@@ -154,11 +154,19 @@
     return window.OSCWorkspaceLabHandlersCore;
   })();
 
+  const WORKSPACE_CONTROLLERS_CORE = (function () {
+    if (typeof window === "undefined" || !window.OSCWorkspaceControllersCore) {
+      throw new Error("OSCWorkspaceControllersCore is required. Load src/workspace_controllers_core.js before src/app.js.");
+    }
+    return window.OSCWorkspaceControllersCore;
+  })();
+
   let _modelGraphRuntime = null;
   let _tabManagerRuntime = null;
   let _imageRenderRuntime = null;
   let _workspaceTabEffectsRuntime = null;
   let _workspaceLabHandlersRuntime = null;
+  let _workspaceControllersRuntime = null;
   let _trainingActionRuntime = {
     runSessionsByIds: null,
   };
@@ -205,74 +213,121 @@
     return _trainingActionRuntime;
   }
 
-  function getWorkspaceLabHandlersRuntime() {
-    if (_workspaceLabHandlersRuntime) return _workspaceLabHandlersRuntime;
-    _workspaceLabHandlersRuntime = WORKSPACE_LAB_HANDLERS_CORE.createRuntime({
-      previewAfterShow: function () {
-        try {
-          if (ui.chart && window.Plotly && Plotly.Plots) {
-            resizePlotIfVisible(ui.chart);
-            if (ui.evalChartSpring) resizePlotIfVisible(ui.evalChartSpring);
-            if (ui.evalChartPendulum) resizePlotIfVisible(ui.evalChartPendulum);
-            if (ui.evalChartBouncing) resizePlotIfVisible(ui.evalChartBouncing);
-          }
-        } catch (_) {}
-      },
-      generationAfterShow: function () {
-        try {
-          if (window.Plotly && Plotly.Plots) {
-            if (ui.genSingleChart) resizePlotIfVisible(ui.genSingleChart);
-            if (ui.genBatchChart) resizePlotIfVisible(ui.genBatchChart);
-            if (ui.genQualityChart) resizePlotIfVisible(ui.genQualityChart);
-          }
-        } catch (_) {}
-      },
-      evaluationAfterShow: function () {
-        try {
-          if (ui.compareChart && window.Plotly && Plotly.Plots) resizePlotIfVisible(ui.compareChart);
-        } catch (_) {}
-      },
-      loadActiveModel: function () {
-        var activeModel = getSavedModelById(state.activeModelId);
-        if (!activeModel) return;
-        runAfterFirstPaint(function () {
-          if (String(state.currentWorkspace || "") !== "nn") return;
+  function getWorkspaceControllersRuntime() {
+    if (_workspaceControllersRuntime) return _workspaceControllersRuntime;
+    _workspaceControllersRuntime = {
+      preview: WORKSPACE_CONTROLLERS_CORE.createPreviewController({
+        resizePlots: function () {
           try {
-            loadSavedModelById(activeModel.id);
-          } catch (err) {
-            setStatus("Load model failed: " + (err && err.message ? err.message : String(err)));
-          }
-        });
-      },
-      refreshModelSelection: function () {
-        refreshModelLabSelectionState();
-      },
-      refreshTrainingWorkspace: function () {
-        refreshSavedModelSelect();
-        refreshTrainSessionSelectors();
-        renderTrainSessionTable();
-        updateRuntimeOptionsUi();
-      },
-      refreshDatasetWorkspace: function () {
-        refreshDatasetModuleSelect(currentDatasetModuleId() || state.activeDatasetModuleId || "oscillator");
-        showDataLabSubTab(state.dataLabSubTab || "preview");
-        refreshDatasetDetailPanel();
-        var activeDatasetId = String(state.activeDatasetId || "").trim();
-        if (!activeDatasetId) return;
-        try {
-          loadSavedDatasetById(activeDatasetId, {
+            if (ui.chart && window.Plotly && Plotly.Plots) {
+              resizePlotIfVisible(ui.chart);
+              if (ui.evalChartSpring) resizePlotIfVisible(ui.evalChartSpring);
+              if (ui.evalChartPendulum) resizePlotIfVisible(ui.evalChartPendulum);
+              if (ui.evalChartBouncing) resizePlotIfVisible(ui.evalChartBouncing);
+            }
+          } catch (_) {}
+        },
+        refreshWorkspace: function () {
+          refreshPlaygroundWorkspaceUi();
+        },
+      }),
+      dataset: WORKSPACE_CONTROLLERS_CORE.createDatasetController({
+        refreshModuleSelect: function () {
+          refreshDatasetModuleSelect(currentDatasetModuleId() || state.activeDatasetModuleId || "oscillator");
+        },
+        showSubTab: function () {
+          showDataLabSubTab(state.dataLabSubTab || "preview");
+        },
+        refreshDetailPanel: function () {
+          refreshDatasetDetailPanel();
+        },
+        getActiveDatasetId: function () {
+          return String(state.activeDatasetId || "").trim();
+        },
+        shouldLoadActiveDataset: function (_, activeId) {
+          return String(state.renderedDatasetId || "").trim() !== String(activeId || "").trim();
+        },
+        loadActiveDataset: function () {
+          loadSavedDatasetById(String(state.activeDatasetId || "").trim(), {
             skipUiSync: true,
             refreshLibrary: false,
           });
-        } catch (err) {
+        },
+        onError: function (err) {
           setStatus("Load dataset failed: " + (err && err.message ? err.message : String(err)));
-        }
+        },
+      }),
+      nn: WORKSPACE_CONTROLLERS_CORE.createModelController({
+        hasActiveModel: function () {
+          return !!getSavedModelById(state.activeModelId);
+        },
+        shouldLoadActiveModel: function () {
+          return String(state.renderedModelId || "").trim() !== String(state.activeModelId || "").trim();
+        },
+        loadActiveModel: function () {
+          var activeModel = getSavedModelById(state.activeModelId);
+          if (!activeModel) return;
+          runAfterFirstPaint(function () {
+            if (String(state.currentWorkspace || "") !== "nn") return;
+            try {
+              loadSavedModelById(activeModel.id);
+            } catch (err) {
+              setStatus("Load model failed: " + (err && err.message ? err.message : String(err)));
+            }
+          });
+        },
+        refreshSelection: function () {
+          refreshModelLabSelectionState();
+        },
+      }),
+      train: WORKSPACE_CONTROLLERS_CORE.createTrainingController({
+        refreshWorkspace: function () {
+          refreshSavedModelSelect();
+          refreshTrainSessionSelectors();
+          renderTrainSessionTable();
+          updateRuntimeOptionsUi();
+        },
+      }),
+      gen: WORKSPACE_CONTROLLERS_CORE.createGenerationController({
+        resizePlots: function () {
+          try {
+            if (window.Plotly && Plotly.Plots) {
+              if (ui.genSingleChart) resizePlotIfVisible(ui.genSingleChart);
+              if (ui.genBatchChart) resizePlotIfVisible(ui.genBatchChart);
+              if (ui.genQualityChart) resizePlotIfVisible(ui.genQualityChart);
+            }
+          } catch (_) {}
+        },
+        refreshWorkspace: function () {
+          refreshGenerationRefOptions();
+        },
+      }),
+      eval: WORKSPACE_CONTROLLERS_CORE.createEvaluationController({
+        resizePlots: function () {
+          try {
+            if (ui.compareChart && window.Plotly && Plotly.Plots) resizePlotIfVisible(ui.compareChart);
+          } catch (_) {}
+        },
+      }),
+    };
+    return _workspaceControllersRuntime;
+  }
+
+  function getWorkspaceLabHandlersRuntime() {
+    if (_workspaceLabHandlersRuntime) return _workspaceLabHandlersRuntime;
+    var controllers = getWorkspaceControllersRuntime();
+    _workspaceLabHandlersRuntime = WORKSPACE_LAB_HANDLERS_CORE.createRuntime({
+      afterShowHandlers: {
+        preview: controllers.preview.afterShow,
+        gen: controllers.gen.afterShow,
+        eval: controllers.eval.afterShow,
       },
-      refreshPreviewWorkspace: function () {
-        refreshPlaygroundWorkspaceUi();
-      },
-      refreshGenerationWorkspace: function () {
-        refreshGenerationRefOptions();
+      afterPaintHandlers: {
+        nn: controllers.nn.afterPaint,
+        train: controllers.train.afterPaint,
+        dataset: controllers.dataset.afterPaint,
+        preview: controllers.preview.afterPaint,
+        gen: controllers.gen.afterPaint,
       },
     });
     return _workspaceLabHandlersRuntime;
@@ -9606,6 +9661,7 @@
     const profile = getUiProfileForSchema(schemaId);
     const useImageView = String((profile && profile.viewer) || "").trim().toLowerCase() === "image";
     state.preparedDataset = null;
+    state.renderedDatasetId = "";
     if (!preserveSelection) {
       state.activeDatasetId = "";
       state.activeDatasetName = "";
@@ -10110,6 +10166,7 @@
     if (ui.modelLibraryName) ui.modelLibraryName.value = String(entry.name || "");
     state.activeModelId = String(entry.id || "");
     state.activeModelName = String(entry.name || "");
+    state.renderedModelId = "";
     markModelGraphClean();
     if (state.currentWorkspace === "nn") refreshModelLabSelectionState();
     syncWorkspaceStoreFromState("save_model");
@@ -10129,6 +10186,7 @@
     if (ui.modelLibraryName) ui.modelLibraryName.value = String(model.name || "");
     state.activeModelId = String(model.id || "");
     state.activeModelName = String(model.name || "");
+    state.renderedModelId = String(model.id || "");
     markModelGraphClean();
     if (state.currentWorkspace === "nn") refreshModelLabSelectionState();
     syncWorkspaceStoreMetaOnly("load_model");
@@ -10142,6 +10200,7 @@
     if (String(state.activeModelId || "") === mid) {
       state.activeModelId = "";
       state.activeModelName = "";
+      state.renderedModelId = "";
     }
     refreshSavedModelSelect();
     refreshTrainSessionSelectors();
@@ -10412,6 +10471,7 @@
     if (isSameSelection) {
       state.dataset = isDraft ? null : dataObj;
       state.activeDatasetName = String(found.name || "");
+      state.renderedDatasetId = isDraft ? "" : did;
       state.preparedDataset = null;
       if (state.datasetsByMode) {
         state.datasetsByMode.autoregressive = null;
@@ -10455,6 +10515,7 @@
       state.dataset = null;
       state.activeDatasetId = String(found.id || "");
       state.activeDatasetName = String(found.name || "");
+      state.renderedDatasetId = "";
       state.preparedDataset = null;
       if (state.datasetsByMode) {
         state.datasetsByMode.autoregressive = null;
@@ -10478,6 +10539,7 @@
     state.dataset = found.data;
     state.activeDatasetId = String(found.id || "");
     state.activeDatasetName = String(found.name || "");
+    state.renderedDatasetId = did;
     state.preparedDataset = null;
     if (state.datasetsByMode) {
       state.datasetsByMode.autoregressive = null;
@@ -11774,10 +11836,12 @@
     datasetsByMode: { autoregressive: null, direct: null },
     activeDatasetId: "",
     activeDatasetName: "",
+    renderedDatasetId: "",
     activeDatasetModuleId: "oscillator",
     playgroundSchemaId: "",
     activeModelId: "",
     activeModelName: "",
+    renderedModelId: "",
     activeTrainSessionId: "",
     savedDatasets: [],
     savedModels: [],

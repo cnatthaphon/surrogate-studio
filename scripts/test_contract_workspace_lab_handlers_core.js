@@ -43,6 +43,22 @@ function main() {
     "paint:gen",
   ], "workspace lab handlers mismatch");
 
+  const directOrder = [];
+  const directRuntime = core.createRuntime({
+    afterShowHandlers: {
+      preview: function () { directOrder.push("show:preview"); },
+    },
+    afterPaintHandlers: {
+      nn: function () { directOrder.push("paint:nn"); },
+    },
+  });
+  directRuntime.getAfterShowHandlers().preview({});
+  directRuntime.getAfterPaintHandlers().nn({});
+  assert.deepStrictEqual(directOrder, [
+    "show:preview",
+    "paint:nn",
+  ], "workspace lab handlers direct-map mode mismatch");
+
   console.log("PASS test_contract_workspace_lab_handlers_core");
 }
 

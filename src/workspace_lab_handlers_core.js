@@ -13,8 +13,22 @@
     return cfg && typeof cfg[key] === "function" ? cfg[key] : noop;
   }
 
+  function normalizeHandlerMap(raw) {
+    var src = raw && typeof raw === "object" ? raw : {};
+    var out = {};
+    Object.keys(src).forEach(function (key) {
+      var id = String(key || "").trim();
+      if (!id) return;
+      if (typeof src[key] !== "function") return;
+      out[id] = src[key];
+    });
+    return out;
+  }
+
   function createRuntime(config) {
     var cfg = config && typeof config === "object" ? config : {};
+    var directAfterShow = normalizeHandlerMap(cfg.afterShowHandlers);
+    var directAfterPaint = normalizeHandlerMap(cfg.afterPaintHandlers);
     var previewAfterShow = pickFn(cfg, "previewAfterShow");
     var generationAfterShow = pickFn(cfg, "generationAfterShow");
     var evaluationAfterShow = pickFn(cfg, "evaluationAfterShow");
@@ -27,6 +41,7 @@
 
     return {
       getAfterShowHandlers: function () {
+        if (Object.keys(directAfterShow).length) return directAfterShow;
         return {
           preview: function (payload) {
             previewAfterShow(payload || {});
@@ -40,6 +55,7 @@
         };
       },
       getAfterPaintHandlers: function () {
+        if (Object.keys(directAfterPaint).length) return directAfterPaint;
         return {
           nn: function (payload) {
             var info = payload || {};
