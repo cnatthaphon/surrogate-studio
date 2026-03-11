@@ -22,6 +22,7 @@ const baseSuite = [
   "test_contract_workspace_tab_effects_core.js",
   "test_contract_workspace_controllers_core.js",
   "test_contract_workspace_lab_handlers_core.js",
+  "test_contract_workspace_selection_ui_core.js",
   "test_contract_dataset_modules.js",
   "test_contract_dataset_runtime.js",
   "test_contract_dataset_service_core.js",

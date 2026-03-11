@@ -161,12 +161,20 @@
     return window.OSCWorkspaceControllersCore;
   })();
 
+  const WORKSPACE_SELECTION_UI_CORE = (function () {
+    if (typeof window === "undefined" || !window.OSCWorkspaceSelectionUiCore) {
+      throw new Error("OSCWorkspaceSelectionUiCore is required. Load src/workspace_selection_ui_core.js before src/app.js.");
+    }
+    return window.OSCWorkspaceSelectionUiCore;
+  })();
+
   let _modelGraphRuntime = null;
   let _tabManagerRuntime = null;
   let _imageRenderRuntime = null;
   let _workspaceTabEffectsRuntime = null;
   let _workspaceLabHandlersRuntime = null;
   let _workspaceControllersRuntime = null;
+  let _workspaceSelectionUiRuntime = null;
   let _trainingActionRuntime = {
     runSessionsByIds: null,
   };
@@ -211,6 +219,16 @@
 
   function getTrainingActionRuntime() {
     return _trainingActionRuntime;
+  }
+
+  function getWorkspaceSelectionUiRuntime() {
+    if (_workspaceSelectionUiRuntime) return _workspaceSelectionUiRuntime;
+    _workspaceSelectionUiRuntime = WORKSPACE_SELECTION_UI_CORE.createRuntime({
+      applySelectionState: function (cfg) {
+        applyLabSelectionState(cfg);
+      },
+    });
+    return _workspaceSelectionUiRuntime;
   }
 
   function getWorkspaceControllersRuntime() {
@@ -8527,8 +8545,9 @@
 
   function refreshDataLabSelectionLinkedPanels(hasSelection) {
     if (String(state.currentWorkspace || "") === "preview") return;
-    applyLabSelectionState({
+    getWorkspaceSelectionUiRuntime().applyDatasetSelectionUi({
       selected: hasSelection,
+      hasSelection: hasSelection,
       emptyEl: ui.datasetSelectionEmpty,
       disableWhenEmpty: [ui.dataLabPreviewTab, ui.dataLabBuilderTab, ui.exportDatasetCsvBtn],
       onEmpty: function () {
@@ -8559,25 +8578,23 @@
     if (!ui.datasetDetailTitle || !ui.datasetDetailMeta) return;
     const activeId = String((state.activeDatasetId || (ui.savedDatasetSelect && ui.savedDatasetSelect.value) || "") || "").trim();
     const dsEntry = activeId ? getSavedDatasetById(activeId) : null;
-    if (!dsEntry) {
-      ui.datasetDetailTitle.textContent = "No dataset selected";
-      ui.datasetDetailMeta.textContent = "Select dataset from left panel or click New Dataset.";
-      ui.datasetDetailMeta.style.display = "";
-      refreshDataLabSelectionLinkedPanels(false);
-      return;
-    }
-    ui.datasetDetailTitle.textContent = String(dsEntry.name || dsEntry.id || "dataset");
-    ui.datasetDetailMeta.textContent = "";
-    ui.datasetDetailMeta.style.display = "none";
-    refreshDataLabSelectionLinkedPanels(true);
+    const detailState = getWorkspaceSelectionUiRuntime().buildDatasetDetailState(dsEntry);
+    ui.datasetDetailTitle.textContent = detailState.title;
+    ui.datasetDetailMeta.textContent = detailState.meta;
+    ui.datasetDetailMeta.style.display = detailState.hideMeta ? "none" : "";
+    refreshDataLabSelectionLinkedPanels(detailState.hasSelection);
   }
 
   function refreshModelLabSelectionState() {
     const activeId = String(state.activeModelId || "").trim();
-    renderModelPaletteForSchema(state.modelSchemaId || SCHEMA_REGISTRY.getDefaultSchemaId());
-    const hasSelection = !!getSavedModelById(activeId);
-    if (ui.modelLabSelectionEmpty) ui.modelLabSelectionEmpty.style.display = hasSelection ? "none" : "";
-    if (ui.modelLabContent) ui.modelLabContent.style.display = "";
+    getWorkspaceSelectionUiRuntime().applyModelSelectionUi({
+      hasSelection: !!getSavedModelById(activeId),
+      emptyEl: ui.modelLabSelectionEmpty,
+      contentEl: ui.modelLabContent,
+      renderPalette: function () {
+        renderModelPaletteForSchema(state.modelSchemaId || SCHEMA_REGISTRY.getDefaultSchemaId());
+      },
+    });
   }
 
   function renderLeftLibraryByWorkspace() {
@@ -11020,19 +11037,29 @@
         };
       }
       configureTfjsWasmPaths();
+      try {
+        if (typeof tf.ready === "function") await tf.ready();
+      } catch (_) {}
       const avail = getClientTfjsBackendAvailability();
-      let negotiated = cfg.backend;
+      const requested = String(cfg.backend || "auto").toLowerCase();
+      let negotiated = requested;
       if (negotiated === "auto") {
-        negotiated = String(tf.getBackend ? tf.getBackend() : "cpu").toLowerCase() || "cpu";
+        negotiated = preferredClientBackend(avail);
       }
       if (!Object.prototype.hasOwnProperty.call(avail, negotiated) || !avail[negotiated]) {
-        return {
-          ok: false,
-          reason: "backend_unavailable",
-          message: "Requested backend '" + cfg.backend + "' is unavailable in browser runtime.",
-          runtimeConfig: cfg,
-          backendAvailability: avail,
-        };
+        const fallbackBackend = preferredClientBackend(avail) || "cpu";
+        if (Object.prototype.hasOwnProperty.call(avail, fallbackBackend) && avail[fallbackBackend]) {
+          negotiated = fallbackBackend;
+        } else {
+          negotiated = "cpu";
+        }
+      }
+      let handshakeMessage = "Browser runtime ready.";
+      if (requested !== negotiated) {
+        handshakeMessage =
+          requested === "auto"
+            ? ("Browser runtime ready. Auto-selected backend '" + negotiated + "'.")
+            : ("Browser runtime ready. Requested backend '" + requested + "' unavailable; fallback to '" + negotiated + "'.");
       }
       try {
         if (typeof tf.setBackend === "function" && String(tf.getBackend() || "").toLowerCase() !== negotiated) {
@@ -11052,7 +11079,7 @@
       return {
         ok: true,
         reason: "ok",
-        message: "Browser runtime ready.",
+        message: handshakeMessage,
         runtimeConfig: normalizeRuntimeConfig(cfg.runtimeId, finalBackend, cfg.transport),
         backendAvailability: avail,
       };
