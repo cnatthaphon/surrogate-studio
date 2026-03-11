@@ -19,7 +19,9 @@ This is compatible with:
 
 ## Requirements
 - Python environment with notebook dependencies installed.
-- `OSC_SURROGATE_NOTEBOOKS_DIR` set to notebooks path.
+- `OSC_SURROGATE_NOTEBOOKS_DIR` set to a compatible notebook-runtime directory that contains
+  `oscillator_surrogate_pipeline.py` and the expected `helpers/` package.
+- This staging repo does not ship the old `notebooks/` runtime tree from the legacy workspace.
 - CUDA available if `--require-gpu true`.
 - Use the same interpreter as notebook env:
   - CLI: `--python /home/cue/venv/main/bin/python`
@@ -31,9 +33,9 @@ This is compatible with:
 
 ## Example 1: Run direct family (python_server)
 ```bash
-export OSC_SURROGATE_NOTEBOOKS_DIR=/mnt/f/Data/Projects/Portfolio/comphys/oscillator-surrogate/notebooks
+export OSC_SURROGATE_NOTEBOOKS_DIR=/path/to/notebook_runtime
 node server/node_python_orchestrator.mjs \
-  --project-dir /mnt/f/Data/Projects/Portfolio/comphys/oscillator-surrogate \
+  --project-dir /path/to/surrogate-studio \
   --runtime python_server \
   --family direct \
   --run-id direct_run_01 \
@@ -46,9 +48,9 @@ node server/node_python_orchestrator.mjs \
 
 ## Example 2: Run score-based diffusion
 ```bash
-export OSC_SURROGATE_NOTEBOOKS_DIR=/mnt/f/Data/Projects/Portfolio/comphys/oscillator-surrogate/notebooks
+export OSC_SURROGATE_NOTEBOOKS_DIR=/path/to/notebook_runtime
 node server/node_python_orchestrator.mjs \
-  --project-dir /mnt/f/Data/Projects/Portfolio/comphys/oscillator-surrogate \
+  --project-dir /path/to/surrogate-studio \
   --runtime python_server \
   --family score \
   --run-id score_run_01 \
@@ -61,8 +63,8 @@ node server/node_python_orchestrator.mjs \
 You can pass `--config path/to/config.json`:
 ```json
 {
-  "notebooks_dir": "/mnt/f/Data/Projects/Portfolio/comphys/oscillator-surrogate/notebooks",
-  "dataset_csv": "dataset/oscillator_dataset_autoregressive_seed42.csv",
+  "notebooks_dir": "/path/to/notebook_runtime",
+  "dataset_csv": "/path/to/exported_dataset.csv",
   "family": "ar",
   "split_mode": "from_csv",
   "epochs": 40,
@@ -90,10 +92,15 @@ Typical events:
 Create a self-contained notebook folder/zip from shared artifacts.
 This mirrors the client-side export contract (`schemas/notebook.bundle.spec.schema.json`).
 
+Note:
+- this server-side exporter is still an optional scaffold and still assumes a legacy
+  notebook-runtime directory layout.
+- the current baseline notebook path is the client-side export flow from `Training Lab`.
+
 ```bash
 python server/export_notebook_bundle.py \
-  --project-dir /mnt/f/Data/Projects/Portfolio/comphys/oscillator-surrogate \
-  --dataset-csv /mnt/f/Data/Projects/Portfolio/comphys/oscillator-surrogate/notebooks/dataset/oscillator_dataset_autoregressive_seed42.csv \
+  --project-dir /path/to/surrogate-studio \
+  --dataset-csv /path/to/exported_dataset.csv \
   --trainers js_client,python_server \
   --layout single \
   --out-dir /tmp/osc_bundle \

@@ -19,12 +19,12 @@ Architecture diagram matters here because the project value is not just “train
 It is the system design: schema-driven modules, shared render engines, worker-backed execution, runtime-family separation, and portable notebook export.
 
 Execution plan:
-- See `oscillator-surrogate/ARCHITECTURE_PLAN.md` for current architecture baseline, gaps, and phased roadmap.
-- Architecture spec baseline: `oscillator-surrogate/ARCHITECTURE_SPEC_V0_1.md`
-- Refactor status map: `oscillator-surrogate/REFACTOR_GAP_MAP.md`
-- Visual architecture draft: `oscillator-surrogate/design.drawio`
-- IR v1 schema drafts: `oscillator-surrogate/schemas/README.md`
-- Repo split path (in-place now -> new repo before release): `oscillator-surrogate/REPO_SPLIT_PLAN.md`
+- See `ARCHITECTURE_PLAN.md` for current architecture baseline, gaps, and phased roadmap.
+- Architecture spec baseline: `ARCHITECTURE_SPEC_V0_1.md`
+- Refactor status map: `REFACTOR_GAP_MAP.md`
+- Visual architecture draft: `design.drawio`
+- IR v1 schema drafts: `schemas/README.md`
+- Repo split path (in-place now -> new repo before release): `REPO_SPLIT_PLAN.md`
 - Pre-release staging helper: `bash scripts/stage_platform_repo.sh`
 
 ## Architecture Diagrams
@@ -234,7 +234,7 @@ To keep execution deterministic and reduce state conflicts, studies should be sp
 All studies follow the same contract:
 - model-file driven (`.model.json` from web export)
 - dataset-file driven (CSV from web export)
-- shared training/eval module: `notebooks/oscillator_surrogate_pipeline.py`
+- shared training/eval module: `oscillator_surrogate_pipeline.py`
 - checkpoint-first rerun policy
 - fixed split/seed protocol for fair comparison
 
@@ -356,32 +356,14 @@ Use this table in your README after experiments:
 | GRU (64) | x + params | Bouncing (rigid) | - | - | better on transients |
 | LSTM (64) | x+v + params | Pendulum | - | - | compare generalization |
 
-## Notebook GPU Benchmark (Reference)
+## Benchmark Note
 
-You can reproduce GPU benchmarks from exported dataset + graph JSON files:
+The old notebook benchmark walkthrough from the original `oscillator-surrogate` workspace is intentionally not part of this staging repo.
 
-```bash
-source /home/cue/venv/main/bin/activate
-cd oscillator-surrogate/notebooks
-python -u run_gpu_benchmarks.py \
-  --dataset dataset/oscillator_dataset_autoregressive_seed42.csv \
-  --models-dir ../models \
-  --out-dir results \
-  --profile quick \
-  --epochs 6 \
-  --batch-size 256 \
-  --device cuda
-```
-
-Latest reference run artifacts:
-
-- `oscillator-surrogate/notebooks/results/benchmark_20260221_030741/benchmark_summary.csv`
-- `oscillator-surrogate/notebooks/results/benchmark_20260221_030741/benchmark_mae_bar.png`
-- `oscillator-surrogate/notebooks/results/benchmark_20260221_030741/latent_summary.csv`
-
-Top result in this run:
-
-- `exp_ar_cnn_strong.model.json`: MAE `1.0149e-1`, RMSE `1.4579e-1` (autoregressive, sequence)
+Current validation paths in `Surrogate Studio` are:
+- browser flow checks across `Playground`, `Data Lab`, `Model Lab`, and `Training Lab`
+- contract tests via `node scripts/test_contract_all.js`
+- exported notebook bundle reruns from the active notebook export flow
 
 ## Notebook Generation Validation (Current)
 
@@ -418,7 +400,7 @@ This is a strong practical framing: VAE/Opt as production-oriented surrogate gen
 
 This project is fully client-side, so visitors can interact directly via GitHub Pages:
 
-- `https://<username>.github.io/comphys/oscillator-surrogate/`
+- `https://<username>.github.io/surrogate-studio/`
 
 ## Suggested Portfolio Artifacts
 
