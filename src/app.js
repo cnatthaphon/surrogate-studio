@@ -147,10 +147,18 @@
     return window.OSCWorkspaceTabEffectsCore;
   })();
 
+  const WORKSPACE_LAB_HANDLERS_CORE = (function () {
+    if (typeof window === "undefined" || !window.OSCWorkspaceLabHandlersCore) {
+      throw new Error("OSCWorkspaceLabHandlersCore is required. Load src/workspace_lab_handlers_core.js before src/app.js.");
+    }
+    return window.OSCWorkspaceLabHandlersCore;
+  })();
+
   let _modelGraphRuntime = null;
   let _tabManagerRuntime = null;
   let _imageRenderRuntime = null;
   let _workspaceTabEffectsRuntime = null;
+  let _workspaceLabHandlersRuntime = null;
   let _trainingActionRuntime = {
     runSessionsByIds: null,
   };
@@ -197,79 +205,85 @@
     return _trainingActionRuntime;
   }
 
+  function getWorkspaceLabHandlersRuntime() {
+    if (_workspaceLabHandlersRuntime) return _workspaceLabHandlersRuntime;
+    _workspaceLabHandlersRuntime = WORKSPACE_LAB_HANDLERS_CORE.createRuntime({
+      previewAfterShow: function () {
+        try {
+          if (ui.chart && window.Plotly && Plotly.Plots) {
+            resizePlotIfVisible(ui.chart);
+            if (ui.evalChartSpring) resizePlotIfVisible(ui.evalChartSpring);
+            if (ui.evalChartPendulum) resizePlotIfVisible(ui.evalChartPendulum);
+            if (ui.evalChartBouncing) resizePlotIfVisible(ui.evalChartBouncing);
+          }
+        } catch (_) {}
+      },
+      generationAfterShow: function () {
+        try {
+          if (window.Plotly && Plotly.Plots) {
+            if (ui.genSingleChart) resizePlotIfVisible(ui.genSingleChart);
+            if (ui.genBatchChart) resizePlotIfVisible(ui.genBatchChart);
+            if (ui.genQualityChart) resizePlotIfVisible(ui.genQualityChart);
+          }
+        } catch (_) {}
+      },
+      evaluationAfterShow: function () {
+        try {
+          if (ui.compareChart && window.Plotly && Plotly.Plots) resizePlotIfVisible(ui.compareChart);
+        } catch (_) {}
+      },
+      loadActiveModel: function () {
+        var activeModel = getSavedModelById(state.activeModelId);
+        if (!activeModel) return;
+        runAfterFirstPaint(function () {
+          if (String(state.currentWorkspace || "") !== "nn") return;
+          try {
+            loadSavedModelById(activeModel.id);
+          } catch (err) {
+            setStatus("Load model failed: " + (err && err.message ? err.message : String(err)));
+          }
+        });
+      },
+      refreshModelSelection: function () {
+        refreshModelLabSelectionState();
+      },
+      refreshTrainingWorkspace: function () {
+        refreshSavedModelSelect();
+        refreshTrainSessionSelectors();
+        renderTrainSessionTable();
+        updateRuntimeOptionsUi();
+      },
+      refreshDatasetWorkspace: function () {
+        refreshDatasetModuleSelect(currentDatasetModuleId() || state.activeDatasetModuleId || "oscillator");
+        showDataLabSubTab(state.dataLabSubTab || "preview");
+        refreshDatasetDetailPanel();
+        var activeDatasetId = String(state.activeDatasetId || "").trim();
+        if (!activeDatasetId) return;
+        try {
+          loadSavedDatasetById(activeDatasetId, {
+            skipUiSync: true,
+            refreshLibrary: false,
+          });
+        } catch (err) {
+          setStatus("Load dataset failed: " + (err && err.message ? err.message : String(err)));
+        }
+      },
+      refreshPreviewWorkspace: function () {
+        refreshPlaygroundWorkspaceUi();
+      },
+      refreshGenerationWorkspace: function () {
+        refreshGenerationRefOptions();
+      },
+    });
+    return _workspaceLabHandlersRuntime;
+  }
+
   function getWorkspaceTabEffectsRuntime() {
     if (_workspaceTabEffectsRuntime) return _workspaceTabEffectsRuntime;
+    var handlers = getWorkspaceLabHandlersRuntime();
     _workspaceTabEffectsRuntime = WORKSPACE_TAB_EFFECTS_CORE.createRuntime({
-      afterShowHandlers: {
-        preview: function () {
-          try {
-            if (ui.chart && window.Plotly && Plotly.Plots) {
-              resizePlotIfVisible(ui.chart);
-              if (ui.evalChartSpring) resizePlotIfVisible(ui.evalChartSpring);
-              if (ui.evalChartPendulum) resizePlotIfVisible(ui.evalChartPendulum);
-              if (ui.evalChartBouncing) resizePlotIfVisible(ui.evalChartBouncing);
-            }
-          } catch (_) {}
-        },
-        gen: function () {
-          try {
-            if (window.Plotly && Plotly.Plots) {
-              if (ui.genSingleChart) resizePlotIfVisible(ui.genSingleChart);
-              if (ui.genBatchChart) resizePlotIfVisible(ui.genBatchChart);
-              if (ui.genQualityChart) resizePlotIfVisible(ui.genQualityChart);
-            }
-          } catch (_) {}
-        },
-        eval: function () {
-          try {
-            if (ui.compareChart && window.Plotly && Plotly.Plots) resizePlotIfVisible(ui.compareChart);
-          } catch (_) {}
-        },
-      },
-      afterPaintHandlers: {
-        nn: function () {
-          var activeModel = getSavedModelById(state.activeModelId);
-          if (activeModel) {
-            runAfterFirstPaint(function () {
-              if (String(state.currentWorkspace || "") !== "nn") return;
-              try {
-                loadSavedModelById(activeModel.id);
-              } catch (err) {
-                setStatus("Load model failed: " + (err && err.message ? err.message : String(err)));
-              }
-            });
-          } else {
-            refreshModelLabSelectionState();
-          }
-        },
-        train: function () {
-          refreshSavedModelSelect();
-          refreshTrainSessionSelectors();
-          renderTrainSessionTable();
-          updateRuntimeOptionsUi();
-        },
-        dataset: function () {
-          refreshDatasetModuleSelect(currentDatasetModuleId() || state.activeDatasetModuleId || "oscillator");
-          showDataLabSubTab(state.dataLabSubTab || "preview");
-          refreshDatasetDetailPanel();
-          var activeDatasetId = String(state.activeDatasetId || "").trim();
-          if (!activeDatasetId) return;
-          try {
-            loadSavedDatasetById(activeDatasetId, {
-              skipUiSync: true,
-              refreshLibrary: false,
-            });
-          } catch (err) {
-            setStatus("Load dataset failed: " + (err && err.message ? err.message : String(err)));
-          }
-        },
-        preview: function () {
-          refreshPlaygroundWorkspaceUi();
-        },
-        gen: function () {
-          refreshGenerationRefOptions();
-        },
-      },
+      afterShowHandlers: handlers.getAfterShowHandlers(),
+      afterPaintHandlers: handlers.getAfterPaintHandlers(),
     });
     return _workspaceTabEffectsRuntime;
   }
