@@ -1,0 +1,15 @@
+{
+  "name": "surrogate-studio",
+  "version": "1.0.0",
+  "description": "A schema-driven ML experimentation platform.",
+  "main": "src/workflow_api_core.js",
+  "scripts": {
+    "test": "node scripts/test_contract_all.js"
+  },
+  "dependencies": {
+    "@tensorflow/tfjs": "^4.22.0"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC"
+}

@@ -1,0 +1,109 @@
+# Surrogate Studio - Active Plan (Mar 2026)
+
+## 1) Direction (locked)
+- Platform is schema-first, module-based, runtime-agnostic.
+- `oscillator` is one dataset schema/module among many.
+- UI is lab-based: Data Lab / Model Lab / Training Lab.
+- Repo strategy: in-place development now, split to new repo before release.
+- Runtime family split is explicit:
+  - `tfjs` = browser/client baseline family, with optional `tf-node` / `server_tfjs` adapter on server
+  - `pytorch` = server/notebook baseline family
+- Trainer owns its worker/runtime session until delete/clear/reload.
+
+## 2) Current State
+
+### Done
+1. Shared contracts
+- schema registry + dataset runtime bridge
+- runtime handshake/event normalization
+- workspace store contract (dataset/model/session/epoch history)
+
+2. Shared UI engines
+- left item list renderer reused across labs
+- right inspector form renderer reused across labs
+
+3. Dataset modules
+- `oscillator`, `mnist`, `fashion_mnist` registered
+- module build path active in Data Lab
+- image-source lazy load/cache flow active
+
+4. Model graph contract
+- drawflow graph is canonical model structure
+- schema-scoped presets
+- schema feature-node policy enforced in model feature node controls
+- built-in schema presets are declarative (`metadata.graphSpec`)
+- model node palette is rendered from schema contract, not hardcoded tab buttons
+
+5. Training/export baseline
+- single selected trainer main view is active (no multi-card main panel)
+- selected sessions export to notebook bundle from Training Lab
+
+6. Repository split prep
+- `REPO_SPLIT_PLAN.md` added
+- `scripts/stage_platform_repo.sh` added for pre-release staging copy
+
+### Partial / pending
+1. Non-oscillator training path in run queue is not fully enabled yet.
+2. Server runtime adapters remain scaffold-level (not full parity).
+3. Module custom render override is partial; shared schema-driven render is the primary path.
+4. Remaining legacy `app.js` logic still needs to be pushed into shared core modules.
+5. Model payload shape must be normalized consistently as `graph + per-node config`.
+6. Shared item-panel/config-panel modules are not yet formalized as first-class core modules.
+
+## 3) Near-Term Tasks
+
+1. Browser flow stabilization
+- fix Data Lab item-switch lag
+- fix Model Lab create/render regressions
+- reduce startup/tab-switch main-thread work further
+
+2. Training adapters by schema
+- implement/enable mnist + fashion_mnist client trainer adapters
+- keep metrics/events same shape as oscillator
+
+3. Runtime family hardening
+- enforce `tfjs` vs `pytorch` family split in trainer/runtime contracts
+- keep notebook export only on `pytorch` path for baseline behavior
+- keep nodejs -> python subprocess path explicit in runtime adapter work
+
+4. Data/model coupling checks
+- enforce schema match strictly for dataset-model-trainer creation
+- no silent fallback behavior
+
+5. Export parity hardening
+- confirm exported notebook bundle matches training session contract exactly
+- keep bundle portable (no hidden local file dependency)
+
+6. Server adapter phase
+- wire python_server handshake + run/epoch/complete events
+- preserve same runtime event payload used by client
+
+7. Shared panel/core cleanup
+- formalize shared item-panel module and config-panel module from current render helpers
+- keep Tab Manager as orchestrator only
+
+8. Pre-release repo split
+- run staging script and validate tests in staged layout
+- create `surrogate-platform` repo from staging snapshot
+
+9. Core cleanup
+- continue moving schema/model graph/runtime logic out of `app.js`
+- keep `app.js` limited to orchestration + rendering
+- avoid schema-specific branches and hidden fallback paths
+
+## 4) Invariants (must keep)
+
+1. No hardcode by tab
+- behavior must come from schema/module/graph contracts.
+
+2. Processing vs rendering separation
+- core processing functions callable from scripts without UI.
+
+3. Shared engine reuse
+- list/form behavior fixes in one place apply across all labs.
+
+4. Test gate
+- `node scripts/test_contract_all.js` must pass before merges.
+- declarative schema contract tests must stay green.
+- model graph core contract tests must stay green:
+  - `node scripts/test_contract_model_graph_core.js`

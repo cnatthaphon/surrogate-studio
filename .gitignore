@@ -1,0 +1,6 @@
+node_modules/
+output/
+legacy/
+__tmp_probe/
+*.pyc
+__pycache__/

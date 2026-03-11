@@ -1,0 +1,51 @@
+{
+  "irVersion": "1.0",
+  "runName": "direct_mlp_s42_e20",
+  "seed": 42,
+  "runtime": "server_pytorch_gpu",
+  "runtimeConfig": {
+    "irVersion": "1.0",
+    "runtimeId": "server_pytorch_gpu",
+    "host": "server",
+    "engine": "pytorch",
+    "backend": "torch-cuda",
+    "transport": "ws"
+  },
+  "device": "cuda",
+  "optimizer": {
+    "name": "adam",
+    "lr": 0.001,
+    "weightDecay": 0.0,
+    "betas": [0.9, 0.999]
+  },
+  "scheduler": {
+    "name": "reduce_on_plateau",
+    "factor": 0.5,
+    "patience": 5,
+    "minLr": 1e-6
+  },
+  "training": {
+    "epochs": 20,
+    "batchSize": 256,
+    "shuffle": true,
+    "gradientClipNorm": 1.0,
+    "mixedPrecision": false
+  },
+  "earlyStopping": {
+    "enabled": true,
+    "monitor": "val_loss",
+    "patience": 8,
+    "minDelta": 1e-6
+  },
+  "checkpointing": {
+    "enabled": true,
+    "saveBest": true,
+    "saveLast": true,
+    "dir": "notebooks/results/checkpoints",
+    "specHash": "sha256:example"
+  },
+  "metrics": ["mae", "rmse", "bias", "mse"],
+  "metadata": {
+    "notes": "baseline train spec"
+  }
+}

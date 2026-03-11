@@ -1,0 +1,32 @@
+{
+  "irVersion": "1.0",
+  "mode": "autoregressive",
+  "subset": {
+    "split": "test",
+    "scenarios": ["spring", "pendulum", "bouncing"],
+    "maxTrajectories": 30
+  },
+  "rollout": {
+    "initMode": "rk4_warmup",
+    "windowSize": 20,
+    "horizon": 801,
+    "teacherForcing": false
+  },
+  "generation": {
+    "enabled": true,
+    "samples": 30,
+    "bestOfK": 4,
+    "guidanceScale": 1.8,
+    "diffusionSteps": 140
+  },
+  "metrics": ["mae", "rmse", "bias", "wasserstein", "diversity_gap"],
+  "report": {
+    "saveCsv": true,
+    "saveJson": true,
+    "includeWorstCases": true,
+    "includeScenarioBreakdown": true
+  },
+  "metadata": {
+    "notes": "example eval spec"
+  }
+}

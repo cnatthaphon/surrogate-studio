@@ -1,0 +1,53 @@
+{
+  "irVersion": "1.0",
+  "bundleId": "bundle_20260301_001",
+  "layout": "single",
+  "sessions": [
+    {
+      "sessionId": "direct_001",
+      "runtime": "js_client",
+      "runtimeConfig": {
+        "irVersion": "1.0",
+        "runtimeId": "js_client",
+        "host": "browser",
+        "engine": "tfjs",
+        "backend": "webgl",
+        "transport": "inproc"
+      },
+      "datasetRef": "dataset/oscillator_dataset_autoregressive_seed42.csv",
+      "graphRefs": [
+        "models/direct_mlp_strong.model.json"
+      ],
+      "trainSpecRef": "specs/train.direct.json",
+      "evalSpecRef": "specs/eval.direct.json"
+    },
+    {
+      "sessionId": "ae_001",
+      "runtime": "server_pytorch_gpu",
+      "runtimeConfig": {
+        "irVersion": "1.0",
+        "runtimeId": "server_pytorch_gpu",
+        "host": "server",
+        "engine": "pytorch",
+        "backend": "torch-cuda",
+        "transport": "ws"
+      },
+      "datasetRef": "dataset/oscillator_dataset_autoregressive_seed42.csv",
+      "graphRefs": [
+        "models/exp_ae_traj_lstm_zmatch.model.json"
+      ],
+      "trainSpecRef": "specs/train.ae.json",
+      "evalSpecRef": "specs/eval.ae.json",
+      "metadata": {
+        "sourceSessionId": "session_ae_001"
+      }
+    }
+  ],
+  "artifacts": {
+    "includeCheckpoints": false,
+    "zipPath": "exports/notebook_bundle.zip"
+  },
+  "metadata": {
+    "notes": "single-folder export with mixed trainer runtimes"
+  }
+}

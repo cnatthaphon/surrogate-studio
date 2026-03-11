@@ -1,0 +1,89 @@
+{
+  "id": "your_image_schema_id",
+  "label": "your_image_schema_label",
+  "description": "Image dataset schema template for registry-based integration.",
+  "dataset": {
+    "id": "your_image_schema_id",
+    "label": "Your Image Dataset",
+    "sampleType": "image",
+    "splitUnit": "sample",
+    "splitDefaults": {
+      "mode": "stratified_label",
+      "train": 0.8,
+      "val": 0.1,
+      "test": 0.1
+    },
+    "metadata": {
+      "ui": {
+        "sidebarMode": "generic",
+        "viewer": "image"
+      },
+      "splitModes": [
+        {
+          "id": "random",
+          "label": "Random (global)",
+          "stratifyKey": ""
+        },
+        {
+          "id": "stratified_label",
+          "label": "Stratified by label",
+          "stratifyKey": "label"
+        }
+      ],
+      "display": {
+        "chartType": "label_histogram",
+        "tableColumns": ["split", "index", "label", "class_name", "pixel_values"]
+      }
+    }
+  },
+  "model": {
+    "outputs": [
+      { "key": "label", "label": "class label" },
+      { "key": "logits", "label": "class logits" }
+    ],
+    "params": [],
+    "presets": [
+      { "id": "image_mlp_baseline", "label": "Image: MLP Baseline" }
+    ],
+    "metadata": {
+      "featureNodes": {
+        "imageSource": [
+          {
+            "key": "pixel_values",
+            "label": "pixel values",
+            "shape": [28, 28, 1],
+            "featureSize": 784
+          }
+        ],
+        "oneHot": [
+          {
+            "key": "label",
+            "label": "label",
+            "values": ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"]
+          }
+        ],
+        "policy": {
+          "allowHistory": false,
+          "allowWindowHistory": false,
+          "allowParams": false,
+          "allowOneHot": true,
+          "allowImageSource": true
+        }
+      }
+    }
+  },
+  "preconfig": {
+    "dataset": {
+      "defaultModuleId": "your_image_module_id",
+      "splitDefaults": {
+        "mode": "stratified_label",
+        "train": 0.8,
+        "val": 0.1,
+        "test": 0.1
+      }
+    },
+    "model": {
+      "defaultPreset": "image_mlp_baseline"
+    }
+  }
+}

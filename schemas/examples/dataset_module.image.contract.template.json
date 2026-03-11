@@ -1,0 +1,108 @@
+{
+  "contractVersion": "1.0",
+  "type": "dataset_module_contract",
+  "moduleDescriptor": {
+    "id": "your_image_module_id",
+    "schemaId": "your_image_schema_id",
+    "label": "Your Image Module",
+    "description": "Builds image-classification datasets for a registered image schema.",
+    "helpText": "Image dataset builder | split modes: random, stratified_label(stratify=label) | columns: split, index, label, class_name, pixel_values",
+    "kind": "panel_builder",
+    "preconfig": {
+      "dataset": {
+        "seed": 42,
+        "totalCount": 1400,
+        "splitDefaults": {
+          "mode": "stratified_label",
+          "train": 0.8,
+          "val": 0.1,
+          "test": 0.1
+        }
+      },
+      "model": {
+        "defaultPreset": "image_mlp_baseline"
+      }
+    }
+  },
+  "buildInputConfig": {
+    "schemaId": "your_image_schema_id",
+    "variant": "mnist_or_fashion_mnist_or_custom",
+    "seed": 42,
+    "splitMode": "stratified_label",
+    "trainFrac": 0.8,
+    "valFrac": 0.1,
+    "testFrac": 0.1,
+    "totalCount": 1400,
+    "sourceRecords": {
+      "pixelsUint8": "Uint8Array | number[]",
+      "labelsUint8": "Uint8Array | number[]",
+      "x": "number[][] (optional alternative to pixelsUint8)",
+      "y": "number[] (optional alternative to labelsUint8)"
+    }
+  },
+  "buildOutputDataset": {
+    "schemaId": "your_image_schema_id",
+    "datasetModuleId": "your_image_module_id",
+    "source": "tfjs_or_custom_source",
+    "sourceUrls": null,
+    "mode": "classification",
+    "imageShape": [28, 28, 1],
+    "classCount": 10,
+    "classNames": ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"],
+    "splitConfig": {
+      "mode": "stratified_label",
+      "train": 0.8,
+      "val": 0.1,
+      "test": 0.1,
+      "stratifyKey": "label",
+      "trainCount": 1120,
+      "valCount": 140,
+      "testCount": 140
+    },
+    "splitCounts": {
+      "train": 1120,
+      "val": 140,
+      "test": 140
+    },
+    "trainCount": 1120,
+    "valCount": 140,
+    "testCount": 140,
+    "labelsHistogram": {
+      "0": 140,
+      "1": 140,
+      "2": 140,
+      "3": 140,
+      "4": 140,
+      "5": 140,
+      "6": 140,
+      "7": 140,
+      "8": 140,
+      "9": 140
+    },
+    "records": {
+      "train": {
+        "x": [[0.0, 0.0, 0.0]],
+        "y": [0]
+      },
+      "val": {
+        "x": [[0.0, 0.0, 0.0]],
+        "y": [0]
+      },
+      "test": {
+        "x": [[0.0, 0.0, 0.0]],
+        "y": [0]
+      }
+    },
+    "preview": {
+      "firstLabels": [0, 1, 2],
+      "sampleCount": 1400
+    },
+    "seed": 42
+  },
+  "runtimeNotes": {
+    "buildFunctionContract": "module.build(cfg) => datasetPack | Promise<datasetPack>",
+    "asyncBuildAllowed": true,
+    "lazyFetchRecommended": true,
+    "fetchOnceReuseSourceById": true
+  }
+}
