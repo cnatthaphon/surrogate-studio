@@ -171,6 +171,7 @@
         <button id="wsDatasetTab" class="workspace-tab">Dataset</button>
         <button id="wsNnTab" class="workspace-tab">Model</button>
         <button id="wsGenTab" class="workspace-tab">Generation</button>
+        <button id="wsPlaygroundTab" class="workspace-tab">Playground</button>
         <button id="wsEvalTab" class="workspace-tab">Evaluation</button>
       </div>
 
@@ -404,6 +405,14 @@
         </div>
       </div>
 
+      <div id="wsPlaygroundPane" class="ws-pane">
+        <section class="card" style="padding:16px;">
+          <h3 style="color:#67e8f9; margin:0 0 8px;">Playground</h3>
+          <p>Runtime playground for quick experiments: inference, visualization, and manual testing.</p>
+          <div id="playgroundContent"></div>
+        </section>
+      </div>
+
       <div id="wsEvalPane" class="ws-pane">
         <div class="compare-panel">
           <div class="row" style="margin-bottom:6px;"><label>Scenario (single-case eval)</label><select id="evalScenarioType"><option value="spring">Damped Spring</option><option value="pendulum">Damped Pendulum</option><option value="bouncing">Bouncing Ball</option></select></div>
@@ -518,6 +527,9 @@
   <script src="./src/training_session_core.js"></script>
   <script src="./src/training_worker_bridge.js"></script>
   <script src="./src/dataset_bundle_adapter.js"></script>
-  <script src="./src/app.js?v=20260314restore"></script>
+  <script src="./src/notebook_export_support_core.js"></script>
+  <script src="./src/evaluation_lab_core.js"></script>
+  <script src="./src/generation_lab_core.js"></script>
+  <script src="./src/app.js?v=20260314b"></script>
 </body>
 </html>

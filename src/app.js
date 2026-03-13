@@ -372,6 +372,7 @@
           { id: "nn", tabEl: ui.wsNnTab, paneEl: ui.wsNnPane },
           { id: "train", tabEl: ui.wsTrainTab, paneEl: ui.wsTrainPane },
           { id: "gen", tabEl: ui.wsGenTab, paneEl: ui.wsGenPane },
+          { id: "playground", tabEl: ui.wsPlaygroundTab, paneEl: ui.wsPlaygroundPane },
           { id: "eval", tabEl: ui.wsEvalTab, paneEl: ui.wsEvalPane },
         ];
       },
@@ -5323,6 +5324,7 @@
     wsNnTab: document.getElementById("wsNnTab"),
     wsTrainTab: document.getElementById("wsTrainTab"),
     wsGenTab: document.getElementById("wsGenTab"),
+    wsPlaygroundTab: document.getElementById("wsPlaygroundTab"),
     wsEvalTab: document.getElementById("wsEvalTab"),
     wsPreviewPane: document.getElementById("wsPreviewPane"),
     wsDatasetPane: document.getElementById("wsDatasetPane"),
@@ -5331,6 +5333,7 @@
     modelLabContent: document.getElementById("modelLabContent"),
     wsTrainPane: document.getElementById("wsTrainPane"),
     wsGenPane: document.getElementById("wsGenPane"),
+    wsPlaygroundPane: document.getElementById("wsPlaygroundPane"),
     wsEvalPane: document.getElementById("wsEvalPane"),
     serverEndpointInput: document.getElementById("serverEndpointInput"),
     detectServerBtn: document.getElementById("detectServerBtn"),
@@ -13084,6 +13087,7 @@
     if (ui.wsNnTab) ui.wsNnTab.addEventListener("click", function () { showWorkspaceTab("nn"); });
     if (ui.wsTrainTab) ui.wsTrainTab.addEventListener("click", function () { showWorkspaceTab("train"); });
     if (ui.wsGenTab) ui.wsGenTab.addEventListener("click", function () { showWorkspaceTab("gen"); refreshGenerationRefOptions(); });
+    if (ui.wsPlaygroundTab) ui.wsPlaygroundTab.addEventListener("click", function () { showWorkspaceTab("playground"); });
     if (ui.wsEvalTab) ui.wsEvalTab.addEventListener("click", function () { showWorkspaceTab("eval"); });
     if (ui.dataLabPreviewTab) {
       ui.dataLabPreviewTab.addEventListener("click", function () {
