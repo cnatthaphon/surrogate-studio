@@ -11041,13 +11041,20 @@
         if (typeof tf.ready === "function") await tf.ready();
       } catch (_) {}
       const avail = getClientTfjsBackendAvailability();
+      const currentBackend = String(tf.getBackend ? tf.getBackend() : "cpu").toLowerCase() || "cpu";
       const requested = String(cfg.backend || "auto").toLowerCase();
       let negotiated = requested;
       if (negotiated === "auto") {
-        negotiated = preferredClientBackend(avail);
+        negotiated =
+          (Object.prototype.hasOwnProperty.call(avail, currentBackend) && avail[currentBackend])
+            ? currentBackend
+            : preferredClientBackend(avail);
       }
       if (!Object.prototype.hasOwnProperty.call(avail, negotiated) || !avail[negotiated]) {
-        const fallbackBackend = preferredClientBackend(avail) || "cpu";
+        const fallbackBackend =
+          (Object.prototype.hasOwnProperty.call(avail, currentBackend) && avail[currentBackend])
+            ? currentBackend
+            : (preferredClientBackend(avail) || "cpu");
         if (Object.prototype.hasOwnProperty.call(avail, fallbackBackend) && avail[fallbackBackend]) {
           negotiated = fallbackBackend;
         } else {
@@ -11067,11 +11074,48 @@
         }
         if (typeof tf.ready === "function") await tf.ready();
       } catch (err) {
+        const preferredError = String(err && err.message ? err.message : err);
+        const fallbackOrder = [];
+        if (negotiated !== currentBackend && Object.prototype.hasOwnProperty.call(avail, currentBackend) && avail[currentBackend]) {
+          fallbackOrder.push(currentBackend);
+        }
+        if (negotiated !== "cpu") fallbackOrder.push("cpu");
+        let fallbackBackend = "";
+        let fallbackError = "";
+        for (let i = 0; i < fallbackOrder.length; i += 1) {
+          const candidate = String(fallbackOrder[i] || "").toLowerCase();
+          if (!candidate || candidate === negotiated) continue;
+          if (!Object.prototype.hasOwnProperty.call(avail, candidate) || !avail[candidate]) continue;
+          try {
+            if (typeof tf.setBackend === "function" && String(tf.getBackend() || "").toLowerCase() !== candidate) {
+              await tf.setBackend(candidate);
+            }
+            if (typeof tf.ready === "function") await tf.ready();
+            fallbackBackend = String(tf.getBackend ? tf.getBackend() : candidate).toLowerCase() || candidate;
+            break;
+          } catch (fallbackErr) {
+            fallbackError = String(fallbackErr && fallbackErr.message ? fallbackErr.message : fallbackErr);
+          }
+        }
+        if (!fallbackBackend) {
+          return {
+            ok: false,
+            reason: "backend_set_failed",
+            message: preferredError || fallbackError || "Failed to initialize client runtime backend.",
+            runtimeConfig: cfg,
+            backendAvailability: avail,
+          };
+        }
         return {
-          ok: false,
-          reason: "backend_set_failed",
-          message: String(err && err.message ? err.message : err),
-          runtimeConfig: cfg,
+          ok: true,
+          reason: "ok",
+          message:
+            "Browser runtime ready. Requested backend '" +
+            negotiated +
+            "' failed; fallback to '" +
+            fallbackBackend +
+            "'.",
+          runtimeConfig: normalizeRuntimeConfig(cfg.runtimeId, fallbackBackend, cfg.transport),
           backendAvailability: avail,
         };
       }
@@ -15170,6 +15214,7 @@
       const ids = Array.isArray(sessionIds) ? sessionIds.map(function (x) { return String(x || ""); }).filter(Boolean) : [];
       if (!ids.length) throw new Error("No trainer selected.");
       if (state.trainQueueRunning) throw new Error("Training is already running.");
+      state.runtimeCapabilities = normalizeRuntimeCapabilities(state.runtimeCapabilities);
       const runs = ids.map(function (sid) {
         return state.trainSessions.find(function (x) { return String(x.id) === sid; });
       }).filter(Boolean);
@@ -15177,6 +15222,17 @@
 
       const runPlan = runs.map(function (s) {
         normalizeTrainSessionRecord(s);
+        if (s.runtime !== "js_client" && !state.runtimeCapabilities[s.runtime]) {
+          s.runtime = "js_client";
+          s.runtimeFamily = runtimeFamilyFor("js_client");
+          s.runtimeBackend = normalizeRuntimeBackend("js_client", s.runtimeBackend || "auto");
+          if (s.runtimeStatus && typeof s.runtimeStatus === "object") {
+            s.runtimeStatus.runtimeId = "js_client";
+            s.runtimeStatus.backend = s.runtimeBackend;
+            s.runtimeStatus.message = "Selected server runtime unavailable; falling back to js_client.";
+            s.runtimeStatus.ts = Date.now();
+          }
+        }
         const ds = getSavedDatasetById(s.datasetId);
         const model = getSavedModelById(s.modelId);
         if (!ds || !ds.data) throw new Error("Dataset not found for session: " + s.name);
@@ -15268,7 +15324,7 @@
             emitSessionRuntimeEvent("run_skipped", {
               status: {
                 state: "skipped",
-                message: "Skipped: runtime handshake failed.",
+                message: "Skipped: " + String(hs.message || hs.reason || "runtime handshake failed."),
               },
               reason: String(hs.reason || "runtime_handshake_failed"),
             }, baseRuntimeConfig);
