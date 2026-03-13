@@ -4,32 +4,31 @@
   const DEFAULT_LOSS_TYPE = "meanSquaredError";
   const TFJS_VERSION = "4.22.0";
   const TFJS_WASM_CDN_BASE = "https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-wasm@" + TFJS_VERSION + "/dist/";
-  const DATASET_WORKER_PATH = (function () {
+  function resolveSiblingAssetUrl(filename, fallbackPath) {
     if (typeof window === "undefined") return "";
+    const name = String(filename || "").trim();
+    const fallback = String(fallbackPath || name || "").trim();
     try {
       const currentScript = document.currentScript;
       if (currentScript && currentScript.src) {
-        return new URL("dataset_worker.js", currentScript.src).href;
+        const baseUrl = new URL(currentScript.src, window.location.href);
+        const nextUrl = new URL(name, baseUrl);
+        const version = String(baseUrl.searchParams.get("v") || BUILD_TAG || "").trim();
+        if (version) nextUrl.searchParams.set("v", version);
+        return nextUrl.href;
       }
     } catch (_) {}
     try {
-      return new URL("src/dataset_worker.js", window.location.href).href;
+      const nextUrl = new URL(fallback, window.location.href);
+      const version = String(BUILD_TAG || "").trim();
+      if (version) nextUrl.searchParams.set("v", version);
+      return nextUrl.href;
     } catch (_) {}
-    return "src/dataset_worker.js";
-  })();
-  const TRAINING_WORKER_PATH = (function () {
-    if (typeof window === "undefined") return "";
-    try {
-      const currentScript = document.currentScript;
-      if (currentScript && currentScript.src) {
-        return new URL("training_worker.js", currentScript.src).href;
-      }
-    } catch (_) {}
-    try {
-      return new URL("src/training_worker.js", window.location.href).href;
-    } catch (_) {}
-    return "src/training_worker.js";
-  })();
+    return fallback;
+  }
+
+  const DATASET_WORKER_PATH = resolveSiblingAssetUrl("dataset_worker.js", "src/dataset_worker.js");
+  const TRAINING_WORKER_PATH = resolveSiblingAssetUrl("training_worker.js", "src/training_worker.js");
 
   const PRESET_LIMITS = {
     spring: {
@@ -2331,551 +2330,59 @@
     }
   }
 
-  function addInputNode(editor, x, y) {
-    const html =
-      "<div><div style='font-weight:700'>Input</div><div style='display:grid;gap:4px'>" +
-      "<select df-mode style='width:120px'><option value='auto'>auto</option><option value='flat'>flat</option><option value='sequence'>sequence</option></select>" +
-      "<div style='font-size:11px'>auto: infer from layers</div><div class='node-summary' style='font-size:11px;color:#334155;'>mode=auto</div></div></div>";
-    return editor.addNode("input_layer", 1, 1, x, y, "input_layer", { mode: "auto" }, html);
-  }
+  const MODEL_GRAPH_RUNTIME = OSCModelGraphCore.createRuntime({
+    clamp: clamp,
+    clearEditor: clearEditor,
+    resolveSchemaId: resolveSchemaId,
+    getCurrentSchemaId: function () { return state && state.modelSchemaId; },
+    normalizeOutputTargetsList: normalizeOutputTargetsList,
+    outputTargetsSummaryText: outputTargetsSummaryText,
+    normalizeHistorySeriesKey: normalizeHistorySeriesKey,
+    historySeriesLabel: historySeriesLabel,
+    getImageSourceSpec: getImageSourceSpec,
+    normalizeParamMask: normalizeParamMask,
+    defaultParamMask: defaultParamMask,
+    normalizeOneHotKey: normalizeOneHotKey,
+    oneHotLabel: oneHotLabel,
+    getSchemaPresetDefById: getSchemaPresetDefById,
+  });
 
-  function addDenseNode(editor, x, y, cfg) {
-    const units = Math.max(1, Number((cfg && cfg.units) || 32));
-    const activation = String((cfg && cfg.activation) || "relu");
-    const html =
-      "<div><div style='font-weight:700'>Dense</div><div style='display:grid;gap:4px'>" +
-      "<input type='number' df-units value='" + units + "' min='1' style='width:80px'>" +
-      "<select df-activation style='width:120px'>" +
-      "<option value='relu'>relu</option><option value='tanh'>tanh</option><option value='sigmoid'>sigmoid</option><option value='linear'>linear</option>" +
-      "</select><div class='node-summary' style='font-size:11px;color:#334155;'>u=" + units + ", act=" + activation + "</div></div></div>";
-    return editor.addNode("dense_layer", 1, 1, x, y, "dense_layer", { units: units, activation: activation }, html);
-  }
-
-  function addDropoutNode(editor, x, y, cfg) {
-    const rate = clamp(Number((cfg && cfg.rate) || 0.1), 0, 0.9);
-    const html =
-      "<div><div style='font-weight:700'>Dropout</div>" +
-      "<input type='number' step='0.05' min='0' max='0.9' df-rate value='" + rate.toFixed(2) + "' style='width:80px'>" +
-      "<div class='node-summary' style='font-size:11px;color:#334155;'>rate=" + rate.toFixed(2) + "</div></div>";
-    return editor.addNode("dropout_layer", 1, 1, x, y, "dropout_layer", { rate: rate }, html);
-  }
-
-  function addBatchNormNode(editor, x, y, cfg) {
-    const momentum = clamp(Number((cfg && cfg.momentum) || 0.99), 0.1, 0.999);
-    const epsilon = Math.max(1e-6, Number((cfg && cfg.epsilon) || 1e-3));
-    const html =
-      "<div><div style='font-weight:700'>BatchNorm</div>" +
-      "<div class='node-summary' style='font-size:11px;color:#334155;'>m=" + momentum.toFixed(3) + ", ε=" + epsilon.toExponential(1) + "</div></div>";
-    return editor.addNode("batchnorm_layer", 1, 1, x, y, "batchnorm_layer", { momentum: momentum, epsilon: epsilon }, html);
-  }
-
-  function addLayerNormNode(editor, x, y, cfg) {
-    const epsilon = Math.max(1e-6, Number((cfg && cfg.epsilon) || 1e-3));
-    const html =
-      "<div><div style='font-weight:700'>LayerNorm</div>" +
-      "<div class='node-summary' style='font-size:11px;color:#334155;'>ε=" + epsilon.toExponential(1) + "</div></div>";
-    return editor.addNode("layernorm_layer", 1, 1, x, y, "layernorm_layer", { epsilon: epsilon }, html);
-  }
-
-  function addLatentNode(editor, x, y, cfg) {
-    const units = Math.max(2, Number((cfg && cfg.units) || 16));
-    const group = String((cfg && cfg.group) || "z_shared");
-    const matchWeight = Math.max(0, Number((cfg && cfg.matchWeight) || 1));
-    const html =
-      "<div><div style='font-weight:700'>Latent Z</div>" +
-      "<div class='node-summary' style='font-size:11px;color:#334155;'>u=" + units + ", g=" + group + ", w=" + matchWeight.toFixed(2) + "</div></div>";
-    return editor.addNode("latent_layer", 1, 1, x, y, "latent_layer", { units: units, group: group, matchWeight: matchWeight }, html);
-  }
-
-  function addLatentMuNode(editor, x, y, cfg) {
-    const units = Math.max(2, Number((cfg && cfg.units) || 16));
-    const group = String((cfg && cfg.group) || "z_shared");
-    const matchWeight = Math.max(0, Number((cfg && cfg.matchWeight) || 1));
-    const html =
-      "<div><div style='font-weight:700'>Latent μ</div>" +
-      "<div class='node-summary' style='font-size:11px;color:#334155;'>u=" + units + ", g=" + group + ", w=" + matchWeight.toFixed(2) + "</div></div>";
-    return editor.addNode("latent_mu_layer", 1, 1, x, y, "latent_mu_layer", { units: units, group: group, matchWeight: matchWeight }, html);
-  }
-
-  function addLatentLogVarNode(editor, x, y, cfg) {
-    const units = Math.max(2, Number((cfg && cfg.units) || 16));
-    const group = String((cfg && cfg.group) || "z_shared");
-    const matchWeight = Math.max(0, Number((cfg && cfg.matchWeight) || 1));
-    const html =
-      "<div><div style='font-weight:700'>Latent logσ²</div>" +
-      "<div class='node-summary' style='font-size:11px;color:#334155;'>u=" + units + ", g=" + group + ", w=" + matchWeight.toFixed(2) + "</div></div>";
-    return editor.addNode("latent_logvar_layer", 1, 1, x, y, "latent_logvar_layer", { units: units, group: group, matchWeight: matchWeight }, html);
-  }
-
-  function addReparamNode(editor, x, y, cfg) {
-    const group = String((cfg && cfg.group) || "z_shared");
-    const beta = Math.max(0, Number((cfg && cfg.beta) || 1e-3));
-    const matchWeight = Math.max(0, Number((cfg && cfg.matchWeight) || 1));
-    const html =
-      "<div><div style='font-weight:700'>Reparam z</div>" +
-      "<div class='node-summary' style='font-size:11px;color:#334155;'>g=" + group + ", β=" + beta.toExponential(1) + ", w=" + matchWeight.toFixed(2) + "</div></div>";
-    return editor.addNode("reparam_layer", 2, 1, x, y, "reparam_layer", { group: group, beta: beta, matchWeight: matchWeight }, html);
-  }
-
-  function addOutputNode(editor, x, y, cfg) {
-    const schemaId = resolveSchemaId((cfg && cfg.schemaId) || (state && state.modelSchemaId) || "oscillator");
-    const targets = normalizeOutputTargetsList(
-      (cfg && (cfg.targets != null ? cfg.targets : (cfg.targetsCsv != null ? cfg.targetsCsv : (cfg.targetType || cfg.target)))),
-      ["x"],
-      schemaId
-    );
-    const target = targets[0];
-    const loss = String((cfg && cfg.loss) || "mse");
-    const wx = Math.max(0, Number((cfg && cfg.wx) || 1));
-    const wv = Math.max(0, Number((cfg && cfg.wv) || 1));
-    const matchWeight = Math.max(0, Number((cfg && cfg.matchWeight) || 1));
-    const paramsSelectRaw = (cfg && cfg.paramsSelect != null) ? cfg.paramsSelect : "";
-    const paramsSelect = Array.isArray(paramsSelectRaw)
-      ? paramsSelectRaw.join(",")
-      : String(paramsSelectRaw || "");
-    const html =
-      "<div><div style='font-weight:700'>Output</div>" +
-      "<div class='node-summary' style='font-size:11px;color:#334155;'>" + outputTargetsSummaryText(targets, schemaId) + ", loss=" + loss + "</div></div>";
-    return editor.addNode("output_layer", 1, 0, x, y, "output_layer", {
-      targets: targets.slice(),
-      targetsCsv: targets.join(","),
-      target: target,
-      targetType: target,
-      paramsSelect: paramsSelect,
-      loss: loss,
-      wx: wx,
-      wv: wv,
-      matchWeight: matchWeight,
-    }, html);
-  }
-
-  function addHistNode(editor, x, y, cfg) {
-    const schemaId = resolveSchemaId((cfg && cfg.schemaId) || (state && state.modelSchemaId) || "oscillator");
-    const featureKey = normalizeHistorySeriesKey((cfg && cfg.featureKey) || "x", schemaId);
-    const html = "<div><div style='font-weight:700'>History</div><div class='node-summary' style='font-size:11px;color:#334155;'>feature=" + historySeriesLabel(featureKey, schemaId) + "</div></div>";
-    return editor.addNode("hist_block", 0, 1, x, y, "hist_block", { featureKey: featureKey }, html);
-  }
-
-  function addImageSourceNode(editor, x, y, cfg) {
-    const schemaId = resolveSchemaId((cfg && cfg.schemaId) || (state && state.modelSchemaId) || "oscillator");
-    const srcSpec = getImageSourceSpec((cfg && cfg.sourceKey) || "", schemaId);
-    const featureSize = Math.max(1, Number((cfg && cfg.featureSize) || srcSpec.featureSize || 1));
-    const html =
-      "<div><div style='font-weight:700'>ImageSource</div>" +
-      "<div class='node-summary' style='font-size:11px;color:#334155;'>feature=" + srcSpec.label + ", shape=" + srcSpec.width + "x" + srcSpec.height + "x" + srcSpec.channels + ", n=" + String(Math.round(featureSize)) + "</div></div>";
-    return editor.addNode("image_source_block", 0, 1, x, y, "image_source_block", {
-      sourceKey: srcSpec.sourceKey,
-      featureSize: Math.round(featureSize),
-      imageShape: srcSpec.shape.slice(),
-      imageHeight: srcSpec.height,
-      imageWidth: srcSpec.width,
-      imageChannels: srcSpec.channels,
-    }, html);
-  }
-
-  function addHistXNode(editor, x, y) {
-    return addHistNode(editor, x, y, { featureKey: "x", schemaId: state && state.modelSchemaId });
-  }
-
-  function addHistVNode(editor, x, y) {
-    return addHistNode(editor, x, y, { featureKey: "v", schemaId: state && state.modelSchemaId });
-  }
-
-  function addXNode(editor, x, y) {
-    return addHistNode(editor, x, y, { featureKey: "x", schemaId: state && state.modelSchemaId });
-  }
-
-  function addVNode(editor, x, y) {
-    return addHistNode(editor, x, y, { featureKey: "v", schemaId: state && state.modelSchemaId });
-  }
-
-  function addWindowHistNode(editor, x, y, cfg) {
-    const schemaId = resolveSchemaId((cfg && cfg.schemaId) || (state && state.modelSchemaId) || "oscillator");
-    const featureKey = normalizeHistorySeriesKey((cfg && cfg.featureKey) || "x", schemaId);
-    const windowSize = Math.max(5, Number((cfg && cfg.windowSize) || 20));
-    const stride = Math.max(1, Number((cfg && cfg.stride) || 1));
-    const lagMode = String((cfg && cfg.lagMode) || "contiguous");
-    const lagCsv = String((cfg && cfg.lagCsv) || "1,2,3,4,5");
-    const padMode = String((cfg && cfg.padMode) || "none");
-    const html =
-      "<div><div style='font-weight:700'>WindowHistory</div>" +
-      "<div class='node-summary' style='font-size:11px;color:#334155;'>feature=" + historySeriesLabel(featureKey, schemaId) + ", w=" + windowSize + ", s=" + stride + ", " + lagMode + ", " + padMode + "</div></div>";
-    return editor.addNode("window_hist_block", 0, 1, x, y, "window_hist_block", { featureKey: featureKey, windowSize: windowSize, stride: stride, lagMode: lagMode, lagCsv: lagCsv, padMode: padMode }, html);
-  }
-
-  function addWindowHistXNode(editor, x, y, cfg) {
-    return addWindowHistNode(editor, x, y, Object.assign({}, cfg || {}, { featureKey: "x", schemaId: state && state.modelSchemaId }));
-  }
-
-  function addWindowHistVNode(editor, x, y, cfg) {
-    return addWindowHistNode(editor, x, y, Object.assign({}, cfg || {}, { featureKey: "v", schemaId: state && state.modelSchemaId }));
-  }
-
-  function addParamsNode(editor, x, y, cfg) {
-    const pm = normalizeParamMask(cfg && cfg.paramMask ? cfg.paramMask : defaultParamMask());
-    const html =
-      "<div><div style='font-weight:700'>Features</div>" +
-      "<div class='node-summary' style='font-size:11px;color:#334155;'>m,c,k,e,x0,v0,gm,gk,gc,+ratios(opt)</div></div>";
-    return editor.addNode("params_block", 0, 1, x, y, "params_block", { paramMask: pm }, html);
-  }
-
-  function addScenarioNode(editor, x, y, cfg) {
-    const schemaId = resolveSchemaId((cfg && cfg.schemaId) || (state && state.modelSchemaId) || "oscillator");
-    const oneHotKey = normalizeOneHotKey((cfg && cfg.oneHotKey) || "scenario", schemaId);
-    const html = "<div><div style='font-weight:700'>OneHot</div><div class='node-summary' style='font-size:11px;color:#334155;'>field=" + oneHotLabel(oneHotKey, schemaId) + "</div></div>";
-    return editor.addNode("scenario_block", 0, 1, x, y, "scenario_block", { oneHotKey: oneHotKey }, html);
-  }
-
-  function addTimeSecNode(editor, x, y) {
-    const html = "<div><div style='font-weight:700'>TimeSec</div><div class='node-summary' style='font-size:11px;color:#334155;'>t (seconds)</div></div>";
-    return editor.addNode("time_sec_block", 0, 1, x, y, "time_sec_block", {}, html);
-  }
-
-  function addTimeNormNode(editor, x, y) {
-    const html = "<div><div style='font-weight:700'>TimeNorm</div><div class='node-summary' style='font-size:11px;color:#334155;'>t/T</div></div>";
-    return editor.addNode("time_norm_block", 0, 1, x, y, "time_norm_block", {}, html);
-  }
-
-  function addSinNormNode(editor, x, y) {
-    const html = "<div><div style='font-weight:700'>SinNorm</div><div class='node-summary' style='font-size:11px;color:#334155;'>sin(2π·t/T)</div></div>";
-    return editor.addNode("sin_norm_block", 0, 1, x, y, "sin_norm_block", {}, html);
-  }
-
-  function addCosNormNode(editor, x, y) {
-    const html = "<div><div style='font-weight:700'>CosNorm</div><div class='node-summary' style='font-size:11px;color:#334155;'>cos(2π·t/T)</div></div>";
-    return editor.addNode("cos_norm_block", 0, 1, x, y, "cos_norm_block", {}, html);
-  }
-
-  function addNoiseScheduleNode(editor, x, y) {
-    const html = "<div><div style='font-weight:700'>NoiseSchedule</div><div class='node-summary' style='font-size:11px;color:#334155;'>β(t), ᾱ(t), σ(t)</div></div>";
-    return editor.addNode("noise_schedule_block", 0, 1, x, y, "noise_schedule_block", {}, html);
-  }
-
-  function addConv1dNode(editor, x, y, cfg) {
-    const filters = Math.max(1, Number((cfg && cfg.filters) || 64));
-    const kernelSize = Math.max(1, Number((cfg && cfg.kernelSize) || 3));
-    const stride = Math.max(1, Number((cfg && cfg.stride) || 1));
-    const activation = String((cfg && cfg.activation) || "relu");
-    const html =
-      "<div><div style='font-weight:700'>Conv1D</div><div style='display:grid;gap:4px'>" +
-      "<input type='number' df-filters value='" + filters + "' min='1' style='width:80px'>" +
-      "<input type='number' df-kernelSize value='" + kernelSize + "' min='1' style='width:80px'>" +
-      "<input type='number' df-stride value='" + stride + "' min='1' style='width:80px'>" +
-      "<select df-activation style='width:120px'><option value='relu'>relu</option><option value='tanh'>tanh</option><option value='sigmoid'>sigmoid</option><option value='linear'>linear</option></select>" +
-      "<div class='node-summary' style='font-size:11px;color:#334155;'>f=" + filters + ", k=" + kernelSize + ", s=" + stride + ", act=" + activation + "</div></div></div>";
-    return editor.addNode("conv1d_layer", 1, 1, x, y, "conv1d_layer", { filters: filters, kernelSize: kernelSize, stride: stride, activation: activation }, html);
-  }
-
-  function addRatioKmNode(editor, x, y) {
-    const html = "<div><div style='font-weight:700'>Ratio k/m</div><div class='node-summary' style='font-size:11px;color:#334155;'>k/m</div></div>";
-    return editor.addNode("ratio_km_block", 0, 1, x, y, "ratio_km_block", {}, html);
-  }
-
-  function addRatioCmNode(editor, x, y) {
-    const html = "<div><div style='font-weight:700'>Ratio c/m</div><div class='node-summary' style='font-size:11px;color:#334155;'>c/m</div></div>";
-    return editor.addNode("ratio_cm_block", 0, 1, x, y, "ratio_cm_block", {}, html);
-  }
-
-  function addRatioGlNode(editor, x, y) {
-    const html = "<div><div style='font-weight:700'>Ratio g/L</div><div class='node-summary' style='font-size:11px;color:#334155;'>g/L</div></div>";
-    return editor.addNode("ratio_gl_block", 0, 1, x, y, "ratio_gl_block", {}, html);
-  }
-
-  function addConcatNode(editor, x, y, cfg) {
-    const numInputs = clamp(Math.round(Number((cfg && cfg.numInputs) || 5)), 1, 24);
-    const html = "<div><div style='font-weight:700'>Concat</div><div class='node-summary' style='font-size:11px;color:#334155;'>merge selected features</div></div>";
-    return editor.addNode("concat_block", numInputs, 1, x, y, "concat_block", { numInputs: numInputs }, html);
-  }
-
-  function addRnnNode(editor, x, y, cfg) {
-    const units = Math.max(1, Number((cfg && cfg.units) || 48));
-    const dropout = clamp(Number((cfg && cfg.dropout) || 0.1), 0, 0.8);
-    const returnseq = String((cfg && cfg.returnseq) || "auto");
-    const html =
-      "<div><div style='font-weight:700'>SimpleRNN</div><div style='display:grid;gap:4px'>" +
-      "<input type='number' df-units value='" + units + "' min='1' style='width:80px'>" +
-      "<input type='number' df-dropout value='" + dropout.toFixed(2) + "' min='0' max='0.8' step='0.05' style='width:80px'>" +
-      "<select df-returnseq style='width:120px'><option value='auto'>returnSeq:auto</option><option value='false'>returnSeq:false</option><option value='true'>returnSeq:true</option></select>" +
-      "<div class='node-summary' style='font-size:11px;color:#334155;'>u=" + units + ", d=" + dropout.toFixed(2) + ", rs=" + returnseq + "</div>" +
-      "</div></div>";
-    return editor.addNode("rnn_layer", 1, 1, x, y, "rnn_layer", { units: units, dropout: dropout, returnseq: returnseq }, html);
-  }
-
-  function addGruNode(editor, x, y, cfg) {
-    const units = Math.max(1, Number((cfg && cfg.units) || 64));
-    const dropout = clamp(Number((cfg && cfg.dropout) || 0.1), 0, 0.8);
-    const returnseq = String((cfg && cfg.returnseq) || "auto");
-    const html =
-      "<div><div style='font-weight:700'>GRU</div><div style='display:grid;gap:4px'>" +
-      "<input type='number' df-units value='" + units + "' min='1' style='width:80px'>" +
-      "<input type='number' df-dropout value='" + dropout.toFixed(2) + "' min='0' max='0.8' step='0.05' style='width:80px'>" +
-      "<select df-returnseq style='width:120px'><option value='auto'>returnSeq:auto</option><option value='false'>returnSeq:false</option><option value='true'>returnSeq:true</option></select>" +
-      "<div class='node-summary' style='font-size:11px;color:#334155;'>u=" + units + ", d=" + dropout.toFixed(2) + ", rs=" + returnseq + "</div>" +
-      "</div></div>";
-    return editor.addNode("gru_layer", 1, 1, x, y, "gru_layer", { units: units, dropout: dropout, returnseq: returnseq }, html);
-  }
-
-  function addLstmNode(editor, x, y, cfg) {
-    const units = Math.max(1, Number((cfg && cfg.units) || 64));
-    const dropout = clamp(Number((cfg && cfg.dropout) || 0.1), 0, 0.8);
-    const returnseq = String((cfg && cfg.returnseq) || "auto");
-    const html =
-      "<div><div style='font-weight:700'>LSTM</div><div style='display:grid;gap:4px'>" +
-      "<input type='number' df-units value='" + units + "' min='1' style='width:80px'>" +
-      "<input type='number' df-dropout value='" + dropout.toFixed(2) + "' min='0' max='0.8' step='0.05' style='width:80px'>" +
-      "<select df-returnseq style='width:120px'><option value='auto'>returnSeq:auto</option><option value='false'>returnSeq:false</option><option value='true'>returnSeq:true</option></select>" +
-      "<div class='node-summary' style='font-size:11px;color:#334155;'>u=" + units + ", d=" + dropout.toFixed(2) + ", rs=" + returnseq + "</div>" +
-      "</div></div>";
-    return editor.addNode("lstm_layer", 1, 1, x, y, "lstm_layer", { units: units, dropout: dropout, returnseq: returnseq }, html);
-  }
-
+  function addInputNode(editor, x, y) { return MODEL_GRAPH_RUNTIME.addInputNode(editor, x, y); }
+  function addDenseNode(editor, x, y, cfg) { return MODEL_GRAPH_RUNTIME.addDenseNode(editor, x, y, cfg); }
+  function addDropoutNode(editor, x, y, cfg) { return MODEL_GRAPH_RUNTIME.addDropoutNode(editor, x, y, cfg); }
+  function addBatchNormNode(editor, x, y, cfg) { return MODEL_GRAPH_RUNTIME.addBatchNormNode(editor, x, y, cfg); }
+  function addLayerNormNode(editor, x, y, cfg) { return MODEL_GRAPH_RUNTIME.addLayerNormNode(editor, x, y, cfg); }
+  function addLatentNode(editor, x, y, cfg) { return MODEL_GRAPH_RUNTIME.addLatentNode(editor, x, y, cfg); }
+  function addLatentMuNode(editor, x, y, cfg) { return MODEL_GRAPH_RUNTIME.addLatentMuNode(editor, x, y, cfg); }
+  function addLatentLogVarNode(editor, x, y, cfg) { return MODEL_GRAPH_RUNTIME.addLatentLogVarNode(editor, x, y, cfg); }
+  function addReparamNode(editor, x, y, cfg) { return MODEL_GRAPH_RUNTIME.addReparamNode(editor, x, y, cfg); }
+  function addOutputNode(editor, x, y, cfg) { return MODEL_GRAPH_RUNTIME.addOutputNode(editor, x, y, cfg); }
+  function addHistNode(editor, x, y, cfg) { return MODEL_GRAPH_RUNTIME.addHistNode(editor, x, y, cfg); }
+  function addImageSourceNode(editor, x, y, cfg) { return MODEL_GRAPH_RUNTIME.addImageSourceNode(editor, x, y, cfg); }
+  function addHistXNode(editor, x, y) { return addHistNode(editor, x, y, { featureKey: "x", schemaId: state && state.modelSchemaId }); }
+  function addHistVNode(editor, x, y) { return addHistNode(editor, x, y, { featureKey: "v", schemaId: state && state.modelSchemaId }); }
+  function addXNode(editor, x, y) { return addHistNode(editor, x, y, { featureKey: "x", schemaId: state && state.modelSchemaId }); }
+  function addVNode(editor, x, y) { return addHistNode(editor, x, y, { featureKey: "v", schemaId: state && state.modelSchemaId }); }
+  function addWindowHistNode(editor, x, y, cfg) { return MODEL_GRAPH_RUNTIME.addWindowHistNode(editor, x, y, cfg); }
+  function addWindowHistXNode(editor, x, y, cfg) { return addWindowHistNode(editor, x, y, Object.assign({}, cfg || {}, { featureKey: "x", schemaId: state && state.modelSchemaId })); }
+  function addWindowHistVNode(editor, x, y, cfg) { return addWindowHistNode(editor, x, y, Object.assign({}, cfg || {}, { featureKey: "v", schemaId: state && state.modelSchemaId })); }
+  function addParamsNode(editor, x, y, cfg) { return MODEL_GRAPH_RUNTIME.addParamsNode(editor, x, y, cfg); }
+  function addScenarioNode(editor, x, y, cfg) { return MODEL_GRAPH_RUNTIME.addScenarioNode(editor, x, y, cfg); }
+  function addTimeSecNode(editor, x, y) { return MODEL_GRAPH_RUNTIME.addTimeSecNode(editor, x, y); }
+  function addTimeNormNode(editor, x, y) { return MODEL_GRAPH_RUNTIME.addTimeNormNode(editor, x, y); }
+  function addSinNormNode(editor, x, y) { return MODEL_GRAPH_RUNTIME.addSinNormNode(editor, x, y); }
+  function addCosNormNode(editor, x, y) { return MODEL_GRAPH_RUNTIME.addCosNormNode(editor, x, y); }
+  function addNoiseScheduleNode(editor, x, y) { return MODEL_GRAPH_RUNTIME.addNoiseScheduleNode(editor, x, y); }
+  function addConv1dNode(editor, x, y, cfg) { return MODEL_GRAPH_RUNTIME.addConv1dNode(editor, x, y, cfg); }
+  function addConcatNode(editor, x, y, cfg) { return MODEL_GRAPH_RUNTIME.addConcatNode(editor, x, y, cfg); }
+  function addRnnNode(editor, x, y, cfg) { return MODEL_GRAPH_RUNTIME.addRnnNode(editor, x, y, cfg); }
+  function addGruNode(editor, x, y, cfg) { return MODEL_GRAPH_RUNTIME.addGruNode(editor, x, y, cfg); }
+  function addLstmNode(editor, x, y, cfg) { return MODEL_GRAPH_RUNTIME.addLstmNode(editor, x, y, cfg); }
+  function renderPresetGraphSpec(editor, graphSpec, schemaId) { return MODEL_GRAPH_RUNTIME.renderPresetGraphSpec(editor, graphSpec, schemaId); }
   function seedPreconfigGraph(editor, preset) {
-    const runtime = getModelGraphRuntime();
-    const schemaId = resolveSchemaId((state && state.modelSchemaId) || "oscillator");
-    if (runtime && typeof runtime.seedPreconfigGraph === "function") {
-      runtime.seedPreconfigGraph(editor, preset, schemaId);
-      return;
-    }
-    preset = String(preset || "").trim();
-    clearEditor(editor);
-    if (preset === "mnist_mlp_baseline") {
-      const hx = addImageSourceNode(editor, 140, 60, { sourceKey: "pixel_values", schemaId: state && state.modelSchemaId });
-      const i = addInputNode(editor, 420, 120);
-      if (editor && typeof editor.updateNodeDataFromId === "function") editor.updateNodeDataFromId(i, { mode: "flat" });
-      const d1 = addDenseNode(editor, 620, 120, { units: 256, activation: "relu" });
-      const dr = addDropoutNode(editor, 800, 120, { rate: 0.2 });
-      const d2 = addDenseNode(editor, 980, 120, { units: 128, activation: "relu" });
-      const o = addOutputNode(editor, 1160, 120, { target: "label", targetType: "label", loss: "cross_entropy", units: 10, unitsHint: 10, matchWeight: 1 });
-      editor.addConnection(hx, i, "output_1", "input_1");
-      editor.addConnection(i, d1, "output_1", "input_1");
-      editor.addConnection(d1, dr, "output_1", "input_1");
-      editor.addConnection(dr, d2, "output_1", "input_1");
-      editor.addConnection(d2, o, "output_1", "input_1");
-      return;
-    }
-    if (preset === "exp_diffusion_denoise_1d") {
-      const pm = normalizeParamMask(defaultParamMask());
-      const px = addParamsNode(editor, 180, 80, { paramMask: pm });
-      const tnorm = addTimeNormNode(editor, 340, 80);
-      const ns = addNoiseScheduleNode(editor, 500, 80);
-      const sx = addScenarioNode(editor, 660, 80);
-      const cx = addConcatNode(editor, 840, 80, { numInputs: 4 });
-      const i = addInputNode(editor, 980, 120);
-      if (editor && typeof editor.updateNodeDataFromId === "function") editor.updateNodeDataFromId(i, { mode: "flat" });
-      const d1 = addDenseNode(editor, 1140, 80, { units: 128, activation: "relu" });
-      const d2 = addDenseNode(editor, 1300, 80, { units: 64, activation: "relu" });
-      const d3 = addDenseNode(editor, 1460, 80, { units: 32, activation: "tanh" });
-      const o = addOutputNode(editor, 1620, 80, { target: "x", loss: "mse", wx: 1, wv: 1 });
-      let ci = 1;
-      editor.addConnection(px, cx, "output_1", "input_" + String(ci++));
-      editor.addConnection(tnorm, cx, "output_1", "input_" + String(ci++));
-      editor.addConnection(ns, cx, "output_1", "input_" + String(ci++));
-      editor.addConnection(sx, cx, "output_1", "input_" + String(ci++));
-      editor.addConnection(cx, i, "output_1", "input_1");
-      editor.addConnection(i, d1, "output_1", "input_1");
-      editor.addConnection(d1, d2, "output_1", "input_1");
-      editor.addConnection(d2, d3, "output_1", "input_1");
-      editor.addConnection(d3, o, "output_1", "input_1");
-      return;
-    }
-    if (preset === "exp_vae_direct") {
-      const pm = normalizeParamMask(defaultParamMask());
-      const px = addParamsNode(editor, 180, 80, { paramMask: pm });
-      const tnorm = addTimeNormNode(editor, 340, 80);
-      const sx = addScenarioNode(editor, 500, 80);
-      const sn = addSinNormNode(editor, 660, 80);
-      const cn = addCosNormNode(editor, 820, 80);
-      const cx = addConcatNode(editor, 980, 80, { numInputs: 5 });
-      const i = addInputNode(editor, 1120, 120);
-      if (editor && typeof editor.updateNodeDataFromId === "function") editor.updateNodeDataFromId(i, { mode: "flat" });
-      const e1 = addDenseNode(editor, 1280, 80, { units: 96, activation: "relu" });
-      const mu = addLatentMuNode(editor, 1440, 40, { units: 16, group: "z_vae" });
-      const lv = addLatentLogVarNode(editor, 1440, 180, { units: 16, group: "z_vae" });
-      const rz = addReparamNode(editor, 1600, 100, { group: "z_vae", beta: 1e-3 });
-      const d1 = addDenseNode(editor, 1760, 100, { units: 64, activation: "relu" });
-      const o = addOutputNode(editor, 1920, 100, { target: "x", loss: "mse", wx: 1, wv: 1 });
-      let ci = 1;
-      editor.addConnection(px, cx, "output_1", "input_" + String(ci++));
-      editor.addConnection(tnorm, cx, "output_1", "input_" + String(ci++));
-      editor.addConnection(sx, cx, "output_1", "input_" + String(ci++));
-      editor.addConnection(sn, cx, "output_1", "input_" + String(ci++));
-      editor.addConnection(cn, cx, "output_1", "input_" + String(ci++));
-      editor.addConnection(cx, i, "output_1", "input_1");
-      editor.addConnection(i, e1, "output_1", "input_1");
-      editor.addConnection(e1, mu, "output_1", "input_1");
-      editor.addConnection(e1, lv, "output_1", "input_1");
-      editor.addConnection(mu, rz, "output_1", "input_1");
-      editor.addConnection(lv, rz, "output_1", "input_2");
-      editor.addConnection(rz, d1, "output_1", "input_1");
-      editor.addConnection(d1, o, "output_1", "input_1");
-      return;
-    }
-    if (preset === "exp_dual_latent_match_direct") {
-      const pm = normalizeParamMask(defaultParamMask());
-      const px = addParamsNode(editor, 160, 80, { paramMask: pm });
-      const tsec = addTimeSecNode(editor, 320, 80);
-      const tnorm = addTimeNormNode(editor, 480, 80);
-      const sx = addScenarioNode(editor, 640, 80);
-      const sn = addSinNormNode(editor, 800, 80);
-      const cn = addCosNormNode(editor, 960, 80);
-      const cx = addConcatNode(editor, 1120, 80, { numInputs: 6 });
-      const i = addInputNode(editor, 1260, 120);
-      if (editor && typeof editor.updateNodeDataFromId === "function") editor.updateNodeDataFromId(i, { mode: "flat" });
-      const e1 = addDenseNode(editor, 1420, 70, { units: 96, activation: "relu" });
-      const e2 = addDenseNode(editor, 1420, 190, { units: 96, activation: "relu" });
-      const z1 = addLatentNode(editor, 1580, 70, { units: 16, group: "z_shared", matchWeight: 1 });
-      const z2 = addLatentNode(editor, 1580, 190, { units: 16, group: "z_shared", matchWeight: 1 });
-      const d1 = addDenseNode(editor, 1740, 70, { units: 64, activation: "relu" });
-      const d2 = addDenseNode(editor, 1900, 70, { units: 32, activation: "tanh" });
-      const o = addOutputNode(editor, 2060, 70, { target: "x", loss: "mse", wx: 1, wv: 1 });
-      let ci = 1;
-      editor.addConnection(px, cx, "output_1", "input_" + String(ci++));
-      editor.addConnection(tsec, cx, "output_1", "input_" + String(ci++));
-      editor.addConnection(tnorm, cx, "output_1", "input_" + String(ci++));
-      editor.addConnection(sx, cx, "output_1", "input_" + String(ci++));
-      editor.addConnection(sn, cx, "output_1", "input_" + String(ci++));
-      editor.addConnection(cn, cx, "output_1", "input_" + String(ci++));
-      editor.addConnection(cx, i, "output_1", "input_1");
-      editor.addConnection(i, e1, "output_1", "input_1");
-      editor.addConnection(i, e2, "output_1", "input_1");
-      editor.addConnection(e1, z1, "output_1", "input_1");
-      editor.addConnection(e2, z2, "output_1", "input_1");
-      editor.addConnection(z1, d1, "output_1", "input_1");
-      editor.addConnection(d1, d2, "output_1", "input_1");
-      editor.addConnection(d2, o, "output_1", "input_1");
-      return;
-    }
-    if (preset === "exp_ar_gru_latent_match") {
-      const pm = normalizeParamMask(defaultParamMask());
-      const whx = addWindowHistXNode(editor, 40, 40, { windowSize: 20, stride: 1, lagMode: "contiguous", lagCsv: "1,2,3,4,5", padMode: "none" });
-      const whv = addWindowHistVNode(editor, 200, 40, { windowSize: 20, stride: 1, lagMode: "contiguous", lagCsv: "1,2,3,4,5", padMode: "none" });
-      const px = addParamsNode(editor, 360, 40, { paramMask: pm });
-      const tnorm = addTimeNormNode(editor, 520, 40);
-      const sx = addScenarioNode(editor, 680, 40);
-      const cx = addConcatNode(editor, 840, 40, { numInputs: 5 });
-      const i = addInputNode(editor, 980, 120);
-      if (editor && typeof editor.updateNodeDataFromId === "function") editor.updateNodeDataFromId(i, { mode: "sequence" });
-      const g1 = addGruNode(editor, 1140, 120, { units: 96, dropout: 0.1, returnseq: "true" });
-      const g2 = addGruNode(editor, 1300, 120, { units: 48, dropout: 0.1, returnseq: "false" });
-      const z1 = addLatentNode(editor, 1460, 80, { units: 16, group: "z_shared", matchWeight: 1 });
-      const z2 = addLatentNode(editor, 1460, 200, { units: 16, group: "z_shared", matchWeight: 1 });
-      const d1 = addDenseNode(editor, 1620, 80, { units: 32, activation: "relu" });
-      const o = addOutputNode(editor, 1780, 80, { target: "x", loss: "mse", wx: 1, wv: 1 });
-      let ci = 1;
-      editor.addConnection(whx, cx, "output_1", "input_" + String(ci++));
-      editor.addConnection(whv, cx, "output_1", "input_" + String(ci++));
-      editor.addConnection(px, cx, "output_1", "input_" + String(ci++));
-      editor.addConnection(tnorm, cx, "output_1", "input_" + String(ci++));
-      editor.addConnection(sx, cx, "output_1", "input_" + String(ci++));
-      editor.addConnection(cx, i, "output_1", "input_1");
-      editor.addConnection(i, g1, "output_1", "input_1");
-      editor.addConnection(g1, g2, "output_1", "input_1");
-      editor.addConnection(g2, z1, "output_1", "input_1");
-      editor.addConnection(g2, z2, "output_1", "input_1");
-      editor.addConnection(z1, d1, "output_1", "input_1");
-      editor.addConnection(d1, o, "output_1", "input_1");
-      return;
-    }
-    const directPresets = {
-      direct_mlp_strong: true,
-      direct_mlp_ratio: true,
-      exp_dual_latent_match_direct: true,
-    };
-    const arGruPresets = {
-      gru: true,
-      ar_gru_strong: true,
-      ar_gru_ratio: true,
-      exp_ar_gru_window_to_x_zero_pad: true,
-      exp_ar_gru_window_to_x_rk4_warmup: true,
-      exp_ar_gru_latent_match: true,
-    };
-    const arCnnPresets = {
-      exp_ar_cnn_strong: true,
-    };
-    const arLstmPresets = {
-      lstm: true,
-      ar_lstm_strong: true,
-      ar_lstm_ratio: true,
-    };
-    const isDirectPreset = Boolean(directPresets[preset]);
-    const useRatioPreset = preset === "direct_mlp_ratio" || preset === "ar_gru_ratio" || preset === "ar_lstm_ratio";
-    const outputTarget = (preset.indexOf("_to_v") >= 0) ? "v" : ((preset.indexOf("_to_xv") >= 0) ? "xv" : "x");
-    const includeHist = !(isDirectPreset);
-    const windowPadMode = preset.indexOf("zero_pad") >= 0
-      ? "zero"
-      : (preset.indexOf("edge_pad") >= 0 ? "edge" : "none");
-    const pm = normalizeParamMask(Object.assign({}, defaultParamMask(), {
-      rkm: useRatioPreset,
-      rcm: useRatioPreset,
-      rgl: useRatioPreset,
-    }));
-    const whx = includeHist ? addWindowHistXNode(editor, 40, 40, { windowSize: 20, stride: 1, lagMode: "contiguous", lagCsv: "1,2,3,4,5", padMode: windowPadMode }) : null;
-    const whv = includeHist ? addWindowHistVNode(editor, 200, 40, { windowSize: 20, stride: 1, lagMode: "contiguous", lagCsv: "1,2,3,4,5", padMode: windowPadMode }) : null;
-    const px = addParamsNode(editor, includeHist ? 540 : 360, 40, { paramMask: pm });
-    const tsec = addTimeSecNode(editor, includeHist ? 700 : 520, 40);
-    const tnorm = addTimeNormNode(editor, includeHist ? 860 : 680, 40);
-    const sx = addScenarioNode(editor, includeHist ? 860 : 680, 40);
-    const sn = addSinNormNode(editor, includeHist ? 1020 : 840, 40);
-    const cn = addCosNormNode(editor, includeHist ? 1180 : 1000, 40);
-    const cx = addConcatNode(editor, includeHist ? 1340 : 1160, 40, { numInputs: includeHist ? 8 : 6 });
-    const i = addInputNode(editor, includeHist ? 1480 : 1300, 120);
-    if (editor && typeof editor.updateNodeDataFromId === "function") {
-      editor.updateNodeDataFromId(i, {
-        mode: (preset === "mlp" || isDirectPreset) ? "flat" : "sequence",
-      });
-    }
-    let n1;
-    let n2;
-    let n3 = null;
-    if (preset === "rnn") {
-      n1 = addRnnNode(editor, 1340, 120, { units: 64, dropout: 0.1, returnseq: "true" });
-      n2 = addRnnNode(editor, 1540, 120, { units: 32, dropout: 0.1, returnseq: "false" });
-      n3 = addDenseNode(editor, 1740, 120, { units: 32, activation: "relu" });
-    } else if (arGruPresets[preset]) {
-      n1 = addGruNode(editor, 1340, 120, { units: 96, dropout: 0.1, returnseq: "true" });
-      n2 = addGruNode(editor, 1540, 120, { units: 48, dropout: 0.1, returnseq: "false" });
-      n3 = addDenseNode(editor, 1740, 120, { units: 32, activation: "relu" });
-    } else if (arLstmPresets[preset]) {
-      n1 = addLstmNode(editor, 1340, 120, { units: 96, dropout: 0.1, returnseq: "true" });
-      n2 = addLstmNode(editor, 1540, 120, { units: 48, dropout: 0.1, returnseq: "false" });
-      n3 = addDenseNode(editor, 1740, 120, { units: 32, activation: "relu" });
-    } else if (arCnnPresets[preset]) {
-      n1 = addConv1dNode(editor, 1340, 120, { filters: 64, kernelSize: 5, stride: 1, activation: "relu" });
-      n2 = addConv1dNode(editor, 1540, 120, { filters: 32, kernelSize: 3, stride: 1, activation: "relu" });
-      n3 = addDenseNode(editor, 1740, 120, { units: 32, activation: "relu" });
-    } else if (preset === "direct_mlp_strong") {
-      n1 = addDenseNode(editor, 1340, 120, { units: 128, activation: "relu" });
-      n2 = addDenseNode(editor, 1540, 120, { units: 64, activation: "relu" });
-      n3 = addDenseNode(editor, 1740, 120, { units: 32, activation: "tanh" });
-    } else if (preset === "direct_mlp_ratio") {
-      n1 = addDenseNode(editor, 1340, 120, { units: 128, activation: "relu" });
-      n2 = addDenseNode(editor, 1540, 120, { units: 64, activation: "relu" });
-      n3 = addDenseNode(editor, 1740, 120, { units: 32, activation: "relu" });
-    } else {
-      n1 = addDenseNode(editor, 1340, 120, { units: 96, activation: "relu" });
-      n2 = addDenseNode(editor, 1540, 120, { units: 48, activation: "relu" });
-      n3 = addDropoutNode(editor, 1740, 120, { rate: 0.1 });
-    }
-    const o = addOutputNode(editor, 1940, 120, { target: outputTarget });
-    let ci = 1;
-    if (whx) editor.addConnection(whx, cx, "output_1", "input_" + String(ci++));
-    if (whv) editor.addConnection(whv, cx, "output_1", "input_" + String(ci++));
-    editor.addConnection(px, cx, "output_1", "input_" + String(ci++));
-    editor.addConnection(tsec, cx, "output_1", "input_" + String(ci++));
-    editor.addConnection(tnorm, cx, "output_1", "input_" + String(ci++));
-    editor.addConnection(sx, cx, "output_1", "input_" + String(ci++));
-    editor.addConnection(sn, cx, "output_1", "input_" + String(ci++));
-    editor.addConnection(cn, cx, "output_1", "input_" + String(ci++));
-    editor.addConnection(cx, i, "output_1", "input_1");
-    editor.addConnection(i, n1, "output_1", "input_1");
-    editor.addConnection(n1, n2, "output_1", "input_1");
-    if (n3) {
-      editor.addConnection(n2, n3, "output_1", "input_1");
-      editor.addConnection(n3, o, "output_1", "input_1");
-    } else {
-      editor.addConnection(n2, o, "output_1", "input_1");
-    }
+    return MODEL_GRAPH_RUNTIME.seedPreconfigGraph(editor, preset, resolveSchemaId((state && state.modelSchemaId) || "oscillator"));
   }
+
 
   function seedDefaultGraph(editor) {
     const sid = resolveSchemaId((state && state.modelSchemaId) || "oscillator");

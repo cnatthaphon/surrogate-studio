@@ -745,9 +745,22 @@ function createHeadLoss(tf, head, preparedDataset) {
 }
 
 async function saveModelArtifacts(tf, model) {
-  return model.save(tf.io.withSaveHandler(async function (artifacts) {
-    return artifacts;
+  var captured = null;
+  await model.save(tf.io.withSaveHandler(async function (artifacts) {
+    captured = artifacts;
+    return {
+      modelArtifactsInfo: tf.io && typeof tf.io.getModelArtifactsInfoForJSON === "function"
+        ? tf.io.getModelArtifactsInfoForJSON(artifacts)
+        : {
+          dateSaved: new Date(),
+          modelTopologyType: artifacts && artifacts.modelTopology ? "JSON" : "Unknown",
+          modelTopologyBytes: 0,
+          weightSpecsBytes: 0,
+          weightDataBytes: artifacts && artifacts.weightData ? artifacts.weightData.byteLength || 0 : 0,
+        },
+    };
   }));
+  return captured;
 }
 
 function buildHistoryRows(history) {
