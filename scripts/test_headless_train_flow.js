@@ -14,9 +14,10 @@ var PC = require("../src/prediction_core.js");
 
 var tf;
 try {
-  tf = require("@tensorflow/tfjs");
+  var loader = require("../src/tfjs_node_loader.js");
+  tf = loader.loadTfjs();
 } catch (e) {
-  console.log("SKIP test_headless_train_flow (tfjs not installed: npm install @tensorflow/tfjs)");
+  console.log("SKIP test_headless_train_flow (tfjs runtime not available: " + e.message + ")");
   process.exit(0);
 }
 

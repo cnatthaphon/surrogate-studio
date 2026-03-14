@@ -4,3 +4,4 @@ legacy/
 __tmp_probe/
 *.pyc
 __pycache__/
+node_modules/
