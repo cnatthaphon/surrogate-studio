@@ -79,6 +79,8 @@
         schemaRegistry: SchemaRegistry,
         datasetModules: DatasetModules,
         datasetRuntime: DatasetRuntime,
+        oscillatorCore: W.OSCOscillatorDatasetCore || null,
+        imageRender: W.OSCImageRenderCore || null,
         escapeHtml: escapeHtml,
         el: elHelper,
       });

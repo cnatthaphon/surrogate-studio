@@ -28,6 +28,12 @@
       return e;
     };
 
+    var oscillatorCore = deps.oscillatorCore;   // OSCOscillatorDatasetCore (optional)
+    var imageRender = deps.imageRender;         // OSCImageRenderCore (optional)
+    var getPlotly = deps.getPlotly || function () {
+      return typeof window !== "undefined" && window.Plotly ? window.Plotly : null;
+    };
+
     var _selectedSchemaId = null;
     var _selectedModuleId = null;
 
@@ -190,10 +196,113 @@
         modCard.appendChild(elFactory("div", { style: "font-size:12px;color:#cbd5e1;" },
           "Playground mode: " + escapeHtml(playgroundMode)));
 
-        // playground content mount point — tab controllers or module can fill this
+        // playground interactive preview
         var playgroundMount = elFactory("div", { id: "playground-content-mount", style: "margin-top:12px;" });
         modCard.appendChild(playgroundMount);
+        _renderPlaygroundPreview(playgroundMount, activeModule, _selectedSchemaId);
         el.appendChild(modCard);
+      }
+    }
+
+    function _renderPlaygroundPreview(mountEl, activeModule, schemaId) {
+      var playgroundMode = (activeModule && activeModule.playground && activeModule.playground.mode) || "generic";
+
+      if (playgroundMode === "trajectory_simulation" && oscillatorCore) {
+        // interactive oscillator preview
+        var controls = elFactory("div", { style: "display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px;" });
+        var paramFields = [
+          { key: "m", label: "Mass", value: 1.0, min: 0.1, max: 5 },
+          { key: "c", label: "Damping", value: 0.25, min: 0, max: 2 },
+          { key: "k", label: "Stiffness", value: 4.0, min: 0.1, max: 20 },
+          { key: "x0", label: "x(0)", value: 1.0, min: -3, max: 3 },
+        ];
+        var paramInputs = {};
+        paramFields.forEach(function (f) {
+          var row = elFactory("div", { style: "display:flex;align-items:center;gap:4px;" });
+          row.appendChild(elFactory("label", { style: "font-size:11px;color:#94a3b8;min-width:50px;" }, f.label));
+          var inp = elFactory("input", {
+            type: "number", value: String(f.value), style: "width:60px;padding:3px;font-size:12px;border-radius:4px;border:1px solid #334155;background:#0b1220;color:#e2e8f0;",
+          });
+          if (f.min != null) inp.setAttribute("min", f.min);
+          if (f.max != null) inp.setAttribute("max", f.max);
+          inp.setAttribute("step", "0.1");
+          paramInputs[f.key] = inp;
+          row.appendChild(inp);
+          controls.appendChild(row);
+        });
+        var runBtn = elFactory("button", { className: "osc-btn sm" }, "Simulate");
+        controls.appendChild(runBtn);
+        mountEl.appendChild(controls);
+
+        var chartDiv = elFactory("div", { style: "height:280px;" });
+        mountEl.appendChild(chartDiv);
+
+        var runSim = function () {
+          var condition = {
+            scenario: "spring",
+            m: Number(paramInputs.m.value) || 1,
+            c: Number(paramInputs.c.value) || 0.25,
+            k: Number(paramInputs.k.value) || 4,
+            x0: Number(paramInputs.x0.value) || 1,
+            v0: 0, g: 9.81, dt: 0.02, steps: 400,
+            restitution: 0.8, groundModel: "rigid", groundK: 2500, groundC: 90,
+          };
+          var sim = oscillatorCore.simulateOscillator(condition);
+          var Plotly = getPlotly();
+          if (Plotly && sim && sim.t && sim.x) {
+            Plotly.newPlot(chartDiv, [
+              { x: sim.t, y: sim.x, mode: "lines", name: "x(t)", line: { color: "#22d3ee" } },
+              { x: sim.t, y: sim.v, mode: "lines", name: "v(t)", line: { color: "#f59e0b", dash: "dot" } },
+            ], {
+              paper_bgcolor: "#0b1220", plot_bgcolor: "#0b1220",
+              font: { color: "#e2e8f0" },
+              title: "Oscillator Preview (m=" + condition.m + " c=" + condition.c + " k=" + condition.k + ")",
+              xaxis: { title: "time (s)", gridcolor: "#1e293b" },
+              yaxis: { gridcolor: "#1e293b" },
+              legend: { orientation: "h" },
+              margin: { t: 40, b: 40, l: 50, r: 20 },
+            }, { responsive: true });
+          }
+        };
+        runBtn.addEventListener("click", runSim);
+        // auto-run on mount
+        setTimeout(runSim, 100);
+
+      } else if (playgroundMode === "image_dataset") {
+        // image dataset preview
+        mountEl.appendChild(elFactory("div", { style: "color:#94a3b8;font-size:13px;" },
+          "Image dataset preview: generate a small sample to see class distribution."));
+        var previewBtn = elFactory("button", { className: "osc-btn sm", style: "margin-top:8px;" }, "Preview Samples");
+        mountEl.appendChild(previewBtn);
+        var previewMount = elFactory("div", { style: "margin-top:8px;" });
+        mountEl.appendChild(previewMount);
+
+        previewBtn.addEventListener("click", function () {
+          previewMount.innerHTML = "<div style='color:#67e8f9;font-size:12px;'>Generating preview...</div>";
+          if (activeModule && typeof activeModule.build === "function") {
+            try {
+              var previewResult = activeModule.build({ seed: 42, totalCount: 50, variant: schemaId });
+              var handlePreview = function (res) {
+                if (!res) { previewMount.innerHTML = "<div class='osc-empty'>No data</div>"; return; }
+                var info = elFactory("div", { style: "font-size:12px;color:#cbd5e1;" });
+                info.textContent = "Samples: " + (res.totalCount || res.xTrain && res.xTrain.length || "?");
+                previewMount.innerHTML = "";
+                previewMount.appendChild(info);
+              };
+              if (previewResult && typeof previewResult.then === "function") {
+                previewResult.then(handlePreview);
+              } else {
+                handlePreview(previewResult);
+              }
+            } catch (e) {
+              previewMount.innerHTML = "<div style='color:#f43f5e;font-size:12px;'>Error: " + escapeHtml(e.message) + "</div>";
+            }
+          }
+        });
+
+      } else {
+        mountEl.appendChild(elFactory("div", { style: "color:#64748b;font-size:12px;" },
+          "No interactive preview available for this module type."));
       }
     }
 
