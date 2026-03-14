@@ -23,6 +23,8 @@
     var ModelGraphCore = cfg.modelGraphCore || W.OSCModelGraphCore;
     var DrawflowAdapter = cfg.drawflowAdapter || W.OSCModelGraphDrawflowAdapter;
     var TrainingEngine = cfg.trainingEngine || W.OSCTrainingEngineCore;
+    var ModelBuilderCore = cfg.modelBuilder || W.OSCModelBuilderCore;
+    var PredictionCore = cfg.predictionCore || W.OSCPredictionCore;
     var UiEngine = cfg.uiEngine || W.OSCUiSharedEngine;
     var ProcessingCore = cfg.processingCore || W.OSCDatasetProcessingCore;
 
@@ -31,6 +33,8 @@
     var DatasetTab = cfg.datasetTab || W.OSCDatasetTab;
     var ModelTab = cfg.modelTab || W.OSCModelTab;
     var TrainerTab = cfg.trainerTab || W.OSCTrainerTab;
+    var GenerationTab = cfg.generationTab || W.OSCGenerationTab;
+    var EvaluationTab = cfg.evaluationTab || W.OSCEvaluationTab;
 
     // create store
     var store = cfg.store || (WorkspaceStore ? WorkspaceStore.createMemoryStore() : null);
@@ -124,13 +128,31 @@
       });
     }
 
-    // placeholder for generation + evaluation tabs
-    ["generation", "evaluation"].forEach(function (tabId) {
-      if (layoutApi.tabs[tabId]) {
-        var pane = layoutApi.tabs[tabId];
-        pane.mainEl.innerHTML = "<div class='osc-empty'>Coming soon: " + tabId + " tab</div>";
-      }
-    });
+    if (GenerationTab && layoutApi.tabs.generation) {
+      tabControllers.generation = GenerationTab.create({
+        layout: layoutApi.tabs.generation,
+        stateApi: stateApi,
+        store: store,
+        schemaRegistry: SchemaRegistry,
+        modelBuilder: ModelBuilderCore,
+        onStatus: setStatus,
+        escapeHtml: escapeHtml,
+        el: elHelper,
+      });
+    }
+
+    if (EvaluationTab && layoutApi.tabs.evaluation) {
+      tabControllers.evaluation = EvaluationTab.create({
+        layout: layoutApi.tabs.evaluation,
+        stateApi: stateApi,
+        store: store,
+        schemaRegistry: SchemaRegistry,
+        predictionCore: PredictionCore,
+        onStatus: setStatus,
+        escapeHtml: escapeHtml,
+        el: elHelper,
+      });
+    }
 
     // wire tab switching
     var _currentTab = null;
