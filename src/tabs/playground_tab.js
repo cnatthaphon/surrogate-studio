@@ -7,18 +7,26 @@
 })(typeof globalThis !== "undefined" ? globalThis : this, function () {
   "use strict";
 
+  var SCENARIOS = ["spring", "pendulum", "bouncing"];
+  var SCENARIO_DEFAULTS = {
+    spring:    { m: 1.2, c: 0.25, k: 4.0, x0: 1.0, v0: 0, e: 0.8 },
+    pendulum:  { m: 1.0, c: 0.1,  k: 9.81, x0: 0.5, v0: 0, e: 0.8 },
+    bouncing:  { m: 0.5, c: 0.0,  k: 9.81, x0: 2.0, v0: 0, e: 0.8 },
+  };
+
   function create(deps) {
-    var layout = deps.layout;       // { leftEl, mainEl, rightEl }
-    var stateApi = deps.stateApi;   // OSCAppStateCore instance
-    var schemaRegistry = deps.schemaRegistry; // OSCSchemaRegistry
-    var datasetModules = deps.datasetModules; // OSCDatasetModules
-    var datasetRuntime = deps.datasetRuntime; // OSCDatasetRuntime (optional)
+    var layout = deps.layout;
+    var stateApi = deps.stateApi;
+    var schemaRegistry = deps.schemaRegistry;
+    var datasetModules = deps.datasetModules;
+    var oscillatorCore = deps.oscillatorCore;
     var escapeHtml = deps.escapeHtml || function (s) { return String(s || ""); };
-    var elFactory = deps.el || function (tag, attrs, children) {
+    var el = deps.el || function (tag, attrs, children) {
       var e = document.createElement(tag);
       if (attrs) Object.keys(attrs).forEach(function (k) {
         if (k === "className") e.className = attrs[k];
         else if (k === "textContent") e.textContent = attrs[k];
+        else if (k === "innerHTML") e.innerHTML = attrs[k];
         else e.setAttribute(k, attrs[k]);
       });
       if (children) (Array.isArray(children) ? children : [children]).forEach(function (c) {
@@ -28,362 +36,301 @@
       return e;
     };
 
-    var oscillatorCore = deps.oscillatorCore;   // OSCOscillatorDatasetCore (optional)
-    var imageRender = deps.imageRender;         // OSCImageRenderCore (optional)
-    var getPlotly = deps.getPlotly || function () {
-      return typeof window !== "undefined" && window.Plotly ? window.Plotly : null;
-    };
+    var _inputs = {};
+    var _chartDiv = null;
+    var _scenarioSelect = null;
+    var _statusEl = null;
 
-    var _selectedSchemaId = null;
-    var _selectedModuleId = null;
+    function _getSchemaId() { return stateApi ? stateApi.getActiveSchema() : ""; }
 
-    function _getSchemas() {
-      if (schemaRegistry && typeof schemaRegistry.listSchemas === "function") {
-        return schemaRegistry.listSchemas();
+    function _getPlaygroundMode() {
+      var schemaId = _getSchemaId();
+      if (!datasetModules) return "generic";
+      var mods = [];
+      if (typeof datasetModules.getModuleForSchema === "function") {
+        mods = datasetModules.getModuleForSchema(schemaId);
+        if (!Array.isArray(mods)) mods = [];
       }
-      return [];
+      if (!mods.length && typeof datasetModules.listModules === "function") {
+        mods = datasetModules.listModules().filter(function (m) { return m.schemaId === schemaId; });
+      }
+      var mod = mods[0];
+      return (mod && mod.playground && mod.playground.mode) || "generic";
     }
 
-    function _getModulesForSchema(schemaId) {
-      if (datasetModules && typeof datasetModules.getModuleForSchema === "function") {
-        var mods = datasetModules.getModuleForSchema(schemaId);
-        return Array.isArray(mods) ? mods : [];
-      }
-      if (datasetModules && typeof datasetModules.listModules === "function") {
-        return datasetModules.listModules().filter(function (m) { return m.schemaId === schemaId; });
-      }
-      return [];
-    }
-
+    // --- left panel: schema/module list ---
     function _renderLeftPanel() {
-      var el = layout.leftEl;
-      el.innerHTML = "";
-      var title = elFactory("h3", {}, "Schemas & Modules");
-      el.appendChild(title);
+      var leftEl = layout.leftEl;
+      leftEl.innerHTML = "";
+      leftEl.appendChild(el("h3", {}, "Schemas"));
 
-      var schemas = _getSchemas();
-      if (!schemas.length) {
-        el.appendChild(elFactory("div", { className: "osc-empty" }, "No schemas registered"));
-        return;
-      }
-
-      var list = elFactory("ul", { className: "osc-item-list" });
-      schemas.forEach(function (schema) {
-        var li = elFactory("li", {
-          "data-schema-id": schema.id,
-          className: schema.id === _selectedSchemaId ? "active" : "",
-        });
-        var label = elFactory("strong", {}, schema.label || schema.id);
-        var desc = elFactory("div", { className: "osc-badge" }, schema.id);
-        li.appendChild(label);
-        li.appendChild(document.createTextNode(" "));
-        li.appendChild(desc);
-
-        // show modules under schema
-        var modules = _getModulesForSchema(schema.id);
-        if (modules.length) {
-          var modList = elFactory("div", { style: "margin-top:4px;font-size:11px;color:#64748b;" });
-          modules.forEach(function (m) {
-            modList.appendChild(document.createTextNode((m.label || m.id) + " "));
-          });
-          li.appendChild(modList);
-        }
-
+      var schemas = schemaRegistry ? schemaRegistry.listSchemas() : [];
+      var activeSchema = _getSchemaId();
+      var list = el("ul", { className: "osc-item-list" });
+      schemas.forEach(function (s) {
+        var li = el("li", { className: s.id === activeSchema ? "active" : "" });
+        li.appendChild(el("strong", {}, s.label || s.id));
+        if (s.description) li.appendChild(el("div", { style: "font-size:11px;color:#64748b;" }, s.description));
         li.addEventListener("click", function () {
-          _selectedSchemaId = schema.id;
-          _selectedModuleId = modules.length ? modules[0].id : null;
-          _renderLeftPanel();
-          _renderMainPanel();
-          _renderRightPanel();
+          if (stateApi) stateApi.setActiveSchema(s.id);
+          mount(); // re-render entire tab for new schema
         });
         list.appendChild(li);
       });
-      el.appendChild(list);
+      leftEl.appendChild(list);
     }
 
+    // --- main panel: interactive simulation ---
     function _renderMainPanel() {
-      var el = layout.mainEl;
-      el.innerHTML = "";
+      var mainEl = layout.mainEl;
+      mainEl.innerHTML = "";
 
-      if (!_selectedSchemaId) {
-        el.appendChild(elFactory("div", { className: "osc-empty" }, "Select a schema to explore"));
-        return;
-      }
-
-      var schema = schemaRegistry ? schemaRegistry.getSchema(_selectedSchemaId) : null;
-      if (!schema) {
-        el.appendChild(elFactory("div", { className: "osc-empty" }, "Schema not found: " + escapeHtml(_selectedSchemaId)));
-        return;
-      }
-
-      // schema overview card
-      var card = elFactory("div", { className: "osc-card" });
-      card.appendChild(elFactory("h3", { style: "color:#67e8f9;margin:0 0 8px;" }, schema.label || schema.id));
-      if (schema.description) {
-        card.appendChild(elFactory("p", { style: "color:#94a3b8;font-size:13px;margin:0 0 8px;" }, schema.description));
-      }
-
-      // dataset info
-      var dsSchema = schema.dataset || {};
-      var sampleType = String(dsSchema.sampleType || "unknown");
-      var info = elFactory("div", { style: "font-size:12px;color:#cbd5e1;margin-bottom:8px;" });
-      info.innerHTML = "<strong>Sample type:</strong> " + escapeHtml(sampleType);
-      if (dsSchema.splitDefaults) {
-        info.innerHTML += " | <strong>Split:</strong> " +
-          escapeHtml(String(dsSchema.splitDefaults.mode || "random")) +
-          " (" + (dsSchema.splitDefaults.train || 0.7) + "/" + (dsSchema.splitDefaults.val || 0.15) + "/" + (dsSchema.splitDefaults.test || 0.15) + ")";
-      }
-      card.appendChild(info);
-
-      // model presets
-      var modelSchema = schema.model || {};
-      var presets = Array.isArray(modelSchema.presets) ? modelSchema.presets : [];
-      if (presets.length) {
-        var presetsTitle = elFactory("div", { style: "font-size:12px;color:#94a3b8;margin-bottom:4px;font-weight:600;" }, "Model Presets (" + presets.length + "):");
-        card.appendChild(presetsTitle);
-        var presetList = elFactory("div", { style: "display:flex;flex-wrap:wrap;gap:4px;" });
-        presets.forEach(function (p) {
-          var badge = elFactory("span", { className: "osc-badge" }, (p && p.label) || (p && p.id) || String(p));
-          presetList.appendChild(badge);
-        });
-        card.appendChild(presetList);
-      }
-
-      // node palette — from schema.model.metadata.featureNodes.palette.items
-      var modelMeta = (modelSchema.metadata && modelSchema.metadata.featureNodes) || {};
-      var paletteItems = (modelMeta.palette && Array.isArray(modelMeta.palette.items)) ? modelMeta.palette.items : [];
-      if (paletteItems.length) {
-        // group by section
-        var sections = {};
-        paletteItems.forEach(function (item) {
-          var sec = item.section || "Nodes";
-          if (!sections[sec]) sections[sec] = [];
-          sections[sec].push(item);
-        });
-        var palTitle = elFactory("div", { style: "font-size:12px;color:#94a3b8;margin-top:8px;margin-bottom:4px;font-weight:600;" }, "Node Palette (" + paletteItems.length + " types):");
-        card.appendChild(palTitle);
-        Object.keys(sections).forEach(function (secName) {
-          var secDiv = elFactory("div", { style: "margin-bottom:4px;" });
-          secDiv.appendChild(elFactory("span", { style: "font-size:11px;color:#64748b;" }, secName + ": "));
-          sections[secName].forEach(function (item) {
-            secDiv.appendChild(elFactory("span", { className: "osc-badge", style: "margin-right:2px;" }, item.label || item.type));
-          });
-          card.appendChild(secDiv);
-        });
-      }
-
-      // output keys
-      if (schemaRegistry && typeof schemaRegistry.getOutputKeys === "function") {
-        var outputKeys = schemaRegistry.getOutputKeys(_selectedSchemaId);
-        if (outputKeys && outputKeys.length) {
-          var okTitle = elFactory("div", { style: "font-size:12px;color:#94a3b8;margin-top:8px;margin-bottom:4px;font-weight:600;" }, "Output Targets:");
-          card.appendChild(okTitle);
-          var okList = elFactory("div", { style: "display:flex;flex-wrap:wrap;gap:4px;" });
-          outputKeys.forEach(function (ok) {
-            okList.appendChild(elFactory("span", { className: "osc-badge" }, ok));
-          });
-          card.appendChild(okList);
-        }
-      }
-
-      el.appendChild(card);
-
-      // module playground preview area
-      var modules = _getModulesForSchema(_selectedSchemaId);
-      var activeModule = _selectedModuleId
-        ? modules.find(function (m) { return m.id === _selectedModuleId; })
-        : modules[0];
-
-      if (activeModule) {
-        var modCard = elFactory("div", { className: "osc-card" });
-        modCard.appendChild(elFactory("h3", { style: "color:#67e8f9;margin:0 0 8px;" }, "Module: " + (activeModule.label || activeModule.id)));
-        if (activeModule.description) {
-          modCard.appendChild(elFactory("p", { style: "color:#94a3b8;font-size:13px;margin:0 0 8px;" }, activeModule.description));
-        }
-        var playgroundMode = (activeModule.playground && activeModule.playground.mode) || "generic";
-        modCard.appendChild(elFactory("div", { style: "font-size:12px;color:#cbd5e1;" },
-          "Playground mode: " + escapeHtml(playgroundMode)));
-
-        // playground interactive preview
-        var playgroundMount = elFactory("div", { id: "playground-content-mount", style: "margin-top:12px;" });
-        modCard.appendChild(playgroundMount);
-        _renderPlaygroundPreview(playgroundMount, activeModule, _selectedSchemaId);
-        el.appendChild(modCard);
-      }
-    }
-
-    function _renderPlaygroundPreview(mountEl, activeModule, schemaId) {
-      var playgroundMode = (activeModule && activeModule.playground && activeModule.playground.mode) || "generic";
-
-      if (playgroundMode === "trajectory_simulation" && oscillatorCore) {
-        // interactive oscillator preview
-        var controls = elFactory("div", { style: "display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px;" });
-        var paramFields = [
-          { key: "m", label: "Mass", value: 1.0, min: 0.1, max: 5 },
-          { key: "c", label: "Damping", value: 0.25, min: 0, max: 2 },
-          { key: "k", label: "Stiffness", value: 4.0, min: 0.1, max: 20 },
-          { key: "x0", label: "x(0)", value: 1.0, min: -3, max: 3 },
-        ];
-        var paramInputs = {};
-        paramFields.forEach(function (f) {
-          var row = elFactory("div", { style: "display:flex;align-items:center;gap:4px;" });
-          row.appendChild(elFactory("label", { style: "font-size:11px;color:#94a3b8;min-width:50px;" }, f.label));
-          var inp = elFactory("input", {
-            type: "number", value: String(f.value), style: "width:60px;padding:3px;font-size:12px;border-radius:4px;border:1px solid #334155;background:#0b1220;color:#e2e8f0;",
-          });
-          if (f.min != null) inp.setAttribute("min", f.min);
-          if (f.max != null) inp.setAttribute("max", f.max);
-          inp.setAttribute("step", "0.1");
-          paramInputs[f.key] = inp;
-          row.appendChild(inp);
-          controls.appendChild(row);
-        });
-        var runBtn = elFactory("button", { className: "osc-btn sm" }, "Simulate");
-        controls.appendChild(runBtn);
-        mountEl.appendChild(controls);
-
-        var chartDiv = elFactory("div", { style: "height:280px;" });
-        mountEl.appendChild(chartDiv);
-
-        var runSim = function () {
-          var condition = {
-            scenario: "spring",
-            m: Number(paramInputs.m.value) || 1,
-            c: Number(paramInputs.c.value) || 0.25,
-            k: Number(paramInputs.k.value) || 4,
-            x0: Number(paramInputs.x0.value) || 1,
-            v0: 0, g: 9.81, dt: 0.02, steps: 400,
-            restitution: 0.8, groundModel: "rigid", groundK: 2500, groundC: 90,
-          };
-          var sim = oscillatorCore.simulateOscillator(condition);
-          var Plotly = getPlotly();
-          if (Plotly && sim && sim.t && sim.x) {
-            Plotly.newPlot(chartDiv, [
-              { x: sim.t, y: sim.x, mode: "lines", name: "x(t)", line: { color: "#22d3ee" } },
-              { x: sim.t, y: sim.v, mode: "lines", name: "v(t)", line: { color: "#f59e0b", dash: "dot" } },
-            ], {
-              paper_bgcolor: "#0b1220", plot_bgcolor: "#0b1220",
-              font: { color: "#e2e8f0" },
-              title: "Oscillator Preview (m=" + condition.m + " c=" + condition.c + " k=" + condition.k + ")",
-              xaxis: { title: "time (s)", gridcolor: "#1e293b" },
-              yaxis: { gridcolor: "#1e293b" },
-              legend: { orientation: "h" },
-              margin: { t: 40, b: 40, l: 50, r: 20 },
-            }, { responsive: true });
-          }
-        };
-        runBtn.addEventListener("click", runSim);
-        // auto-run on mount
-        setTimeout(runSim, 100);
-
-      } else if (playgroundMode === "image_dataset") {
-        // image dataset preview
-        mountEl.appendChild(elFactory("div", { style: "color:#94a3b8;font-size:13px;" },
-          "Image dataset preview: generate a small sample to see class distribution."));
-        var previewBtn = elFactory("button", { className: "osc-btn sm", style: "margin-top:8px;" }, "Preview Samples");
-        mountEl.appendChild(previewBtn);
-        var previewMount = elFactory("div", { style: "margin-top:8px;" });
-        mountEl.appendChild(previewMount);
-
-        previewBtn.addEventListener("click", function () {
-          previewMount.innerHTML = "<div style='color:#67e8f9;font-size:12px;'>Generating preview...</div>";
-          if (activeModule && typeof activeModule.build === "function") {
-            try {
-              var previewResult = activeModule.build({ seed: 42, totalCount: 50, variant: schemaId });
-              var handlePreview = function (res) {
-                if (!res) { previewMount.innerHTML = "<div class='osc-empty'>No data</div>"; return; }
-                var info = elFactory("div", { style: "font-size:12px;color:#cbd5e1;" });
-                info.textContent = "Samples: " + (res.totalCount || res.xTrain && res.xTrain.length || "?");
-                previewMount.innerHTML = "";
-                previewMount.appendChild(info);
-              };
-              if (previewResult && typeof previewResult.then === "function") {
-                previewResult.then(handlePreview);
-              } else {
-                handlePreview(previewResult);
-              }
-            } catch (e) {
-              previewMount.innerHTML = "<div style='color:#f43f5e;font-size:12px;'>Error: " + escapeHtml(e.message) + "</div>";
-            }
-          }
-        });
-
+      var mode = _getPlaygroundMode();
+      if (mode === "trajectory_simulation") {
+        _renderTrajectoryPlayground(mainEl);
+      } else if (mode === "image_dataset") {
+        _renderImagePlayground(mainEl);
       } else {
-        mountEl.appendChild(elFactory("div", { style: "color:#64748b;font-size:12px;" },
-          "No interactive preview available for this module type."));
+        mainEl.appendChild(el("div", { className: "osc-empty" }, "Select a schema with a playground module."));
       }
     }
 
-    function _renderRightPanel() {
-      var el = layout.rightEl;
-      el.innerHTML = "";
-      el.appendChild(elFactory("h3", {}, "Playground Info"));
-
-      if (!_selectedSchemaId) {
-        el.appendChild(elFactory("div", { className: "osc-empty" }, "Select a schema"));
+    function _renderTrajectoryPlayground(mainEl) {
+      if (!oscillatorCore) {
+        mainEl.appendChild(el("div", { className: "osc-empty" }, "Oscillator core not loaded."));
         return;
       }
 
-      var infoCard = elFactory("div", { className: "osc-card" });
-      infoCard.appendChild(elFactory("p", { style: "font-size:12px;color:#94a3b8;" },
-        "Explore datasets and model architectures for this schema. " +
-        "Go to the Dataset tab to generate data, or the Model tab to design a network."));
+      // title
+      mainEl.appendChild(el("h3", { style: "color:#67e8f9;margin:0 0 12px;" }, "RK4 Oscillator Playground"));
 
-      // modules list
-      var modules = _getModulesForSchema(_selectedSchemaId);
-      if (modules.length > 1) {
-        var modTitle = elFactory("div", { style: "font-size:12px;color:#94a3b8;margin-top:8px;font-weight:600;" }, "Available Modules:");
-        infoCard.appendChild(modTitle);
-        modules.forEach(function (m) {
-          var mBtn = elFactory("button", {
-            className: "osc-btn sm" + (m.id === _selectedModuleId ? "" : " secondary"),
-            style: "margin:2px;",
-          }, m.label || m.id);
-          mBtn.addEventListener("click", function () {
-            _selectedModuleId = m.id;
-            _renderMainPanel();
-            _renderRightPanel();
-          });
-          infoCard.appendChild(mBtn);
+      // scenario selector
+      var topBar = el("div", { style: "display:flex;gap:8px;align-items:center;margin-bottom:8px;" });
+      topBar.appendChild(el("label", { style: "font-size:12px;color:#94a3b8;" }, "Scenario:"));
+      _scenarioSelect = el("select", { style: "padding:4px 8px;border-radius:6px;border:1px solid #334155;background:#0b1220;color:#e2e8f0;" });
+      SCENARIOS.forEach(function (s) {
+        var opt = el("option", { value: s });
+        opt.textContent = s.charAt(0).toUpperCase() + s.slice(1);
+        _scenarioSelect.appendChild(opt);
+      });
+      _scenarioSelect.addEventListener("change", function () { _applyScenarioDefaults(); });
+      topBar.appendChild(_scenarioSelect);
+
+      // action buttons
+      var simBtn = el("button", { className: "osc-btn" }, "Simulate");
+      simBtn.addEventListener("click", function () { _runSimulation(); });
+      topBar.appendChild(simBtn);
+
+      var randomBtn = el("button", { className: "osc-btn secondary" }, "Random Params");
+      randomBtn.addEventListener("click", function () { _randomizeParams(); _runSimulation(); });
+      topBar.appendChild(randomBtn);
+
+      mainEl.appendChild(topBar);
+
+      // parameter controls grid
+      var paramGrid = el("div", { style: "display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:6px;margin-bottom:12px;" });
+      var paramDefs = [
+        { key: "m", label: "Mass (m)", min: 0.1, max: 10, step: 0.1 },
+        { key: "c", label: "Damping (c)", min: 0, max: 5, step: 0.05 },
+        { key: "k", label: "Stiffness (k)", min: 0.1, max: 30, step: 0.1 },
+        { key: "x0", label: "x(0)", min: -5, max: 5, step: 0.1 },
+        { key: "v0", label: "v(0)", min: -5, max: 5, step: 0.1 },
+        { key: "e", label: "Restitution (e)", min: 0, max: 1, step: 0.05 },
+        { key: "durationSec", label: "Duration (s)", min: 0.5, max: 30, step: 0.5 },
+        { key: "dt", label: "dt", min: 0.001, max: 0.1, step: 0.001 },
+        { key: "g", label: "Gravity (g)", min: 0.1, max: 20, step: 0.1 },
+      ];
+      var defaults = Object.assign({ durationSec: 8, dt: 0.02, g: 9.81 }, SCENARIO_DEFAULTS.spring);
+      paramDefs.forEach(function (p) {
+        var row = el("div", { style: "display:flex;flex-direction:column;gap:2px;" });
+        row.appendChild(el("label", { style: "font-size:11px;color:#94a3b8;" }, p.label));
+        var inp = el("input", {
+          type: "number", value: String(defaults[p.key] != null ? defaults[p.key] : ""),
+          style: "padding:4px 6px;border-radius:4px;border:1px solid #334155;background:#0b1220;color:#e2e8f0;font-size:12px;",
         });
-      }
-      el.appendChild(infoCard);
+        if (p.min != null) inp.setAttribute("min", p.min);
+        if (p.max != null) inp.setAttribute("max", p.max);
+        if (p.step != null) inp.setAttribute("step", p.step);
+        _inputs[p.key] = inp;
+        row.appendChild(inp);
+        paramGrid.appendChild(row);
+      });
+      mainEl.appendChild(paramGrid);
+
+      // chart
+      _chartDiv = el("div", { style: "height:350px;margin-bottom:8px;" });
+      mainEl.appendChild(_chartDiv);
+
+      // status
+      _statusEl = el("div", { style: "font-size:12px;color:#94a3b8;" });
+      mainEl.appendChild(_statusEl);
+
+      // auto-run
+      setTimeout(function () { _runSimulation(); }, 50);
     }
+
+    function _renderImagePlayground(mainEl) {
+      mainEl.appendChild(el("h3", { style: "color:#67e8f9;margin:0 0 12px;" }, "Image Dataset Preview"));
+      mainEl.appendChild(el("p", { style: "color:#94a3b8;font-size:13px;" },
+        "Generate a small preview of the image dataset to explore class distribution."));
+
+      var previewBtn = el("button", { className: "osc-btn" }, "Preview Samples");
+      var previewMount = el("div", { style: "margin-top:12px;" });
+      mainEl.appendChild(previewBtn);
+      mainEl.appendChild(previewMount);
+
+      previewBtn.addEventListener("click", function () {
+        var schemaId = _getSchemaId();
+        var mods = datasetModules ? (datasetModules.getModuleForSchema(schemaId) || []) : [];
+        var mod = Array.isArray(mods) ? mods[0] : mods;
+        if (!mod || typeof mod.build !== "function") {
+          previewMount.innerHTML = "<div class='osc-empty'>No build function</div>";
+          return;
+        }
+        previewMount.innerHTML = "<div style='color:#67e8f9;'>Generating...</div>";
+        try {
+          var result = mod.build({ seed: 42, totalCount: 100, variant: schemaId });
+          var handle = function (res) {
+            if (!res) { previewMount.innerHTML = "<div class='osc-empty'>No data</div>"; return; }
+            previewMount.innerHTML = "";
+            var info = el("div", { style: "font-size:12px;color:#cbd5e1;margin-bottom:8px;" });
+            info.textContent = "Train: " + ((res.xTrain || []).length) + " Val: " + ((res.xVal || []).length) + " Test: " + ((res.xTest || []).length);
+            previewMount.appendChild(info);
+          };
+          if (result && typeof result.then === "function") result.then(handle);
+          else handle(result);
+        } catch (err) {
+          previewMount.innerHTML = "<div style='color:#f43f5e;'>" + escapeHtml(err.message) + "</div>";
+        }
+      });
+    }
+
+    // --- right panel: info ---
+    function _renderRightPanel() {
+      var rightEl = layout.rightEl;
+      rightEl.innerHTML = "";
+      rightEl.appendChild(el("h3", {}, "Playground Info"));
+
+      var schemaId = _getSchemaId();
+      var schema = schemaRegistry ? schemaRegistry.getSchema(schemaId) : null;
+      if (!schema) {
+        rightEl.appendChild(el("div", { className: "osc-empty" }, "No schema selected"));
+        return;
+      }
+
+      var card = el("div", { className: "osc-card" });
+      card.appendChild(el("div", { style: "font-size:13px;color:#67e8f9;margin-bottom:4px;" }, schema.label || schema.id));
+      if (schema.description) card.appendChild(el("div", { style: "font-size:12px;color:#94a3b8;margin-bottom:8px;" }, schema.description));
+
+      var dsSchema = schema.dataset || {};
+      card.appendChild(el("div", { style: "font-size:12px;color:#cbd5e1;" },
+        "Type: " + (dsSchema.sampleType || "unknown")));
+
+      // hint
+      card.appendChild(el("p", { style: "font-size:12px;color:#64748b;margin-top:12px;" },
+        "Explore the simulation. When ready, go to Dataset tab to generate training data."));
+
+      rightEl.appendChild(card);
+    }
+
+    // --- simulation actions ---
+
+    function _getParams() {
+      var params = {};
+      Object.keys(_inputs).forEach(function (k) {
+        params[k] = Number(_inputs[k].value);
+      });
+      return params;
+    }
+
+    function _applyScenarioDefaults() {
+      var scenario = _scenarioSelect ? _scenarioSelect.value : "spring";
+      var defaults = SCENARIO_DEFAULTS[scenario] || SCENARIO_DEFAULTS.spring;
+      Object.keys(defaults).forEach(function (k) {
+        if (_inputs[k]) _inputs[k].value = String(defaults[k]);
+      });
+    }
+
+    function _randomizeParams() {
+      var scenario = _scenarioSelect ? _scenarioSelect.value : "spring";
+      var def = SCENARIO_DEFAULTS[scenario] || SCENARIO_DEFAULTS.spring;
+      function rand(lo, hi) { return lo + Math.random() * (hi - lo); }
+      if (_inputs.m) _inputs.m.value = rand(0.3, 3).toFixed(2);
+      if (_inputs.c) _inputs.c.value = rand(0, 1).toFixed(2);
+      if (_inputs.k) _inputs.k.value = (scenario === "bouncing" ? 9.81 : rand(0.5, 10)).toFixed(2);
+      if (_inputs.x0) _inputs.x0.value = rand(0.2, 2.5).toFixed(2);
+      if (_inputs.v0) _inputs.v0.value = rand(-1, 1).toFixed(2);
+      if (_inputs.e) _inputs.e.value = rand(0.3, 0.95).toFixed(2);
+    }
+
+    function _runSimulation() {
+      if (!oscillatorCore || !_chartDiv) return;
+      var Plotly = (typeof window !== "undefined" && window.Plotly) ? window.Plotly : null;
+      if (!Plotly) {
+        if (_statusEl) _statusEl.textContent = "Plotly not loaded";
+        return;
+      }
+
+      var p = _getParams();
+      var scenario = _scenarioSelect ? _scenarioSelect.value : "spring";
+      var steps = Math.max(10, Math.floor((p.durationSec || 8) / (p.dt || 0.02)));
+
+      var sim = oscillatorCore.simulateOscillator({
+        scenario: scenario,
+        m: p.m || 1, c: p.c || 0.25, k: p.k || 4, g: p.g || 9.81,
+        x0: p.x0 || 1, v0: p.v0 || 0,
+        restitution: p.e || 0.8,
+        dt: p.dt || 0.02, steps: steps,
+        groundModel: "rigid", groundK: 2500, groundC: 90,
+      });
+
+      var titleText = scenario.charAt(0).toUpperCase() + scenario.slice(1) +
+        " (m=" + (p.m || 1) + " c=" + (p.c || 0.25) + " k=" + (p.k || 4) + ")";
+
+      Plotly.newPlot(_chartDiv, [
+        { x: sim.t, y: sim.x, mode: "lines", name: "x(t)", line: { color: "#22d3ee" } },
+        { x: sim.t, y: sim.v, mode: "lines", name: "v(t)", line: { color: "#f59e0b", dash: "dot" } },
+      ], {
+        paper_bgcolor: "#0b1220", plot_bgcolor: "#0b1220",
+        font: { color: "#e2e8f0" },
+        title: titleText,
+        xaxis: { title: "time (s)", gridcolor: "#1e293b" },
+        yaxis: { title: scenario === "bouncing" ? "height (m)" : "displacement", gridcolor: "#1e293b" },
+        legend: { orientation: "h", y: -0.15 },
+        margin: { t: 40, b: 60, l: 50, r: 20 },
+      }, { responsive: true });
+
+      if (_statusEl) {
+        _statusEl.textContent = "Simulated " + sim.t.length + " steps | " +
+          scenario + " | dt=" + (p.dt || 0.02) + " | duration=" + (p.durationSec || 8) + "s";
+      }
+    }
+
+    // --- lifecycle ---
 
     function mount() {
-      _selectedSchemaId = stateApi ? stateApi.getActiveSchema() : null;
-      var modules = _selectedSchemaId ? _getModulesForSchema(_selectedSchemaId) : [];
-      _selectedModuleId = modules.length ? modules[0].id : null;
+      _inputs = {};
+      _chartDiv = null;
+      _scenarioSelect = null;
+      _statusEl = null;
       _renderLeftPanel();
       _renderMainPanel();
       _renderRightPanel();
     }
 
     function unmount() {
+      _inputs = {};
+      _chartDiv = null;
+      _scenarioSelect = null;
+      _statusEl = null;
       layout.leftEl.innerHTML = "";
       layout.mainEl.innerHTML = "";
       layout.rightEl.innerHTML = "";
     }
 
-    function refresh() {
-      if (stateApi) {
-        var currentSchema = stateApi.getActiveSchema();
-        if (currentSchema !== _selectedSchemaId) {
-          _selectedSchemaId = currentSchema;
-          var modules = _getModulesForSchema(_selectedSchemaId);
-          _selectedModuleId = modules.length ? modules[0].id : null;
-        }
-      }
-      _renderLeftPanel();
-      _renderMainPanel();
-      _renderRightPanel();
-    }
+    function refresh() { mount(); }
 
-    return {
-      mount: mount,
-      unmount: unmount,
-      refresh: refresh,
-    };
+    return { mount: mount, unmount: unmount, refresh: refresh };
   }
 
   return { create: create };
