@@ -7,12 +7,57 @@
 })(typeof globalThis !== "undefined" ? globalThis : this, function () {
   "use strict";
 
-  var SCENARIOS = ["spring", "pendulum", "bouncing"];
-  var SCENARIO_DEFAULTS = {
-    spring:    { m: 1.2, c: 0.25, k: 4.0, x0: 1.0, v0: 0, e: 0.8 },
-    pendulum:  { m: 1.0, c: 0.1,  k: 9.81, x0: 0.5, v0: 0, e: 0.8 },
-    bouncing:  { m: 0.5, c: 0.0,  k: 9.81, x0: 2.0, v0: 0, e: 0.8 },
-  };
+  var SCENARIO_DEFS = [
+    { id: "spring", label: "Damped Spring",
+      params: [
+        { key: "m", label: "Mass (m)", value: 1.2 },
+        { key: "c", label: "Damping (c)", value: 0.25 },
+        { key: "k", label: "Stiffness (k)", value: 4.0 },
+        { key: "x0", label: "x(0)", value: 1.0 },
+        { key: "v0", label: "v(0)", value: 0.0 },
+      ],
+      ranges: [
+        { key: "mRange", label: "m range", value: "0.5,2.0" },
+        { key: "cRange", label: "c range", value: "0.05,0.8" },
+        { key: "kRange", label: "k range", value: "1.0,8.0" },
+        { key: "x0Range", label: "x(0) range", value: "-1.5,1.5" },
+        { key: "v0Range", label: "v(0) range", value: "-1.0,1.0" },
+      ],
+    },
+    { id: "pendulum", label: "Damped Pendulum",
+      params: [
+        { key: "m", label: "Mass (m)", value: 1.0 },
+        { key: "c", label: "Damping (c)", value: 0.15 },
+        { key: "k", label: "Length (L)", value: 2.0 },
+        { key: "x0", label: "Angle x(0)", value: 0.6 },
+        { key: "v0", label: "Ang. vel v(0)", value: 0.0 },
+      ],
+      ranges: [
+        { key: "mRange", label: "m range", value: "0.5,2.0" },
+        { key: "cRange", label: "c range", value: "0.01,0.5" },
+        { key: "kRange", label: "L range", value: "0.5,2.0" },
+        { key: "x0Range", label: "x(0) range", value: "-1.2,1.2" },
+        { key: "v0Range", label: "v(0) range", value: "-1.0,1.0" },
+      ],
+    },
+    { id: "bouncing", label: "Bouncing Ball",
+      params: [
+        { key: "m", label: "Mass (m)", value: 1.0 },
+        { key: "c", label: "Air drag (c)", value: 0.15 },
+        { key: "k", label: "Gravity (g)", value: 9.81 },
+        { key: "e", label: "Restitution (e)", value: 0.80 },
+        { key: "x0", label: "Height x(0)", value: 1.0 },
+        { key: "v0", label: "Velocity v(0)", value: 2.0 },
+      ],
+      ranges: [
+        { key: "mRange", label: "m range", value: "0.3,3.0" },
+        { key: "cRange", label: "c range", value: "0.0,0.25" },
+        { key: "eRange", label: "e range", value: "0.55,0.9" },
+        { key: "x0Range", label: "x(0) range", value: "0.0,0.0" },
+        { key: "v0Range", label: "v(0) range", value: "0.8,6.0" },
+      ],
+    },
+  ];
 
   function create(deps) {
     var layout = deps.layout;
@@ -35,24 +80,25 @@
       return e;
     };
 
-    var _inputs = {};
-    var _chartDiv = null;
-    var _scenarioSelect = null;
+    // per-scenario state: { inputs: {key: inputEl}, includeCheckbox, chartDiv }
+    var _scenarios = {};
+    var _globalInputs = {};
     var _statusEl = null;
 
     function _getSchemaId() { return stateApi ? stateApi.getActiveSchema() : ""; }
-
     function _getPlaygroundMode() {
-      var schemaId = _getSchemaId();
-      if (!datasetModules) return "generic";
-      var mods = [];
-      if (typeof datasetModules.getModuleForSchema === "function") {
-        mods = datasetModules.getModuleForSchema(schemaId);
-        if (!Array.isArray(mods)) mods = [];
-      }
-      var mod = mods[0];
+      var mods = datasetModules ? (datasetModules.getModuleForSchema(_getSchemaId()) || []) : [];
+      var mod = Array.isArray(mods) ? mods[0] : mods;
       return (mod && mod.playground && mod.playground.mode) || "generic";
     }
+
+    function _parseRange(str) {
+      var parts = String(str || "").split(",").map(function (s) { return Number(s.trim()); });
+      if (parts.length >= 2 && isFinite(parts[0]) && isFinite(parts[1])) return parts;
+      return [0, 1];
+    }
+
+    function _rand(lo, hi) { return lo + Math.random() * (hi - lo); }
 
     // --- LEFT: schema list ---
     function _renderLeftPanel() {
@@ -60,12 +106,11 @@
       leftEl.innerHTML = "";
       leftEl.appendChild(el("h3", {}, "Schemas"));
       var schemas = schemaRegistry ? schemaRegistry.listSchemas() : [];
-      var activeSchema = _getSchemaId();
+      var active = _getSchemaId();
       var list = el("ul", { className: "osc-item-list" });
       schemas.forEach(function (s) {
-        var li = el("li", { className: s.id === activeSchema ? "active" : "" });
+        var li = el("li", { className: s.id === active ? "active" : "" });
         li.appendChild(el("strong", {}, s.label || s.id));
-        if (s.description) li.appendChild(el("div", { style: "font-size:11px;color:#64748b;" }, s.description));
         li.addEventListener("click", function () {
           if (stateApi) stateApi.setActiveSchema(s.id);
           mount();
@@ -75,48 +120,50 @@
       leftEl.appendChild(list);
     }
 
-    // --- MIDDLE: chart / preview only ---
+    // --- MIDDLE: 3 charts (one per scenario) ---
     function _renderMainPanel() {
       var mainEl = layout.mainEl;
       mainEl.innerHTML = "";
       var mode = _getPlaygroundMode();
 
       if (mode === "trajectory_simulation") {
-        _chartDiv = el("div", { style: "height:450px;" });
-        mainEl.appendChild(_chartDiv);
-        _statusEl = el("div", { style: "font-size:12px;color:#94a3b8;margin-top:8px;" });
+        SCENARIO_DEFS.forEach(function (def) {
+          var wrap = el("div", { style: "margin-bottom:12px;" });
+          wrap.appendChild(el("div", { style: "font-size:13px;color:#67e8f9;margin-bottom:4px;font-weight:600;" }, def.label));
+          var chartDiv = el("div", { style: "height:260px;" });
+          wrap.appendChild(chartDiv);
+          mainEl.appendChild(wrap);
+          _scenarios[def.id].chartDiv = chartDiv;
+        });
+        _statusEl = el("div", { style: "font-size:12px;color:#94a3b8;margin-top:4px;" });
         mainEl.appendChild(_statusEl);
-        setTimeout(function () { _runSimulation(); }, 50);
+        setTimeout(function () { _simulateAll(); }, 50);
 
       } else if (mode === "image_dataset") {
-        mainEl.appendChild(el("h3", { style: "color:#67e8f9;margin:0 0 12px;" }, "Image Dataset Preview"));
+        mainEl.appendChild(el("h3", { style: "color:#67e8f9;" }, "Image Dataset Preview"));
         var previewMount = el("div", {});
         mainEl.appendChild(previewMount);
-        // auto-generate small preview
-        var schemaId = _getSchemaId();
-        var mods = datasetModules ? (datasetModules.getModuleForSchema(schemaId) || []) : [];
+        var mods = datasetModules ? (datasetModules.getModuleForSchema(_getSchemaId()) || []) : [];
         var mod = Array.isArray(mods) ? mods[0] : mods;
         if (mod && typeof mod.build === "function") {
           previewMount.innerHTML = "<div style='color:#67e8f9;'>Generating preview...</div>";
           try {
-            var result = mod.build({ seed: 42, totalCount: 50, variant: schemaId });
-            var handle = function (res) {
+            var r = mod.build({ seed: 42, totalCount: 50, variant: _getSchemaId() });
+            var h = function (res) {
               if (!res) { previewMount.innerHTML = "<div class='osc-empty'>No data</div>"; return; }
               previewMount.innerHTML = "";
               previewMount.appendChild(el("div", { style: "font-size:12px;color:#cbd5e1;" },
-                "Train: " + ((res.xTrain || []).length) + " | Val: " + ((res.xVal || []).length) + " | Test: " + ((res.xTest || []).length)));
+                "Train: " + ((res.xTrain||[]).length) + " | Val: " + ((res.xVal||[]).length) + " | Test: " + ((res.xTest||[]).length)));
             };
-            if (result && typeof result.then === "function") result.then(handle); else handle(result);
-          } catch (err) {
-            previewMount.innerHTML = "<div style='color:#f43f5e;'>" + escapeHtml(err.message) + "</div>";
-          }
+            if (r && typeof r.then === "function") r.then(h); else h(r);
+          } catch (e) { previewMount.innerHTML = "<div style='color:#f43f5e;'>" + escapeHtml(e.message) + "</div>"; }
         }
       } else {
         mainEl.appendChild(el("div", { className: "osc-empty" }, "Select a schema to explore."));
       }
     }
 
-    // --- RIGHT: config controls ---
+    // --- RIGHT: global config + per-scenario cards ---
     function _renderRightPanel() {
       var rightEl = layout.rightEl;
       rightEl.innerHTML = "";
@@ -125,129 +172,166 @@
       if (mode === "trajectory_simulation") {
         rightEl.appendChild(el("h3", {}, "Simulation Config"));
 
-        // scenario
-        var scenRow = el("div", { className: "osc-form-row" });
-        scenRow.appendChild(el("label", {}, "Scenario"));
-        _scenarioSelect = el("select", {});
-        SCENARIOS.forEach(function (s) {
-          var opt = el("option", { value: s });
-          opt.textContent = s.charAt(0).toUpperCase() + s.slice(1);
-          _scenarioSelect.appendChild(opt);
-        });
-        _scenarioSelect.addEventListener("change", function () { _applyScenarioDefaults(); _runSimulation(); });
-        scenRow.appendChild(_scenarioSelect);
-        rightEl.appendChild(scenRow);
-
-        // parameters
-        var paramDefs = [
-          { key: "m", label: "Mass (m)", min: 0.1, max: 10, step: 0.1 },
-          { key: "c", label: "Damping (c)", min: 0, max: 5, step: 0.05 },
-          { key: "k", label: "Stiffness (k)", min: 0.1, max: 30, step: 0.1 },
-          { key: "x0", label: "x(0)", min: -5, max: 5, step: 0.1 },
-          { key: "v0", label: "v(0)", min: -5, max: 5, step: 0.1 },
-          { key: "e", label: "Restitution", min: 0, max: 1, step: 0.05 },
-          { key: "durationSec", label: "Duration (s)", min: 0.5, max: 30, step: 0.5 },
-          { key: "dt", label: "dt", min: 0.001, max: 0.1, step: 0.001 },
-          { key: "g", label: "Gravity (g)", min: 0.1, max: 20, step: 0.1 },
+        // global controls
+        var globalDefs = [
+          { key: "durationSec", label: "Duration (s)", value: 8, step: 0.5 },
+          { key: "dt", label: "dt", value: 0.02, step: 0.001 },
+          { key: "g", label: "Gravity (g)", value: 9.81, step: 0.1 },
         ];
-        var defaults = Object.assign({ durationSec: 8, dt: 0.02, g: 9.81 }, SCENARIO_DEFAULTS.spring);
-        paramDefs.forEach(function (p) {
+        globalDefs.forEach(function (gd) {
           var row = el("div", { className: "osc-form-row" });
-          row.appendChild(el("label", {}, p.label));
-          var inp = el("input", { type: "number", value: String(defaults[p.key] != null ? defaults[p.key] : "") });
-          if (p.min != null) inp.setAttribute("min", p.min);
-          if (p.max != null) inp.setAttribute("max", p.max);
-          if (p.step != null) inp.setAttribute("step", p.step);
-          _inputs[p.key] = inp;
+          row.appendChild(el("label", {}, gd.label));
+          var inp = el("input", { type: "number", value: String(gd.value) });
+          if (gd.step) inp.setAttribute("step", gd.step);
+          _globalInputs[gd.key] = inp;
           row.appendChild(inp);
           rightEl.appendChild(row);
         });
 
-        // buttons
-        var btnRow = el("div", { style: "display:flex;gap:6px;margin-top:8px;" });
-        var simBtn = el("button", { className: "osc-btn", style: "flex:1;" }, "Simulate");
-        simBtn.addEventListener("click", function () { _runSimulation(); });
-        btnRow.appendChild(simBtn);
-        var randBtn = el("button", { className: "osc-btn secondary", style: "flex:1;" }, "Random");
-        randBtn.addEventListener("click", function () { _randomizeParams(); _runSimulation(); });
-        btnRow.appendChild(randBtn);
+        // action buttons
+        var btnRow = el("div", { style: "display:flex;gap:4px;margin:8px 0;" });
+        var simAll = el("button", { className: "osc-btn", style: "flex:1;font-size:12px;" }, "Simulate All");
+        simAll.addEventListener("click", function () { _simulateAll(); });
+        btnRow.appendChild(simAll);
+        var randAll = el("button", { className: "osc-btn secondary", style: "flex:1;font-size:12px;" }, "Random All");
+        randAll.addEventListener("click", function () { _randomizeAll(); _simulateAll(); });
+        btnRow.appendChild(randAll);
         rightEl.appendChild(btnRow);
+
+        // per-scenario cards
+        _scenarios = {};
+        SCENARIO_DEFS.forEach(function (def) {
+          var sc = { inputs: {}, rangeInputs: {}, includeCheckbox: null, chartDiv: null };
+          var card = el("div", { className: "osc-card", style: "margin-bottom:8px;padding:10px;" });
+
+          // header
+          var head = el("div", { style: "display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;" });
+          head.appendChild(el("strong", { style: "font-size:12px;color:#67e8f9;" }, def.label));
+          var resetBtn = el("button", { className: "osc-btn sm secondary" }, "Reset");
+          resetBtn.addEventListener("click", function () { _resetScenario(def.id); _simulateOne(def.id); });
+          head.appendChild(resetBtn);
+          card.appendChild(head);
+
+          // include checkbox
+          var inclRow = el("div", { style: "display:flex;align-items:center;gap:6px;margin-bottom:4px;font-size:11px;color:#94a3b8;" });
+          var inclCb = el("input", { type: "checkbox" });
+          inclCb.checked = true;
+          sc.includeCheckbox = inclCb;
+          inclRow.appendChild(inclCb);
+          inclRow.appendChild(document.createTextNode("Include in dataset"));
+          card.appendChild(inclRow);
+
+          // param inputs
+          def.params.forEach(function (p) {
+            var row = el("div", { style: "display:flex;justify-content:space-between;align-items:center;margin-bottom:2px;" });
+            row.appendChild(el("span", { style: "font-size:11px;color:#94a3b8;min-width:80px;" }, p.label));
+            var inp = el("input", { type: "number", value: String(p.value), style: "width:70px;padding:2px 4px;font-size:11px;border-radius:4px;border:1px solid #334155;background:#0b1220;color:#e2e8f0;" });
+            inp.setAttribute("step", "0.1");
+            sc.inputs[p.key] = inp;
+            row.appendChild(inp);
+            card.appendChild(row);
+          });
+
+          // range inputs
+          card.appendChild(el("div", { style: "font-size:10px;color:#64748b;margin-top:4px;margin-bottom:2px;" }, "Dataset Ranges:"));
+          def.ranges.forEach(function (r) {
+            var row = el("div", { style: "display:flex;justify-content:space-between;align-items:center;margin-bottom:2px;" });
+            row.appendChild(el("span", { style: "font-size:10px;color:#64748b;min-width:60px;" }, r.label));
+            var inp = el("input", { type: "text", value: r.value, style: "width:80px;padding:2px 4px;font-size:10px;border-radius:4px;border:1px solid #334155;background:#0b1220;color:#94a3b8;" });
+            sc.rangeInputs[r.key] = inp;
+            row.appendChild(inp);
+            card.appendChild(row);
+          });
+
+          rightEl.appendChild(card);
+          _scenarios[def.id] = sc;
+        });
 
       } else if (mode === "image_dataset") {
         rightEl.appendChild(el("h3", {}, "Preview Config"));
-        rightEl.appendChild(el("div", { style: "font-size:12px;color:#94a3b8;" },
-          "Image dataset preview. Go to Dataset tab to configure and generate full dataset."));
-
+        rightEl.appendChild(el("div", { style: "font-size:12px;color:#94a3b8;" }, "Go to Dataset tab to generate full dataset."));
       } else {
         rightEl.appendChild(el("h3", {}, "Info"));
-        rightEl.appendChild(el("div", { className: "osc-empty" }, "Select a schema"));
+        rightEl.appendChild(el("div", { className: "osc-empty" }, "Select a schema."));
       }
     }
 
     // --- simulation ---
 
-    function _getParams() {
-      var params = {};
-      Object.keys(_inputs).forEach(function (k) { params[k] = Number(_inputs[k].value); });
-      return params;
+    function _getScenarioCondition(scenarioId) {
+      var sc = _scenarios[scenarioId];
+      if (!sc) return null;
+      var p = {};
+      Object.keys(sc.inputs).forEach(function (k) { p[k] = Number(sc.inputs[k].value); });
+      return {
+        scenario: scenarioId,
+        m: p.m || 1, c: p.c || 0.25, k: p.k || 4, g: Number((_globalInputs.g || {}).value) || 9.81,
+        x0: p.x0 || 0, v0: p.v0 || 0, restitution: p.e || 0.8,
+        dt: Number((_globalInputs.dt || {}).value) || 0.02,
+        steps: Math.max(10, Math.floor((Number((_globalInputs.durationSec || {}).value) || 8) / (Number((_globalInputs.dt || {}).value) || 0.02))),
+        groundModel: "rigid", groundK: 2500, groundC: 90,
+      };
     }
 
-    function _applyScenarioDefaults() {
-      var scenario = _scenarioSelect ? _scenarioSelect.value : "spring";
-      var defaults = SCENARIO_DEFAULTS[scenario] || SCENARIO_DEFAULTS.spring;
-      Object.keys(defaults).forEach(function (k) { if (_inputs[k]) _inputs[k].value = String(defaults[k]); });
-    }
-
-    function _randomizeParams() {
-      var scenario = _scenarioSelect ? _scenarioSelect.value : "spring";
-      function rand(lo, hi) { return lo + Math.random() * (hi - lo); }
-      if (_inputs.m) _inputs.m.value = rand(0.3, 3).toFixed(2);
-      if (_inputs.c) _inputs.c.value = rand(0, 1).toFixed(2);
-      if (_inputs.k) _inputs.k.value = (scenario === "bouncing" ? 9.81 : rand(0.5, 10)).toFixed(2);
-      if (_inputs.x0) _inputs.x0.value = rand(0.2, 2.5).toFixed(2);
-      if (_inputs.v0) _inputs.v0.value = rand(-1, 1).toFixed(2);
-      if (_inputs.e) _inputs.e.value = rand(0.3, 0.95).toFixed(2);
-    }
-
-    function _runSimulation() {
-      if (!oscillatorCore || !_chartDiv) return;
+    function _simulateOne(scenarioId) {
+      if (!oscillatorCore) return;
       var Plotly = (typeof window !== "undefined" && window.Plotly) ? window.Plotly : null;
-      if (!Plotly) { if (_statusEl) _statusEl.textContent = "Plotly not loaded"; return; }
+      if (!Plotly) return;
+      var sc = _scenarios[scenarioId];
+      if (!sc || !sc.chartDiv) return;
 
-      var p = _getParams();
-      var scenario = _scenarioSelect ? _scenarioSelect.value : "spring";
-      var steps = Math.max(10, Math.floor((p.durationSec || 8) / (p.dt || 0.02)));
+      var cond = _getScenarioCondition(scenarioId);
+      var sim = oscillatorCore.simulateOscillator(cond);
+      var def = SCENARIO_DEFS.find(function (d) { return d.id === scenarioId; });
+      var title = (def ? def.label : scenarioId) + " | m=" + cond.m + " c=" + cond.c + " k=" + cond.k;
 
-      var sim = oscillatorCore.simulateOscillator({
-        scenario: scenario, m: p.m || 1, c: p.c || 0.25, k: p.k || 4, g: p.g || 9.81,
-        x0: p.x0 || 1, v0: p.v0 || 0, restitution: p.e || 0.8,
-        dt: p.dt || 0.02, steps: steps, groundModel: "rigid", groundK: 2500, groundC: 90,
-      });
-
-      Plotly.newPlot(_chartDiv, [
+      Plotly.newPlot(sc.chartDiv, [
         { x: sim.t, y: sim.x, mode: "lines", name: "x(t)", line: { color: "#22d3ee" } },
         { x: sim.t, y: sim.v, mode: "lines", name: "v(t)", line: { color: "#f59e0b", dash: "dot" } },
       ], {
-        paper_bgcolor: "#0b1220", plot_bgcolor: "#0b1220", font: { color: "#e2e8f0" },
-        title: scenario.charAt(0).toUpperCase() + scenario.slice(1) + " | m=" + (p.m||1) + " c=" + (p.c||0.25) + " k=" + (p.k||4),
-        xaxis: { title: "time (s)", gridcolor: "#1e293b" },
-        yaxis: { title: scenario === "bouncing" ? "height" : "displacement", gridcolor: "#1e293b" },
-        legend: { orientation: "h", y: -0.12 },
-        margin: { t: 40, b: 55, l: 50, r: 20 },
+        paper_bgcolor: "#0b1220", plot_bgcolor: "#0b1220", font: { color: "#e2e8f0", size: 10 },
+        title: { text: title, font: { size: 12 } },
+        xaxis: { title: "t (s)", gridcolor: "#1e293b" },
+        yaxis: { gridcolor: "#1e293b" },
+        legend: { orientation: "h", y: -0.2, font: { size: 10 } },
+        margin: { t: 30, b: 45, l: 40, r: 10 },
       }, { responsive: true });
+    }
 
-      if (_statusEl) _statusEl.textContent = sim.t.length + " steps | " + scenario + " | dt=" + (p.dt || 0.02);
+    function _simulateAll() {
+      SCENARIO_DEFS.forEach(function (def) { _simulateOne(def.id); });
+      if (_statusEl) _statusEl.textContent = "Simulated all scenarios | dt=" + (Number((_globalInputs.dt || {}).value) || 0.02);
+    }
+
+    function _resetScenario(scenarioId) {
+      var def = SCENARIO_DEFS.find(function (d) { return d.id === scenarioId; });
+      var sc = _scenarios[scenarioId];
+      if (!def || !sc) return;
+      def.params.forEach(function (p) { if (sc.inputs[p.key]) sc.inputs[p.key].value = String(p.value); });
+      def.ranges.forEach(function (r) { if (sc.rangeInputs[r.key]) sc.rangeInputs[r.key].value = r.value; });
+    }
+
+    function _randomizeAll() {
+      SCENARIO_DEFS.forEach(function (def) {
+        var sc = _scenarios[def.id];
+        if (!sc) return;
+        def.ranges.forEach(function (r) {
+          var range = _parseRange(sc.rangeInputs[r.key] ? sc.rangeInputs[r.key].value : r.value);
+          var paramKey = r.key.replace("Range", "");
+          if (sc.inputs[paramKey]) sc.inputs[paramKey].value = _rand(range[0], range[1]).toFixed(3);
+        });
+      });
     }
 
     // --- lifecycle ---
     function mount() {
-      _inputs = {}; _chartDiv = null; _scenarioSelect = null; _statusEl = null;
+      _scenarios = {}; _globalInputs = {}; _statusEl = null;
       _renderLeftPanel();
+      _renderRightPanel(); // right first so _scenarios is populated before main needs chartDivs
       _renderMainPanel();
-      _renderRightPanel();
     }
     function unmount() {
-      _inputs = {}; _chartDiv = null; _scenarioSelect = null; _statusEl = null;
+      _scenarios = {}; _globalInputs = {}; _statusEl = null;
       layout.leftEl.innerHTML = ""; layout.mainEl.innerHTML = ""; layout.rightEl.innerHTML = "";
     }
     function refresh() { mount(); }
