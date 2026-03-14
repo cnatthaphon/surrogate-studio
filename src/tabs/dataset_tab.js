@@ -68,11 +68,38 @@
       var schemaId = _getSchemaId();
       var mod = _getModule();
 
-      // try module-provided config spec
+      // use module-provided config spec (full sections with defaults)
       if (mod && mod.uiApi && typeof mod.uiApi.getDatasetConfigSpec === "function") {
         try {
           var spec = mod.uiApi.getDatasetConfigSpec({});
-          if (spec && Array.isArray(spec.fields)) return spec;
+          if (spec) {
+            // flatten sections into fields array for rendering
+            var fields = [];
+            var values = {};
+            var sections = Array.isArray(spec.sections) ? spec.sections : (Array.isArray(spec.fields) ? [{ schema: spec.fields }] : []);
+            sections.forEach(function (section) {
+              var schema = Array.isArray(section.schema) ? section.schema : [];
+              var sectionValues = (section.value && typeof section.value === "object") ? section.value : {};
+              schema.forEach(function (field) {
+                var key = field.key || field.id;
+                if (!key) return;
+                var val = sectionValues[key] !== undefined ? sectionValues[key] : field.value;
+                fields.push({
+                  kind: field.type === "select" ? "select" : (field.type || "text"),
+                  key: key,
+                  label: field.label || key,
+                  value: val !== undefined ? val : "",
+                  min: field.min,
+                  max: field.max,
+                  step: field.step,
+                  disabled: field.disabled,
+                  options: field.options,
+                });
+                values[key] = val;
+              });
+            });
+            if (fields.length) return { fields: fields, values: values };
+          }
         } catch (e) {}
       }
 
@@ -83,13 +110,10 @@
         { kind: "number", key: "seed", label: "Random seed", value: Number(preconfig.seed || 42) },
         { kind: "number", key: "totalCount", label: "Total samples", value: Number(preconfig.totalCount || 200) },
       ];
-
-      // split config from schema
       var splitDefaults = (dsSchema && dsSchema.splitDefaults) || {};
       fields.push({ kind: "number", key: "trainFrac", label: "Train fraction", value: Number(splitDefaults.train || 0.7), min: 0.1, max: 0.95, step: 0.05 });
       fields.push({ kind: "number", key: "valFrac", label: "Val fraction", value: Number(splitDefaults.val || 0.15), min: 0.05, max: 0.5, step: 0.05 });
       fields.push({ kind: "number", key: "testFrac", label: "Test fraction", value: Number(splitDefaults.test || 0.15), min: 0.05, max: 0.5, step: 0.05 });
-
       return { fields: fields };
     }
 
@@ -246,8 +270,8 @@
       if (_configFormApi && typeof _configFormApi.getConfig === "function") {
         formConfig = _configFormApi.getConfig();
       } else {
-        // read from DOM inputs
-        var inputs = layout.rightEl.querySelectorAll("input[data-key]");
+        // read from DOM inputs and selects
+        var inputs = layout.rightEl.querySelectorAll("input[data-key], select[data-key]");
         inputs.forEach(function (inp) {
           var key = inp.getAttribute("data-key");
           var val = inp.type === "number" ? Number(inp.value) : inp.value;
@@ -257,16 +281,13 @@
 
       onStatus("Generating dataset...");
       try {
-        var result = mod.build({
-          schemaId: schemaId,
-          moduleId: mod.id,
-          seed: Number(formConfig.seed || 42),
-          totalCount: Number(formConfig.totalCount || 200),
-          trainFrac: Number(formConfig.trainFrac || 0.7),
-          valFrac: Number(formConfig.valFrac || 0.15),
-          testFrac: Number(formConfig.testFrac || 0.15),
-          config: formConfig,
-        });
+        // pass all form config directly to module build — module knows what it needs
+        var buildConfig = Object.assign({ schemaId: schemaId, moduleId: mod.id }, formConfig);
+        // ensure steps is computed if module needs it
+        if (!buildConfig.steps && buildConfig.durationSec && buildConfig.dt) {
+          buildConfig.steps = Math.floor(Number(buildConfig.durationSec) / Number(buildConfig.dt));
+        }
+        var result = mod.build(buildConfig);
 
         // handle promise or sync result
         var handleResult = function (ds) {
