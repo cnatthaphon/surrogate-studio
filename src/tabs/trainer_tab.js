@@ -15,6 +15,10 @@
     var trainingEngine = deps.trainingEngine;       // OSCTrainingEngineCore
     var modelBuilder = deps.modelBuilder;           // OSCModelBuilderCore
     var trainingWorkerBridge = deps.trainingWorkerBridge; // OSCTrainingWorkerBridge (optional)
+    var getTf = deps.getTf || function () {
+      var W = typeof window !== "undefined" ? window : (typeof globalThis !== "undefined" ? globalThis : {});
+      return W.tf || null;
+    };
     var onStatus = deps.onStatus || function () {};
     var escapeHtml = deps.escapeHtml || function (s) { return String(s || ""); };
     var elFactory = deps.el || function (tag, attrs, children) {
@@ -297,34 +301,122 @@
       if (store) store.upsertTrainerCard(trainerCard);
       if (stateApi) stateApi.setActiveTrainer(trainerId);
 
+      var tf = getTf();
+      if (!tf) { onStatus("TF.js runtime not available"); return; }
+      if (!modelBuilder) { onStatus("Model builder not available"); return; }
+      if (!trainingEngine) { onStatus("Training engine not available"); return; }
+
+      // build TF.js model from saved graph
+      var graphData = model.graph;
+      if (!graphData) { onStatus("Model has no graph data"); return; }
+
+      var schemaConfig = schemaRegistry ? schemaRegistry.getSchema(schemaId) : {};
+      var allowedOutputKeys = schemaRegistry ? (schemaRegistry.getOutputKeys(schemaId) || ["x"]) : ["x"];
+      var defaultTarget = allowedOutputKeys.indexOf("x") >= 0 ? "x" : (allowedOutputKeys[0] || "x");
+
+      var dsData = dataset.data;
+      if (!dsData) { onStatus("Dataset has no data"); return; }
+
+      // infer graph properties
+      var graphMode = modelBuilder.inferGraphMode(graphData, "direct");
+      var heads = modelBuilder.inferOutputHeads(graphData, allowedOutputKeys, defaultTarget);
+      var isClassification = heads.some(function (h) { return h.target === "logits" || h.target === "label"; });
+
+      // determine dataset shape
+      var featureSize = Number(dsData.featureSize || (dsData.xTrain && dsData.xTrain[0] && dsData.xTrain[0].length) || 1);
+      var seqFeatureSize = Number(dsData.seqFeatureSize || featureSize);
+      var windowSize = Number(dsData.windowSize || 1);
+
+      var buildResult;
+      try {
+        buildResult = modelBuilder.buildModelFromGraph(tf, graphData, {
+          mode: graphMode,
+          featureSize: featureSize,
+          seqFeatureSize: seqFeatureSize,
+          windowSize: windowSize,
+          allowedOutputKeys: allowedOutputKeys,
+          defaultTarget: defaultTarget,
+          paramNames: dsData.paramNames,
+          paramSize: dsData.paramSize,
+          numClasses: dsData.numClasses || 10,
+        });
+      } catch (err) {
+        onStatus("Model build error: " + err.message);
+        store.upsertTrainerCard(Object.assign({}, trainerCard, { status: "error", error: err.message }));
+        return;
+      }
+
       _isTraining = true;
       onStatus("Training started: " + trainerId);
       _renderLeftPanel();
       _renderMainPanel();
 
-      // epoch callback
-      var onEpochEnd = function (epoch, logs) {
-        if (store) store.appendTrainerEpoch(trainerId, {
-          epoch: epoch + 1,
-          loss: logs.loss,
-          val_loss: logs.val_loss,
-          current_lr: logs.current_lr,
+      trainingEngine.trainModel(tf, {
+        model: buildResult.model,
+        isSequence: buildResult.isSequence,
+        headConfigs: buildResult.headConfigs,
+        dataset: {
+          xTrain: dsData.xTrain, yTrain: dsData.yTrain,
+          seqTrain: dsData.seqTrain,
+          xVal: dsData.xVal, yVal: dsData.yVal,
+          seqVal: dsData.seqVal,
+          xTest: dsData.xTest, yTest: dsData.yTest,
+          seqTest: dsData.seqTest,
+          pTrain: dsData.pTrain, pVal: dsData.pVal, pTest: dsData.pTest,
+          targetMode: dsData.targetMode || defaultTarget,
+          paramNames: dsData.paramNames,
+          paramSize: dsData.paramSize,
+          numClasses: dsData.numClasses,
+        },
+        epochs: Number(config.epochs || 20),
+        batchSize: Number(config.batchSize || 32),
+        learningRate: Number(config.learningRate || 0.001),
+        optimizerType: String(config.optimizerType || "adam"),
+        lrSchedulerType: String(config.lrSchedulerType || "plateau"),
+        earlyStoppingPatience: Number(config.earlyStoppingPatience || 5),
+        restoreBestWeights: true,
+        onEpochEnd: function (epoch, logs) {
+          if (store) store.appendTrainerEpoch(trainerId, {
+            epoch: epoch + 1,
+            loss: logs.loss,
+            val_loss: logs.val_loss,
+            current_lr: logs.current_lr,
+          });
+          if (_epochLogEl) {
+            var line = document.createElement("div");
+            line.textContent = "Epoch " + (epoch + 1) + ": loss=" +
+              (logs.loss != null ? Number(logs.loss).toExponential(3) : "—") +
+              " val_loss=" + (logs.val_loss != null ? Number(logs.val_loss).toExponential(3) : "—");
+            _epochLogEl.appendChild(line);
+            _epochLogEl.scrollTop = _epochLogEl.scrollHeight;
+          }
+        },
+      }).then(function (result) {
+        _isTraining = false;
+        var updatedCard = Object.assign({}, trainerCard, {
+          status: "done",
+          metrics: {
+            mae: result.mae,
+            testMae: result.testMae,
+            mse: result.mse,
+            testMse: result.testMse,
+            bestEpoch: result.bestEpoch,
+            bestValLoss: result.bestValLoss,
+            finalLr: result.finalLr,
+            stoppedEarly: result.stoppedEarly,
+          },
         });
-        if (_epochLogEl) {
-          var line = document.createElement("div");
-          line.textContent = "Epoch " + (epoch + 1) + ": loss=" +
-            (logs.loss != null ? Number(logs.loss).toExponential(3) : "—") +
-            " val_loss=" + (logs.val_loss != null ? Number(logs.val_loss).toExponential(3) : "—");
-          _epochLogEl.appendChild(line);
-          _epochLogEl.scrollTop = _epochLogEl.scrollHeight;
-        }
-      };
-
-      // Note: actual training would happen here via trainingEngine.trainModel(tf, {...})
-      // or via trainingWorkerBridge for off-main-thread execution
-      // The full wiring happens in surrogate_studio.js orchestrator
-      onStatus("Training session created. Wiring to runtime pending in orchestrator.");
-      _isTraining = false;
+        if (store) store.upsertTrainerCard(updatedCard);
+        onStatus("Training done: MAE=" + (result.mae != null ? Number(result.mae).toExponential(3) : "—"));
+        _renderLeftPanel();
+        _renderMainPanel();
+      }).catch(function (err) {
+        _isTraining = false;
+        if (store) store.upsertTrainerCard(Object.assign({}, trainerCard, { status: "error", error: err.message }));
+        onStatus("Training error: " + err.message);
+        _renderLeftPanel();
+        _renderMainPanel();
+      });
     }
 
     function _handleExport() {

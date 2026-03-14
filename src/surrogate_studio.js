@@ -122,6 +122,7 @@
         store: store,
         schemaRegistry: SchemaRegistry,
         trainingEngine: TrainingEngine,
+        modelBuilder: ModelBuilderCore,
         onStatus: setStatus,
         escapeHtml: escapeHtml,
         el: elHelper,
