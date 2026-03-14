@@ -137,31 +137,39 @@
 
       // model presets
       var modelSchema = schema.model || {};
-      var presets = modelSchema.presets || {};
-      var presetIds = Object.keys(presets);
-      if (presetIds.length) {
-        var presetsTitle = elFactory("div", { style: "font-size:12px;color:#94a3b8;margin-bottom:4px;font-weight:600;" }, "Model Presets (" + presetIds.length + "):");
+      var presets = Array.isArray(modelSchema.presets) ? modelSchema.presets : [];
+      if (presets.length) {
+        var presetsTitle = elFactory("div", { style: "font-size:12px;color:#94a3b8;margin-bottom:4px;font-weight:600;" }, "Model Presets (" + presets.length + "):");
         card.appendChild(presetsTitle);
         var presetList = elFactory("div", { style: "display:flex;flex-wrap:wrap;gap:4px;" });
-        presetIds.forEach(function (pid) {
-          var badge = elFactory("span", { className: "osc-badge" }, pid);
+        presets.forEach(function (p) {
+          var badge = elFactory("span", { className: "osc-badge" }, (p && p.label) || (p && p.id) || String(p));
           presetList.appendChild(badge);
         });
         card.appendChild(presetList);
       }
 
-      // node palette
-      var palette = modelSchema.palette || {};
-      var paletteKeys = Object.keys(palette);
-      if (paletteKeys.length) {
-        var palTitle = elFactory("div", { style: "font-size:12px;color:#94a3b8;margin-top:8px;margin-bottom:4px;font-weight:600;" }, "Node Palette (" + paletteKeys.length + " types):");
-        card.appendChild(palTitle);
-        var palList = elFactory("div", { style: "display:flex;flex-wrap:wrap;gap:4px;" });
-        paletteKeys.forEach(function (nk) {
-          var badge = elFactory("span", { className: "osc-badge" }, nk);
-          palList.appendChild(badge);
+      // node palette — from schema.model.metadata.featureNodes.palette.items
+      var modelMeta = (modelSchema.metadata && modelSchema.metadata.featureNodes) || {};
+      var paletteItems = (modelMeta.palette && Array.isArray(modelMeta.palette.items)) ? modelMeta.palette.items : [];
+      if (paletteItems.length) {
+        // group by section
+        var sections = {};
+        paletteItems.forEach(function (item) {
+          var sec = item.section || "Nodes";
+          if (!sections[sec]) sections[sec] = [];
+          sections[sec].push(item);
         });
-        card.appendChild(palList);
+        var palTitle = elFactory("div", { style: "font-size:12px;color:#94a3b8;margin-top:8px;margin-bottom:4px;font-weight:600;" }, "Node Palette (" + paletteItems.length + " types):");
+        card.appendChild(palTitle);
+        Object.keys(sections).forEach(function (secName) {
+          var secDiv = elFactory("div", { style: "margin-bottom:4px;" });
+          secDiv.appendChild(elFactory("span", { style: "font-size:11px;color:#64748b;" }, secName + ": "));
+          sections[secName].forEach(function (item) {
+            secDiv.appendChild(elFactory("span", { className: "osc-badge", style: "margin-right:2px;" }, item.label || item.type));
+          });
+          card.appendChild(secDiv);
+        });
       }
 
       // output keys

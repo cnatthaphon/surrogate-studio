@@ -50,18 +50,19 @@
       return [];
     }
 
-    function _getPalette() {
+    function _getPaletteItems() {
       var schemaId = _getSchemaId();
-      if (!schemaRegistry) return {};
+      if (!schemaRegistry) return [];
       var schema = schemaRegistry.getModelSchema(schemaId);
-      return (schema && schema.palette) || {};
+      var meta = (schema && schema.metadata && schema.metadata.featureNodes) || {};
+      return (meta.palette && Array.isArray(meta.palette.items)) ? meta.palette.items : [];
     }
 
     function _getPresets() {
       var schemaId = _getSchemaId();
-      if (!schemaRegistry) return {};
+      if (!schemaRegistry) return [];
       var schema = schemaRegistry.getModelSchema(schemaId);
-      return (schema && schema.presets) || {};
+      return Array.isArray(schema && schema.presets) ? schema.presets : [];
     }
 
     // --- render ---
@@ -116,29 +117,40 @@
 
       // preset selector
       var presets = _getPresets();
-      var presetIds = Object.keys(presets);
-      if (presetIds.length) {
+      if (presets.length) {
         var presetBar = elFactory("div", { style: "margin-bottom:8px;display:flex;gap:4px;align-items:center;flex-wrap:wrap;" });
         presetBar.appendChild(elFactory("span", { style: "font-size:12px;color:#94a3b8;" }, "Presets:"));
-        presetIds.forEach(function (pid) {
-          var btn = elFactory("button", { className: "osc-btn sm secondary" }, pid);
+        presets.forEach(function (preset) {
+          var pid = (preset && preset.id) || String(preset);
+          var plabel = (preset && preset.label) || pid;
+          var btn = elFactory("button", { className: "osc-btn sm secondary" }, plabel);
           btn.addEventListener("click", function () { _loadPreset(pid); });
           presetBar.appendChild(btn);
         });
         el.appendChild(presetBar);
       }
 
-      // node palette from schema
-      var palette = _getPalette();
-      var paletteKeys = Object.keys(palette);
-      if (paletteKeys.length) {
-        var palDiv = elFactory("div", { className: "osc-palette" });
-        paletteKeys.forEach(function (nodeType) {
-          var btn = elFactory("button", {}, nodeType);
-          btn.addEventListener("click", function () { _addNode(nodeType); });
-          palDiv.appendChild(btn);
+      // node palette from schema.model.metadata.featureNodes.palette.items
+      var paletteItems = _getPaletteItems();
+      if (paletteItems.length) {
+        // group by section
+        var sections = {};
+        paletteItems.forEach(function (item) {
+          var sec = item.section || "Nodes";
+          if (!sections[sec]) sections[sec] = [];
+          sections[sec].push(item);
         });
-        el.appendChild(palDiv);
+        Object.keys(sections).forEach(function (secName) {
+          var secLabel = elFactory("div", { style: "font-size:11px;color:#64748b;margin-bottom:2px;margin-top:6px;" }, secName);
+          el.appendChild(secLabel);
+          var palDiv = elFactory("div", { className: "osc-palette" });
+          sections[secName].forEach(function (item) {
+            var btn = elFactory("button", {}, item.label || item.type);
+            btn.addEventListener("click", function () { _addNode(item.type, item.config); });
+            palDiv.appendChild(btn);
+          });
+          el.appendChild(palDiv);
+        });
       }
 
       // Drawflow editor container
@@ -244,10 +256,10 @@
       }
     }
 
-    function _addNode(nodeType) {
+    function _addNode(nodeType, defaultConfig) {
       if (!_graphRuntime || !_editor) return;
       if (typeof _graphRuntime.createNodeByType === "function") {
-        _graphRuntime.createNodeByType(_editor, 250, 200, nodeType);
+        _graphRuntime.createNodeByType(_editor, 250, 200, nodeType, defaultConfig || {});
       }
     }
 
