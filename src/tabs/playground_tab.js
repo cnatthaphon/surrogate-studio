@@ -10,34 +10,34 @@
   var SCENARIO_DEFS = [
     { id: "spring", label: "Damped Spring",
       params: [
-        { key: "m", label: "Mass (m)", value: 1.2 },
-        { key: "c", label: "Damping (c)", value: 0.25 },
-        { key: "k", label: "Stiffness (k)", value: 4.0 },
-        { key: "x0", label: "x(0)", value: 1.0 },
-        { key: "v0", label: "v(0)", value: 0.0 },
+        { key: "m", label: "Mass m (kg)", value: 1.2 },
+        { key: "c", label: "Damping c (Ns/m)", value: 0.25 },
+        { key: "k", label: "Stiffness k (N/m)", value: 4.0 },
+        { key: "x0", label: "Position x₀ (m)", value: 1.0 },
+        { key: "v0", label: "Velocity v₀ (m/s)", value: 0.0 },
       ],
       ranges: [
         { key: "mRange", label: "m range", value: "0.5,2.0" },
         { key: "cRange", label: "c range", value: "0.05,0.8" },
         { key: "kRange", label: "k range", value: "1.0,8.0" },
-        { key: "x0Range", label: "x(0) range", value: "-1.5,1.5" },
-        { key: "v0Range", label: "v(0) range", value: "-1.0,1.0" },
+        { key: "x0Range", label: "x₀ range", value: "-1.5,1.5" },
+        { key: "v0Range", label: "v₀ range", value: "-1.0,1.0" },
       ],
     },
     { id: "pendulum", label: "Damped Pendulum",
       params: [
-        { key: "m", label: "Mass (m)", value: 1.0 },
+        { key: "m", label: "Mass (kg)", value: 1.0 },
         { key: "c", label: "Damping (c)", value: 0.15 },
-        { key: "k", label: "Length (L)", value: 2.0 },
-        { key: "x0", label: "Angle x(0)", value: 0.6 },
-        { key: "v0", label: "Ang. vel v(0)", value: 0.0 },
+        { key: "k", label: "Length L (m)", value: 2.0 },
+        { key: "x0", label: "Initial angle θ₀ (rad)", value: 0.6 },
+        { key: "v0", label: "Initial ω₀ (rad/s)", value: 0.0 },
       ],
       ranges: [
         { key: "mRange", label: "m range", value: "0.5,2.0" },
         { key: "cRange", label: "c range", value: "0.01,0.5" },
         { key: "kRange", label: "L range", value: "0.5,2.0" },
-        { key: "x0Range", label: "x(0) range", value: "-1.2,1.2" },
-        { key: "v0Range", label: "v(0) range", value: "-1.0,1.0" },
+        { key: "x0Range", label: "θ₀ range (rad)", value: "-1.2,1.2" },
+        { key: "v0Range", label: "ω₀ range", value: "-1.0,1.0" },
       ],
     },
     { id: "bouncing", label: "Bouncing Ball",
@@ -212,33 +212,13 @@
           head.appendChild(resetBtn);
           card.appendChild(head);
 
-          // include checkbox
-          var inclRow = el("div", { style: "display:flex;align-items:center;gap:6px;margin-bottom:4px;font-size:11px;color:#94a3b8;" });
-          var inclCb = el("input", { type: "checkbox" });
-          inclCb.checked = true;
-          sc.includeCheckbox = inclCb;
-          inclRow.appendChild(inclCb);
-          inclRow.appendChild(document.createTextNode("Include in dataset"));
-          card.appendChild(inclRow);
-
-          // param inputs
+          // param inputs only (no ranges, no include checkbox — those belong in Dataset tab)
           def.params.forEach(function (p) {
             var row = el("div", { style: "display:flex;justify-content:space-between;align-items:center;margin-bottom:2px;" });
-            row.appendChild(el("span", { style: "font-size:11px;color:#94a3b8;min-width:80px;" }, p.label));
+            row.appendChild(el("span", { style: "font-size:11px;color:#94a3b8;min-width:100px;" }, p.label));
             var inp = el("input", { type: "number", value: String(p.value), style: "width:70px;padding:2px 4px;font-size:11px;border-radius:4px;border:1px solid #334155;background:#0b1220;color:#e2e8f0;" });
             inp.setAttribute("step", "0.1");
             sc.inputs[p.key] = inp;
-            row.appendChild(inp);
-            card.appendChild(row);
-          });
-
-          // range inputs
-          card.appendChild(el("div", { style: "font-size:10px;color:#64748b;margin-top:4px;margin-bottom:2px;" }, "Dataset Ranges:"));
-          def.ranges.forEach(function (r) {
-            var row = el("div", { style: "display:flex;justify-content:space-between;align-items:center;margin-bottom:2px;" });
-            row.appendChild(el("span", { style: "font-size:10px;color:#64748b;min-width:60px;" }, r.label));
-            var inp = el("input", { type: "text", value: r.value, style: "width:80px;padding:2px 4px;font-size:10px;border-radius:4px;border:1px solid #334155;background:#0b1220;color:#94a3b8;" });
-            sc.rangeInputs[r.key] = inp;
             row.appendChild(inp);
             card.appendChild(row);
           });
