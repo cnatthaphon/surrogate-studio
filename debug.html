@@ -1,0 +1,227 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Debug — Surrogate Studio</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/jerosoler/Drawflow/dist/drawflow.min.css">
+  <script src="https://cdn.jsdelivr.net/gh/jerosoler/Drawflow/dist/drawflow.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.22.0/dist/tf.min.js"></script>
+  <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+  <!-- modules -->
+  <script src="./src/schema_registry.js"></script>
+  <script src="./src/schema_definitions_builtin.js"></script>
+  <script src="./src/oscillator_dataset_core.js"></script>
+  <script src="./src/model_graph_core.js"></script>
+  <script src="./src/model_builder_core.js"></script>
+  <script src="./src/training_engine_core.js"></script>
+  <script src="./src/prediction_core.js"></script>
+  <style>
+    body { font-family: sans-serif; background: #0f172a; color: #e2e8f0; padding: 16px; }
+    .card { background: #111827; border: 1px solid #1e293b; border-radius: 10px; padding: 14px; margin-bottom: 12px; }
+    button { padding: 6px 14px; border-radius: 8px; border: 1px solid #0ea5e9; background: #0284c7; color: #fff; cursor: pointer; }
+    #log { font-size: 12px; color: #94a3b8; white-space: pre-wrap; max-height: 200px; overflow-y: auto; }
+    #drawflow-test { width: 100%; height: 300px; background: #f8fafc; border-radius: 10px; }
+    #chart-test { height: 280px; }
+  </style>
+</head>
+<body>
+  <h2 style="color:#67e8f9;">Surrogate Studio — Debug Page</h2>
+
+  <!-- 1. Module Load Check -->
+  <div class="card">
+    <h3>1. Module Load Check</h3>
+    <div id="module-check"></div>
+  </div>
+
+  <!-- 2. Oscillator Simulation -->
+  <div class="card">
+    <h3>2. Oscillator Simulation</h3>
+    <button onclick="testOscillator()">Run RK4 Sim</button>
+    <div id="chart-test"></div>
+  </div>
+
+  <!-- 3. Drawflow Editor -->
+  <div class="card">
+    <h3>3. Drawflow Editor + Preset</h3>
+    <button onclick="testDrawflow()">Init Drawflow + Load Preset</button>
+    <div id="drawflow-test"></div>
+  </div>
+
+  <!-- 4. Build Model from Graph -->
+  <div class="card">
+    <h3>4. Build TF.js Model from Graph</h3>
+    <button onclick="testBuildModel()">Build Model</button>
+    <div id="build-result" style="font-size:12px;"></div>
+  </div>
+
+  <!-- 5. Train -->
+  <div class="card">
+    <h3>5. Train Model</h3>
+    <button onclick="testTrain()">Train 5 Epochs</button>
+    <div id="train-result" style="font-size:12px;max-height:200px;overflow-y:auto;"></div>
+  </div>
+
+  <div class="card">
+    <h3>Log</h3>
+    <div id="log"></div>
+  </div>
+
+  <script>
+    var log = document.getElementById("log");
+    function addLog(msg) { log.textContent += msg + "\n"; log.scrollTop = log.scrollHeight; }
+
+    // 1. Check modules
+    (function () {
+      var el = document.getElementById("module-check");
+      var checks = [
+        ["OSCSchemaRegistry", window.OSCSchemaRegistry],
+        ["OSCOscillatorDatasetCore", window.OSCOscillatorDatasetCore],
+        ["OSCModelGraphCore", window.OSCModelGraphCore],
+        ["OSCModelBuilderCore", window.OSCModelBuilderCore],
+        ["OSCTrainingEngineCore", window.OSCTrainingEngineCore],
+        ["OSCPredictionCore", window.OSCPredictionCore],
+        ["Drawflow", window.Drawflow],
+        ["tf", window.tf],
+        ["Plotly", window.Plotly],
+      ];
+      checks.forEach(function (c) {
+        var ok = !!c[1];
+        el.innerHTML += "<div style='color:" + (ok ? "#4ade80" : "#f43f5e") + "'>" + (ok ? "✓" : "✗") + " " + c[0] + "</div>";
+      });
+      var schemas = OSCSchemaRegistry ? OSCSchemaRegistry.listSchemas() : [];
+      el.innerHTML += "<div style='color:#67e8f9'>Schemas: " + schemas.map(function(s){return s.id}).join(", ") + "</div>";
+    })();
+
+    // 2. Oscillator
+    var _simResult = null;
+    function testOscillator() {
+      addLog("Running RK4 simulation...");
+      var osc = window.OSCOscillatorDatasetCore;
+      var sim = osc.simulateOscillator({
+        scenario: "spring", m: 1.2, c: 0.25, k: 4, x0: 1, v0: 0, g: 9.81,
+        dt: 0.02, steps: 400, restitution: 0.8, groundModel: "rigid", groundK: 2500, groundC: 90,
+      });
+      _simResult = sim;
+      addLog("Sim: " + sim.t.length + " steps, x[0]=" + sim.x[0] + " x[200]=" + sim.x[200].toFixed(4));
+      Plotly.newPlot("chart-test", [
+        { x: sim.t, y: sim.x, mode: "lines", name: "x(t)", line: { color: "#22d3ee" } },
+        { x: sim.t, y: sim.v, mode: "lines", name: "v(t)", line: { color: "#f59e0b", dash: "dot" } },
+      ], {
+        paper_bgcolor: "#0b1220", plot_bgcolor: "#0b1220", font: { color: "#e2e8f0" },
+        title: "Spring Oscillator (m=1.2, c=0.25, k=4)",
+        xaxis: { title: "t (s)", gridcolor: "#1e293b" }, yaxis: { gridcolor: "#1e293b" },
+        margin: { t: 40, b: 40, l: 50, r: 20 },
+      }, { responsive: true });
+      addLog("Plot rendered ✓");
+    }
+
+    // 3. Drawflow
+    var _editor = null;
+    function testDrawflow() {
+      var container = document.getElementById("drawflow-test");
+      addLog("Initializing Drawflow...");
+      _editor = new Drawflow(container);
+      _editor.reroute = true;
+      _editor.start();
+      addLog("Drawflow started ✓");
+
+      // load a preset via ModelGraphCore
+      var runtime = OSCModelGraphCore.createRuntime({});
+      runtime.seedPreconfigGraph(_editor, "ar_lstm_strong", "oscillator");
+      addLog("Preset loaded: ar_lstm_strong ✓ (nodes: " + Object.keys(_editor.export().drawflow.Home.data).length + ")");
+    }
+
+    // 4. Build model
+    var _buildResult = null;
+    function testBuildModel() {
+      if (!_editor) { addLog("Init Drawflow first!"); return; }
+      addLog("Building TF.js model from graph...");
+      var el = document.getElementById("build-result");
+      try {
+        var graphExport = _editor.export();
+        var mbc = window.OSCModelBuilderCore;
+        var mode = mbc.inferGraphMode(graphExport);
+        var heads = mbc.inferOutputHeads(graphExport, ["x", "v", "xv", "params"], "x");
+        addLog("Graph mode: " + mode + ", heads: " + heads.length);
+
+        _buildResult = mbc.buildModelFromGraph(tf, graphExport, {
+          mode: mode,
+          featureSize: 22,
+          seqFeatureSize: 11,
+          windowSize: 20,
+          allowedOutputKeys: ["x", "v", "xv", "params"],
+          defaultTarget: "x",
+          paramNames: ["m", "c", "k", "e", "x0", "v0", "gm", "gk", "gc"],
+          paramSize: 9,
+        });
+        el.innerHTML = "<div style='color:#4ade80'>Model built ✓ params=" + _buildResult.model.countParams() +
+          " isSeq=" + _buildResult.isSequence + " heads=" + _buildResult.headConfigs.length + "</div>";
+        addLog("Model built ✓");
+      } catch (err) {
+        el.innerHTML = "<div style='color:#f43f5e'>Error: " + err.message + "</div>";
+        addLog("Build error: " + err.message);
+      }
+    }
+
+    // 5. Train
+    function testTrain() {
+      addLog("Generating dataset + training...");
+      var el = document.getElementById("train-result");
+      el.innerHTML = "Generating dataset...";
+
+      var osc = window.OSCOscillatorDatasetCore;
+      var ds = osc.generateDataset({
+        seed: 42, numTraj: 30, scenarioType: "spring", includedScenarios: ["spring"],
+        predictionMode: "direct", targetMode: "x",
+        featureConfig: { useX: false, useV: false, useParams: true },
+        featureSpec: { useParams: true, useTimeNorm: true },
+        paramPreset: "safe", durationSec: 4, dt: 0.02, steps: 200,
+        trainFrac: 0.7, valFrac: 0.15, testFrac: 0.15,
+        mRange: [0.5, 2], cRange: [0.1, 0.5], kRange: [1, 5],
+        x0Range: [0.5, 1.5], v0Range: [0, 0.5], restitutionRange: [0.5, 0.9],
+        globalG: 9.81, groundModel: "rigid", groundK: 2500, groundC: 90,
+      });
+      addLog("Dataset: xTrain=" + ds.xTrain.length + " featureSize=" + ds.featureSize);
+      el.innerHTML = "Dataset OK. Building model...";
+
+      // Build simple direct MLP
+      var mbc = window.OSCModelBuilderCore;
+      var graph = {
+        drawflow: { Home: { data: {
+          "1": { name: "input_layer", data: { mode: "flat" }, inputs: {}, outputs: { output_1: { connections: [{ node: "2", input: "input_1" }] } } },
+          "2": { name: "dense_layer", data: { units: 32, activation: "relu" }, inputs: { input_1: { connections: [{ node: "1", output: "output_1" }] } }, outputs: { output_1: { connections: [{ node: "3", input: "input_1" }] } } },
+          "3": { name: "dense_layer", data: { units: 16, activation: "relu" }, inputs: { input_1: { connections: [{ node: "2", output: "output_1" }] } }, outputs: { output_1: { connections: [{ node: "4", input: "input_1" }] } } },
+          "4": { name: "output_layer", data: { matchWeight: 1, targets: ["x"], loss: "mse", wx: 1, wv: 1 }, inputs: { input_1: { connections: [{ node: "3", output: "output_1" }] } }, outputs: {} },
+        } } }
+      };
+      var build = mbc.buildModelFromGraph(tf, graph, {
+        mode: "direct", featureSize: ds.featureSize, windowSize: 1, seqFeatureSize: ds.featureSize,
+        allowedOutputKeys: ["x"], defaultTarget: "x",
+      });
+      addLog("Model: params=" + build.model.countParams());
+      el.innerHTML = "Model built. Training...";
+
+      var tec = window.OSCTrainingEngineCore;
+      tec.trainModel(tf, {
+        model: build.model,
+        isSequence: false,
+        headConfigs: build.headConfigs,
+        dataset: { xTrain: ds.xTrain, yTrain: ds.yTrain, xVal: ds.xVal, yVal: ds.yVal, xTest: ds.xTest, yTest: ds.yTest, targetMode: "x" },
+        epochs: 5, batchSize: 32, learningRate: 0.01, optimizerType: "adam", lrSchedulerType: "none",
+        onEpochEnd: function (epoch, logs) {
+          var line = "Epoch " + (epoch + 1) + ": loss=" + Number(logs.loss).toExponential(3) +
+            " val_loss=" + (logs.val_loss != null ? Number(logs.val_loss).toExponential(3) : "—");
+          el.innerHTML += "<div>" + line + "</div>";
+          addLog(line);
+        },
+      }).then(function (result) {
+        el.innerHTML += "<div style='color:#4ade80'>Done! MAE=" + result.mae.toExponential(3) + " testMAE=" + result.testMae.toExponential(3) + "</div>";
+        addLog("Training done ✓ MAE=" + result.mae.toExponential(3));
+      }).catch(function (err) {
+        el.innerHTML += "<div style='color:#f43f5e'>Error: " + err.message + "</div>";
+        addLog("Train error: " + err.message);
+      });
+    }
+  </script>
+</body>
+</html>
