@@ -1,0 +1,523 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Oscillator Surrogate Lab</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/jerosoler/Drawflow/dist/drawflow.min.css">
+  <script src="https://cdn.jsdelivr.net/gh/jerosoler/Drawflow/dist/drawflow.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.22.0/dist/tf.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-vis@1.5.1/dist/tfjs-vis.umd.min.js"></script>
+  <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: "Segoe UI", Tahoma, sans-serif; background: #0f172a; color: #e2e8f0; }
+    .layout { display: grid; grid-template-columns: 360px 1fr; min-height: 100vh; }
+    .sidebar { padding: 16px; border-right: 1px solid #1e293b; background: #111827; overflow: auto; }
+    .main { padding: 16px; }
+    h1 { margin: 0 0 8px; font-size: 20px; color: #67e8f9; }
+    h2 { margin: 18px 0 8px; font-size: 14px; color: #cbd5e1; }
+    p { margin: 0 0 8px; color: #94a3b8; font-size: 13px; }
+    .row { display: grid; grid-template-columns: 1fr 120px; gap: 8px; margin-bottom: 8px; align-items: center; }
+    label { font-size: 12px; color: #cbd5e1; }
+    input, select, button, textarea { width: 100%; padding: 8px; border-radius: 8px; border: 1px solid #334155; background: #0b1220; color: #e2e8f0; }
+    button { cursor: pointer; border-color: #0ea5e9; background: linear-gradient(135deg, #0284c7, #0369a1); font-weight: 600; }
+    button.secondary { border-color: #475569; background: #1f2937; }
+    .mini-btn { width: auto; padding: 3px 8px; font-size: 11px; border-radius: 6px; border: 1px solid #475569; background: #1f2937; color: #cbd5e1; }
+    .two-btn { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .node-btns { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 6px; margin-bottom: 8px; }
+    .node-btns button { font-size: 11px; padding: 6px 4px; white-space: nowrap; }
+    @media (max-width: 1600px) {
+      .node-btns { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+    }
+    @media (max-width: 1200px) {
+      .node-btns { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+    }
+    .status { margin-top: 8px; font-size: 12px; color: #67e8f9; min-height: 16px; }
+    .hint { margin-top: 6px; font-size: 11px; color: #94a3b8; }
+    #drawflow { width: 100%; height: 360px; background: #f8fafc; border-radius: 10px; }
+    .drawflow-resizer {
+      height: 10px;
+      margin: 6px 0 8px 0;
+      border-radius: 6px;
+      border: 1px solid #334155;
+      background: linear-gradient(180deg, #1f2937, #111827);
+      cursor: ns-resize;
+      position: relative;
+    }
+    .drawflow-resizer::before {
+      content: "";
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      width: 56px;
+      height: 2px;
+      background: #64748b;
+      transform: translate(-50%, -50%);
+      border-radius: 999px;
+    }
+    .chart { width: 100%; min-height: 340px; border: 1px solid #1e293b; border-radius: 10px; background: #0b1220; }
+    .panel { border: 1px solid #1e293b; border-radius: 10px; background: #0b1220; padding: 8px; }
+    .chart-wrap { position: relative; }
+    .chart-eom { position: absolute; right: 8px; top: 56px; z-index: 5; width: min(44%, 360px); border: 1px solid #334155; border-radius: 8px; background: rgba(11,18,32,0.92); padding: 6px 8px; font-size: 10px; line-height: 1.3; color: #cbd5e1; pointer-events: none; white-space: pre-line; }
+    .rk4-controls { border: 1px solid #1e293b; border-radius: 8px; padding: 8px; margin-bottom: 8px; background: #0b1220; }
+    .scenario-card { border: 1px solid #334155; border-radius: 10px; padding: 8px; margin-bottom: 8px; background: #0b1220; }
+    .scenario-card-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
+    .scenario-card.spring { border-color: #155e75; }
+    .scenario-card.pendulum { border-color: #4c1d95; }
+    .scenario-card.bouncing { border-color: #7c2d12; }
+    .info-wrap { position: relative; display: inline-flex; align-items: center; margin-left: 4px; }
+    .info-btn { width: 20px; height: 20px; padding: 0; border-radius: 50%; }
+    .tooltip { position: absolute; top: 24px; left: 0; z-index: 9999; width: 320px; max-width: min(320px, 70vw); background: #0b1220; color: #cbd5e1; border: 1px solid #334155; border-radius: 8px; padding: 8px; font-size: 12px; line-height: 1.35; box-shadow: 0 8px 24px rgba(0,0,0,.35); display: none; }
+    .info-wrap:hover .tooltip, .info-wrap:focus-within .tooltip { display: block; }
+    .workspace-tabs { display: flex; gap: 8px; margin-bottom: 8px; }
+    .workspace-tab { width: auto; padding: 6px 12px; border: 1px solid #334155; border-radius: 8px; background: #111827; color: #cbd5e1; cursor: pointer; }
+    .workspace-tab.active { border-color: #0ea5e9; color: #67e8f9; }
+    .ws-pane { display: none; }
+    .ws-pane.active { display: block; }
+    .quick-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
+    .quick-actions button { width: auto; padding: 6px 10px; font-size: 12px; }
+    .data-controls { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 8px; }
+    .data-controls label { font-size: 12px; color: #94a3b8; }
+    .data-controls input, .data-controls select, .data-controls button { width: auto; }
+    .table-wrap { border: 1px solid #334155; border-radius: 8px; overflow: auto; max-height: 280px; }
+    table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    th, td { padding: 6px; border-bottom: 1px solid #1f2937; text-align: left; }
+    th { background: #111827; color: #67e8f9; position: sticky; top: 0; }
+    .compare-panel { border: 1px solid #1e293b; border-radius: 10px; background: #0b1220; padding: 8px; }
+    .compare-title { font-size: 12px; color: #67e8f9; margin: 0 0 6px; }
+    .metric-wrap { margin-top: 8px; border: 1px solid #334155; border-radius: 8px; overflow: auto; max-height: 220px; }
+    .metric-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    .metric-table th, .metric-table td { padding: 6px; border-bottom: 1px solid #1f2937; text-align: left; }
+    .metric-table th { background: #111827; color: #67e8f9; position: sticky; top: 0; }
+    .modal-backdrop { position: fixed; inset: 0; background: rgba(2,6,23,0.7); z-index: 10000; display: none; align-items: center; justify-content: center; padding: 16px; }
+    .modal-backdrop.open { display: flex; }
+    .modal { width: min(560px, 96vw); border: 1px solid #334155; border-radius: 12px; background: #0b1220; padding: 12px; box-shadow: 0 16px 40px rgba(0,0,0,0.45); }
+    .modal h3 { margin: 0 0 10px; font-size: 14px; color: #67e8f9; }
+    .modal .row { margin-bottom: 10px; }
+    /* Prevent tfjs-vis visor flash on load; show only when body has .tfvis-allowed */
+    body:not(.tfvis-allowed) .visor,
+    body:not(.tfvis-allowed) .tfjs-vis-visor,
+    body:not(.tfvis-allowed) [class*="visor"] {
+      display: none !important;
+      visibility: hidden !important;
+      opacity: 0 !important;
+      pointer-events: none !important;
+    }
+  </style>
+</head>
+<body>
+  <div class="layout" id="layoutRoot">
+    <aside class="sidebar" id="sidebar">
+      <h1>Oscillator Surrogate Lab</h1>
+      <p>Generate RK4 trajectories, train a TF.js model from Drawflow, compare NN vs RK4.</p>
+
+      <h2>Scenario</h2>
+      <div class="row" id="primaryScenarioRow"><label>Scenario</label><select id="scenarioType"><option value="spring">Damped Spring</option><option value="pendulum">Damped Pendulum</option><option value="bouncing">Bouncing Ball</option></select></div>
+      <div class="row" style="grid-template-columns: 1fr;"><label>Dataset Scenarios</label><div style="display:flex; gap:12px; flex-wrap:wrap; font-size:12px;"><label><input id="dsSpring" type="checkbox" checked> spring</label><label><input id="dsPendulum" type="checkbox" checked> pendulum</label><label><input id="dsBouncing" type="checkbox" checked> bouncing</label></div></div>
+      <div class="row"><label>Parameter Preset</label><select id="paramPreset"><option value="safe">Safe</option><option value="wide">Wide</option><option value="stress">Stress</option></select></div>
+      <div class="row"><label>Mass range [min,max]</label><input id="massRange" value="0.5,2.0"></div>
+      <div class="row"><label id="dampingRangeLabel">Damping range [min,max]</label><input id="dampingRange" value="0.05,0.8"></div>
+      <div class="row"><label id="param3RangeLabel">Stiffness k range [min,max]</label><input id="stiffnessRange" value="1.0,8.0"></div>
+      <div class="row" id="groundModelRow" style="display:none;"><label>Ground model</label><select id="groundModel"><option value="rigid">Rigid (impact)</option><option value="compliant">Compliant (spring-damper)</option></select></div>
+      <div class="row" id="groundKRow" style="display:none;"><label>Ground stiffness k_g</label><input id="groundK" type="number" min="50" step="50" value="2500"></div>
+      <div class="row" id="groundCRow" style="display:none;"><label>Ground damping c_g</label><input id="groundC" type="number" min="0" step="1" value="90"></div>
+      <div class="row" id="restitutionRangeRow" style="display:none;"><label>Restitution e range [min,max]</label><input id="restitutionRange" value="0.5,0.95"></div>
+      <div class="row"><label>Initial x range [min,max]</label><input id="x0Range" value="-1.5,1.5"></div>
+      <div class="row"><label>Initial v range [min,max]</label><input id="v0Range" value="-1.0,1.0"></div>
+
+      <h2>Preview</h2>
+      <div id="previewControlsMount"></div>
+
+      <h2>Dataset</h2>
+      <div class="row"><label>Dataset Name</label><input id="datasetName" value="ds_seed42_mixed"></div>
+      <div class="row"><label>Trajectories</label><input id="numTraj" type="number" min="10" value="150"></div>
+      <div class="row"><label>Simulation duration (s)</label><input id="durationSec" type="number" min="0.5" step="0.1" value="16.0"></div>
+      <div class="row"><label>dt</label><input id="dt" type="number" min="0.001" step="0.001" value="0.02"></div>
+      <div class="row"><label>Random Seed</label><input id="seed" type="number" value="42"></div>
+      <div class="row"><label>Split mode</label><select id="splitMode"><option value="stratified_scenario">Stratified by scenario</option><option value="random">Random (global)</option></select></div>
+      <div class="row"><label>Train fraction</label><input id="trainFrac" type="number" min="0.05" max="0.9" step="0.01" value="0.70"></div>
+      <div class="row"><label>Val fraction</label><input id="valFrac" type="number" min="0.05" max="0.9" step="0.01" value="0.15"></div>
+      <div class="row"><label>Test fraction</label><input id="testFrac" type="number" min="0.05" max="0.9" step="0.01" value="0.15"></div>
+      <div id="datasetCardsMount"></div>
+      <button id="genDatasetBtn">Generate Dataset (RK4)</button>
+      <button class="secondary" id="applyCleanExpBtn" style="margin-top:8px;">Apply Clean Experiment Preset</button>
+
+      <h2>Training</h2>
+      <div class="row"><label>Show tfjs-vis</label><input id="useTfvis" type="checkbox" checked></div>
+      <div class="row"><label>Epochs</label><input id="epochs" type="number" min="1" value="40"></div>
+      <div class="row"><label>Batch size</label><input id="batchSize" type="number" min="8" value="64"></div>
+      <div class="row"><label>Learning rate</label><input id="learningRate" type="number" min="0.0001" step="0.0001" value="0.001"></div>
+      <div class="row"><label>LR scheduler</label><input id="useLrScheduler" type="checkbox" checked></div>
+      <div class="row"><label>LR patience (epochs)</label><input id="lrPatience" type="number" min="1" step="1" value="3"></div>
+      <div class="row"><label>LR factor</label><input id="lrFactor" type="number" min="0.05" max="0.99" step="0.05" value="0.5"></div>
+      <div class="row"><label>Min LR</label><input id="minLr" type="number" min="0.000001" step="0.000001" value="0.000001"></div>
+      <div class="row"><label>Restore best weights</label><input id="restoreBestWeights" type="checkbox" checked></div>
+      <div class="row"><label>Early stop patience (0=off)</label><input id="earlyStoppingPatience" type="number" min="0" step="1" value="0"></div>
+      <button id="trainBtn">Train NN</button>
+      <button class="secondary" id="openTfvisBtn" style="margin-top:8px;">Toggle tfjs-vis</button>
+
+      <h2>Node Config</h2>
+      <div id="nodeConfigPanel" class="panel" style="padding:10px;">
+        <div id="nodeConfigTitle" class="compare-title" style="margin-bottom:6px;">No node selected</div>
+        <div id="nodeConfigBody" style="font-size:12px; color:#94a3b8;">Click a node gear in Model tab to edit its settings here.</div>
+      </div>
+      <div class="status" id="status">Ready.</div>
+    </aside>
+
+    <main class="main">
+      <div class="workspace-tabs">
+        <button id="wsPreviewTab" class="workspace-tab active">Preview</button>
+        <button id="wsDatasetTab" class="workspace-tab">Dataset</button>
+        <button id="wsNnTab" class="workspace-tab">Model</button>
+        <button id="wsGenTab" class="workspace-tab">Generation</button>
+        <button id="wsEvalTab" class="workspace-tab">Evaluation</button>
+      </div>
+
+      <div id="wsPreviewPane" class="ws-pane active">
+        <div class="panel">
+          <div class="rk4-controls" id="rk4Controls">
+            <div class="row"><label>Simulation time (s)</label><input id="previewDurationSec" type="number" min="0.5" step="0.1" value="16.0"></div>
+            <div class="row"><label>dt</label><input id="previewDt" type="number" min="0.001" step="0.001" value="0.02"></div>
+            <div class="row"><label>Gravity g (global)</label><input id="globalG" type="number" min="0.1" step="0.01" value="9.81"></div>
+            <button class="mini-btn" id="previewTimeResetBtn" style="margin-bottom:8px; margin-left:auto; display:block;">Reset Global</button>
+            <button class="secondary" id="qaQuickCompareBtn">Quick Compare</button>
+            <div class="row" style="margin-top:8px;"><label>Quick Compare <span class="info-wrap"><button class="mini-btn info-btn" id="quickCompareInfoBtn" type="button">i</button><div id="quickCompareInfo" class="tooltip"></div></span></label><select id="quickCompareMode"><option value="vary_m">Vary Mass (m)</option><option value="vary_c">Vary Air Resistance (c)</option><option value="vary_k">Vary k / L / g</option><option value="vary_e">Vary Restitution (e)</option></select></div>
+            <button class="secondary" id="qaSweepBtn" style="margin-top:8px;">Parameter Sweep</button>
+            <div class="row" style="margin-top:8px;"><label>Sweep Parameter <span class="info-wrap"><button class="mini-btn info-btn" id="sweepInfoBtn" type="button">i</button><div id="sweepInfoTip" class="tooltip">Sweep rule: only selected parameter is varied; all other parameters stay fixed to current scenario card values.</div></span></label><select id="sweepParam"><option value="m">Mass m</option><option value="c">Damping/Air c</option><option value="k">k / L / g</option><option value="restitution">Restitution e</option></select></div>
+            <div class="row"><label>Sweep Values (csv)</label><input id="sweepValues" value="0.5,1.0,2.0"></div>
+            <div class="two-btn" style="margin-top:8px;"><button class="secondary" id="qaRandomPreviewBtn">Random Params + Preview</button><button class="secondary" id="qaResetAllPreviewBtn">Reset All + Preview</button></div>
+
+            <div class="scenario-card spring">
+              <div class="scenario-card-head"><div class="compare-title">Spring Parameters</div><button class="mini-btn" id="resetSpringBtn" type="button">Reset</button></div>
+              <div class="row"><label>Include in dataset</label><input id="cardDsSpring" type="checkbox" checked></div>
+              <div class="row"><label>Mass (m)</label><input id="spM" type="number" value="1.2"></div>
+              <div class="row"><label>Damping (c)</label><input id="spC" type="number" value="0.25"></div>
+              <div class="row"><label>Stiffness (k)</label><input id="spK" type="number" value="4.0"></div>
+              <div class="row"><label>Initial Position x(0)</label><input id="spX0" type="number" value="1.0"></div>
+              <div class="row"><label>Initial Velocity v(0)</label><input id="spV0" type="number" value="0.0"></div>
+              <div class="row"><label>Mass m range [min,max]</label><input id="spMRng" value="0.5,2.0"></div>
+              <div class="row"><label>Damping c range [min,max]</label><input id="spCRng" value="0.05,0.8"></div>
+              <div class="row"><label>Stiffness k range [min,max]</label><input id="spKRng" value="1.0,8.0"></div>
+              <div class="row"><label>x(0) range [min,max]</label><input id="spX0Rng" value="-1.5,1.5"></div>
+              <div class="row"><label>v(0) range [min,max]</label><input id="spV0Rng" value="-1.0,1.0"></div>
+            </div>
+
+            <div class="scenario-card pendulum">
+              <div class="scenario-card-head"><div class="compare-title">Pendulum Parameters</div><button class="mini-btn" id="resetPendulumBtn" type="button">Reset</button></div>
+              <div class="row"><label>Include in dataset</label><input id="cardDsPendulum" type="checkbox" checked></div>
+              <div class="row"><label>Mass (m)</label><input id="pdM" type="number" value="1.0"></div>
+              <div class="row"><label>Damping (c)</label><input id="pdC" type="number" value="0.15"></div>
+              <div class="row"><label>Length (L)</label><input id="pdK" type="number" value="2.0"></div>
+              <div class="row"><label>Initial Angle/State x(0)</label><input id="pdX0" type="number" value="0.6"></div>
+              <div class="row"><label>Initial Angular Velocity v(0)</label><input id="pdV0" type="number" value="0.0"></div>
+              <div class="row"><label>Mass m range [min,max]</label><input id="pdMRng" value="0.5,2.0"></div>
+              <div class="row"><label>Damping c range [min,max]</label><input id="pdCRng" value="0.01,0.5"></div>
+              <div class="row"><label>Length L range [min,max]</label><input id="pdKRng" value="0.5,2.0"></div>
+              <div class="row"><label>x(0) range [min,max]</label><input id="pdX0Rng" value="-1.2,1.2"></div>
+              <div class="row"><label>v(0) range [min,max]</label><input id="pdV0Rng" value="-1.0,1.0"></div>
+            </div>
+
+            <div class="scenario-card bouncing">
+              <div class="scenario-card-head"><div class="compare-title">Bouncing Parameters</div><button class="mini-btn" id="resetBouncingBtn" type="button">Reset</button></div>
+              <div class="row"><label>Include in dataset</label><input id="cardDsBouncing" type="checkbox" checked></div>
+              <div class="row"><label>Mass (m)</label><input id="bbM" type="number" value="1.0"></div>
+              <div class="row"><label>Air Drag (c)</label><input id="bbC" type="number" value="0.15"></div>
+              <div class="row" id="bbGravityRow"><label>Gravity (g)</label><input id="bbK" type="number" value="9.81"></div>
+              <div class="row"><label>Restitution (e)</label><input id="bbE" type="number" value="0.80" min="0" max="1" step="0.01"></div>
+              <div class="row"><label>Ground model</label><select id="bbGroundModel"><option value="rigid">Rigid (impact)</option><option value="compliant">Compliant (spring-damper)</option></select></div>
+              <div class="row"><label>Ground Stiffness (k_g)</label><input id="bbGroundK" type="number" min="50" step="50" value="2500"></div>
+              <div class="row"><label>Ground Damping (c_g)</label><input id="bbGroundC" type="number" min="0" step="1" value="90"></div>
+              <div class="row"><label>Initial Height x(0)</label><input id="bbX0" type="number" value="1.0"></div>
+              <div class="row"><label>Initial Velocity v(0)</label><input id="bbV0" type="number" value="2.0"></div>
+              <div class="row"><label>Mass m range [min,max]</label><input id="bbMRng" value="0.3,3.0"></div>
+              <div class="row"><label>Air drag c range [min,max]</label><input id="bbCRng" value="0.0,0.25"></div>
+              <div class="row"><label>Restitution e range [min,max]</label><input id="bbERng" value="0.55,0.9"></div>
+              <div class="row"><label>x(0) range [min,max]</label><input id="bbX0Rng" value="0.0,0.0"></div>
+              <div class="row"><label>v(0) range [min,max]</label><input id="bbV0Rng" value="0.8,6.0"></div>
+            </div>
+
+            <button id="evalBtn" style="display:none;">Compare NN vs RK4</button>
+            <div id="inlineStatus" class="status" style="margin-top:0; margin-bottom:8px;"></div>
+          </div>
+
+          <div class="chart-wrap">
+            <div id="evalChart" class="chart"></div>
+            <div id="eomMainOverlay" class="chart-eom"></div>
+          </div>
+          <div id="previewSplitCharts" style="display:none; margin-top:8px;">
+            <div class="chart-wrap"><div id="evalChartSpring" class="chart" style="min-height:260px;"></div><div id="eomSpringOverlay" class="chart-eom"></div></div>
+            <div style="height:8px;"></div>
+            <div class="chart-wrap"><div id="evalChartPendulum" class="chart" style="min-height:260px;"></div><div id="eomPendulumOverlay" class="chart-eom"></div></div>
+            <div style="height:8px;"></div>
+            <div class="chart-wrap"><div id="evalChartBouncing" class="chart" style="min-height:260px;"></div><div id="eomBouncingOverlay" class="chart-eom"></div></div>
+          </div>
+        </div>
+      </div>
+
+      <div id="wsDatasetPane" class="ws-pane">
+        <div class="panel">
+          <div class="row" style="margin-bottom:8px;"><label>Saved Datasets</label><select id="savedDatasetSelect"></select></div>
+          <div class="quick-actions"><button class="secondary" id="datasetComparePageBtn">Dataset Compare</button></div>
+          <div class="row" style="margin-bottom:8px;"><label>Dataset Compare Scenario</label><select id="datasetCompareScenario"><option value="all">All</option><option value="spring">spring</option><option value="pendulum">pendulum</option><option value="bouncing">bouncing</option></select></div>
+          <div class="row" style="margin-bottom:8px;"><label>Dataset Compare Mode</label><select id="datasetCompareMode"><option value="random">Random 3</option><option value="first">First 3</option><option value="uniform">Uniform 3</option><option value="select">Select 3</option></select></div>
+          <div class="row" style="margin-bottom:8px;"><label>Selected idx (csv)</label><input id="selectedTrajCsv" value="0,10,20"></div>
+          <div id="datasetChart" class="chart" style="min-height:300px; margin-bottom:8px;"></div>
+          <p style="margin:0 0 8px;">Use left panel scenario cards + dataset settings, then click <code>Generate Dataset (RK4)</code>.</p>
+          <div class="data-controls">
+            <label>Scenario Filter</label><select id="dataScenarioFilter"><option value="all">All</option><option value="spring">spring</option><option value="pendulum">pendulum</option><option value="bouncing">bouncing</option></select>
+            <label>Trajectory Index</label><select id="dataTrajIdx"></select>
+            <label>Rows</label><select id="dataRows"><option value="100">100</option><option value="500">500</option><option value="1000">1000</option><option value="5000">5000</option><option value="10000">10000</option><option value="20000">20000</option><option value="all">All</option></select>
+            <button class="secondary" id="drawTableTrajBtn">Draw Trajectory</button>
+          </div>
+          <p id="tableDatasetInfo" style="margin:0 0 8px; font-size:12px; color:#94a3b8;">Table Dataset: (none)</p>
+          <p style="margin:0 0 8px; font-size:12px; color:#94a3b8;">
+            Shared param schema: <code>k_slg</code> means <code>k</code> (spring), <code>L</code> (pendulum), or <code>g</code> (bouncing). Use <code>scenario</code> and <code>k_slg_role</code> to interpret it.
+          </p>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr><th>traj</th><th>step</th><th>t</th><th>x</th><th>v</th><th>scenario</th><th>m</th><th>c</th><th>k_slg</th><th>k_slg_role</th><th>g_global</th><th>e</th><th>x0</th><th>v0</th><th>ground</th><th>k_g</th><th>c_g</th></tr>
+              </thead>
+              <tbody id="dataTableBody"></tbody>
+            </table>
+          </div>
+          <div class="quick-actions" style="margin-top:8px;">
+            <button class="secondary" id="exportDatasetCsvBtn">Export Dataset CSV</button>
+            <button class="secondary" id="deleteDatasetBtn">Delete Selected Dataset</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="wsNnPane" class="ws-pane">
+        <div class="panel" style="margin-bottom:8px;">
+          <div class="row" style="grid-template-columns: 1fr minmax(0, 1fr);">
+            <label>Architecture Preset</label>
+            <div style="display:flex; align-items:center; justify-content:space-between; gap:8px; min-width:0;">
+              <div id="currentPresetLabel" style="font-size:12px; color:#cbd5e1; flex:1 1 auto; min-width:0;">Quick: Direct-MLP-Strong</div>
+              <button class="secondary" id="applyPresetBtn" type="button" style="width:auto; padding:6px 10px;">Select Preconfig</button>
+            </div>
+          </div>
+          <button class="secondary" id="startCleanBtn" type="button" style="margin-bottom:8px;">Start Clean</button>
+          <select id="netPreset" style="display:none;">
+            <option value="direct_mlp_strong">Quick: Direct-MLP-Strong</option>
+            <option value="ar_gru_strong">Quick: AR-GRU-Strong</option>
+            <option value="ar_lstm_strong">Quick: AR-LSTM-Strong</option>
+            <option value="direct_mlp_ratio">Quick: Direct-MLP-Ratio</option>
+            <option value="ar_gru_ratio">Quick: AR-GRU-Ratio</option>
+            <option value="ar_lstm_ratio">Quick: AR-LSTM-Ratio</option>
+            <option value="exp_ar_cnn_strong">EXP: AR-CNN-Strong</option>
+            <option value="exp_ar_gru_window_to_x_zero_pad">EXP: AR-GRU ZeroPad (x-only)</option>
+            <option value="exp_ar_gru_window_to_x_rk4_warmup">EXP: AR-GRU RK4 Warmup (x-only)</option>
+            <option value="exp_dual_latent_match_direct">EXP: Dual Encoder Z-Match (Direct)</option>
+            <option value="exp_ar_gru_latent_match">EXP: AR-GRU + Z-Match</option>
+            <option value="custom">Custom</option>
+          </select>
+          <div class="row" style="display:none;"><label>Inferred mode</label><select id="predictionMode" disabled><option value="autoregressive">Autoregressive</option><option value="direct">Direct</option></select></div>
+          <div class="hint">Target output is configured on Output node (`x`, `v`, `x+v`, `traj`, or `params`).</div>
+          <div class="row" style="display:none;"><label>Dataset Source</label><select id="modelDatasetSource"><option value="auto">Auto</option><option value="autoregressive">AR dataset</option><option value="direct">Direct dataset</option></select></div>
+          <div class="hint">Graph decides mode: use `WindowHistX/WindowHistV` or `HistX/HistV` for AR, or direct feature nodes for direct mapping.</div>
+          <div id="modeContract" class="hint"></div>
+        </div>
+        <div class="panel" style="margin-bottom:8px;">
+          <div class="compare-title">Inputs</div>
+          <div class="node-btns" style="margin-bottom:8px;">
+            <button class="secondary" id="addWindowHistXBtn">WindowHistX</button><button class="secondary" id="addWindowHistVBtn">WindowHistV</button><button class="secondary" id="addHistXBtn">HistX</button><button class="secondary" id="addHistVBtn">HistV</button><button class="secondary" id="addParamsBtn">Params</button>
+            <button class="secondary" id="addScenarioBtn">Scenario</button>
+          </div>
+          <div class="compare-title">NN</div>
+          <div class="node-btns" style="margin-bottom:8px;">
+            <button class="secondary" id="addInputBtn">Input</button><button class="secondary" id="addDenseBtn">Dense</button><button class="secondary" id="addRnnBtn">RNN</button><button class="secondary" id="addGruBtn">GRU</button>
+            <button class="secondary" id="addLstmBtn">LSTM</button><button class="secondary" id="addConv1dBtn">Conv1D</button><button class="secondary" id="addDropoutBtn">Dropout</button><button class="secondary" id="addBatchNormBtn">BatchNorm</button><button class="secondary" id="addLayerNormBtn">LayerNorm</button><button class="secondary" id="addLatentBtn">Latent Z</button><button class="secondary" id="addLatentMuBtn">Latent μ</button><button class="secondary" id="addLatentLogVarBtn">Latent logσ²</button><button class="secondary" id="addReparamBtn">Reparam z</button>
+          </div>
+          <div class="compare-title">Utils</div>
+          <div class="node-btns" style="margin-bottom:8px;">
+            <button class="secondary" id="addTimeSecBtn">TimeSec</button><button class="secondary" id="addTimeNormBtn">TimeNorm</button><button class="secondary" id="addSinNormBtn">SinNorm</button><button class="secondary" id="addCosNormBtn">CosNorm</button><button class="secondary" id="addNoiseScheduleBtn">NoiseSchedule</button><button class="secondary" id="addConcatBtn">Concat</button>
+          </div>
+          <div class="compare-title">Output</div>
+          <div class="node-btns" style="margin-bottom:8px;">
+            <button class="secondary" id="addOutputXBtn">Output X</button><button class="secondary" id="addOutputVBtn">Output V</button><button class="secondary" id="addOutputXVBtn">Output X+V</button>
+          </div>
+          <div class="compare-title">Graph Tools</div>
+          <div class="node-btns">
+            <button class="secondary" id="autoArrangeBtn">Auto Arrange</button><button class="secondary" id="exportGraphBtn">Export Graph JSON</button><button class="secondary" id="importGraphBtn">Import Graph JSON</button><button class="secondary" id="exportRunPackBtn">Export Run Pack</button>
+          </div>
+          <input id="importGraphFile" type="file" accept="application/json,.json" style="display:none;">
+        </div>
+        <div id="drawflow"></div>
+        <div id="drawflowResizer" class="drawflow-resizer" title="Drag to resize model viewport height"></div>
+        <div class="panel" style="margin-bottom:8px;">
+          <div class="compare-title">Latent Monitor</div>
+          <div id="latentMonitorInfo" class="hint">Connect 2+ Latent Z nodes with same group to track z-match during training.</div>
+          <div id="latentMonitorChart" class="chart" style="min-height:220px;"></div>
+        </div>
+      </div>
+
+      <div id="wsGenPane" class="ws-pane">
+        <div class="compare-panel">
+          <div class="row" style="margin-bottom:6px;"><label>Scenario</label><select id="genScenarioType"><option value="spring">spring</option><option value="pendulum">pendulum</option><option value="bouncing">bouncing</option></select></div>
+          <div class="row" style="margin-bottom:6px;"><label>Condition Source</label><select id="genSourceMode"><option value="dataset_ref">Dataset trajectory params</option><option value="card_condition">Current preview card params</option></select></div>
+          <div class="row" style="margin-bottom:6px;"><label>Reference trajectory index</label><select id="genRefTrajIdx"></select></div>
+          <div class="row" style="margin-bottom:6px;"><label>Batch samples</label><input id="genNumSamples" type="number" min="1" max="200" step="1" value="12"></div>
+          <div class="row" style="margin-bottom:6px;"><label>Param noise sigma (fraction)</label><input id="genParamNoise" type="number" min="0" max="1" step="0.01" value="0.05"></div>
+          <div class="row" style="margin-bottom:6px;"><label>Ratio feature</label><select id="genRatioFeature"><option value="none">None</option><option value="rkm">k/m</option><option value="rcm">c/m</option><option value="rgl">g/L</option></select></div>
+          <div class="row" style="margin-bottom:6px;"><label>Ratio scale</label><input id="genRatioScale" type="number" step="0.05" value="1.00"></div>
+          <div class="row" style="margin-bottom:6px;"><label>Diffusion steps (UI)</label><input id="genDiffSteps" type="number" min="10" max="500" step="5" value="140"></div>
+          <div class="row" style="margin-bottom:6px;"><label>Guidance (UI)</label><input id="genGuidance" type="number" min="0" max="10" step="0.1" value="2.0"></div>
+          <div class="quick-actions" style="margin-bottom:6px;">
+            <button id="genRunOneBtn">Generate + Compare (Single)</button>
+            <button class="secondary" id="genRunBatchBtn">Run Batch Generation</button>
+            <button class="secondary" id="genQualityBtn">Run Quality Check</button>
+            <button class="secondary" id="genClearBtn">Clear Generation Results</button>
+            <button class="secondary" id="genExportCsvBtn">Export Generation CSV</button>
+            <button class="secondary" id="genExportJsonBtn">Export Generation JSON</button>
+          </div>
+          <div class="data-controls" style="margin-bottom:8px;">
+            <label>Sort</label>
+            <select id="genSortMode"><option value="recent">Recent</option><option value="best_mae">Best MAE</option><option value="worst_mae">Worst MAE</option></select>
+            <label>Sample</label>
+            <select id="genSampleSelect"></select>
+            <button class="secondary" id="genJumpBtn">Plot Selected</button>
+          </div>
+          <div class="hint" style="margin-bottom:8px;">
+            For diffusion-family graphs, this tab currently uses forward proxy comparison in web; full iterative denoise workflows remain notebook-grade.
+          </div>
+          <div id="genSingleChart" class="chart"></div>
+          <div class="compare-title" style="margin-top:8px;">Batch Overview</div>
+          <div id="genBatchChart" class="chart" style="min-height:260px;"></div>
+          <div class="compare-title" style="margin-top:8px;">Quality Overview</div>
+          <div id="genQualityChart" class="chart" style="min-height:240px;"></div>
+          <div class="compare-title" style="margin-top:8px;">Generation Metrics</div>
+          <div class="metric-wrap">
+            <table class="metric-table">
+              <thead><tr><th>#</th><th>Scenario</th><th>Model</th><th>Source</th><th>Ratio</th><th>MAE</th><th>RMSE</th><th>Bias</th></tr></thead>
+              <tbody id="genMetricsTableBody"></tbody>
+            </table>
+          </div>
+          <div class="compare-title" style="margin-top:8px;">Quality Metrics (Feature-based)</div>
+          <div class="metric-wrap">
+            <table class="metric-table">
+              <thead><tr><th>Scope</th><th>Model</th><th>Scenario</th><th>Samples</th><th>Integrity</th><th>Diversity Gap</th></tr></thead>
+              <tbody id="genQualityTableBody"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <div id="wsEvalPane" class="ws-pane">
+        <div class="compare-panel">
+          <div class="row" style="margin-bottom:6px;"><label>Scenario (single-case eval)</label><select id="evalScenarioType"><option value="spring">Damped Spring</option><option value="pendulum">Damped Pendulum</option><option value="bouncing">Bouncing Ball</option></select></div>
+          <div class="hint" style="margin-bottom:6px;">Inference is automatic from graph architecture (history nodes => AR rollout, direct feature nodes => direct inference).</div>
+          <div class="quick-actions" style="margin-bottom:6px;">
+            <button id="qaEvalBtn">NN vs RK4 (After Training)</button>
+            <button class="secondary" id="qaRandomDatasetEvalBtn">Random Dataset vs NN</button>
+            <button class="secondary" id="runBenchmarkBtn">Run Benchmark</button>
+            <button class="secondary" id="runFullAutoBtn">Run Full Auto</button>
+            <button class="secondary" id="exportMetricsBtn">Export CSV</button>
+            <button class="secondary" id="clearMetricsBtn">Clear Metrics</button>
+          </div>
+          <div class="row" style="margin-bottom:6px;"><label>Benchmark suite</label><select id="benchmarkSuite"><option value="current">Current graph only</option><option value="strong_pack">Strong Pack (Direct-MLP, AR-GRU, AR-LSTM)</option></select></div>
+          <div class="panel" style="margin-bottom:8px; padding:8px;">
+            <div class="row" style="margin-bottom:6px; align-items:center;">
+              <label>Experiment Checklist</label>
+              <button class="secondary" id="clearChecklistBtn">Clear Checklist</button>
+            </div>
+            <div class="metric-wrap">
+              <table class="metric-table">
+                <thead><tr><th>Done</th><th>Run</th><th>Preset</th><th>Target</th><th>Inference</th></tr></thead>
+                <tbody id="checklistTableBody"></tbody>
+              </table>
+            </div>
+          </div>
+          <div class="row" style="margin-bottom:6px; align-items:center;"><label>Run log</label><button class="secondary" id="copyRunLogBtn">Copy Log</button><button class="secondary" id="clearRunLogBtn">Clear Log</button></div>
+          <textarea id="runLog" rows="7" readonly style="width:100%; background:#0b1220; color:#e2e8f0; border:1px solid #1e293b; border-radius:8px; padding:8px; font-family:ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;"></textarea>
+          <div id="bestModelSummary" style="margin:6px 0; padding:8px; border:1px solid #1e3a8a; border-radius:8px; background:#0b1220; color:#bfdbfe; font-size:12px;">Best model summary will appear after benchmarks.</div>
+          <div id="configMixWarning" style="margin-top:8px; padding:8px; border:1px solid #7c2d12; border-radius:8px; background:#431407; color:#fdba74; font-size:12px; display:none;"></div>
+          <div class="compare-title">NN vs RK4 Comparison (always shown here)</div>
+          <div id="compareChart" class="chart"></div>
+          <div class="compare-title" style="margin-top:8px;">Performance Summary</div>
+          <div class="metric-wrap">
+            <table class="metric-table"><thead><tr><th>Type</th><th>Exp ID</th><th>Scenario</th><th>Model</th><th>Val MAE</th><th>Test MAE</th><th>MAE</th><th>RMSE</th><th>Bias</th></tr></thead><tbody id="metricsTableBody"></tbody></table>
+          </div>
+          <div class="panel" style="margin-top:8px;">
+            <div class="row" style="margin-bottom:6px; align-items:center;">
+              <label>Notebook/Web Alignment</label>
+              <button class="secondary" id="clearBenchDetailBtn">Clear Benchmark Details</button>
+            </div>
+            <div class="hint" style="margin-bottom:8px;">
+              This panel mirrors the notebook narrative: scenario-wise benchmark means, worst-case trajectories, and reproducibility notes.
+            </div>
+            <div id="scenarioSummaryChart" class="chart" style="min-height:240px;"></div>
+            <div class="compare-title" style="margin-top:8px;">Worst-Case Samples (Current Benchmark Run)</div>
+            <div class="metric-wrap">
+              <table class="metric-table">
+                <thead><tr><th>Model</th><th>Scenario</th><th>Traj Idx</th><th>MAE</th><th>RMSE</th><th>Bias</th></tr></thead>
+                <tbody id="worstCasesTableBody"></tbody>
+              </table>
+            </div>
+            <div id="reproChecklistBox" style="margin-top:8px; padding:8px; border:1px solid #1e293b; border-radius:8px; background:#0b1220; color:#cbd5e1; font-size:12px;">
+              Repro steps: 1) Export dataset CSV from Dataset tab. 2) Export graph JSON from Model tab. 3) Run notebook with same files and seed.
+            </div>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <div id="presetModalBackdrop" class="modal-backdrop" aria-hidden="true">
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="presetModalTitle">
+      <h3 id="presetModalTitle">Apply Architecture Preset</h3>
+      <div class="row" style="grid-template-columns: 1fr;">
+        <select id="presetModalSelect">
+          <option value="direct_mlp_strong">Quick: Direct-MLP-Strong</option>
+          <option value="ar_gru_strong">Quick: AR-GRU-Strong</option>
+          <option value="ar_lstm_strong">Quick: AR-LSTM-Strong</option>
+          <option value="direct_mlp_ratio">Quick: Direct-MLP-Ratio</option>
+          <option value="ar_gru_ratio">Quick: AR-GRU-Ratio</option>
+          <option value="ar_lstm_ratio">Quick: AR-LSTM-Ratio</option>
+          <option value="exp_ar_cnn_strong">EXP: AR-CNN-Strong</option>
+          <option value="exp_ar_gru_window_to_x_zero_pad">EXP: AR-GRU ZeroPad (x-only)</option>
+          <option value="exp_ar_gru_window_to_x_rk4_warmup">EXP: AR-GRU RK4 Warmup (x-only)</option>
+          <option value="exp_dual_latent_match_direct">EXP: Dual Encoder Z-Match (Direct)</option>
+          <option value="exp_ar_gru_latent_match">EXP: AR-GRU + Z-Match</option>
+        </select>
+      </div>
+      <div class="two-btn">
+        <button class="secondary" id="presetModalCancelBtn" type="button">Cancel</button>
+        <button id="presetModalApplyBtn" type="button">Apply</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="./src/schema_registry.js"></script>
+  <script src="./src/schema_definitions_builtin.js"></script>
+  <script src="./src/oscillator_dataset_core.js"></script>
+  <script src="./src/dataset_modules/mnist_source_loader.js"></script>
+  <script src="./src/dataset_modules/mnist_module.js"></script>
+  <script src="./src/dataset_modules/fashion_mnist_module.js"></script>
+  <script src="./src/dataset_modules/oscillator_module.js"></script>
+  <script src="./src/dataset_modules.js"></script>
+  <script src="./src/dataset_runtime.js"></script>
+  <script src="./src/workspace_store.js"></script>
+  <script src="./src/ui_shared_engine.js"></script>
+  <script src="./src/item_panel_module.js"></script>
+  <script src="./src/config_panel_module.js"></script>
+  <script src="./src/tab_manager_core.js"></script>
+  <script src="./src/dataset_processing_core.js"></script>
+  <script src="./src/entity_create_core.js"></script>
+  <script src="./src/model_graph_core.js"></script>
+  <script src="./src/model_graph_drawflow_adapter.js"></script>
+  <script src="./src/image_render_core.js"></script>
+  <script src="./src/trainer_session_state_core.js"></script>
+  <script src="./src/workspace_tab_effects_core.js"></script>
+  <script src="./src/workspace_lab_handlers_core.js"></script>
+  <script src="./src/workspace_controllers_core.js"></script>
+  <script src="./src/workspace_selection_ui_core.js"></script>
+  <script src="./src/notebook_runtime_assets.js"></script>
+  <script src="./src/notebook_bundle_core.js"></script>
+  <script src="./src/training_session_core.js"></script>
+  <script src="./src/training_worker_bridge.js"></script>
+  <script src="./src/dataset_bundle_adapter.js"></script>
+  <script src="./src/app.js?v=20260314restore"></script>
+</body>
+</html>
