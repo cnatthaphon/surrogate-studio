@@ -140,6 +140,47 @@
       };
     });
 
+    // modal backdrop
+    var modalBackdrop = el("div", {
+      className: "osc-modal-backdrop",
+      style: "display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.6);z-index:1000;align-items:center;justify-content:center;",
+    });
+    var modalBox = el("div", {
+      style: "background:#111827;border:1px solid #1e293b;border-radius:12px;padding:20px;min-width:340px;max-width:480px;",
+    });
+    var modalTitle = el("h3", { style: "color:#67e8f9;margin:0 0 12px;" }, "");
+    var modalFormMount = el("div", {});
+    var modalBtnRow = el("div", { style: "display:flex;gap:8px;margin-top:12px;justify-content:flex-end;" });
+    var modalCancelBtn = el("button", { className: "osc-btn secondary" }, "Cancel");
+    var modalCreateBtn = el("button", { className: "osc-btn" }, "Create");
+    modalBtnRow.appendChild(modalCancelBtn);
+    modalBtnRow.appendChild(modalCreateBtn);
+    modalBox.appendChild(modalTitle);
+    modalBox.appendChild(modalFormMount);
+    modalBox.appendChild(modalBtnRow);
+    modalBackdrop.appendChild(modalBox);
+    root.appendChild(modalBackdrop);
+
+    var _modalOnCreate = null;
+    function openModal(config) {
+      var cfg = config || {};
+      modalTitle.textContent = String(cfg.title || "New Item");
+      modalFormMount.innerHTML = "";
+      if (cfg.renderForm) cfg.renderForm(modalFormMount);
+      _modalOnCreate = cfg.onCreate || null;
+      modalBackdrop.style.display = "flex";
+    }
+    function closeModal() {
+      modalBackdrop.style.display = "none";
+      _modalOnCreate = null;
+    }
+    modalCancelBtn.addEventListener("click", closeModal);
+    modalBackdrop.addEventListener("click", function (e) { if (e.target === modalBackdrop) closeModal(); });
+    modalCreateBtn.addEventListener("click", function () {
+      if (typeof _modalOnCreate === "function") _modalOnCreate();
+      closeModal();
+    });
+
     mountEl.innerHTML = "";
     mountEl.appendChild(root);
 
@@ -185,6 +226,7 @@
     return {
       tabs: tabs,
       header: { schemaSelect: schemaSelect, statusEl: statusEl, titleEl: title },
+      modal: { open: openModal, close: closeModal, formMount: modalFormMount },
       showTab: showTab,
       setStatus: setStatus,
       onTabChange: onTabChange,

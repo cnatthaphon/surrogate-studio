@@ -139,41 +139,45 @@
         el.appendChild(list);
       }
 
-      // new trainer button + inline form
+      // new trainer button → opens modal popup
+      var modal = deps.modal;
       var newBtn = elFactory("button", { className: "osc-btn", style: "margin-top:8px;width:100%;" }, "+ New Trainer");
-      var newForm = elFactory("div", { style: "display:none;margin-top:6px;" });
-      var nameInput = elFactory("input", { type: "text", placeholder: "Trainer name", style: "width:100%;padding:4px 8px;margin-bottom:4px;border-radius:6px;border:1px solid #334155;background:#0b1220;color:#e2e8f0;font-size:12px;" });
-      var schemaSelect = elFactory("select", { style: "width:100%;padding:4px 8px;margin-bottom:4px;border-radius:6px;border:1px solid #334155;background:#0b1220;color:#e2e8f0;font-size:12px;" });
-      var schemas = schemaRegistry ? schemaRegistry.listSchemas() : [];
-      var currentSchema = _getSchemaId();
-      schemas.forEach(function (s) {
-        var opt = elFactory("option", { value: s.id });
-        opt.textContent = s.label || s.id;
-        if (s.id === currentSchema) opt.selected = true;
-        schemaSelect.appendChild(opt);
-      });
-      var createBtn = elFactory("button", { className: "osc-btn sm", style: "width:100%;" }, "Create");
-      createBtn.addEventListener("click", function () {
-        var name = nameInput.value.trim();
-        if (!name) { onStatus("Enter a name"); return; }
-        var sid = schemaSelect.value;
-        if (stateApi) stateApi.setActiveSchema(sid);
-        if (stateApi) stateApi.setActiveTrainer("");
-        if (stateApi) stateApi.set("pendingTrainerName", name);
-        newForm.style.display = "none";
-        nameInput.value = "";
-        _renderLeftPanel();
-        _renderMainPanel();
-        _renderRightPanel();
-      });
-      newForm.appendChild(nameInput);
-      newForm.appendChild(schemaSelect);
-      newForm.appendChild(createBtn);
       newBtn.addEventListener("click", function () {
-        newForm.style.display = newForm.style.display === "none" ? "" : "none";
+        if (!modal) return;
+        var _nameInput, _schemaSelect;
+        modal.open({
+          title: "New Training Session",
+          renderForm: function (mount) {
+            var schemas = schemaRegistry ? schemaRegistry.listSchemas() : [];
+            var currentSchema = _getSchemaId();
+            mount.appendChild(elFactory("label", { style: "font-size:12px;color:#94a3b8;display:block;margin-bottom:2px;" }, "Session Name"));
+            _nameInput = elFactory("input", { type: "text", placeholder: "my_training", style: "width:100%;padding:6px 8px;margin-bottom:8px;border-radius:6px;border:1px solid #334155;background:#0b1220;color:#e2e8f0;" });
+            mount.appendChild(_nameInput);
+            mount.appendChild(elFactory("label", { style: "font-size:12px;color:#94a3b8;display:block;margin-bottom:2px;" }, "Schema"));
+            _schemaSelect = elFactory("select", { style: "width:100%;padding:6px 8px;border-radius:6px;border:1px solid #334155;background:#0b1220;color:#e2e8f0;" });
+            schemas.forEach(function (s) {
+              var opt = elFactory("option", { value: s.id });
+              opt.textContent = s.label || s.id;
+              if (s.id === currentSchema) opt.selected = true;
+              _schemaSelect.appendChild(opt);
+            });
+            mount.appendChild(_schemaSelect);
+            setTimeout(function () { _nameInput.focus(); }, 50);
+          },
+          onCreate: function () {
+            var name = _nameInput ? _nameInput.value.trim() : "";
+            var sid = _schemaSelect ? _schemaSelect.value : "";
+            if (!name) { onStatus("Enter a name"); return; }
+            if (stateApi) stateApi.setActiveSchema(sid);
+            if (stateApi) stateApi.setActiveTrainer("");
+            if (stateApi) stateApi.set("pendingTrainerName", name);
+            _renderLeftPanel();
+            _renderMainPanel();
+            _renderRightPanel();
+          },
+        });
       });
       el.appendChild(newBtn);
-      el.appendChild(newForm);
     }
 
     function _renderMainPanel() {

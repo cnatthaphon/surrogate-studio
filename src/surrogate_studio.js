@@ -68,6 +68,7 @@
     var setStatus = layoutApi.setStatus;
     var escapeHtml = layoutApi.escapeHtml;
     var elHelper = layoutApi.el;
+    var modal = layoutApi.modal;
 
     // create tab controllers
     var tabControllers = {};
@@ -99,6 +100,7 @@
         onStatus: setStatus,
         escapeHtml: escapeHtml,
         el: elHelper,
+        modal: modal,
       });
     }
 
@@ -114,6 +116,7 @@
         onStatus: setStatus,
         escapeHtml: escapeHtml,
         el: elHelper,
+        modal: modal,
       });
     }
 
@@ -128,6 +131,7 @@
         onStatus: setStatus,
         escapeHtml: escapeHtml,
         el: elHelper,
+        modal: modal,
       });
     }
 
