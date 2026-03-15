@@ -150,14 +150,42 @@
         el.appendChild(list);
       }
 
-      // new dataset button
+      // new dataset button + inline form
       var newBtn = elFactory("button", { className: "osc-btn", style: "margin-top:8px;width:100%;" }, "+ New Dataset");
-      newBtn.addEventListener("click", function () {
+      var newForm = elFactory("div", { style: "display:none;margin-top:6px;" });
+      var nameInput = elFactory("input", { type: "text", placeholder: "Dataset name", style: "width:100%;padding:4px 8px;margin-bottom:4px;border-radius:6px;border:1px solid #334155;background:#0b1220;color:#e2e8f0;font-size:12px;" });
+      var schemaSelect = elFactory("select", { style: "width:100%;padding:4px 8px;margin-bottom:4px;border-radius:6px;border:1px solid #334155;background:#0b1220;color:#e2e8f0;font-size:12px;" });
+      var schemas = schemaRegistry ? schemaRegistry.listSchemas() : [];
+      var currentSchema = _getSchemaId();
+      schemas.forEach(function (s) {
+        var opt = elFactory("option", { value: s.id });
+        opt.textContent = s.label || s.id;
+        if (s.id === currentSchema) opt.selected = true;
+        schemaSelect.appendChild(opt);
+      });
+      var createBtn = elFactory("button", { className: "osc-btn sm", style: "width:100%;" }, "Create");
+      createBtn.addEventListener("click", function () {
+        var name = nameInput.value.trim();
+        if (!name) { onStatus("Enter a name"); return; }
+        var sid = schemaSelect.value;
+        if (stateApi) stateApi.setActiveSchema(sid);
         if (stateApi) stateApi.setActiveDataset("");
+        newForm.style.display = "none";
+        nameInput.value = "";
+        // store the pending name for when dataset is generated
+        if (stateApi) stateApi.set("pendingDatasetName", name);
         _renderLeftPanel();
         _renderMainPanel();
+        _renderRightPanel();
+      });
+      newForm.appendChild(nameInput);
+      newForm.appendChild(schemaSelect);
+      newForm.appendChild(createBtn);
+      newBtn.addEventListener("click", function () {
+        newForm.style.display = newForm.style.display === "none" ? "" : "none";
       });
       el.appendChild(newBtn);
+      el.appendChild(newForm);
     }
 
     function _renderMainPanel() {
@@ -294,9 +322,10 @@
           if (!ds) { onStatus("Generation returned empty"); return; }
           // save to store
           var id = "ds_" + Date.now();
+          var pendingName = stateApi ? stateApi.get("pendingDatasetName") : "";
           var record = {
             id: id,
-            name: schemaId + "_" + id,
+            name: pendingName || (schemaId + "_" + id),
             schemaId: schemaId,
             moduleId: mod.id,
             seed: Number(formConfig.seed || 42),
