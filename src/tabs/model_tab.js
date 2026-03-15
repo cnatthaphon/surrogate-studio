@@ -255,14 +255,12 @@
     }
 
     function _initEditor(container) {
-      if (typeof root.Drawflow === "undefined" && typeof window !== "undefined" && window.Drawflow) {
-        // browser
-      } else if (typeof root.Drawflow === "undefined") {
+      var W = typeof window !== "undefined" ? window : (typeof globalThis !== "undefined" ? globalThis : {});
+      var Drawflow = W.Drawflow || null;
+      if (!Drawflow) {
         container.innerHTML = "<div class='osc-empty'>Drawflow not loaded</div>";
         return;
       }
-      var Drawflow = root.Drawflow || (typeof window !== "undefined" ? window.Drawflow : null);
-      if (!Drawflow) return;
 
       _editor = new Drawflow(container);
       _editor.reroute = true;
