@@ -1,6 +1,6 @@
 <mxfile host="Electron" agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) draw.io/29.5.2 Chrome/142.0.7444.265 Electron/39.6.1 Safari/537.36" version="29.5.2" pages="2">
   <diagram name="Design" id="2ENL1TxlSpZzeUq41aDY">
-    <mxGraphModel dx="757" dy="3272" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="827" pageHeight="1169" math="0" shadow="0">
+    <mxGraphModel dx="531" dy="3139" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="827" pageHeight="1169" math="0" shadow="0">
       <root>
         <mxCell id="0" />
         <mxCell id="1" parent="0" />
@@ -53,7 +53,7 @@
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
         <mxCell id="9CXCHwLyg4OmDUMbx66X-29" parent="1" style="rounded=0;whiteSpace=wrap;html=1;align=left;" value="&lt;div&gt;&lt;div&gt;Sampling Module&lt;/div&gt;&lt;/div&gt;&lt;div&gt;- สำหรับ GAN/AE/VAE/Difussion&lt;/div&gt;&lt;div&gt;- ระบบเดียวกับ Train แต่ทำหน้าที่ Sampling ตาม Model&lt;/div&gt;" vertex="1">
-          <mxGeometry height="100" width="460" x="4180" y="550" as="geometry" />
+          <mxGeometry height="100" width="460" x="4502" y="400" as="geometry" />
         </mxCell>
         <mxCell id="mHzK8inOEMTbdyNxkMmV-3" edge="1" parent="1" source="9CXCHwLyg4OmDUMbx66X-30" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;" target="mHzK8inOEMTbdyNxkMmV-2">
           <mxGeometry relative="1" as="geometry" />
@@ -212,15 +212,6 @@
             <mxPoint x="3060" y="-250" as="sourcePoint" />
             <mxPoint x="2747.5" y="160" as="targetPoint" />
           </mxGeometry>
-        </mxCell>
-        <mxCell id="wNZCZ6THGhpWY_Fcxty--1" parent="1" style="rounded=0;whiteSpace=wrap;html=1;" value="&lt;div&gt;แนวทางที่คุณว่า ทำเป็น JS file เช่น demo_presets.js:&lt;/div&gt;&lt;div&gt;&lt;br&gt;&lt;/div&gt;&lt;div&gt;&amp;nbsp; export const DEMO_OSCILLATOR = {&lt;/div&gt;&lt;div&gt;&amp;nbsp; &amp;nbsp; dataset: { /* dataset spec - oscillator, 500 samples */ },&lt;/div&gt;&lt;div&gt;&amp;nbsp; &amp;nbsp; model: { /* drawflow graph - LSTM encoder-decoder */ },&lt;/div&gt;&lt;div&gt;&amp;nbsp; &amp;nbsp; trainer: { /* train spec - 50 epochs, lr 0.001 */ }&lt;/div&gt;&lt;div&gt;&amp;nbsp; };&lt;/div&gt;&lt;div&gt;&lt;br&gt;&lt;/div&gt;&lt;div&gt;&amp;nbsp; เปิด app มา detect ว่า store ว่าง → load preset → user เห็น Data Lab มี dataset, Model Lab มี graph, Training Lab พร้อม train&lt;/div&gt;&lt;div&gt;&amp;nbsp; &amp;nbsp;— กด Train ได้เลย&lt;/div&gt;&lt;div&gt;&lt;br&gt;&lt;/div&gt;&lt;div&gt;&amp;nbsp; เป็น in-memory ไม่ต้อง IndexedDB, ไม่ต้อง server, ไม่ต้อง fetch — เปิด browser = พร้อมใช้&lt;/div&gt;&lt;div&gt;&lt;br&gt;&lt;/div&gt;&lt;div&gt;&amp;nbsp; ภาพรวมงานอยู่ในทิศทางที่ดีครับ ใกล้ release แล้ว&lt;/div&gt;" vertex="1">
-          <mxGeometry height="60" width="120" x="4940" y="710" as="geometry" />
-        </mxCell>
-        <mxCell id="wNZCZ6THGhpWY_Fcxty--2" parent="1" style="rounded=0;whiteSpace=wrap;html=1;align=left;" value="&lt;div&gt;&lt;div&gt;Eval tab&lt;/div&gt;&lt;/div&gt;&lt;div&gt;- สำหรับ GAN/AE/VAE/Difussion&lt;/div&gt;&lt;div&gt;- ระบบเดียวกับ Train แต่ทำหน้าที่ Sampling ตาม Model&lt;/div&gt;" vertex="1">
-          <mxGeometry height="100" width="460" x="4335" y="700" as="geometry" />
-        </mxCell>
-        <mxCell id="wNZCZ6THGhpWY_Fcxty--3" parent="1" style="rounded=0;whiteSpace=wrap;html=1;align=left;" value="&lt;div&gt;&lt;div&gt;initialize&lt;/div&gt;&lt;/div&gt;" vertex="1">
-          <mxGeometry height="100" width="460" x="3881" y="780" as="geometry" />
         </mxCell>
       </root>
     </mxGraphModel>

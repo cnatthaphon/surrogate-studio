@@ -154,7 +154,8 @@
       var modal = deps.modal; // from layout.modal
       var newBtn = elFactory("button", { className: "osc-btn", style: "margin-top:8px;width:100%;" }, "+ New Dataset");
       newBtn.addEventListener("click", function () {
-        if (!modal) return;
+        console.log("[dataset_tab] + New clicked, modal=", modal, "modal.open=", modal && modal.open);
+        if (!modal || typeof modal.open !== "function") { console.error("[dataset_tab] modal not available"); return; }
         var _nameInput, _schemaSelect;
         modal.open({
           title: "New Dataset",

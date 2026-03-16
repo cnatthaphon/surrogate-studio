@@ -176,19 +176,7 @@
       if (stateApi) stateApi.setActiveTab(tabId);
     });
 
-    // wire schema selector
-    var schemaSelect = layoutApi.header.schemaSelect;
-    if (schemaSelect) {
-      schemaSelect.addEventListener("change", function () {
-        var newSchema = schemaSelect.value;
-        if (stateApi) stateApi.setActiveSchema(newSchema);
-        // refresh current tab
-        if (_currentTab && tabControllers[_currentTab] && typeof tabControllers[_currentTab].refresh === "function") {
-          tabControllers[_currentTab].refresh();
-        }
-        setStatus("Schema: " + newSchema);
-      });
-    }
+    // schema changes are handled by individual tabs (e.g. playground left panel)
 
     // show default tab
     layoutApi.showTab("playground");

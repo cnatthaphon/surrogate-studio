@@ -97,16 +97,8 @@
     // header
     var header = el("div", { className: "osc-header" });
     var title = el("h1", {}, "Surrogate Studio");
-    var schemaSelect = el("select", { id: "osc-schema-select" });
-    schemas.forEach(function (s) {
-      var opt = el("option", { value: s.id });
-      opt.textContent = s.label || s.id;
-      if (s.id === defaultSchemaId) opt.selected = true;
-      schemaSelect.appendChild(opt);
-    });
     var statusEl = el("span", { className: "osc-status" }, "Ready");
     header.appendChild(title);
-    header.appendChild(schemaSelect);
     header.appendChild(statusEl);
     root.appendChild(header);
 
@@ -215,7 +207,7 @@
       _onTabChange = cb;
     }
 
-    function getSchemaSelectEl() { return schemaSelect; }
+    function getSchemaSelectEl() { return null; }
     function getActiveTabId() { return _activeTabId; }
 
     function destroy() {
@@ -225,7 +217,7 @@
 
     return {
       tabs: tabs,
-      header: { schemaSelect: schemaSelect, statusEl: statusEl, titleEl: title },
+      header: { statusEl: statusEl, titleEl: title },
       modal: { open: openModal, close: closeModal, formMount: modalFormMount },
       showTab: showTab,
       setStatus: setStatus,
