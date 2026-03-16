@@ -148,7 +148,7 @@
         if (mod && typeof mod.build === "function") {
           previewMount.innerHTML = "<div style='color:#67e8f9;'>Generating preview...</div>";
           try {
-            var r = mod.build({ seed: 42, totalCount: 50, variant: _getSchemaId() });
+            var r = mod.build({ seed: 42, totalCount: 50, variant: _getSchemaId(), sourceMode: "synthetic" });
             var h = function (res) {
               if (!res) { previewMount.innerHTML = "<div class='osc-empty'>No data</div>"; return; }
               previewMount.innerHTML = "";

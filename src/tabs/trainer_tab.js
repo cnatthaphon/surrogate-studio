@@ -168,9 +168,13 @@
             var name = _nameInput ? _nameInput.value.trim() : "";
             var sid = _schemaSelect ? _schemaSelect.value : "";
             if (!name) { onStatus("Enter a name"); return; }
+            var id = "t_" + Date.now();
+            if (store && typeof store.upsertTrainerCard === "function") {
+              store.upsertTrainerCard({ id: id, name: name, schemaId: sid, status: "draft", createdAt: Date.now() });
+            }
             if (stateApi) stateApi.setActiveSchema(sid);
-            if (stateApi) stateApi.setActiveTrainer("");
-            if (stateApi) stateApi.set("pendingTrainerName", name);
+            if (stateApi) stateApi.setActiveTrainer(id);
+            onStatus("Created trainer: " + name);
             _renderLeftPanel();
             _renderMainPanel();
             _renderRightPanel();

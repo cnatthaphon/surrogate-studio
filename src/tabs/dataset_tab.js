@@ -181,9 +181,14 @@
             var name = _nameInput ? _nameInput.value.trim() : "";
             var sid = _schemaSelect ? _schemaSelect.value : "";
             if (!name) { onStatus("Enter a name"); return; }
+            // create draft record in store immediately
+            var id = "ds_" + Date.now();
+            if (store && typeof store.upsertDataset === "function") {
+              store.upsertDataset({ id: id, name: name, schemaId: sid, status: "draft", createdAt: Date.now() });
+            }
             if (stateApi) stateApi.setActiveSchema(sid);
-            if (stateApi) stateApi.setActiveDataset("");
-            if (stateApi) stateApi.set("pendingDatasetName", name);
+            if (stateApi) stateApi.setActiveDataset(id);
+            onStatus("Created dataset: " + name);
             _renderLeftPanel();
             _renderMainPanel();
             _renderRightPanel();

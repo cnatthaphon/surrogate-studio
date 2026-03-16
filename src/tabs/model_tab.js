@@ -127,9 +127,13 @@
             var name = _nameInput ? _nameInput.value.trim() : "";
             var sid = _schemaSelect ? _schemaSelect.value : "";
             if (!name) { onStatus("Enter a name"); return; }
+            var id = "m_" + Date.now();
+            if (store && typeof store.upsertModel === "function") {
+              store.upsertModel({ id: id, name: name, schemaId: sid, status: "draft", createdAt: Date.now() });
+            }
             if (stateApi) stateApi.setActiveSchema(sid);
-            if (stateApi) stateApi.setActiveModel("");
-            if (stateApi) stateApi.set("pendingModelName", name);
+            if (stateApi) stateApi.setActiveModel(id);
+            onStatus("Created model: " + name);
             _clearEditor();
             _renderLeftPanel();
             _renderMainPanel();
