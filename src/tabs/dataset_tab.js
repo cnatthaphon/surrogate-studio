@@ -364,9 +364,11 @@
 
     function mount() {
       console.log("[dataset_tab] mount() called, leftEl=", layout.leftEl, "mainEl=", layout.mainEl);
+      console.log("[dataset_tab] leftEl.parentNode=", layout.leftEl.parentNode, "visible=", layout.leftEl.offsetParent !== null);
       _renderLeftPanel();
       _renderMainPanel();
       _renderRightPanel();
+      console.log("[dataset_tab] after render, leftEl.innerHTML length=", layout.leftEl.innerHTML.length, "children=", layout.leftEl.children.length);
     }
 
     function unmount() {
