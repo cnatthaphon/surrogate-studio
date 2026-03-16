@@ -489,6 +489,151 @@
     </div>
   </div>
 
+  <!-- Missing elements for item management (app.js expects these) -->
+  <div id="leftLibraryPanel" class="sidebar" style="display:none;position:fixed;left:0;top:0;width:260px;height:100vh;z-index:50;padding:12px;overflow-y:auto;">
+    <div id="leftLibraryTitle" style="font-size:13px;color:#94a3b8;margin-bottom:8px;font-weight:600;">Library</div>
+    <div id="leftLibraryActions" style="display:flex;gap:4px;margin-bottom:8px;">
+      <button id="leftNewDatasetBtn" class="mini-btn">+ Dataset</button>
+      <button id="leftNewModelBtn" class="mini-btn">+ Model</button>
+      <button id="leftNewTrainSessionBtn" class="mini-btn">+ Trainer</button>
+    </div>
+    <div id="leftLibraryList"></div>
+  </div>
+  <div id="rightRail" style="display:none;position:fixed;right:0;top:0;width:280px;height:100vh;z-index:50;padding:12px;overflow-y:auto;background:#111827;border-left:1px solid #1e293b;">
+    <div id="rightDataLabPanel" style="display:none;">
+      <div id="rightDataLabPanelTitle" style="font-size:13px;color:#94a3b8;margin-bottom:4px;">Dataset Config</div>
+      <div id="rightDataLabInfo"></div>
+      <div id="rightDataLabConfigTitle"></div>
+      <div id="rightDataLabConfigMount"></div>
+    </div>
+    <div id="rightModelPanel" style="display:none;"></div>
+    <div id="rightTrainPanel" style="display:none;">
+      <div id="rightTrainInfo"></div>
+      <div id="rightTrainConfigTitle"></div>
+      <div id="rightTrainConfigMount"></div>
+    </div>
+  </div>
+
+  <!-- Entity Create Modal -->
+  <div id="entityCreateModalBackdrop" class="modal-backdrop" aria-hidden="true">
+    <div style="background:#111827;border:1px solid #1e293b;border-radius:12px;padding:20px;min-width:340px;max-width:480px;margin:auto;margin-top:15vh;">
+      <div id="entityCreateModalTitle" style="color:#67e8f9;font-size:16px;margin-bottom:12px;">New Item</div>
+      <div id="entityCreateFormMount"></div>
+      <div id="entityCreateFootnote" style="font-size:11px;color:#64748b;margin-top:8px;"></div>
+      <div style="display:flex;gap:8px;margin-top:12px;justify-content:flex-end;">
+        <button id="entityCreateModalCancelBtn" class="secondary" style="width:auto;padding:6px 16px;">Cancel</button>
+        <button id="entityCreateModalCreateBtn" style="width:auto;padding:6px 16px;">Create</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Unsaved Model Modal -->
+  <div id="unsavedModelModalBackdrop" class="modal-backdrop" aria-hidden="true">
+    <div style="background:#111827;border:1px solid #1e293b;border-radius:12px;padding:20px;min-width:300px;max-width:400px;margin:auto;margin-top:15vh;">
+      <div id="unsavedModelModalText" style="color:#e2e8f0;margin-bottom:12px;">Unsaved changes</div>
+      <div style="display:flex;gap:8px;justify-content:flex-end;">
+        <button id="unsavedModelCancelBtn" class="secondary" style="width:auto;padding:6px 12px;">Cancel</button>
+        <button id="unsavedModelDiscardBtn" class="secondary" style="width:auto;padding:6px 12px;">Discard</button>
+        <button id="unsavedModelSaveBtn" style="width:auto;padding:6px 12px;">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Additional workspace tabs -->
+  <div style="display:none;">
+    <button id="wsPlaygroundTab" class="workspace-tab">Playground</button>
+    <div id="wsPlaygroundPane" class="ws-pane"><div id="playgroundUnsupportedHint"></div><div id="previewModulePanelMount"></div></div>
+    <button id="wsTrainTab" class="workspace-tab">Training</button>
+    <div id="wsTrainPane" class="ws-pane">
+      <div id="trainMainView"></div>
+    </div>
+  </div>
+
+  <!-- Dataset Lab elements -->
+  <div style="display:none;">
+    <button id="dataLabPreviewTab">Preview</button>
+    <button id="dataLabBuilderTab">Builder</button>
+    <div id="dataLabPreviewPane"></div>
+    <div id="dataLabBuilderPane"></div>
+    <div id="datasetConfigBlock"></div>
+    <div id="datasetConfigHome"></div>
+    <div id="datasetDetailTitle"></div>
+    <div id="datasetDetailMeta"></div>
+    <select id="datasetModuleSelect"></select>
+    <div id="datasetModuleInfo"></div>
+    <div id="datasetSelectionEmpty"></div>
+    <div id="datasetOscillatorPanel"></div>
+    <div id="datasetOscillatorHint"></div>
+    <div id="datasetOscillatorSchemaHint"></div>
+    <div id="datasetOscillatorTableControls"></div>
+    <div id="datasetOscillatorTableWrap"></div>
+    <div id="datasetSidebarOscillatorOnly"></div>
+    <div id="datasetSidebarImageOnly"></div>
+    <div id="datasetGenericTableWrap"><table><thead><tr id="datasetGenericTableHeadRow"></tr></thead><tbody id="datasetGenericTableBody"></tbody></table></div>
+    <div id="datasetImagePanel">
+      <canvas id="datasetImageCanvas" width="280" height="280"></canvas>
+      <div id="datasetImageInfo"></div>
+      <span id="datasetImageIndex"></span>
+      <span id="datasetImageSplit"></span>
+    </div>
+    <div id="mnistClassGrid"></div>
+    <button id="mnistRandomByClassBtn">Random by class</button>
+    <span id="mnistTrainCount"></span><span id="mnistValCount"></span><span id="mnistTestCount"></span><span id="mnistTotalCount"></span>
+  </div>
+
+  <!-- Model Lab elements -->
+  <div style="display:none;">
+    <div id="modelLabContent"></div>
+    <div id="modelLabSelectionEmpty"></div>
+    <div id="modelPaletteMount"></div>
+    <select id="modelSchemaSelect"></select>
+    <div id="modelSchemaReadonly"></div>
+    <div id="modelLibraryName"></div>
+    <button id="newModelBtn">New</button>
+    <button id="saveModelToLibraryBtn">Save</button>
+    <button id="deleteModelFromLibraryBtn">Delete</button>
+    <button id="renameModelBtn">Rename</button>
+    <button id="clearGraphBtn">Clear</button>
+    <button id="addWindowHistBtn">WinHist</button>
+    <button id="addHistBtn">Hist</button>
+    <button id="addImageSourceBtn">ImgSrc</button>
+    <button id="addOutputMultiBtn">Output</button>
+    <button id="addRatioKmBtn">k/m</button>
+    <button id="addRatioCmBtn">c/m</button>
+    <button id="addRatioGlBtn">g/L</button>
+  </div>
+
+  <!-- Training Lab elements -->
+  <div style="display:none;">
+    <button id="addTrainSessionBtn">+ Session</button>
+    <div id="trainSessionName"></div>
+    <div id="trainSessionStatus"></div>
+    <select id="trainSessionSchemaSelect"></select>
+    <select id="trainSessionDatasetSelect"></select>
+    <select id="trainSessionModelSelect"></select>
+    <div id="trainSessionRuntime"></div>
+    <div id="trainSessionRuntimeBackend"></div>
+    <div id="trainingConfigBlock"></div>
+    <div id="trainingConfigHome"></div>
+    <select id="lossType"></select>
+    <select id="optimizerType"></select>
+    <select id="inferenceMethod"></select>
+    <div id="inferenceMethodInfo"></div>
+    <div id="arWarmupSteps"></div>
+    <div id="windowSize"></div>
+    <div id="gradClipNorm"></div>
+    <div id="gradClipValue"></div>
+    <div id="predictionModeInfo"></div>
+    <div id="splitModeRow"></div>
+    <div id="trainFracRow"></div>
+    <div id="valFracRow"></div>
+    <div id="testFracRow"></div>
+    <div id="previewMainChartWrap"></div>
+    <input id="serverEndpointInput">
+    <button id="detectServerBtn">Detect</button>
+    <div id="runtimeDetectInfo"></div>
+  </div>
+
   <script src="./src/schema_registry.js"></script>
   <script src="./src/schema_definitions_builtin.js"></script>
   <script src="./src/oscillator_dataset_core.js"></script>
