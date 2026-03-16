@@ -363,6 +363,7 @@
     }
 
     function mount() {
+      console.log("[dataset_tab] mount() called, leftEl=", layout.leftEl, "mainEl=", layout.mainEl);
       _renderLeftPanel();
       _renderMainPanel();
       _renderRightPanel();

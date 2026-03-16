@@ -164,6 +164,7 @@
     // wire tab switching
     var _currentTab = null;
     layoutApi.onTabChange(function (tabId, prevTabId) {
+      console.log("[studio] tab change:", prevTabId, "→", tabId, "controllers:", Object.keys(tabControllers));
       // unmount previous
       if (_currentTab && tabControllers[_currentTab] && typeof tabControllers[_currentTab].unmount === "function") {
         tabControllers[_currentTab].unmount();
@@ -171,7 +172,10 @@
       _currentTab = tabId;
       // mount new
       if (tabControllers[tabId] && typeof tabControllers[tabId].mount === "function") {
+        console.log("[studio] mounting", tabId);
         tabControllers[tabId].mount();
+      } else {
+        console.warn("[studio] no controller for tab:", tabId);
       }
       if (stateApi) stateApi.setActiveTab(tabId);
     });
