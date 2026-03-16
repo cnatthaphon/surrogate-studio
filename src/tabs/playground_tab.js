@@ -306,8 +306,10 @@
     // --- lifecycle ---
     function mount() {
       _scenarios = {}; _globalInputs = {}; _statusEl = null;
+      var mode = _getPlaygroundMode();
+      console.log("[playground] mount schema=" + _getSchemaId() + " mode=" + mode);
       _renderLeftPanel();
-      _renderRightPanel(); // right first so _scenarios is populated before main needs chartDivs
+      _renderRightPanel();
       _renderMainPanel();
     }
     function unmount() {
