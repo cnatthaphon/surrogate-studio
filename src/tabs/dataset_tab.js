@@ -42,12 +42,13 @@
 
     function _getModule() {
       var schemaId = _getSchemaId();
-      if (datasetRuntime && typeof datasetRuntime.pickDefaultModuleForSchema === "function") {
-        return datasetRuntime.pickDefaultModuleForSchema(schemaId);
-      }
+      // getModuleForSchema returns clones without build; must use getModule(id) for build
       if (datasetModules && typeof datasetModules.getModuleForSchema === "function") {
         var mods = datasetModules.getModuleForSchema(schemaId);
-        return Array.isArray(mods) && mods.length ? mods[0] : null;
+        var modList = Array.isArray(mods) ? mods : [];
+        if (modList.length && datasetModules.getModule) {
+          return datasetModules.getModule(modList[0].id);
+        }
       }
       return null;
     }

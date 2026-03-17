@@ -147,10 +147,12 @@
         mainEl.appendChild(previewMount);
         var schemaId = _getSchemaId();
         console.log("[playground] image_dataset mode, schemaId=" + schemaId);
-        var mods = datasetModules ? (datasetModules.getModuleForSchema(schemaId) || []) : [];
-        if (!Array.isArray(mods)) mods = [mods];
-        console.log("[playground] modules found:", mods.length, mods.map(function(m){return m && m.id}));
-        var mod = mods[0];
+        // getModuleForSchema returns without build; use getModule(id) to get build function
+        var modList = datasetModules ? (datasetModules.getModuleForSchema(schemaId) || []) : [];
+        if (!Array.isArray(modList)) modList = [modList];
+        var modId = modList.length ? modList[0].id : null;
+        var mod = modId && datasetModules.getModule ? datasetModules.getModule(modId) : null;
+        console.log("[playground] module:", modId, "build:", mod && typeof mod.build);
         if (mod && typeof mod.build === "function") {
           previewMount.innerHTML = "<div style='color:#67e8f9;'>Generating synthetic preview...</div>";
           try {
