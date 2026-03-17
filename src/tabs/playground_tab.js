@@ -127,7 +127,9 @@
       var mode = _getPlaygroundMode();
 
       if (mode === "trajectory_simulation") {
+        console.log("[playground] rendering trajectory charts, _scenarios keys:", Object.keys(_scenarios));
         SCENARIO_DEFS.forEach(function (def) {
+          if (!_scenarios[def.id]) _scenarios[def.id] = { inputs: {}, rangeInputs: {} };
           var wrap = el("div", { style: "margin-bottom:12px;" });
           wrap.appendChild(el("div", { style: "font-size:13px;color:#67e8f9;margin-bottom:4px;font-weight:600;" }, def.label));
           var chartDiv = el("div", { style: "height:260px;" });
@@ -143,20 +145,42 @@
         mainEl.appendChild(el("h3", { style: "color:#67e8f9;" }, "Image Dataset Preview"));
         var previewMount = el("div", {});
         mainEl.appendChild(previewMount);
-        var mods = datasetModules ? (datasetModules.getModuleForSchema(_getSchemaId()) || []) : [];
-        var mod = Array.isArray(mods) ? mods[0] : mods;
+        var schemaId = _getSchemaId();
+        console.log("[playground] image_dataset mode, schemaId=" + schemaId);
+        var mods = datasetModules ? (datasetModules.getModuleForSchema(schemaId) || []) : [];
+        if (!Array.isArray(mods)) mods = [mods];
+        console.log("[playground] modules found:", mods.length, mods.map(function(m){return m && m.id}));
+        var mod = mods[0];
         if (mod && typeof mod.build === "function") {
-          previewMount.innerHTML = "<div style='color:#67e8f9;'>Generating preview...</div>";
+          previewMount.innerHTML = "<div style='color:#67e8f9;'>Generating synthetic preview...</div>";
           try {
-            var r = mod.build({ seed: 42, totalCount: 50, variant: _getSchemaId(), sourceMode: "synthetic" });
+            var r = mod.build({ seed: 42, totalCount: 50, variant: schemaId, sourceMode: "synthetic" });
+            console.log("[playground] build result type:", typeof r, "isPromise:", !!(r && r.then));
             var h = function (res) {
-              if (!res) { previewMount.innerHTML = "<div class='osc-empty'>No data</div>"; return; }
+              console.log("[playground] build result:", res ? Object.keys(res).slice(0,10) : "null");
+              if (!res) { previewMount.innerHTML = "<div class='osc-empty'>No data returned</div>"; return; }
               previewMount.innerHTML = "";
-              previewMount.appendChild(el("div", { style: "font-size:12px;color:#cbd5e1;" },
-                "Train: " + ((res.xTrain||[]).length) + " | Val: " + ((res.xVal||[]).length) + " | Test: " + ((res.xTest||[]).length)));
+              previewMount.appendChild(el("div", { style: "font-size:13px;color:#cbd5e1;margin-bottom:8px;" },
+                "Synthetic preview (" + schemaId + ")"));
+              previewMount.appendChild(el("div", { style: "font-size:12px;color:#94a3b8;" },
+                "Train: " + ((res.xTrain||[]).length) + " | Val: " + ((res.xVal||[]).length) + " | Test: " + ((res.xTest||[]).length) +
+                " | Classes: " + (res.numClasses || "?") + " | Features: " + ((res.xTrain && res.xTrain[0] && res.xTrain[0].length) || "?")));
             };
-            if (r && typeof r.then === "function") r.then(h); else h(r);
-          } catch (e) { previewMount.innerHTML = "<div style='color:#f43f5e;'>" + escapeHtml(e.message) + "</div>"; }
+            if (r && typeof r.then === "function") {
+              r.then(h).catch(function(err) {
+                console.error("[playground] build error:", err);
+                previewMount.innerHTML = "<div style='color:#f43f5e;'>Error: " + escapeHtml(err.message || String(err)) + "</div>";
+              });
+            } else {
+              h(r);
+            }
+          } catch (e) {
+            console.error("[playground] build exception:", e);
+            previewMount.innerHTML = "<div style='color:#f43f5e;'>Error: " + escapeHtml(e.message) + "</div>";
+          }
+        } else {
+          console.warn("[playground] no build function for", schemaId);
+          previewMount.innerHTML = "<div class='osc-empty'>No dataset module with build() for " + escapeHtml(schemaId) + "</div>";
         }
       } else {
         mainEl.appendChild(el("div", { className: "osc-empty" }, "Select a schema to explore."));
