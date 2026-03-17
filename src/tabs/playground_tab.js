@@ -156,7 +156,7 @@
         if (mod && typeof mod.build === "function") {
           previewMount.innerHTML = "<div style='color:#67e8f9;'>Generating synthetic preview...</div>";
           try {
-            var r = mod.build({ seed: 42, totalCount: 50, variant: schemaId, sourceMode: "synthetic" });
+            var r = mod.build({ seed: 42, totalCount: 50, variant: schemaId });
             console.log("[playground] build result type:", typeof r, "isPromise:", !!(r && r.then));
             var h = function (res) {
               console.log("[playground] build result:", res ? Object.keys(res).slice(0,10) : "null");
@@ -189,40 +189,67 @@
                 }).join(" | ");
                 previewMount.appendChild(histDiv);
               }
-              // render sample images
+              // render class grid — 1 image per class + random button
               var imgShape = Array.isArray(res.imageShape) ? res.imageShape : [28, 28, 1];
               var imgW = imgShape[0] || 28;
               var imgH = imgShape[1] || 28;
               var xData = (res.records && res.records.train && res.records.train.x) || res.xTrain || [];
               var yData = (res.records && res.records.train && res.records.train.y) || [];
               var cNames = res.classNames || [];
+              var nClasses = res.classCount || cNames.length || 10;
+
               if (xData.length) {
-                var gridDiv = el("div", { style: "margin-top:12px;display:flex;flex-wrap:wrap;gap:6px;" });
-                var showCount = Math.min(xData.length, 30);
-                for (var si = 0; si < showCount; si++) {
-                  var pixels = xData[si];
-                  if (!pixels || !pixels.length) continue;
+                // group indices by class
+                var byClass = {};
+                for (var gi = 0; gi < yData.length; gi++) {
+                  var cls = Number(yData[gi]);
+                  if (!byClass[cls]) byClass[cls] = [];
+                  byClass[cls].push(gi);
+                }
+
+                var gridDiv = el("div", { style: "margin-top:12px;" });
+                var canvases = [];
+
+                function drawClassGrid(randomize) {
+                  canvases.forEach(function (item) {
+                    var indices = byClass[item.cls] || [];
+                    if (!indices.length) return;
+                    var idx = randomize ? indices[Math.floor(Math.random() * indices.length)] : indices[0];
+                    var pixels = xData[idx];
+                    if (!pixels) return;
+                    var ctx = item.canvas.getContext("2d");
+                    var imgData = ctx.createImageData(imgW, imgH);
+                    for (var pi = 0; pi < pixels.length && pi < imgW * imgH; pi++) {
+                      var v = Math.round(pixels[pi] * 255);
+                      imgData.data[pi * 4] = v;
+                      imgData.data[pi * 4 + 1] = v;
+                      imgData.data[pi * 4 + 2] = v;
+                      imgData.data[pi * 4 + 3] = 255;
+                    }
+                    ctx.putImageData(imgData, 0, 0);
+                  });
+                }
+
+                var classRow = el("div", { style: "display:flex;flex-wrap:wrap;gap:8px;align-items:flex-end;" });
+                for (var ci = 0; ci < nClasses; ci++) {
                   var canvas = document.createElement("canvas");
                   canvas.width = imgW;
                   canvas.height = imgH;
-                  canvas.style.cssText = "width:48px;height:48px;border:1px solid #334155;border-radius:4px;image-rendering:pixelated;";
-                  var ctx = canvas.getContext("2d");
-                  var imgData = ctx.createImageData(imgW, imgH);
-                  for (var pi = 0; pi < pixels.length && pi < imgW * imgH; pi++) {
-                    var v = Math.round(pixels[pi] * 255);
-                    imgData.data[pi * 4] = v;
-                    imgData.data[pi * 4 + 1] = v;
-                    imgData.data[pi * 4 + 2] = v;
-                    imgData.data[pi * 4 + 3] = 255;
-                  }
-                  ctx.putImageData(imgData, 0, 0);
-                  var wrap = el("div", { style: "text-align:center;" });
-                  wrap.appendChild(canvas);
-                  var lbl = yData[si] != null ? (cNames[yData[si]] || String(yData[si])) : "";
-                  wrap.appendChild(el("div", { style: "font-size:9px;color:#64748b;margin-top:1px;" }, lbl));
-                  gridDiv.appendChild(wrap);
+                  canvas.style.cssText = "width:56px;height:56px;border:1px solid #334155;border-radius:4px;image-rendering:pixelated;background:#000;";
+                  var cellWrap = el("div", { style: "text-align:center;" });
+                  cellWrap.appendChild(canvas);
+                  cellWrap.appendChild(el("div", { style: "font-size:10px;color:#94a3b8;margin-top:2px;" }, cNames[ci] || String(ci)));
+                  classRow.appendChild(cellWrap);
+                  canvases.push({ cls: ci, canvas: canvas });
                 }
+                gridDiv.appendChild(classRow);
+
+                var randBtn = el("button", { className: "osc-btn sm", style: "margin-top:8px;" }, "Random");
+                randBtn.addEventListener("click", function () { drawClassGrid(true); });
+                gridDiv.appendChild(randBtn);
+
                 previewMount.appendChild(gridDiv);
+                drawClassGrid(false);
               }
             };
             if (r && typeof r.then === "function") {
