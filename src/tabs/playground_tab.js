@@ -164,9 +164,31 @@
               previewMount.innerHTML = "";
               previewMount.appendChild(el("div", { style: "font-size:13px;color:#cbd5e1;margin-bottom:8px;" },
                 "Synthetic preview (" + schemaId + ")"));
-              previewMount.appendChild(el("div", { style: "font-size:12px;color:#94a3b8;" },
-                "Train: " + ((res.xTrain||[]).length) + " | Val: " + ((res.xVal||[]).length) + " | Test: " + ((res.xTest||[]).length) +
-                " | Classes: " + (res.numClasses || "?") + " | Features: " + ((res.xTrain && res.xTrain[0] && res.xTrain[0].length) || "?")));
+              // handle both formats: oscillator (xTrain/yTrain) and image (records/splitCounts)
+              var trainN = res.trainCount || (res.xTrain || []).length || 0;
+              var valN = res.valCount || (res.xVal || []).length || 0;
+              var testN = res.testCount || (res.xTest || []).length || 0;
+              var classes = res.classCount || res.numClasses || "?";
+              var shape = Array.isArray(res.imageShape) ? res.imageShape.join("x") : "?";
+              previewMount.appendChild(el("div", { style: "font-size:12px;color:#94a3b8;margin-bottom:4px;" },
+                "Train: " + trainN + " | Val: " + valN + " | Test: " + testN +
+                " | Classes: " + classes + (shape !== "?" ? " | Shape: " + shape : "")));
+              // show class names
+              if (Array.isArray(res.classNames) && res.classNames.length) {
+                var classDiv = el("div", { style: "display:flex;flex-wrap:wrap;gap:4px;margin-top:4px;" });
+                res.classNames.forEach(function (cn) {
+                  classDiv.appendChild(el("span", { className: "osc-badge" }, cn));
+                });
+                previewMount.appendChild(classDiv);
+              }
+              // show label histogram
+              if (res.labelsHistogram && typeof res.labelsHistogram === "object") {
+                var histDiv = el("div", { style: "margin-top:8px;font-size:11px;color:#64748b;" });
+                histDiv.textContent = "Distribution: " + Object.keys(res.labelsHistogram).map(function (k) {
+                  return k + ":" + res.labelsHistogram[k];
+                }).join(" | ");
+                previewMount.appendChild(histDiv);
+              }
             };
             if (r && typeof r.then === "function") {
               r.then(h).catch(function(err) {
