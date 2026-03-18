@@ -218,6 +218,7 @@
                 { key: "valFrac", label: "Val fraction", type: "number", min: 0.01, max: 0.99, step: 0.01 },
                 { key: "testFrac", label: "Test fraction (auto)", type: "number", step: 0.01, disabled: true },
                 { key: "mnistTotalCount", label: "Total samples", type: "number", min: 30, step: 10 },
+                { key: "forceEqualClass", label: "Force equal class count", type: "checkbox" },
                 { key: "mnistTrainCount", label: "Train samples (auto)", type: "number", disabled: true },
                 { key: "mnistValCount", label: "Val samples (auto)", type: "number", disabled: true },
                 { key: "mnistTestCount", label: "Test samples (auto)", type: "number", disabled: true }
@@ -229,6 +230,7 @@
                 valFrac: Number(uiState.valFrac || 0.1).toFixed(4),
                 testFrac: Number(uiState.testFrac || 0.1).toFixed(4),
                 mnistTotalCount: String(uiState.mnistTotalCount),
+                forceEqualClass: Boolean(uiState.forceEqualClass),
                 mnistTrainCount: String(uiState.mnistTrainCount),
                 mnistValCount: String(uiState.mnistValCount),
                 mnistTestCount: String(uiState.mnistTestCount),
@@ -269,6 +271,7 @@
           valCount: uiState.mnistValCount,
           testCount: uiState.mnistTestCount,
           totalCount: uiState.mnistTotalCount,
+          forceEqualClass: Boolean(uiState.forceEqualClass),
         };
       },
       getPlaygroundConfigSpec: function (ctx) {
@@ -594,9 +597,31 @@
     var rng = createRng(seed);
     var totalAvailable = Math.max(1, Number(source.numExamples) || 0);
     var counts = countsFromConfig(c, totalAvailable, splitMode, fr);
-    var sampled = splitMode === "stratified_label"
-      ? sampleIndicesStratified(counts.total, source.labelsUint8, rng)
-      : sampleIndicesRandom(counts.total, totalAvailable, rng);
+    var forceEqual = Boolean(c.forceEqualClass);
+    var sampled;
+    if (forceEqual) {
+      // balanced sampling: equal count per class
+      var nClasses = source.classCount || 10;
+      var perClass = Math.max(1, Math.floor(counts.total / nClasses));
+      var byClass = {};
+      for (var li = 0; li < totalAvailable; li++) {
+        var lbl = source.labelsUint8 ? source.labelsUint8[li] : 0;
+        if (!byClass[lbl]) byClass[lbl] = [];
+        byClass[lbl].push(li);
+      }
+      sampled = [];
+      for (var ci = 0; ci < nClasses; ci++) {
+        var pool = byClass[ci] || [];
+        for (var si = 0; si < perClass && si < pool.length; si++) {
+          var idx = Math.floor(rng() * pool.length);
+          sampled.push(pool[idx]);
+        }
+      }
+    } else {
+      sampled = splitMode === "stratified_label"
+        ? sampleIndicesStratified(counts.total, source.labelsUint8, rng)
+        : sampleIndicesRandom(counts.total, totalAvailable, rng);
+    }
     var splitIdx = splitSampledIndices(sampled, source.labelsUint8, splitMode, fr, counts, rng);
     var train = makeSplitFromIndices(splitIdx.train, source);
     var val = makeSplitFromIndices(splitIdx.val, source);
