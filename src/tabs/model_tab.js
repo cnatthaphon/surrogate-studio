@@ -27,7 +27,15 @@
     var _editor = null;
     var _graphRuntime = null;
 
-    function _getSchemaId() { return stateApi ? stateApi.getActiveSchema() : ""; }
+    function _getSchemaId() {
+      // prefer active model's schema, fallback to active schema
+      var activeId = stateApi ? stateApi.getActiveModel() : "";
+      if (activeId && store) {
+        var m = store.getModel(activeId);
+        if (m && m.schemaId) return m.schemaId;
+      }
+      return stateApi ? stateApi.getActiveSchema() : "";
+    }
 
     function _getPaletteItems() {
       if (!schemaRegistry) return [];
@@ -206,10 +214,15 @@
       _editor = new Drawflow(container);
       _editor.reroute = true;
       _editor.start();
+      console.log("[model_tab] Drawflow started, container:", container.offsetWidth, "x", container.offsetHeight);
       if (modelGraphCore && typeof modelGraphCore.createRuntime === "function") {
         _graphRuntime = modelGraphCore.createRuntime({});
+        console.log("[model_tab] graphRuntime created, methods:", Object.keys(_graphRuntime).length);
       }
-      _editor.on("nodeSelected", function () { _renderRightPanel(); });
+      _editor.on("nodeSelected", function (id) {
+        console.log("[model_tab] node selected:", id);
+        _renderRightPanel();
+      });
       _editor.on("nodeUnselected", function () { _renderRightPanel(); });
     }
 
