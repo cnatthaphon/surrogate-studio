@@ -1447,13 +1447,13 @@
           if (showX) traces.push({ x: sim.t, y: sim.x, mode: "lines", name: xLabel, line: { color: "#22d3ee" } });
           if (showV) traces.push({ x: sim.t, y: sim.v, mode: "lines", name: vLabel, line: { color: "#f59e0b", dash: "dot" } });
           if (!traces.length) traces.push({ x: [0], y: [0], mode: "lines", name: "-" });
-          var yLabel = showX && !showV ? (Y_LABELS[scenarioId] || "x") : (showV && !showX ? (V_LABELS[scenarioId] || "v") : "");
+          var yLabel = showX && showV ? (Y_LABELS[scenarioId] + " / " + V_LABELS[scenarioId]) : (showX ? Y_LABELS[scenarioId] : V_LABELS[scenarioId]) || "";
           Plotly.newPlot(sc.chartDiv, traces, {
             paper_bgcolor: "#0b1220", plot_bgcolor: "#0b1220", font: { color: "#e2e8f0", size: 10 },
             title: { text: title, font: { size: 12 } },
             xaxis: { title: "t (s)", gridcolor: "#1e293b" }, yaxis: { title: yLabel, gridcolor: "#1e293b" },
             legend: { orientation: "h", y: -0.2, font: { size: 10 } },
-            margin: { t: 30, b: 45, l: 50, r: 10 },
+            margin: { t: 30, b: 45, l: 60, r: 10 },
           }, { responsive: true });
         }
 
@@ -1470,6 +1470,14 @@
           var showV = sc.showV ? sc.showV.checked : true;
           var traces = [];
           var colors = ["#22d3ee", "#f59e0b", "#a78bfa", "#4ade80", "#f43f5e", "#fb923c"];
+          var X_SHORT = { spring: "x", pendulum: "\u03b8", bouncing: "h" };
+          var V_SHORT = { spring: "v", pendulum: "\u03c9", bouncing: "v" };
+          var xShort = X_SHORT[scenarioId] || "x";
+          var vShort = V_SHORT[scenarioId] || "v";
+          // find param label
+          var paramLabel = paramKey;
+          (LABELS[scenarioId] || []).forEach(function (lb) { if (lb.key === paramKey) paramLabel = lb.label; });
+
           values.forEach(function (val, vi) {
             var pp = Object.assign({}, p);
             pp[paramKey] = val;
@@ -1479,14 +1487,14 @@
               dt: dt, steps: steps, groundModel: "rigid", groundK: 2500, groundC: 90,
             });
             var clr = colors[vi % colors.length];
-            if (showX) traces.push({ x: sim.t, y: sim.x, mode: "lines", name: paramKey + "=" + val + " x", line: { color: clr } });
-            if (showV) traces.push({ x: sim.t, y: sim.v, mode: "lines", name: paramKey + "=" + val + " v", line: { color: clr, dash: "dot" } });
+            if (showX) traces.push({ x: sim.t, y: sim.x, mode: "lines", name: xShort + "(" + paramKey + "=" + val + ")", line: { color: clr } });
+            if (showV) traces.push({ x: sim.t, y: sim.v, mode: "lines", name: vShort + "(" + paramKey + "=" + val + ")", line: { color: clr, dash: "dot" } });
           });
           if (!traces.length) traces.push({ x: [0], y: [0], mode: "lines", name: "-" });
-          var yLabel = showX && !showV ? (Y_LABELS[scenarioId] || "x") : (showV && !showX ? (V_LABELS[scenarioId] || "v") : "");
+          var yLabel = showX && showV ? (Y_LABELS[scenarioId] + " / " + V_LABELS[scenarioId]) : (showX ? Y_LABELS[scenarioId] : V_LABELS[scenarioId]) || "";
           Plotly.newPlot(sc.chartDiv, traces, {
             paper_bgcolor: "#0b1220", plot_bgcolor: "#0b1220", font: { color: "#e2e8f0", size: 10 },
-            title: { text: scenarioId + " | Sweep " + paramKey, font: { size: 12 } },
+            title: { text: scenarioId.charAt(0).toUpperCase() + scenarioId.slice(1) + " | Sweep " + paramLabel, font: { size: 12 } },
             xaxis: { title: "t (s)", gridcolor: "#1e293b" }, yaxis: { title: yLabel, gridcolor: "#1e293b" },
             legend: { orientation: "h", y: -0.2, font: { size: 9 } },
             margin: { t: 30, b: 45, l: 40, r: 10 },
