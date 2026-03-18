@@ -56,10 +56,11 @@
       var models = _listModels();
       var activeId = stateApi ? stateApi.getActiveModel() : "";
       var items = models.map(function (m) {
+        var timePart = m.updatedAt ? new Date(m.updatedAt).toLocaleTimeString() : (m.createdAt ? new Date(m.createdAt).toLocaleTimeString() : "");
         return {
           id: m.id, title: m.name || m.id, active: m.id === activeId,
-          metaLines: [(m.schemaId || "") + " | " + (m.presetId || "custom")],
-          actions: [{ id: "rename", label: "rename" }, { id: "delete", label: "delete" }],
+          metaLines: [m.schemaId || "", m.presetId || "custom", timePart].filter(Boolean),
+          actions: [{ id: "rename", label: "\u270e" }, { id: "delete", label: "\u2715" }],
         };
       });
 

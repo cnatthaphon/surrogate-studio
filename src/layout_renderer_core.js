@@ -55,6 +55,20 @@
     ".osc-metric-table { width: 100%; border-collapse: collapse; font-size: 12px; }",
     ".osc-metric-table th, .osc-metric-table td { padding: 4px 8px; border-bottom: 1px solid #1e293b; text-align: left; }",
     ".osc-metric-table th { color: #94a3b8; font-weight: 500; }",
+    ".left-dataset-list { list-style: none; padding: 0; margin: 0; }",
+    ".left-dataset-item { padding: 8px 10px; border-radius: 6px; cursor: pointer; font-size: 13px; margin-bottom: 2px; border: 1px solid transparent; }",
+    ".left-dataset-item:hover { background: #1e293b; }",
+    ".left-dataset-item.active { background: #0c2340; border-color: #0ea5e9; }",
+    ".left-dataset-main { display: flex; justify-content: space-between; align-items: flex-start; }",
+    ".left-dataset-open { font-weight: 600; color: #e2e8f0; font-size: 12px; flex: 1; }",
+    ".left-dataset-item.active .left-dataset-open { color: #67e8f9; }",
+    ".left-dataset-meta { font-size: 10px; color: #64748b; margin-top: 2px; }",
+    ".left-dataset-meta span { margin-right: 4px; }",
+    ".left-dataset-actions { display: flex; gap: 4px; margin-top: 3px; }",
+    ".left-dataset-actions button { padding: 1px 6px; font-size: 9px; border-radius: 3px; border: 1px solid #475569; background: #1f2937; color: #94a3b8; cursor: pointer; width: auto; }",
+    ".left-dataset-actions button:hover { border-color: #0ea5e9; color: #67e8f9; }",
+    ".left-dataset-actions button[data-item-action='delete'] { border-color: #7c2d12; color: #fdba74; }",
+    ".left-dataset-actions button[data-item-action='delete']:hover { background: #431407; }",
   ].join("\n");
 
   function escapeHtml(str) {

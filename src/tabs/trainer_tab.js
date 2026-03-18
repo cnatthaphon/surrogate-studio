@@ -44,10 +44,11 @@
       var trainers = _listTrainers();
       var activeId = stateApi ? stateApi.getActiveTrainer() : "";
       var items = trainers.map(function (t) {
+        var statusIcon = t.status === "done" ? "\u2713" : (t.status === "running" ? "\u23f3" : "");
         return {
           id: t.id, title: t.name || t.id, active: t.id === activeId,
-          metaLines: [(t.status || "idle") + " | " + (t.schemaId || "")],
-          actions: [{ id: "delete", label: "delete" }],
+          metaLines: [t.schemaId || "", statusIcon + (t.status || ""), t.createdAt ? new Date(t.createdAt).toLocaleTimeString() : ""].filter(Boolean),
+          actions: [{ id: "delete", label: "\u2715" }],
         };
       });
 

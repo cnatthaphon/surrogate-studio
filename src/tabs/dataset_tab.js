@@ -50,14 +50,16 @@
       var activeId = stateApi ? stateApi.getActiveDataset() : "";
 
       var items = datasets.map(function (ds) {
+        var timePart = ds.generatedAt ? new Date(ds.generatedAt).toLocaleTimeString() : (ds.createdAt ? new Date(ds.createdAt).toLocaleTimeString() : "");
+        var statusPart = ds.status === "ready" ? "\u2713 ready" : (ds.status === "generating" ? "\u23f3" : "");
         return {
           id: ds.id,
           title: ds.name || ds.id,
           active: ds.id === activeId,
-          metaLines: [(ds.schemaId || "") + (ds.status === "ready" ? " | ready" : " | draft")],
+          metaLines: [ds.schemaId || "", statusPart, timePart].filter(Boolean),
           actions: [
-            { id: "rename", label: "rename" },
-            { id: "delete", label: "delete" },
+            { id: "rename", label: "\u270e" },
+            { id: "delete", label: "\u2715" },
           ],
         };
       });
