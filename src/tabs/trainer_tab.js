@@ -169,7 +169,7 @@
 
       if (uiEngine && typeof uiEngine.renderConfigForm === "function") {
         var formMount = el("div", {});
-        _configFormApi = uiEngine.renderConfigForm({ mountEl: formMount, schema: formSchema, fieldNamePrefix: "train" });
+        _configFormApi = uiEngine.renderConfigForm({ mountEl: formMount, schema: formSchema, fieldNamePrefix: "train", rowClassName: "osc-form-row" });
         rightEl.appendChild(formMount);
       }
 

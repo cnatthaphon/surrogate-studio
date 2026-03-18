@@ -216,6 +216,7 @@
           schema: formSchema,
           value: formValue,
           fieldNamePrefix: "ds",
+          rowClassName: "osc-form-row",
         });
         rightEl.appendChild(formMount);
       }
@@ -230,16 +231,24 @@
       var mod = _getModule();
       if (!mod || typeof mod.build !== "function") { onStatus("No build function"); return; }
 
-      // collect config from core form or from module
+      // collect config from core form
       var formConfig = {};
       if (_configFormApi && typeof _configFormApi.getConfig === "function") {
         formConfig = _configFormApi.getConfig();
       }
       var schemaId = dsRecord.schemaId || _getSchemaId();
-      if (!formConfig.steps && formConfig.durationSec && formConfig.dt) {
-        formConfig.steps = Math.floor(Number(formConfig.durationSec) / Number(formConfig.dt));
+
+      // use module's getDatasetBuildConfig if available (transforms form config to build config)
+      var buildConfig;
+      if (mod.uiApi && typeof mod.uiApi.getDatasetBuildConfig === "function") {
+        buildConfig = mod.uiApi.getDatasetBuildConfig({ formConfig: formConfig });
+        buildConfig = Object.assign({ schemaId: schemaId, moduleId: mod.id }, buildConfig);
+      } else {
+        if (!formConfig.steps && formConfig.durationSec && formConfig.dt) {
+          formConfig.steps = Math.floor(Number(formConfig.durationSec) / Number(formConfig.dt));
+        }
+        buildConfig = Object.assign({ schemaId: schemaId, moduleId: mod.id }, formConfig);
       }
-      var buildConfig = Object.assign({ schemaId: schemaId, moduleId: mod.id }, formConfig);
 
       onStatus("Generating...");
       var currentMountId = _mountId;
