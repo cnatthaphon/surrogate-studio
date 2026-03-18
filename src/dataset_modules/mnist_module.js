@@ -739,16 +739,17 @@
       mountEl.innerHTML = "";
       var isCurrent = (deps && typeof deps.isCurrent === "function") ? deps.isCurrent : function () { return true; };
 
-      // if dataset data already provided (from dataset tab), use it directly
+      // if dataset data already provided (from dataset tab), show with train/val/test splits
       var providedData = deps && deps.datasetData;
       if (providedData) {
-        _renderImageResult(mountEl, elF, providedData, label, defaultClassNames, isCurrent);
+        _renderImageResult(mountEl, elF, providedData, label, defaultClassNames, isCurrent, true);
         return;
       }
 
+      // playground: fetch preview and show all samples (no split)
       mountEl.appendChild(elF("div", { style: "color:#67e8f9;font-size:13px;" }, "Loading " + label + " data..."));
       buildMnistDataset({ seed: 42, totalCount: 100, variant: variant }).then(function (res) {
-        _renderImageResult(mountEl, elF, res, label, defaultClassNames, isCurrent);
+        _renderImageResult(mountEl, elF, res, label, defaultClassNames, isCurrent, false);
       }).catch(function (err) {
         mountEl.innerHTML = "";
         mountEl.appendChild(elF("div", { style: "color:#f43f5e;" }, "Error: " + String(err.message || err)));
@@ -756,8 +757,8 @@
     };
   }
 
-  function _renderImageResult(mountEl, elF, res, label, defaultClassNames, isCurrent) {
-        if (!isCurrent()) return; // stale mount — don't render
+  function _renderImageResult(mountEl, elF, res, label, defaultClassNames, isCurrent, showSplits) {
+        if (!isCurrent()) return;
         mountEl.innerHTML = "";
         if (!res) { mountEl.appendChild(elF("div", { style: "color:#f43f5e;" }, "No data")); return; }
 
@@ -766,23 +767,32 @@
         var imgShape = Array.isArray(res.imageShape) ? res.imageShape : [28, 28, 1];
         var imgW = imgShape[0] || 28;
         var imgH = imgShape[1] || 28;
-        var xData = (res.records && res.records.train && res.records.train.x) || [];
-        var yData = (res.records && res.records.train && res.records.train.y) || [];
 
         // info
         mountEl.appendChild(elF("div", { style: "font-size:12px;color:#94a3b8;margin-bottom:8px;" },
           label + " | Classes: " + nClasses + " | Shape: " + imgW + "x" + imgH));
 
-        // get all splits
-        var splits = [
-          { name: "Train", x: (res.records && res.records.train && res.records.train.x) || [], y: (res.records && res.records.train && res.records.train.y) || [] },
-          { name: "Val", x: (res.records && res.records.val && res.records.val.x) || [], y: (res.records && res.records.val && res.records.val.y) || [] },
-          { name: "Test", x: (res.records && res.records.test && res.records.test.x) || [], y: (res.records && res.records.test && res.records.test.y) || [] },
-        ];
-
-        // fallback if no records splits but have xTrain etc
-        if (!splits[0].x.length && xData.length) {
-          splits = [{ name: "All", x: xData, y: yData }];
+        var splits;
+        if (showSplits && res.records) {
+          // dataset tab: show train/val/test separately
+          splits = [
+            { name: "Train", x: (res.records.train && res.records.train.x) || [], y: (res.records.train && res.records.train.y) || [] },
+            { name: "Val", x: (res.records.val && res.records.val.x) || [], y: (res.records.val && res.records.val.y) || [] },
+            { name: "Test", x: (res.records.test && res.records.test.x) || [], y: (res.records.test && res.records.test.y) || [] },
+          ];
+        } else {
+          // playground: combine all into one view
+          var allX = [].concat(
+            (res.records && res.records.train && res.records.train.x) || [],
+            (res.records && res.records.val && res.records.val.x) || [],
+            (res.records && res.records.test && res.records.test.x) || []
+          );
+          var allY = [].concat(
+            (res.records && res.records.train && res.records.train.y) || [],
+            (res.records && res.records.val && res.records.val.y) || [],
+            (res.records && res.records.test && res.records.test.y) || []
+          );
+          splits = [{ name: "Samples", x: allX, y: allY }];
         }
 
         var allCanvases = [];
