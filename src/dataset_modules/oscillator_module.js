@@ -1421,6 +1421,8 @@
 
         var scenarios = {};
         var globalInputs = {};
+        var Y_LABELS = { spring: "displacement (m)", pendulum: "angle \u03b8 (rad)", bouncing: "height (m)" };
+        var V_LABELS = { spring: "velocity (m/s)", pendulum: "angular vel \u03c9 (rad/s)", bouncing: "velocity (m/s)" };
 
         function simOne(scenarioId) {
           var sc = scenarios[scenarioId];
@@ -1443,12 +1445,13 @@
           if (showX) traces.push({ x: sim.t, y: sim.x, mode: "lines", name: "x(t)", line: { color: "#22d3ee" } });
           if (showV) traces.push({ x: sim.t, y: sim.v, mode: "lines", name: "v(t)", line: { color: "#f59e0b", dash: "dot" } });
           if (!traces.length) traces.push({ x: [0], y: [0], mode: "lines", name: "-" });
+          var yLabel = showX && !showV ? (Y_LABELS[scenarioId] || "x") : (showV && !showX ? (V_LABELS[scenarioId] || "v") : "");
           Plotly.newPlot(sc.chartDiv, traces, {
             paper_bgcolor: "#0b1220", plot_bgcolor: "#0b1220", font: { color: "#e2e8f0", size: 10 },
             title: { text: title, font: { size: 12 } },
-            xaxis: { title: "t (s)", gridcolor: "#1e293b" }, yaxis: { gridcolor: "#1e293b" },
+            xaxis: { title: "t (s)", gridcolor: "#1e293b" }, yaxis: { title: yLabel, gridcolor: "#1e293b" },
             legend: { orientation: "h", y: -0.2, font: { size: 10 } },
-            margin: { t: 30, b: 45, l: 40, r: 10 },
+            margin: { t: 30, b: 45, l: 50, r: 10 },
           }, { responsive: true });
         }
 
@@ -1461,6 +1464,8 @@
           var dt = Number((globalInputs.dt || {}).value) || 0.02;
           var dur = Number((globalInputs.durationSec || {}).value) || 8;
           var steps = Math.max(10, Math.floor(dur / dt));
+          var showX = sc.showX ? sc.showX.checked : true;
+          var showV = sc.showV ? sc.showV.checked : true;
           var traces = [];
           var colors = ["#22d3ee", "#f59e0b", "#a78bfa", "#4ade80", "#f43f5e", "#fb923c"];
           values.forEach(function (val, vi) {
@@ -1471,12 +1476,16 @@
               x0: pp.x0 || 0, v0: pp.v0 || 0, restitution: pp.e || 0.8,
               dt: dt, steps: steps, groundModel: "rigid", groundK: 2500, groundC: 90,
             });
-            traces.push({ x: sim.t, y: sim.x, mode: "lines", name: paramKey + "=" + val, line: { color: colors[vi % colors.length] } });
+            var clr = colors[vi % colors.length];
+            if (showX) traces.push({ x: sim.t, y: sim.x, mode: "lines", name: paramKey + "=" + val + " x", line: { color: clr } });
+            if (showV) traces.push({ x: sim.t, y: sim.v, mode: "lines", name: paramKey + "=" + val + " v", line: { color: clr, dash: "dot" } });
           });
+          if (!traces.length) traces.push({ x: [0], y: [0], mode: "lines", name: "-" });
+          var yLabel = showX && !showV ? (Y_LABELS[scenarioId] || "x") : (showV && !showX ? (V_LABELS[scenarioId] || "v") : "");
           Plotly.newPlot(sc.chartDiv, traces, {
             paper_bgcolor: "#0b1220", plot_bgcolor: "#0b1220", font: { color: "#e2e8f0", size: 10 },
             title: { text: scenarioId + " | Sweep " + paramKey, font: { size: 12 } },
-            xaxis: { title: "t (s)", gridcolor: "#1e293b" }, yaxis: { gridcolor: "#1e293b" },
+            xaxis: { title: "t (s)", gridcolor: "#1e293b" }, yaxis: { title: yLabel, gridcolor: "#1e293b" },
             legend: { orientation: "h", y: -0.2, font: { size: 9 } },
             margin: { t: 30, b: 45, l: 40, r: 10 },
           }, { responsive: true });
@@ -1567,7 +1576,8 @@
             (LABELS[sid] || []).forEach(function (p) {
               var opt = elF("option", { value: p.key }); opt.textContent = p.key; sweepSelect.appendChild(opt);
             });
-            var sweepInput = elF("input", { type: "text", value: "0.5,1.0,2.0", style: "width:80px;padding:2px 4px;font-size:9px;border-radius:3px;border:1px solid #334155;background:#0b1220;color:#e2e8f0;" });
+            var defaultSweep = sid === "bouncing" ? "0.5,0.7,0.9" : "0.5,1.0,2.0";
+            var sweepInput = elF("input", { type: "text", value: defaultSweep, style: "width:80px;padding:2px 4px;font-size:9px;border-radius:3px;border:1px solid #334155;background:#0b1220;color:#e2e8f0;" });
             var sweepBtn = elF("button", { style: "padding:2px 6px;font-size:9px;border-radius:3px;border:1px solid #475569;background:#1f2937;color:#cbd5e1;cursor:pointer;" }, "Sweep");
             sweepBtn.addEventListener("click", (function (s, sel, inp) {
               return function () {
