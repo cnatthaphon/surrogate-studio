@@ -128,6 +128,7 @@
         schemaRegistry: SchemaRegistry,
         trainingEngine: TrainingEngine,
         modelBuilder: ModelBuilderCore,
+        uiEngine: UiEngine,
         onStatus: setStatus,
         escapeHtml: escapeHtml,
         el: elHelper,

@@ -8,167 +8,155 @@
   "use strict";
 
   function create(deps) {
-    var layout = deps.layout;         // { leftEl, mainEl, rightEl }
-    var stateApi = deps.stateApi;     // OSCAppStateCore
-    var store = deps.store;           // OSCWorkspaceStore instance
+    var layout = deps.layout;
+    var stateApi = deps.stateApi;
+    var store = deps.store;
     var schemaRegistry = deps.schemaRegistry;
-    var modelGraphCore = deps.modelGraphCore;   // OSCModelGraphCore
-    var drawflowAdapter = deps.drawflowAdapter; // OSCModelGraphDrawflowAdapter
-    var uiEngine = deps.uiEngine;              // OSCUiSharedEngine
+    var modelGraphCore = deps.modelGraphCore;
+    var uiEngine = deps.uiEngine;
+    var modal = deps.modal;
     var onStatus = deps.onStatus || function () {};
-    var escapeHtml = deps.escapeHtml || function (s) { return String(s || ""); };
-    var elFactory = deps.el || function (tag, attrs, children) {
+    var el = deps.el || function (tag, a, c) {
       var e = document.createElement(tag);
-      if (attrs) Object.keys(attrs).forEach(function (k) {
-        if (k === "className") e.className = attrs[k];
-        else if (k === "textContent") e.textContent = attrs[k];
-        else if (k === "innerHTML") e.innerHTML = attrs[k];
-        else e.setAttribute(k, attrs[k]);
-      });
-      if (children) (Array.isArray(children) ? children : [children]).forEach(function (c) {
-        if (typeof c === "string") e.appendChild(document.createTextNode(c));
-        else if (c) e.appendChild(c);
-      });
+      if (a) Object.keys(a).forEach(function (k) { if (k === "className") e.className = a[k]; else if (k === "textContent") e.textContent = a[k]; else e.setAttribute(k, a[k]); });
+      if (c) (Array.isArray(c) ? c : [c]).forEach(function (ch) { if (typeof ch === "string") e.appendChild(document.createTextNode(ch)); else if (ch) e.appendChild(ch); });
       return e;
     };
+    var escapeHtml = deps.escapeHtml || function (s) { return String(s || ""); };
 
     var _editor = null;
     var _graphRuntime = null;
-    var _nodeConfigFormApi = null;
-    var _selectedNodeId = null;
 
-    function _getSchemaId() {
-      return stateApi ? stateApi.getActiveSchema() : "";
-    }
-
-    function _listSavedModels() {
-      if (!store) return [];
-      var schemaId = _getSchemaId();
-      if (typeof store.listModels === "function") {
-        return store.listModels({ schemaId: schemaId });
-      }
-      return [];
-    }
+    function _getSchemaId() { return stateApi ? stateApi.getActiveSchema() : ""; }
 
     function _getPaletteItems() {
-      var schemaId = _getSchemaId();
       if (!schemaRegistry) return [];
-      var schema = schemaRegistry.getModelSchema(schemaId);
+      var schema = schemaRegistry.getModelSchema(_getSchemaId());
       var meta = (schema && schema.metadata && schema.metadata.featureNodes) || {};
       return (meta.palette && Array.isArray(meta.palette.items)) ? meta.palette.items : [];
     }
 
     function _getPresets() {
-      var schemaId = _getSchemaId();
       if (!schemaRegistry) return [];
-      var schema = schemaRegistry.getModelSchema(schemaId);
+      var schema = schemaRegistry.getModelSchema(_getSchemaId());
       return Array.isArray(schema && schema.presets) ? schema.presets : [];
     }
 
-    // --- render ---
-
-    function _renderLeftPanel() {
-      var el = layout.leftEl;
-      el.innerHTML = "";
-      el.appendChild(elFactory("h3", {}, "Saved Models"));
-
-      var models = _listSavedModels();
-      var activeId = stateApi ? stateApi.getActiveModel() : "";
-
-      if (!models.length) {
-        el.appendChild(elFactory("div", { className: "osc-empty" }, "No models yet. Design one or load a preset."));
-      } else {
-        var list = elFactory("ul", { className: "osc-item-list" });
-        models.forEach(function (m) {
-          var li = elFactory("li", {
-            "data-id": m.id,
-            className: m.id === activeId ? "active" : "",
-          });
-          li.appendChild(elFactory("strong", {}, m.name || m.id));
-          var meta = elFactory("div", { style: "font-size:11px;color:#64748b;" });
-          meta.textContent = (m.schemaId || "") + " | " + (m.presetId || "custom");
-          li.appendChild(meta);
-          li.addEventListener("click", function () {
-            if (stateApi) stateApi.setActiveModel(m.id);
-            _loadModelToEditor(m);
-            _renderLeftPanel();
-          });
-          list.appendChild(li);
-        });
-        el.appendChild(list);
-      }
-
-      // new model button → opens modal popup
-      var modal = deps.modal;
-      var newBtn = elFactory("button", { className: "osc-btn", style: "margin-top:8px;width:100%;" }, "+ New Model");
-      newBtn.addEventListener("click", function () {
-        if (!modal) return;
-        var _nameInput, _schemaSelect;
-        modal.open({
-          title: "New Model",
-          renderForm: function (mount) {
-            var schemas = schemaRegistry ? schemaRegistry.listSchemas() : [];
-            var currentSchema = _getSchemaId();
-            mount.appendChild(elFactory("label", { style: "font-size:12px;color:#94a3b8;display:block;margin-bottom:2px;" }, "Model Name"));
-            _nameInput = elFactory("input", { type: "text", placeholder: "my_model", style: "width:100%;padding:6px 8px;margin-bottom:8px;border-radius:6px;border:1px solid #334155;background:#0b1220;color:#e2e8f0;" });
-            mount.appendChild(_nameInput);
-            mount.appendChild(elFactory("label", { style: "font-size:12px;color:#94a3b8;display:block;margin-bottom:2px;" }, "Schema"));
-            _schemaSelect = elFactory("select", { style: "width:100%;padding:6px 8px;border-radius:6px;border:1px solid #334155;background:#0b1220;color:#e2e8f0;" });
-            schemas.forEach(function (s) {
-              var opt = elFactory("option", { value: s.id });
-              opt.textContent = s.label || s.id;
-              if (s.id === currentSchema) opt.selected = true;
-              _schemaSelect.appendChild(opt);
-            });
-            mount.appendChild(_schemaSelect);
-            setTimeout(function () { _nameInput.focus(); }, 50);
-          },
-          onCreate: function () {
-            var name = _nameInput ? _nameInput.value.trim() : "";
-            var sid = _schemaSelect ? _schemaSelect.value : "";
-            if (!name) { onStatus("Enter a name"); return; }
-            var id = "m_" + Date.now();
-            if (store && typeof store.upsertModel === "function") {
-              store.upsertModel({ id: id, name: name, schemaId: sid, status: "draft", createdAt: Date.now() });
-            }
-            if (stateApi) stateApi.setActiveSchema(sid);
-            if (stateApi) stateApi.setActiveModel(id);
-            onStatus("Created model: " + name);
-            _clearEditor();
-            _renderLeftPanel();
-            _renderMainPanel();
-            _renderRightPanel();
-          },
-        });
-      });
-      el.appendChild(newBtn);
+    function _listModels() {
+      if (!store) return [];
+      return typeof store.listModels === "function" ? store.listModels({ schemaId: _getSchemaId() }) : [];
     }
 
-    function _renderMainPanel() {
-      var el = layout.mainEl;
-      el.innerHTML = "";
+    // === LEFT: use core renderItemList ===
+    function _renderLeftPanel() {
+      var leftEl = layout.leftEl;
+      leftEl.innerHTML = "";
+      leftEl.appendChild(el("h3", {}, "Models"));
 
-      var schemaId = _getSchemaId();
+      var models = _listModels();
+      var activeId = stateApi ? stateApi.getActiveModel() : "";
+      var items = models.map(function (m) {
+        return {
+          id: m.id, title: m.name || m.id, active: m.id === activeId,
+          metaLines: [(m.schemaId || "") + " | " + (m.presetId || "custom")],
+          actions: [{ id: "rename", label: "rename" }, { id: "delete", label: "delete" }],
+        };
+      });
 
-      // preset selector
-      var presets = _getPresets();
-      if (presets.length) {
-        var presetBar = elFactory("div", { style: "margin-bottom:8px;display:flex;gap:4px;align-items:center;flex-wrap:wrap;" });
-        presetBar.appendChild(elFactory("span", { style: "font-size:12px;color:#94a3b8;" }, "Presets:"));
-        presets.forEach(function (preset) {
-          var pid = (preset && preset.id) || String(preset);
-          var plabel = (preset && preset.label) || pid;
-          var btn = elFactory("button", { className: "osc-btn sm secondary" }, plabel);
-          btn.addEventListener("click", function () { _loadPreset(pid); });
-          presetBar.appendChild(btn);
+      if (uiEngine && typeof uiEngine.renderItemList === "function") {
+        uiEngine.renderItemList({
+          mountEl: leftEl, items: items, emptyText: "No models. Click + New.",
+          onOpen: function (itemId) {
+            if (stateApi) stateApi.setActiveModel(itemId);
+            var m = store ? store.getModel(itemId) : null;
+            if (m && m.graph && _editor) { try { _editor.import(m.graph); } catch (e) {} }
+            _renderLeftPanel();
+          },
+          onAction: function (itemId, actionId) {
+            if (actionId === "rename") {
+              var m = store ? store.getModel(itemId) : null;
+              if (!m) return;
+              var name = prompt("Rename:", m.name || m.id);
+              if (name && name.trim()) { m.name = name.trim(); store.upsertModel(m); _renderLeftPanel(); }
+            } else if (actionId === "delete") {
+              var m2 = store ? store.getModel(itemId) : null;
+              if (!m2) return;
+              if (confirm("Delete '" + (m2.name || m2.id) + "'?")) {
+                store.removeModel(itemId);
+                if (stateApi && stateApi.getActiveModel() === itemId) stateApi.setActiveModel("");
+                _renderLeftPanel(); _renderMainPanel();
+              }
+            }
+          },
         });
-        el.appendChild(presetBar);
       }
 
-      // node palette from schema.model.metadata.featureNodes.palette.items
+      var newBtn = el("button", { className: "osc-btn", style: "margin-top:8px;width:100%;" }, "+ New Model");
+      newBtn.addEventListener("click", function () { _openNewModal(); });
+      leftEl.appendChild(newBtn);
+    }
+
+    function _openNewModal() {
+      if (!modal) return;
+      var _nameInput, _schemaSelect;
+      modal.open({
+        title: "New Model",
+        renderForm: function (mount) {
+          var schemas = schemaRegistry ? schemaRegistry.listSchemas() : [];
+          mount.appendChild(el("label", { style: "font-size:12px;color:#94a3b8;display:block;margin-bottom:2px;" }, "Name"));
+          _nameInput = el("input", { type: "text", placeholder: "my_model", style: "width:100%;padding:6px 8px;margin-bottom:8px;border-radius:6px;border:1px solid #334155;background:#0b1220;color:#e2e8f0;" });
+          mount.appendChild(_nameInput);
+          mount.appendChild(el("label", { style: "font-size:12px;color:#94a3b8;display:block;margin-bottom:2px;" }, "Schema"));
+          _schemaSelect = el("select", { style: "width:100%;padding:6px 8px;border-radius:6px;border:1px solid #334155;background:#0b1220;color:#e2e8f0;" });
+          (schemas).forEach(function (s) {
+            var opt = el("option", { value: s.id }); opt.textContent = s.label || s.id;
+            if (s.id === _getSchemaId()) opt.selected = true;
+            _schemaSelect.appendChild(opt);
+          });
+          mount.appendChild(_schemaSelect);
+          setTimeout(function () { _nameInput.focus(); }, 50);
+        },
+        onCreate: function () {
+          var name = (_nameInput && _nameInput.value.trim()) || "";
+          var sid = _schemaSelect ? _schemaSelect.value : "";
+          if (!name) { onStatus("Enter a name"); return; }
+          var id = "m_" + Date.now();
+          if (store) store.upsertModel({ id: id, name: name, schemaId: sid, status: "draft", createdAt: Date.now() });
+          if (stateApi) { stateApi.setActiveSchema(sid); stateApi.setActiveModel(id); }
+          if (_editor) try { _editor.clear(); } catch (e) {}
+          onStatus("Created: " + name);
+          _renderLeftPanel(); _renderMainPanel(); _renderRightPanel();
+        },
+      });
+    }
+
+    // === MIDDLE: Drawflow editor + palette ===
+    function _renderMainPanel() {
+      var mainEl = layout.mainEl;
+      mainEl.innerHTML = "";
+      var schemaId = _getSchemaId();
+
+      // preset bar
+      var presets = _getPresets();
+      if (presets.length) {
+        var presetBar = el("div", { style: "margin-bottom:6px;display:flex;gap:4px;align-items:center;flex-wrap:wrap;" });
+        presetBar.appendChild(el("span", { style: "font-size:11px;color:#94a3b8;" }, "Presets:"));
+        presets.forEach(function (p) {
+          var btn = el("button", { style: "padding:3px 8px;font-size:10px;border-radius:6px;border:1px solid #475569;background:#1f2937;color:#cbd5e1;cursor:pointer;" }, p.label || p.id);
+          btn.addEventListener("click", function () {
+            if (_graphRuntime && typeof _graphRuntime.seedPreconfigGraph === "function" && _editor) {
+              _graphRuntime.seedPreconfigGraph(_editor, p.id, schemaId);
+              onStatus("Loaded: " + (p.label || p.id));
+            }
+          });
+          presetBar.appendChild(btn);
+        });
+        mainEl.appendChild(presetBar);
+      }
+
+      // palette grouped by section
       var paletteItems = _getPaletteItems();
       if (paletteItems.length) {
-        // group by section
         var sections = {};
         paletteItems.forEach(function (item) {
           var sec = item.section || "Nodes";
@@ -176,212 +164,128 @@
           sections[sec].push(item);
         });
         Object.keys(sections).forEach(function (secName) {
-          var secLabel = elFactory("div", { style: "font-size:11px;color:#64748b;margin-bottom:2px;margin-top:6px;" }, secName);
-          el.appendChild(secLabel);
-          var palDiv = elFactory("div", { className: "osc-palette" });
+          var row = el("div", { style: "margin-bottom:4px;display:flex;align-items:center;gap:3px;flex-wrap:wrap;" });
+          row.appendChild(el("span", { style: "font-size:10px;color:#64748b;min-width:60px;" }, secName + ":"));
           sections[secName].forEach(function (item) {
-            var btn = elFactory("button", {}, item.label || item.type);
-            btn.addEventListener("click", function () { _addNode(item.type, item.config); });
-            palDiv.appendChild(btn);
-          });
-          el.appendChild(palDiv);
-        });
-      }
-
-      // Drawflow editor container
-      var editorContainer = elFactory("div", { id: "drawflow" });
-      el.appendChild(editorContainer);
-
-      // action buttons
-      var actionBar = elFactory("div", { style: "margin-top:8px;display:flex;gap:6px;" });
-      var saveBtn = elFactory("button", { className: "osc-btn" }, "Save Model");
-      saveBtn.addEventListener("click", function () { _handleSave(); });
-      var clearBtn = elFactory("button", { className: "osc-btn secondary" }, "Clear");
-      clearBtn.addEventListener("click", function () { _clearEditor(); });
-      actionBar.appendChild(saveBtn);
-      actionBar.appendChild(clearBtn);
-      el.appendChild(actionBar);
-
-      // initialize Drawflow
-      _initEditor(editorContainer);
-    }
-
-    function _renderRightPanel() {
-      var el = layout.rightEl;
-      el.innerHTML = "";
-      el.appendChild(elFactory("h3", {}, "Node Config"));
-
-      if (!_selectedNodeId) {
-        el.appendChild(elFactory("div", { className: "osc-empty" }, "Click a node in the graph to configure it."));
-        return;
-      }
-
-      if (!_editor) return;
-      var nodeData;
-      try { nodeData = _editor.getNodeFromId(_selectedNodeId); } catch (e) { return; }
-      if (!nodeData) return;
-
-      var card = elFactory("div", { className: "osc-card" });
-      card.appendChild(elFactory("div", { style: "font-size:13px;color:#67e8f9;margin-bottom:8px;" },
-        "Node: " + escapeHtml(nodeData.name || "unknown") + " (#" + _selectedNodeId + ")"));
-
-      // get config spec from model graph core
-      if (_graphRuntime && typeof _graphRuntime.getNodeConfigSpec === "function") {
-        var configSpec = _graphRuntime.getNodeConfigSpec(nodeData.name);
-        if (configSpec && Array.isArray(configSpec.fields) && configSpec.fields.length) {
-          var formMount = elFactory("div", {});
-          if (uiEngine && typeof uiEngine.renderConfigForm === "function") {
-            _nodeConfigFormApi = uiEngine.renderConfigForm({
-              mountEl: formMount,
-              schema: configSpec.fields,
-              config: nodeData.data || {},
-              onChange: function (key, value) {
-                _applyNodeConfig(key, value);
-              },
+            var btn = el("button", { style: "padding:2px 6px;font-size:10px;border-radius:4px;border:1px solid #475569;background:#1f2937;color:#cbd5e1;cursor:pointer;" }, item.label || item.type);
+            btn.addEventListener("click", function () {
+              if (_graphRuntime && _editor && typeof _graphRuntime.createNodeByType === "function") {
+                _graphRuntime.createNodeByType(_editor, 250, 200, item.type, item.config || {});
+              }
             });
-          }
-          card.appendChild(formMount);
-        }
-      }
-
-      // fallback: show raw data
-      if (!_nodeConfigFormApi) {
-        var rawData = nodeData.data || {};
-        Object.keys(rawData).forEach(function (k) {
-          var row = elFactory("div", { className: "osc-form-row" });
-          row.appendChild(elFactory("label", {}, k));
-          row.appendChild(elFactory("span", { style: "font-size:12px;color:#cbd5e1;" }, String(rawData[k])));
-          card.appendChild(row);
+            row.appendChild(btn);
+          });
+          mainEl.appendChild(row);
         });
       }
 
-      el.appendChild(card);
+      // Drawflow container
+      var editorDiv = el("div", { id: "drawflow", style: "width:100%;height:400px;background:#f8fafc;border-radius:10px;margin-top:8px;" });
+      mainEl.appendChild(editorDiv);
+
+      // action bar
+      var actBar = el("div", { style: "margin-top:8px;display:flex;gap:6px;" });
+      var saveBtn = el("button", { className: "osc-btn" }, "Save Model");
+      saveBtn.addEventListener("click", function () { _handleSave(); });
+      var clearBtn = el("button", { className: "osc-btn secondary" }, "Clear");
+      clearBtn.addEventListener("click", function () { if (_editor) try { _editor.clear(); } catch (e) {} });
+      actBar.appendChild(saveBtn); actBar.appendChild(clearBtn);
+      mainEl.appendChild(actBar);
+
+      // init Drawflow
+      _initEditor(editorDiv);
     }
 
     function _initEditor(container) {
-      var W = typeof window !== "undefined" ? window : (typeof globalThis !== "undefined" ? globalThis : {});
-      var Drawflow = W.Drawflow || null;
-      if (!Drawflow) {
-        container.innerHTML = "<div class='osc-empty'>Drawflow not loaded</div>";
-        return;
-      }
-
+      var W = typeof window !== "undefined" ? window : {};
+      var Drawflow = W.Drawflow;
+      if (!Drawflow) { container.innerHTML = "<div class='osc-empty'>Drawflow not loaded</div>"; return; }
       _editor = new Drawflow(container);
       _editor.reroute = true;
       _editor.start();
-
-      // node click handler
-      _editor.on("nodeSelected", function (id) {
-        _selectedNodeId = String(id);
-        _renderRightPanel();
-      });
-      _editor.on("nodeUnselected", function () {
-        _selectedNodeId = null;
-        _renderRightPanel();
-      });
-
-      // create graph runtime
       if (modelGraphCore && typeof modelGraphCore.createRuntime === "function") {
-        _graphRuntime = modelGraphCore.createRuntime({
-          schemaRegistry: schemaRegistry,
-          schemaId: _getSchemaId(),
-        });
+        _graphRuntime = modelGraphCore.createRuntime({});
       }
+      _editor.on("nodeSelected", function () { _renderRightPanel(); });
+      _editor.on("nodeUnselected", function () { _renderRightPanel(); });
     }
 
-    function _addNode(nodeType, defaultConfig) {
-      if (!_graphRuntime || !_editor) return;
-      if (typeof _graphRuntime.createNodeByType === "function") {
-        _graphRuntime.createNodeByType(_editor, 250, 200, nodeType, defaultConfig || {});
-      }
-    }
+    // === RIGHT: node config (from core) ===
+    function _renderRightPanel() {
+      var rightEl = layout.rightEl;
+      rightEl.innerHTML = "";
+      rightEl.appendChild(el("h3", {}, "Node Config"));
 
-    function _loadPreset(presetId) {
-      if (!_editor) return;
-      var schemaId = _getSchemaId();
-      if (_graphRuntime && typeof _graphRuntime.seedPreconfigGraph === "function") {
-        _graphRuntime.seedPreconfigGraph(_editor, presetId, schemaId);
-      } else if (drawflowAdapter && typeof drawflowAdapter.createRuntime === "function") {
-        var adapter = drawflowAdapter.createRuntime(schemaId);
-        if (typeof adapter.createDrawflowGraphFromPreset === "function") {
-          var spec = adapter.createDrawflowGraphFromPreset(schemaId, presetId);
-          if (spec) _editor.import(spec);
+      if (!_editor) { rightEl.appendChild(el("div", { className: "osc-empty" }, "Editor not initialized.")); return; }
+
+      var selectedId = null;
+      try { selectedId = _editor.node_selected; } catch (e) {}
+      if (!selectedId) { rightEl.appendChild(el("div", { className: "osc-empty" }, "Click a node to configure.")); return; }
+
+      var nodeData;
+      try { nodeData = _editor.getNodeFromId(selectedId); } catch (e) { return; }
+      if (!nodeData) return;
+
+      rightEl.appendChild(el("div", { style: "font-size:12px;color:#67e8f9;margin-bottom:8px;" },
+        (nodeData.name || "node") + " #" + selectedId));
+
+      // get config spec from modelGraphCore
+      if (_graphRuntime && typeof _graphRuntime.getNodeConfigSpec === "function" && uiEngine && typeof uiEngine.renderConfigForm === "function") {
+        var spec = _graphRuntime.getNodeConfigSpec(nodeData.name);
+        if (spec && Array.isArray(spec.fields) && spec.fields.length) {
+          var formMount = el("div", {});
+          var formApi = uiEngine.renderConfigForm({
+            mountEl: formMount,
+            schema: spec.fields,
+            value: nodeData.data || {},
+            onChange: function (nextConfig) {
+              if (_graphRuntime && typeof _graphRuntime.applyNodeConfigValue === "function") {
+                Object.keys(nextConfig || {}).forEach(function (k) {
+                  _graphRuntime.applyNodeConfigValue(_editor, selectedId, k, nextConfig[k]);
+                });
+              }
+            },
+          });
+          rightEl.appendChild(formMount);
+          return;
         }
       }
-      onStatus("Loaded preset: " + presetId);
-    }
 
-    function _loadModelToEditor(modelRecord) {
-      if (!_editor || !modelRecord) return;
-      if (modelRecord.graph) {
-        try { _editor.import(modelRecord.graph); } catch (e) {}
-      }
-      _selectedNodeId = null;
-      _renderRightPanel();
-    }
-
-    function _clearEditor() {
-      if (_editor) {
-        try { _editor.clear(); } catch (e) {}
-      }
-      _selectedNodeId = null;
-      _renderRightPanel();
-    }
-
-    function _applyNodeConfig(key, value) {
-      if (!_editor || !_selectedNodeId) return;
-      if (_graphRuntime && typeof _graphRuntime.applyNodeConfigValue === "function") {
-        _graphRuntime.applyNodeConfigValue(_editor, _selectedNodeId, key, value);
-      }
+      // fallback: raw data display
+      var data = nodeData.data || {};
+      Object.keys(data).forEach(function (k) {
+        rightEl.appendChild(el("div", { style: "font-size:11px;color:#94a3b8;margin-bottom:2px;" }, k + ": " + String(data[k])));
+      });
     }
 
     function _handleSave() {
       if (!_editor || !store) return;
-      var schemaId = _getSchemaId();
-      var graphExport = _editor.export();
+      var activeId = stateApi ? stateApi.getActiveModel() : "";
+      var graph = _editor.export();
+      if (activeId) {
+        var existing = store.getModel(activeId);
+        if (existing) {
+          existing.graph = graph; existing.updatedAt = Date.now();
+          store.upsertModel(existing);
+          onStatus("Saved: " + (existing.name || existing.id));
+          _renderLeftPanel();
+          return;
+        }
+      }
+      // no active model — create new
       var id = "m_" + Date.now();
-      var pendingName = stateApi ? stateApi.get("pendingModelName") : "";
-      var record = {
-        id: id,
-        name: pendingName || (schemaId + "_model_" + id),
-        schemaId: schemaId,
-        graph: graphExport,
-        createdAt: Date.now(),
-      };
-      store.upsertModel(record);
+      var schemaId = _getSchemaId();
+      store.upsertModel({ id: id, name: schemaId + "_model", schemaId: schemaId, graph: graph, createdAt: Date.now() });
       if (stateApi) stateApi.setActiveModel(id);
-      onStatus("Model saved: " + id);
+      onStatus("Saved: " + id);
       _renderLeftPanel();
     }
 
-    function mount() {
-      _renderLeftPanel();
-      _renderMainPanel();
-      _renderRightPanel();
-    }
+    function mount() { _editor = null; _graphRuntime = null; _renderLeftPanel(); _renderMainPanel(); _renderRightPanel(); }
+    function unmount() { _editor = null; _graphRuntime = null; layout.leftEl.innerHTML = ""; layout.mainEl.innerHTML = ""; layout.rightEl.innerHTML = ""; }
+    function refresh() { _renderLeftPanel(); _renderRightPanel(); }
 
-    function unmount() {
-      _editor = null;
-      _graphRuntime = null;
-      _nodeConfigFormApi = null;
-      _selectedNodeId = null;
-      layout.leftEl.innerHTML = "";
-      layout.mainEl.innerHTML = "";
-      layout.rightEl.innerHTML = "";
-    }
-
-    function refresh() {
-      _renderLeftPanel();
-      // don't re-render main (Drawflow state) unless schema changed
-      _renderRightPanel();
-    }
-
-    return {
-      mount: mount,
-      unmount: unmount,
-      refresh: refresh,
-      getEditor: function () { return _editor; },
-    };
+    return { mount: mount, unmount: unmount, refresh: refresh, getEditor: function () { return _editor; } };
   }
 
   return { create: create };
