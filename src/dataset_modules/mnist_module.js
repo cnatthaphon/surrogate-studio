@@ -777,13 +777,24 @@
         randBtn.addEventListener("click", function () { drawGrid(true); });
         mountEl.appendChild(randBtn);
 
-        // histogram
+        // class distribution bar chart
         if (res.labelsHistogram) {
-          var histDiv = elF("div", { style: "margin-top:8px;font-size:11px;color:#64748b;" });
-          histDiv.textContent = "Distribution: " + Object.keys(res.labelsHistogram).map(function (k) {
-            return (cNames[k] || k) + ":" + res.labelsHistogram[k];
-          }).join(" | ");
-          mountEl.appendChild(histDiv);
+          var histWrap = elF("div", { style: "margin-top:12px;" });
+          histWrap.appendChild(elF("div", { style: "font-size:11px;color:#94a3b8;margin-bottom:4px;font-weight:600;" }, "Class Distribution"));
+          var maxCount = 0;
+          Object.keys(res.labelsHistogram).forEach(function (k) { if (res.labelsHistogram[k] > maxCount) maxCount = res.labelsHistogram[k]; });
+          Object.keys(res.labelsHistogram).forEach(function (k) {
+            var count = res.labelsHistogram[k];
+            var pct = maxCount > 0 ? (count / maxCount) * 100 : 0;
+            var row = elF("div", { style: "display:flex;align-items:center;gap:6px;margin-bottom:2px;" });
+            row.appendChild(elF("span", { style: "font-size:10px;color:#94a3b8;min-width:70px;text-align:right;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" }, cNames[k] || k));
+            var barOuter = elF("div", { style: "flex:1;height:12px;background:#1e293b;border-radius:3px;overflow:hidden;" });
+            barOuter.appendChild(elF("div", { style: "height:100%;width:" + pct + "%;background:#0ea5e9;border-radius:3px;" }));
+            row.appendChild(barOuter);
+            row.appendChild(elF("span", { style: "font-size:10px;color:#64748b;min-width:24px;" }, String(count)));
+            histWrap.appendChild(row);
+          });
+          mountEl.appendChild(histWrap);
         }
 
         drawGrid(false);
