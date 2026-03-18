@@ -1441,9 +1441,11 @@
           var title = scenarioId.charAt(0).toUpperCase() + scenarioId.slice(1) + " | m=" + (p.m||1) + " c=" + (p.c||0) + " k=" + (p.k||4);
           var showX = sc.showX ? sc.showX.checked : true;
           var showV = sc.showV ? sc.showV.checked : true;
+          var xLabel = Y_LABELS[scenarioId] || "x(t)";
+          var vLabel = V_LABELS[scenarioId] || "v(t)";
           var traces = [];
-          if (showX) traces.push({ x: sim.t, y: sim.x, mode: "lines", name: "x(t)", line: { color: "#22d3ee" } });
-          if (showV) traces.push({ x: sim.t, y: sim.v, mode: "lines", name: "v(t)", line: { color: "#f59e0b", dash: "dot" } });
+          if (showX) traces.push({ x: sim.t, y: sim.x, mode: "lines", name: xLabel, line: { color: "#22d3ee" } });
+          if (showV) traces.push({ x: sim.t, y: sim.v, mode: "lines", name: vLabel, line: { color: "#f59e0b", dash: "dot" } });
           if (!traces.length) traces.push({ x: [0], y: [0], mode: "lines", name: "-" });
           var yLabel = showX && !showV ? (Y_LABELS[scenarioId] || "x") : (showV && !showX ? (V_LABELS[scenarioId] || "v") : "");
           Plotly.newPlot(sc.chartDiv, traces, {
@@ -1593,12 +1595,14 @@
           });
         }
 
-        // render charts into mountEl (main panel)
+        // render charts into mountEl (main panel) — add chartDiv to existing scenario objects
         SCENARIOS.forEach(function (sid) {
-          if (!scenarios[sid]) scenarios[sid] = { inputs: {} };
+          if (!scenarios[sid]) scenarios[sid] = { inputs: {}, showX: null, showV: null };
           var wrap = elF("div", { style: "margin-bottom:12px;" });
-          wrap.appendChild(elF("div", { style: "font-size:13px;color:#67e8f9;margin-bottom:4px;font-weight:600;" },
-            sid.charAt(0).toUpperCase() + sid.slice(1)));
+          var titleText = sid.charAt(0).toUpperCase() + sid.slice(1);
+          var yLabel = Y_LABELS[sid] || "";
+          wrap.appendChild(elF("div", { style: "font-size:13px;color:#67e8f9;margin-bottom:4px;font-weight:600;" }, titleText));
+          wrap.appendChild(elF("div", { style: "font-size:9px;color:#64748b;margin-bottom:2px;" }, "solid = " + yLabel + " | dashed = " + (V_LABELS[sid] || "velocity")));
           var chartDiv = elF("div", { style: "height:260px;" });
           wrap.appendChild(chartDiv);
           mountEl.appendChild(wrap);
