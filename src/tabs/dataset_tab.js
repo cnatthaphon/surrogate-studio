@@ -61,9 +61,11 @@
         };
       });
 
+      var listMount = el("div", {});
+      leftEl.appendChild(listMount);
       if (uiEngine && typeof uiEngine.renderItemList === "function") {
         uiEngine.renderItemList({
-          mountEl: leftEl,
+          mountEl: listMount,
           items: items,
           emptyText: "No datasets. Click + New.",
           onOpen: function (itemId) {

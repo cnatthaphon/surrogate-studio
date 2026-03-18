@@ -63,9 +63,11 @@
         };
       });
 
+      var listMount = el("div", {});
+      leftEl.appendChild(listMount);
       if (uiEngine && typeof uiEngine.renderItemList === "function") {
         uiEngine.renderItemList({
-          mountEl: leftEl, items: items, emptyText: "No models. Click + New.",
+          mountEl: listMount, items: items, emptyText: "No models. Click + New.",
           onOpen: function (itemId) {
             if (stateApi) stateApi.setActiveModel(itemId);
             var m = store ? store.getModel(itemId) : null;

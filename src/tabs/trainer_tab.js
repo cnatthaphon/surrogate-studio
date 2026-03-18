@@ -51,9 +51,11 @@
         };
       });
 
+      var listMount = el("div", {});
+      leftEl.appendChild(listMount);
       if (uiEngine && typeof uiEngine.renderItemList === "function") {
         uiEngine.renderItemList({
-          mountEl: leftEl, items: items, emptyText: "No trainers. Click + New.",
+          mountEl: listMount, items: items, emptyText: "No trainers. Click + New.",
           onOpen: function (id) { if (stateApi) stateApi.setActiveTrainer(id); _renderLeftPanel(); _renderMainPanel(); _renderRightPanel(); },
           onAction: function (id, act) {
             if (act === "delete") {
