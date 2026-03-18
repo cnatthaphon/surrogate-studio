@@ -36,7 +36,8 @@
     }
     function _listDatasets() {
       if (!store) return [];
-      return typeof store.listDatasets === "function" ? store.listDatasets({ schemaId: _getSchemaId() }) : [];
+      // show all datasets, not filtered by active schema — user manages multiple schemas
+      return typeof store.listDatasets === "function" ? store.listDatasets({}) : [];
     }
 
     // === LEFT: use core renderItemList ===

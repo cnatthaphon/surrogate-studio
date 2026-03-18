@@ -31,7 +31,7 @@
     var _isTraining = false;
 
     function _getSchemaId() { return stateApi ? stateApi.getActiveSchema() : ""; }
-    function _listTrainers() { return store && typeof store.listTrainerCards === "function" ? store.listTrainerCards({ schemaId: _getSchemaId() }) : []; }
+    function _listTrainers() { return store && typeof store.listTrainerCards === "function" ? store.listTrainerCards({}) : []; }
     function _listDatasets() { return store && typeof store.listDatasets === "function" ? store.listDatasets({ schemaId: _getSchemaId() }) : []; }
     function _listModels() { return store && typeof store.listModels === "function" ? store.listModels({ schemaId: _getSchemaId() }) : []; }
 

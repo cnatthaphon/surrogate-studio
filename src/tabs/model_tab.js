@@ -44,7 +44,7 @@
 
     function _listModels() {
       if (!store) return [];
-      return typeof store.listModels === "function" ? store.listModels({ schemaId: _getSchemaId() }) : [];
+      return typeof store.listModels === "function" ? store.listModels({}) : [];
     }
 
     // === LEFT: use core renderItemList ===
