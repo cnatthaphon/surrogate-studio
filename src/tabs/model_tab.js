@@ -216,8 +216,11 @@
       _editor.start();
       console.log("[model_tab] Drawflow started, container:", container.offsetWidth, "x", container.offsetHeight);
       if (modelGraphCore && typeof modelGraphCore.createRuntime === "function") {
+        var W = typeof window !== "undefined" ? window : {};
+        var oscCore = W.OSCOscillatorDatasetCore || null;
+        var mbc = W.OSCModelBuilderCore || null;
         _graphRuntime = modelGraphCore.createRuntime({
-          resolveSchemaId: function (id) { return schemaRegistry && typeof schemaRegistry.resolveSchemaId === "function" ? schemaRegistry.resolveSchemaId(id) : String(id || "oscillator"); },
+          resolveSchemaId: function (id) { return schemaRegistry && typeof schemaRegistry.resolveSchemaId === "function" ? schemaRegistry.resolveSchemaId(id) : String(id || ""); },
           getCurrentSchemaId: function () { return _getSchemaId(); },
           getSchema: function (id) { return schemaRegistry ? schemaRegistry.getSchema(id) : null; },
           getModelSchema: function (id) { return schemaRegistry ? schemaRegistry.getModelSchema(id) : null; },
@@ -226,6 +229,34 @@
           getPresetList: function (id) { return schemaRegistry ? schemaRegistry.getPresetList(id) : []; },
           getOutputKeys: function (id) { return schemaRegistry ? schemaRegistry.getOutputKeys(id) : []; },
           getParamDefs: function (id) { return schemaRegistry ? schemaRegistry.getParamDefs(id) : []; },
+          getSchemaPresetDefById: function (schemaId, presetId) {
+            var presets = schemaRegistry ? schemaRegistry.getPresetDefs(schemaId) : {};
+            // presets may be array or object
+            if (Array.isArray(presets)) {
+              for (var i = 0; i < presets.length; i++) { if (presets[i] && presets[i].id === presetId) return presets[i]; }
+            } else if (presets && typeof presets === "object") {
+              return presets[presetId] || null;
+            }
+            return null;
+          },
+          clamp: function (v, lo, hi) { return Math.max(lo, Math.min(hi, v)); },
+          clearEditor: function (editor) { if (editor) try { editor.clear(); } catch (e) {} },
+          defaultParamMask: oscCore ? oscCore.defaultParamMask : function () { return {}; },
+          normalizeParamMask: oscCore ? oscCore.normalizeParamMask : function (m) { return m || {}; },
+          countStaticParams: oscCore ? oscCore.countStaticParams : function () { return 0; },
+          normalizeOutputTargetsList: mbc ? mbc.normalizeOutputTargetsList : function (raw, fb, keys) { return Array.isArray(raw) ? raw : [String(raw || "x")]; },
+          outputTargetsSummaryText: function (targets) { return "targets=[" + (Array.isArray(targets) ? targets.join(",") : String(targets || "")) + "]"; },
+          normalizeOneHotKey: function (raw) { return String(raw || "scenario").trim().toLowerCase(); },
+          oneHotLabel: function (key) { return String(key || ""); },
+          normalizeHistorySeriesKey: function (raw) { return String(raw || "x").trim().toLowerCase(); },
+          historySeriesLabel: function (key) { return String(key || "x"); },
+          getImageSourceSpec: function (rawKey, schemaId) {
+            var ds = schemaRegistry ? schemaRegistry.getDatasetSchema(schemaId) : null;
+            var sampleType = (ds && ds.sampleType) || "";
+            if (sampleType === "image") return { featureSize: 784, shape: [28, 28, 1] };
+            return { featureSize: 0, shape: [] };
+          },
+          estimateNodeFeatureWidth: function () { return 0; },
         });
         console.log("[model_tab] graphRuntime created, methods:", Object.keys(_graphRuntime).length);
       }

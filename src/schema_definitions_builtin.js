@@ -62,6 +62,10 @@
       _paletteItem("addScenarioBtn", "onehot", "OneHot", "Feature Nodes", { oneHotKey: "label" }),
       _paletteItem("addInputBtn", "input", "Input", "NN", { mode: "flat" }),
       _paletteItem("addDenseBtn", "dense", "Dense", "NN", { units: 32, activation: "relu" }),
+      _paletteItem("addConv1dBtn", "conv1d", "Conv1D", "NN", { filters: 32, kernelSize: 3, stride: 1, activation: "relu" }),
+      _paletteItem("addRnnBtn", "rnn", "RNN", "NN", { units: 64, dropout: 0.1, returnseq: "auto" }),
+      _paletteItem("addGruBtn", "gru", "GRU", "NN", { units: 64, dropout: 0.1, returnseq: "auto" }),
+      _paletteItem("addLstmBtn", "lstm", "LSTM", "NN", { units: 64, dropout: 0.1, returnseq: "auto" }),
       _paletteItem("addDropoutBtn", "dropout", "Dropout", "NN", { rate: 0.1 }),
       _paletteItem("addBatchNormBtn", "batchnorm", "BatchNorm", "NN", { momentum: 0.99, epsilon: 1e-3 }),
       _paletteItem("addLayerNormBtn", "layernorm", "LayerNorm", "NN", { epsilon: 1e-3 }),
@@ -69,6 +73,7 @@
       _paletteItem("addLatentMuBtn", "latent_mu", "Latent μ", "NN", { units: 16, group: "z_shared", matchWeight: 1 }),
       _paletteItem("addLatentLogVarBtn", "latent_logvar", "Latent logσ²", "NN", { units: 16, group: "z_shared", matchWeight: 1 }),
       _paletteItem("addReparamBtn", "reparam", "Reparam z", "NN", { group: "z_shared", beta: 1e-3, matchWeight: 1 }),
+      _paletteItem("addNoiseScheduleBtn", "noise_schedule", "NoiseSchedule", "Utils", {}),
       _paletteItem("addConcatBtn", "concat", "Concat", "Utils", { numInputs: 2 }),
       _paletteItem("addOutputMultiBtn", "output", "Output", "Output", { target: "label", targetType: "label", loss: "cross_entropy" }),
     ];
