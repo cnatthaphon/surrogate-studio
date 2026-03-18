@@ -216,7 +216,17 @@
       _editor.start();
       console.log("[model_tab] Drawflow started, container:", container.offsetWidth, "x", container.offsetHeight);
       if (modelGraphCore && typeof modelGraphCore.createRuntime === "function") {
-        _graphRuntime = modelGraphCore.createRuntime({});
+        _graphRuntime = modelGraphCore.createRuntime({
+          resolveSchemaId: function (id) { return schemaRegistry && typeof schemaRegistry.resolveSchemaId === "function" ? schemaRegistry.resolveSchemaId(id) : String(id || "oscillator"); },
+          getCurrentSchemaId: function () { return _getSchemaId(); },
+          getSchema: function (id) { return schemaRegistry ? schemaRegistry.getSchema(id) : null; },
+          getModelSchema: function (id) { return schemaRegistry ? schemaRegistry.getModelSchema(id) : null; },
+          getDatasetSchema: function (id) { return schemaRegistry ? schemaRegistry.getDatasetSchema(id) : null; },
+          getPresetDefs: function (id) { return schemaRegistry ? schemaRegistry.getPresetDefs(id) : {}; },
+          getPresetList: function (id) { return schemaRegistry ? schemaRegistry.getPresetList(id) : []; },
+          getOutputKeys: function (id) { return schemaRegistry ? schemaRegistry.getOutputKeys(id) : []; },
+          getParamDefs: function (id) { return schemaRegistry ? schemaRegistry.getParamDefs(id) : []; },
+        });
         console.log("[model_tab] graphRuntime created, methods:", Object.keys(_graphRuntime).length);
       }
       _editor.on("nodeSelected", function (id) {
