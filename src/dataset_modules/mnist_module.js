@@ -694,6 +694,106 @@
     return buildDatasetFromSource(c, source);
   }
 
+  function createImagePlaygroundRenderer(variant, label, defaultClassNames) {
+    return function renderPlayground(mountEl, deps) {
+      if (!mountEl) return;
+      var elF = (deps && deps.el) || function (tag, attrs, ch) {
+        var e = document.createElement(tag);
+        if (attrs) Object.keys(attrs).forEach(function (k) {
+          if (k === "className") e.className = attrs[k];
+          else if (k === "textContent") e.textContent = attrs[k];
+          else e.setAttribute(k, attrs[k]);
+        });
+        if (ch) (Array.isArray(ch) ? ch : [ch]).forEach(function (c) {
+          if (typeof c === "string") e.appendChild(document.createTextNode(c));
+          else if (c) e.appendChild(c);
+        });
+        return e;
+      };
+
+      mountEl.innerHTML = "";
+      mountEl.appendChild(elF("div", { style: "color:#67e8f9;font-size:13px;" }, "Loading " + label + " data..."));
+
+      var isCurrent = (deps && typeof deps.isCurrent === "function") ? deps.isCurrent : function () { return true; };
+      buildMnistDataset({ seed: 42, totalCount: 100, variant: variant }).then(function (res) {
+        if (!isCurrent()) return; // stale mount — don't render
+        mountEl.innerHTML = "";
+        if (!res) { mountEl.appendChild(elF("div", { style: "color:#f43f5e;" }, "No data")); return; }
+
+        var cNames = res.classNames || defaultClassNames || [];
+        var nClasses = res.classCount || cNames.length || 10;
+        var imgShape = Array.isArray(res.imageShape) ? res.imageShape : [28, 28, 1];
+        var imgW = imgShape[0] || 28;
+        var imgH = imgShape[1] || 28;
+        var xData = (res.records && res.records.train && res.records.train.x) || [];
+        var yData = (res.records && res.records.train && res.records.train.y) || [];
+
+        // info
+        mountEl.appendChild(elF("div", { style: "font-size:12px;color:#94a3b8;margin-bottom:8px;" },
+          label + " | Train: " + (res.trainCount || xData.length) + " | Classes: " + nClasses + " | Shape: " + imgW + "x" + imgH));
+
+        if (!xData.length) { mountEl.appendChild(elF("div", { style: "color:#64748b;" }, "No image data available")); return; }
+
+        // group by class
+        var byClass = {};
+        for (var i = 0; i < yData.length; i++) {
+          var cls = Number(yData[i]);
+          if (!byClass[cls]) byClass[cls] = [];
+          byClass[cls].push(i);
+        }
+
+        var canvases = [];
+        var classRow = elF("div", { style: "display:flex;flex-wrap:wrap;gap:8px;align-items:flex-end;" });
+        for (var ci = 0; ci < nClasses; ci++) {
+          var canvas = document.createElement("canvas");
+          canvas.width = imgW; canvas.height = imgH;
+          canvas.style.cssText = "width:56px;height:56px;border:1px solid #334155;border-radius:4px;image-rendering:pixelated;background:#000;";
+          var cellWrap = elF("div", { style: "text-align:center;" });
+          cellWrap.appendChild(canvas);
+          cellWrap.appendChild(elF("div", { style: "font-size:10px;color:#94a3b8;margin-top:2px;max-width:56px;overflow:hidden;text-overflow:ellipsis;" }, cNames[ci] || String(ci)));
+          classRow.appendChild(cellWrap);
+          canvases.push({ cls: ci, canvas: canvas });
+        }
+        mountEl.appendChild(classRow);
+
+        function drawGrid(randomize) {
+          canvases.forEach(function (item) {
+            var indices = byClass[item.cls] || [];
+            if (!indices.length) return;
+            var idx = randomize ? indices[Math.floor(Math.random() * indices.length)] : indices[0];
+            var pixels = xData[idx];
+            if (!pixels) return;
+            var ctx = item.canvas.getContext("2d");
+            var imgData = ctx.createImageData(imgW, imgH);
+            for (var pi = 0; pi < pixels.length && pi < imgW * imgH; pi++) {
+              var v = Math.round(pixels[pi] * 255);
+              imgData.data[pi * 4] = v; imgData.data[pi * 4 + 1] = v; imgData.data[pi * 4 + 2] = v; imgData.data[pi * 4 + 3] = 255;
+            }
+            ctx.putImageData(imgData, 0, 0);
+          });
+        }
+
+        var randBtn = elF("button", { style: "margin-top:8px;padding:4px 12px;font-size:11px;border-radius:6px;border:1px solid #0ea5e9;background:#0284c7;color:#fff;cursor:pointer;" }, "Random");
+        randBtn.addEventListener("click", function () { drawGrid(true); });
+        mountEl.appendChild(randBtn);
+
+        // histogram
+        if (res.labelsHistogram) {
+          var histDiv = elF("div", { style: "margin-top:8px;font-size:11px;color:#64748b;" });
+          histDiv.textContent = "Distribution: " + Object.keys(res.labelsHistogram).map(function (k) {
+            return (cNames[k] || k) + ":" + res.labelsHistogram[k];
+          }).join(" | ");
+          mountEl.appendChild(histDiv);
+        }
+
+        drawGrid(false);
+      }).catch(function (err) {
+        mountEl.innerHTML = "";
+        mountEl.appendChild(elF("div", { style: "color:#f43f5e;" }, "Error: " + String(err.message || err)));
+      });
+    };
+  }
+
   var modules = [
     {
       id: "mnist",
@@ -720,6 +820,9 @@
       build: function (cfg) {
         return buildMnistDataset(Object.assign({}, cfg || {}, { variant: "mnist" }));
       },
+      playgroundApi: {
+        renderPlayground: createImagePlaygroundRenderer("mnist", "MNIST", ["0","1","2","3","4","5","6","7","8","9"]),
+      },
       uiApi: createImageDatasetUiApi({
         schemaId: "mnist",
         defaultSplitMode: "random",
@@ -732,5 +835,6 @@
     modules: modules,
     buildMnistDataset: buildMnistDataset,
     createImageDatasetUiApi: createImageDatasetUiApi,
+    createImagePlaygroundRenderer: createImagePlaygroundRenderer,
   };
 });

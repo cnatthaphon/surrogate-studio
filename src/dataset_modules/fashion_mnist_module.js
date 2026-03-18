@@ -77,6 +77,18 @@
       }
       return buildMnistDataset(Object.assign({}, cfg || {}, { variant: "fashion_mnist" }));
     },
+    playgroundApi: {
+      renderPlayground: function (mountEl, deps) {
+        // delegate to mnist module's renderer with fashion variant
+        var mnistMod = (root && root.OSCDatasetModuleMnist) || mnistPack;
+        if (mnistMod && mnistMod.createImagePlaygroundRenderer) {
+          var renderer = mnistMod.createImagePlaygroundRenderer("fashion_mnist", "Fashion-MNIST",
+            ["T-shirt/top","Trouser","Pullover","Dress","Coat","Sandal","Shirt","Sneaker","Bag","Ankle boot"]);
+          return renderer(mountEl, deps);
+        }
+        if (mountEl) mountEl.innerHTML = "<div style='color:#64748b;'>Fashion-MNIST renderer not available</div>";
+      },
+    },
     uiApi: (function () {
       var createUiApi = resolveImageDatasetUiApiFactory();
       return createUiApi ? createUiApi({

@@ -1280,6 +1280,159 @@
         if (aid === "parameter_sweep") return runParameterSweepAction(ctx || {});
         throw new Error("Unsupported oscillator playground action: " + aid);
       },
+      renderPlayground: function (mountEl, deps) {
+        if (!mountEl) return;
+        var Plotly = deps && deps.Plotly;
+        var elF = deps && deps.el || function (tag, attrs, ch) {
+          var e = document.createElement(tag);
+          if (attrs) Object.keys(attrs).forEach(function (k) {
+            if (k === "className") e.className = attrs[k];
+            else if (k === "textContent") e.textContent = attrs[k];
+            else e.setAttribute(k, attrs[k]);
+          });
+          if (ch) (Array.isArray(ch) ? ch : [ch]).forEach(function (c) {
+            if (typeof c === "string") e.appendChild(document.createTextNode(c));
+            else if (c) e.appendChild(c);
+          });
+          return e;
+        };
+
+        var SCENARIOS = ["spring", "pendulum", "bouncing"];
+        var DEFAULTS = {
+          spring: { m: 1.2, c: 0.25, k: 4.0, x0: 1.0, v0: 0, e: 0.8 },
+          pendulum: { m: 1.0, c: 0.15, k: 2.0, x0: 0.6, v0: 0, e: 0.8 },
+          bouncing: { m: 1.0, c: 0.15, k: 9.81, x0: 1.0, v0: 2.0, e: 0.8 },
+        };
+        var LABELS = {
+          spring: [
+            { key: "m", label: "Mass m (kg)" }, { key: "c", label: "Damping c (Ns/m)" },
+            { key: "k", label: "Stiffness k (N/m)" }, { key: "x0", label: "x\u2080 (m)" }, { key: "v0", label: "v\u2080 (m/s)" },
+          ],
+          pendulum: [
+            { key: "m", label: "Mass m (kg)" }, { key: "c", label: "Damping c" },
+            { key: "k", label: "Length L (m)" }, { key: "x0", label: "\u03b8\u2080 (rad)" }, { key: "v0", label: "\u03c9\u2080 (rad/s)" },
+          ],
+          bouncing: [
+            { key: "m", label: "Mass m (kg)" }, { key: "c", label: "Air drag c" },
+            { key: "k", label: "Gravity g (m/s\u00b2)" }, { key: "e", label: "Restitution e" },
+            { key: "x0", label: "Height x\u2080 (m)" }, { key: "v0", label: "Velocity v\u2080 (m/s)" },
+          ],
+        };
+
+        var scenarios = {};
+        var globalInputs = {};
+
+        function simOne(scenarioId) {
+          var sc = scenarios[scenarioId];
+          if (!sc || !sc.chartDiv || !Plotly) return;
+          var p = {};
+          Object.keys(sc.inputs).forEach(function (k) { p[k] = Number(sc.inputs[k].value); });
+          var g = Number((globalInputs.g || {}).value) || 9.81;
+          var dt = Number((globalInputs.dt || {}).value) || 0.02;
+          var dur = Number((globalInputs.durationSec || {}).value) || 8;
+          var steps = Math.max(10, Math.floor(dur / dt));
+          var sim = OSC_CORE.simulateOscillator({
+            scenario: scenarioId, m: p.m || 1, c: p.c || 0, k: p.k || 4, g: g,
+            x0: p.x0 || 0, v0: p.v0 || 0, restitution: p.e || 0.8,
+            dt: dt, steps: steps, groundModel: "rigid", groundK: 2500, groundC: 90,
+          });
+          var title = scenarioId.charAt(0).toUpperCase() + scenarioId.slice(1) + " | m=" + (p.m||1) + " c=" + (p.c||0) + " k=" + (p.k||4);
+          Plotly.newPlot(sc.chartDiv, [
+            { x: sim.t, y: sim.x, mode: "lines", name: "x(t)", line: { color: "#22d3ee" } },
+            { x: sim.t, y: sim.v, mode: "lines", name: "v(t)", line: { color: "#f59e0b", dash: "dot" } },
+          ], {
+            paper_bgcolor: "#0b1220", plot_bgcolor: "#0b1220", font: { color: "#e2e8f0", size: 10 },
+            title: { text: title, font: { size: 12 } },
+            xaxis: { title: "t (s)", gridcolor: "#1e293b" }, yaxis: { gridcolor: "#1e293b" },
+            legend: { orientation: "h", y: -0.2, font: { size: 10 } },
+            margin: { t: 30, b: 45, l: 40, r: 10 },
+          }, { responsive: true });
+        }
+
+        function simAll() { SCENARIOS.forEach(simOne); }
+        function randomAll() {
+          SCENARIOS.forEach(function (sid) {
+            var sc = scenarios[sid];
+            if (!sc) return;
+            var def = DEFAULTS[sid];
+            Object.keys(sc.inputs).forEach(function (k) {
+              var base = def[k] || 1;
+              sc.inputs[k].value = (base * (0.5 + Math.random())).toFixed(3);
+            });
+          });
+        }
+
+        // render config into deps.configEl (right panel)
+        var configEl = deps && deps.configEl;
+        if (configEl) {
+          configEl.innerHTML = "";
+          configEl.appendChild(elF("h3", { style: "margin:0 0 8px;font-size:13px;color:#94a3b8;text-transform:uppercase;" }, "Simulation Config"));
+
+          var gDefs = [
+            { key: "durationSec", label: "Duration (s)", value: 8, step: 0.5 },
+            { key: "dt", label: "dt", value: 0.02, step: 0.001 },
+            { key: "g", label: "Gravity g (m/s\u00b2)", value: 9.81, step: 0.1 },
+          ];
+          gDefs.forEach(function (gd) {
+            var row = elF("div", { style: "display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;" });
+            row.appendChild(elF("span", { style: "font-size:11px;color:#94a3b8;" }, gd.label));
+            var inp = elF("input", { type: "number", value: String(gd.value), style: "width:70px;padding:2px 4px;font-size:11px;border-radius:4px;border:1px solid #334155;background:#0b1220;color:#e2e8f0;" });
+            if (gd.step) inp.setAttribute("step", gd.step);
+            globalInputs[gd.key] = inp;
+            row.appendChild(inp);
+            configEl.appendChild(row);
+          });
+
+          var btnRow = elF("div", { style: "display:flex;gap:4px;margin:8px 0;" });
+          var simBtn = elF("button", { style: "flex:1;padding:4px 8px;font-size:11px;border-radius:6px;border:1px solid #0ea5e9;background:#0284c7;color:#fff;cursor:pointer;" }, "Simulate All");
+          simBtn.addEventListener("click", simAll);
+          btnRow.appendChild(simBtn);
+          var randBtn = elF("button", { style: "flex:1;padding:4px 8px;font-size:11px;border-radius:6px;border:1px solid #475569;background:#1f2937;color:#cbd5e1;cursor:pointer;" }, "Random All");
+          randBtn.addEventListener("click", function () { randomAll(); simAll(); });
+          btnRow.appendChild(randBtn);
+          configEl.appendChild(btnRow);
+
+          SCENARIOS.forEach(function (sid) {
+            var sc = { inputs: {} };
+            var card = elF("div", { style: "border:1px solid #334155;border-radius:8px;padding:8px;margin-bottom:8px;background:#0b1220;" });
+            var head = elF("div", { style: "display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;" });
+            head.appendChild(elF("strong", { style: "font-size:12px;color:#67e8f9;" }, sid.charAt(0).toUpperCase() + sid.slice(1)));
+            var resetBtn = elF("button", { style: "padding:2px 6px;font-size:10px;border-radius:4px;border:1px solid #475569;background:#1f2937;color:#cbd5e1;cursor:pointer;" }, "Reset");
+            resetBtn.addEventListener("click", function () {
+              var def = DEFAULTS[sid];
+              Object.keys(def).forEach(function (k) { if (sc.inputs[k]) sc.inputs[k].value = String(def[k]); });
+              simOne(sid);
+            });
+            head.appendChild(resetBtn);
+            card.appendChild(head);
+            (LABELS[sid] || []).forEach(function (p) {
+              var row = elF("div", { style: "display:flex;justify-content:space-between;align-items:center;margin-bottom:2px;" });
+              row.appendChild(elF("span", { style: "font-size:10px;color:#94a3b8;min-width:90px;" }, p.label));
+              var inp = elF("input", { type: "number", value: String(DEFAULTS[sid][p.key] || 0), style: "width:60px;padding:2px 4px;font-size:10px;border-radius:4px;border:1px solid #334155;background:#0b1220;color:#e2e8f0;" });
+              inp.setAttribute("step", "0.1");
+              sc.inputs[p.key] = inp;
+              row.appendChild(inp);
+              card.appendChild(row);
+            });
+            configEl.appendChild(card);
+            scenarios[sid] = sc;
+          });
+        }
+
+        // render charts into mountEl (main panel)
+        SCENARIOS.forEach(function (sid) {
+          if (!scenarios[sid]) scenarios[sid] = { inputs: {} };
+          var wrap = elF("div", { style: "margin-bottom:12px;" });
+          wrap.appendChild(elF("div", { style: "font-size:13px;color:#67e8f9;margin-bottom:4px;font-weight:600;" },
+            sid.charAt(0).toUpperCase() + sid.slice(1)));
+          var chartDiv = elF("div", { style: "height:260px;" });
+          wrap.appendChild(chartDiv);
+          mountEl.appendChild(wrap);
+          scenarios[sid].chartDiv = chartDiv;
+        });
+
+        setTimeout(simAll, 50);
+      },
     },
     uiApi: {
       applyWorkspaceState: applyWorkspaceState,
