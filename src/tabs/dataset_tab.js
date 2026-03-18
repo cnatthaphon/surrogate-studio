@@ -265,31 +265,31 @@
         rightEl.appendChild(globalMount);
       }
 
-      // 2. MODULE-SPECIFIC config (from module.getDatasetConfigSpec, excluding global fields)
+      // 2. MODULE-SPECIFIC config (from module.getDatasetConfigSpec, excluding fields already in global)
+      var globalKeys = { seed: true, splitMode: true, trainFrac: true, valFrac: true, testFrac: true };
       var mod = _getModuleForSchema(ds.schemaId);
       if (mod && mod.uiApi && typeof mod.uiApi.getDatasetConfigSpec === "function" && uiEngine) {
         var spec = mod.uiApi.getDatasetConfigSpec({});
         var sections = Array.isArray(spec.sections) ? spec.sections : [];
-        // skip first section (common/global) since we render it from schema
-        var moduleSectons = sections.length > 1 ? sections.slice(1) : [];
-        if (moduleSectons.length) {
-          moduleSectons.forEach(function (sec) {
-            rightEl.appendChild(el("div", { style: "font-size:11px;color:#67e8f9;margin-top:8px;margin-bottom:4px;font-weight:600;" }, sec.title || "Module Config"));
-            var fields = Array.isArray(sec.schema) ? sec.schema : [];
-            var defaults = (sec.value && typeof sec.value === "object") ? sec.value : {};
-            var modSchema = [];
-            var modValue = {};
-            fields.forEach(function (f) {
-              var key = f.key || f.id;
-              if (!key) return;
-              modSchema.push({ key: key, label: f.label || key, type: f.type || "text", options: f.options, min: f.min, max: f.max, step: f.step, disabled: f.disabled });
-              modValue[key] = defaults[key] !== undefined ? defaults[key] : (f.value || "");
-            });
-            var modMount = el("div", {});
-            uiEngine.renderConfigForm({ mountEl: modMount, schema: modSchema, value: modValue, fieldNamePrefix: "dsmod", rowClassName: "osc-form-row" });
-            rightEl.appendChild(modMount);
+        sections.forEach(function (sec) {
+          var fields = Array.isArray(sec.schema) ? sec.schema : [];
+          var defaults = (sec.value && typeof sec.value === "object") ? sec.value : {};
+          // filter out fields already rendered in global
+          var modFields = fields.filter(function (f) { return !globalKeys[f.key || f.id]; });
+          if (!modFields.length) return;
+          rightEl.appendChild(el("div", { style: "font-size:11px;color:#67e8f9;margin-top:8px;margin-bottom:4px;font-weight:600;" }, sec.title || "Module Config"));
+          var modSchema = [];
+          var modValue = {};
+          modFields.forEach(function (f) {
+            var key = f.key || f.id;
+            if (!key) return;
+            modSchema.push({ key: key, label: f.label || key, type: f.type || "text", options: f.options, min: f.min, max: f.max, step: f.step, disabled: f.disabled });
+            modValue[key] = defaults[key] !== undefined ? defaults[key] : (f.value || "");
           });
-        }
+          var modMount = el("div", {});
+          uiEngine.renderConfigForm({ mountEl: modMount, schema: modSchema, value: modValue, fieldNamePrefix: "dsmod", rowClassName: "osc-form-row" });
+          rightEl.appendChild(modMount);
+        });
       }
 
       // Generate button
