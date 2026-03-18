@@ -1273,6 +1273,106 @@
     },
     playgroundApi: {
       buildQuickCompareInfoText: buildQuickCompareInfoText,
+      renderDataset: function (mountEl, deps) {
+        if (!mountEl) return;
+        var Plotly = deps && deps.Plotly;
+        var elF = deps && deps.el || function (tag, a, c) {
+          var e = document.createElement(tag); if (a) Object.keys(a).forEach(function(k){ if(k==="className")e.className=a[k]; else if(k==="textContent")e.textContent=a[k]; else e.setAttribute(k,a[k]); }); if(c)(Array.isArray(c)?c:[c]).forEach(function(ch){ if(typeof ch==="string")e.appendChild(document.createTextNode(ch)); else if(ch)e.appendChild(ch); }); return e;
+        };
+        var d = deps && deps.datasetData;
+        if (!d) { mountEl.appendChild(elF("div", { style: "color:#64748b;" }, "No dataset data")); return; }
+
+        var isBundle = d.kind === "dataset_bundle" && d.datasets;
+        var variants = isBundle ? Object.keys(d.datasets) : ["default"];
+        var activeVar = isBundle ? (d.activeVariantId || variants[0]) : "default";
+        var activeDs = isBundle ? d.datasets[activeVar] : d;
+
+        if (!activeDs) { mountEl.appendChild(elF("div", { style: "color:#64748b;" }, "No active variant")); return; }
+
+        // summary
+        mountEl.appendChild(elF("div", { style: "font-size:12px;color:#94a3b8;margin-bottom:8px;" },
+          "Trajectories: " + ((activeDs.trajectories || []).length) +
+          " | Train: " + (activeDs.trainCount || (activeDs.xTrain || []).length) +
+          " | Val: " + (activeDs.valCount || (activeDs.xVal || []).length) +
+          " | Test: " + (activeDs.testCount || (activeDs.xTest || []).length) +
+          " | Mode: " + (activeDs.mode || "?") +
+          " | Window: " + (activeDs.windowSize || "?") +
+          (isBundle ? " | Variant: " + activeVar : "")));
+
+        // scenario distribution
+        var trajs = activeDs.trajectories || [];
+        if (trajs.length) {
+          var scenarioCounts = {};
+          trajs.forEach(function (tr) {
+            var s = (tr.params && tr.params.scenario) || "unknown";
+            scenarioCounts[s] = (scenarioCounts[s] || 0) + 1;
+          });
+          var distDiv = elF("div", { style: "margin-bottom:8px;" });
+          distDiv.appendChild(elF("div", { style: "font-size:11px;color:#94a3b8;margin-bottom:2px;font-weight:600;" }, "Scenario Distribution"));
+          var maxC = 0;
+          Object.keys(scenarioCounts).forEach(function (k) { if (scenarioCounts[k] > maxC) maxC = scenarioCounts[k]; });
+          Object.keys(scenarioCounts).forEach(function (k) {
+            var count = scenarioCounts[k];
+            var pct = maxC > 0 ? (count / maxC) * 100 : 0;
+            var row = elF("div", { style: "display:flex;align-items:center;gap:6px;margin-bottom:2px;" });
+            row.appendChild(elF("span", { style: "font-size:10px;color:#94a3b8;min-width:60px;text-align:right;" }, k));
+            var bar = elF("div", { style: "flex:1;height:12px;background:#1e293b;border-radius:3px;overflow:hidden;" });
+            var colors = { spring: "#22d3ee", pendulum: "#a78bfa", bouncing: "#f59e0b" };
+            bar.appendChild(elF("div", { style: "height:100%;width:" + pct + "%;background:" + (colors[k] || "#0ea5e9") + ";border-radius:3px;" }));
+            row.appendChild(bar);
+            row.appendChild(elF("span", { style: "font-size:10px;color:#64748b;" }, String(count)));
+            distDiv.appendChild(row);
+          });
+          mountEl.appendChild(distDiv);
+        }
+
+        // plot sample trajectories
+        if (Plotly && trajs.length) {
+          var chartDiv = elF("div", { style: "height:300px;margin-top:8px;" });
+          mountEl.appendChild(chartDiv);
+          var traces = [];
+          var showCount = Math.min(trajs.length, 9);
+          var colors = { spring: "#22d3ee", pendulum: "#a78bfa", bouncing: "#f59e0b" };
+          for (var ti = 0; ti < showCount; ti++) {
+            var tr = trajs[ti];
+            traces.push({
+              x: tr.t, y: tr.x, mode: "lines",
+              name: (tr.params && tr.params.scenario || "") + " #" + ti,
+              line: { color: colors[(tr.params && tr.params.scenario)] || "#67e8f9", width: 1 },
+            });
+          }
+          Plotly.newPlot(chartDiv, traces, {
+            paper_bgcolor: "#0b1220", plot_bgcolor: "#0b1220", font: { color: "#e2e8f0", size: 10 },
+            title: { text: "Sample Trajectories (" + showCount + "/" + trajs.length + ")", font: { size: 12 } },
+            xaxis: { title: "t (s)", gridcolor: "#1e293b" }, yaxis: { gridcolor: "#1e293b" },
+            legend: { orientation: "h", y: -0.15, font: { size: 9 } },
+            margin: { t: 30, b: 50, l: 40, r: 10 },
+          }, { responsive: true });
+
+          // Random samples button
+          var randBtn = elF("button", { style: "margin-top:4px;padding:4px 12px;font-size:11px;border-radius:6px;border:1px solid #0ea5e9;background:#0284c7;color:#fff;cursor:pointer;" }, "Random Samples");
+          randBtn.addEventListener("click", function () {
+            var newTraces = [];
+            for (var ri = 0; ri < showCount; ri++) {
+              var idx = Math.floor(Math.random() * trajs.length);
+              var rtr = trajs[idx];
+              newTraces.push({
+                x: rtr.t, y: rtr.x, mode: "lines",
+                name: (rtr.params && rtr.params.scenario || "") + " #" + idx,
+                line: { color: colors[(rtr.params && rtr.params.scenario)] || "#67e8f9", width: 1 },
+              });
+            }
+            Plotly.newPlot(chartDiv, newTraces, {
+              paper_bgcolor: "#0b1220", plot_bgcolor: "#0b1220", font: { color: "#e2e8f0", size: 10 },
+              title: { text: "Sample Trajectories (random " + showCount + "/" + trajs.length + ")", font: { size: 12 } },
+              xaxis: { title: "t (s)", gridcolor: "#1e293b" }, yaxis: { gridcolor: "#1e293b" },
+              legend: { orientation: "h", y: -0.15, font: { size: 9 } },
+              margin: { t: 30, b: 50, l: 40, r: 10 },
+            }, { responsive: true });
+          });
+          mountEl.appendChild(randBtn);
+        }
+      },
       runAction: function (actionId, ctx) {
         var aid = String(actionId || "").trim().toLowerCase();
         if (aid === "preview") return runPreviewAction(ctx || {});

@@ -192,27 +192,29 @@
       }
       if (parts.length) mainEl.appendChild(el("div", { style: "font-size:12px;color:#cbd5e1;padding:4px 8px;" }, parts.join(" | ")));
 
-      // delegate image preview to module (only for image datasets that have datasetData)
+      // delegate dataset preview to module
       var mod = _getModuleForSchema(ds.schemaId);
-      var dsSchema = schemaRegistry ? schemaRegistry.getDatasetSchema(ds.schemaId) : null;
-      var sampleType = (dsSchema && dsSchema.sampleType) || "";
-      if (sampleType === "image" && mod && mod.playgroundApi && typeof mod.playgroundApi.renderPlayground === "function") {
+      if (mod && mod.playgroundApi && typeof mod.playgroundApi.renderDataset === "function") {
+        // module has dedicated dataset renderer
         var previewMount = el("div", { style: "margin-top:8px;" });
         mainEl.appendChild(previewMount);
-        mod.playgroundApi.renderPlayground(previewMount, {
+        mod.playgroundApi.renderDataset(previewMount, {
           el: el, escapeHtml: escapeHtml,
+          Plotly: (typeof window !== "undefined" && window.Plotly) ? window.Plotly : null,
+          isCurrent: function () { return currentMountId === _mountId; },
+          datasetData: d,
+        });
+      } else if (mod && mod.playgroundApi && typeof mod.playgroundApi.renderPlayground === "function") {
+        // fallback to playground renderer with dataset data
+        var previewMount2 = el("div", { style: "margin-top:8px;" });
+        mainEl.appendChild(previewMount2);
+        mod.playgroundApi.renderPlayground(previewMount2, {
+          el: el, escapeHtml: escapeHtml,
+          Plotly: (typeof window !== "undefined" && window.Plotly) ? window.Plotly : null,
           configEl: null,
           isCurrent: function () { return currentMountId === _mountId; },
           datasetData: d,
         });
-      } else if (isBundle && activeDs && activeDs.trajectories) {
-        // oscillator: show trajectory summary
-        var trajInfo = el("div", { style: "font-size:12px;color:#94a3b8;padding:4px 8px;" });
-        trajInfo.textContent = "Trajectories: " + (activeDs.trajectories || []).length +
-          " | Mode: " + (activeDs.mode || "?") +
-          " | Window: " + (activeDs.windowSize || "?") +
-          " | Scenarios: " + ((activeDs.includedScenarios || []).join(", ") || "?");
-        mainEl.appendChild(trajInfo);
       }
     }
 
