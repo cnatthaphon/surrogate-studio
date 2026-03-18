@@ -142,6 +142,13 @@
       });
     }
 
+    function _getModuleForSchema(schemaId) {
+      if (!datasetModules) return null;
+      var mods = datasetModules.getModuleForSchema(schemaId);
+      var list = Array.isArray(mods) ? mods : [];
+      return list.length && datasetModules.getModule ? datasetModules.getModule(list[0].id) : null;
+    }
+
     // === MIDDLE: delegate to module or show info ===
     function _renderMainPanel() {
       var mainEl = layout.mainEl;
@@ -152,34 +159,52 @@
       var ds = store ? store.getDataset(activeId) : null;
       if (!ds) { mainEl.appendChild(el("div", { className: "osc-empty" }, "Not found.")); return; }
 
-      // module preview if ready
-      var mod = _getModule();
-      if (ds.status === "ready" && ds.data && mod && mod.playgroundApi && typeof mod.playgroundApi.renderPlayground === "function") {
-        mod.playgroundApi.renderPlayground(mainEl, {
+      // header
+      var card = el("div", { className: "osc-card" });
+      card.appendChild(el("h3", { style: "color:#67e8f9;margin:0 0 8px;" }, ds.name || ds.id));
+      card.appendChild(el("div", { style: "font-size:12px;color:#94a3b8;" },
+        "Schema: " + escapeHtml(ds.schemaId || "") + " | Status: " + (ds.status === "ready" ? "\u2713 ready" : (ds.status || "empty"))));
+      mainEl.appendChild(card);
+
+      if (!ds.data) {
+        mainEl.appendChild(el("div", { style: "font-size:12px;color:#64748b;padding:8px;" }, "Configure and generate from right panel."));
+        return;
+      }
+
+      // data summary
+      var d = ds.data;
+      var isBundle = d.kind === "dataset_bundle" && d.datasets;
+      var activeDs = isBundle ? d.datasets[d.activeVariantId || Object.keys(d.datasets)[0]] : d;
+
+      var parts = [];
+      if (activeDs) {
+        if (activeDs.trainCount || (activeDs.xTrain && activeDs.xTrain.length)) parts.push("Train: " + (activeDs.trainCount || (activeDs.xTrain || []).length));
+        if (activeDs.valCount || (activeDs.xVal && activeDs.xVal.length)) parts.push("Val: " + (activeDs.valCount || (activeDs.xVal || []).length));
+        if (activeDs.testCount || (activeDs.xTest && activeDs.xTest.length)) parts.push("Test: " + (activeDs.testCount || (activeDs.xTest || []).length));
+        if (activeDs.featureSize) parts.push("Features: " + activeDs.featureSize);
+        if (activeDs.classCount) parts.push("Classes: " + activeDs.classCount);
+        if (isBundle) parts.push("Variant: " + (d.activeVariantId || ""));
+      } else {
+        if (d.trainCount) parts.push("Train: " + d.trainCount);
+        if (d.valCount) parts.push("Val: " + d.valCount);
+        if (d.testCount) parts.push("Test: " + d.testCount);
+        if (d.classCount) parts.push("Classes: " + d.classCount);
+      }
+      if (parts.length) mainEl.appendChild(el("div", { style: "font-size:12px;color:#cbd5e1;padding:4px 8px;" }, parts.join(" | ")));
+
+      // delegate detailed view to module (use dataset's own schema, not active schema)
+      var mod = _getModuleForSchema(ds.schemaId);
+      if (mod && mod.playgroundApi && typeof mod.playgroundApi.renderPlayground === "function") {
+        var previewMount = el("div", { style: "margin-top:8px;" });
+        mainEl.appendChild(previewMount);
+        mod.playgroundApi.renderPlayground(previewMount, {
           el: el, escapeHtml: escapeHtml,
           Plotly: (typeof window !== "undefined" && window.Plotly) ? window.Plotly : null,
           configEl: null,
           isCurrent: function () { return currentMountId === _mountId; },
+          datasetData: d,
         });
-        return;
       }
-
-      // info card
-      var card = el("div", { className: "osc-card" });
-      card.appendChild(el("h3", { style: "color:#67e8f9;margin:0 0 8px;" }, ds.name || ds.id));
-      card.appendChild(el("div", { style: "font-size:12px;color:#94a3b8;" },
-        "Schema: " + escapeHtml(ds.schemaId || "") + " | Status: " + (ds.status || "draft")));
-      if (ds.data) {
-        var d = ds.data;
-        var parts = [];
-        if (d.trainCount || (d.xTrain && d.xTrain.length)) parts.push("Train: " + (d.trainCount || (d.xTrain || []).length));
-        if (d.valCount || (d.xVal && d.xVal.length)) parts.push("Val: " + (d.valCount || (d.xVal || []).length));
-        if (d.testCount || (d.xTest && d.xTest.length)) parts.push("Test: " + (d.testCount || (d.xTest || []).length));
-        if (parts.length) card.appendChild(el("div", { style: "font-size:12px;color:#cbd5e1;margin-top:4px;" }, parts.join(" | ")));
-      } else {
-        card.appendChild(el("div", { style: "font-size:12px;color:#64748b;margin-top:4px;" }, "Configure and generate from right panel."));
-      }
-      mainEl.appendChild(card);
     }
 
     // === RIGHT: use core renderConfigForm from module spec ===

@@ -712,10 +712,26 @@
       };
 
       mountEl.innerHTML = "";
-      mountEl.appendChild(elF("div", { style: "color:#67e8f9;font-size:13px;" }, "Loading " + label + " data..."));
-
       var isCurrent = (deps && typeof deps.isCurrent === "function") ? deps.isCurrent : function () { return true; };
+
+      // if dataset data already provided (from dataset tab), use it directly
+      var providedData = deps && deps.datasetData;
+      if (providedData) {
+        _renderImageResult(mountEl, elF, providedData, label, defaultClassNames, isCurrent);
+        return;
+      }
+
+      mountEl.appendChild(elF("div", { style: "color:#67e8f9;font-size:13px;" }, "Loading " + label + " data..."));
       buildMnistDataset({ seed: 42, totalCount: 100, variant: variant }).then(function (res) {
+        _renderImageResult(mountEl, elF, res, label, defaultClassNames, isCurrent);
+      }).catch(function (err) {
+        mountEl.innerHTML = "";
+        mountEl.appendChild(elF("div", { style: "color:#f43f5e;" }, "Error: " + String(err.message || err)));
+      });
+    };
+  }
+
+  function _renderImageResult(mountEl, elF, res, label, defaultClassNames, isCurrent) {
         if (!isCurrent()) return; // stale mount — don't render
         mountEl.innerHTML = "";
         if (!res) { mountEl.appendChild(elF("div", { style: "color:#f43f5e;" }, "No data")); return; }
@@ -798,11 +814,6 @@
         }
 
         drawGrid(false);
-      }).catch(function (err) {
-        mountEl.innerHTML = "";
-        mountEl.appendChild(elF("div", { style: "color:#f43f5e;" }, "Error: " + String(err.message || err)));
-      });
-    };
   }
 
   var modules = [
