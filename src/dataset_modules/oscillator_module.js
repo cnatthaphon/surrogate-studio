@@ -1437,14 +1437,47 @@
             dt: dt, steps: steps, groundModel: "rigid", groundK: 2500, groundC: 90,
           });
           var title = scenarioId.charAt(0).toUpperCase() + scenarioId.slice(1) + " | m=" + (p.m||1) + " c=" + (p.c||0) + " k=" + (p.k||4);
-          Plotly.newPlot(sc.chartDiv, [
-            { x: sim.t, y: sim.x, mode: "lines", name: "x(t)", line: { color: "#22d3ee" } },
-            { x: sim.t, y: sim.v, mode: "lines", name: "v(t)", line: { color: "#f59e0b", dash: "dot" } },
-          ], {
+          var showX = sc.showX ? sc.showX.checked : true;
+          var showV = sc.showV ? sc.showV.checked : true;
+          var traces = [];
+          if (showX) traces.push({ x: sim.t, y: sim.x, mode: "lines", name: "x(t)", line: { color: "#22d3ee" } });
+          if (showV) traces.push({ x: sim.t, y: sim.v, mode: "lines", name: "v(t)", line: { color: "#f59e0b", dash: "dot" } });
+          if (!traces.length) traces.push({ x: [0], y: [0], mode: "lines", name: "-" });
+          Plotly.newPlot(sc.chartDiv, traces, {
             paper_bgcolor: "#0b1220", plot_bgcolor: "#0b1220", font: { color: "#e2e8f0", size: 10 },
             title: { text: title, font: { size: 12 } },
             xaxis: { title: "t (s)", gridcolor: "#1e293b" }, yaxis: { gridcolor: "#1e293b" },
             legend: { orientation: "h", y: -0.2, font: { size: 10 } },
+            margin: { t: 30, b: 45, l: 40, r: 10 },
+          }, { responsive: true });
+        }
+
+        function sweepParam(scenarioId, paramKey, values) {
+          var sc = scenarios[scenarioId];
+          if (!sc || !sc.chartDiv || !Plotly) return;
+          var p = {};
+          Object.keys(sc.inputs).forEach(function (k) { p[k] = Number(sc.inputs[k].value); });
+          var g = Number((globalInputs.g || {}).value) || 9.81;
+          var dt = Number((globalInputs.dt || {}).value) || 0.02;
+          var dur = Number((globalInputs.durationSec || {}).value) || 8;
+          var steps = Math.max(10, Math.floor(dur / dt));
+          var traces = [];
+          var colors = ["#22d3ee", "#f59e0b", "#a78bfa", "#4ade80", "#f43f5e", "#fb923c"];
+          values.forEach(function (val, vi) {
+            var pp = Object.assign({}, p);
+            pp[paramKey] = val;
+            var sim = OSC_CORE.simulateOscillator({
+              scenario: scenarioId, m: pp.m || 1, c: pp.c || 0, k: pp.k || 4, g: g,
+              x0: pp.x0 || 0, v0: pp.v0 || 0, restitution: pp.e || 0.8,
+              dt: dt, steps: steps, groundModel: "rigid", groundK: 2500, groundC: 90,
+            });
+            traces.push({ x: sim.t, y: sim.x, mode: "lines", name: paramKey + "=" + val, line: { color: colors[vi % colors.length] } });
+          });
+          Plotly.newPlot(sc.chartDiv, traces, {
+            paper_bgcolor: "#0b1220", plot_bgcolor: "#0b1220", font: { color: "#e2e8f0", size: 10 },
+            title: { text: scenarioId + " | Sweep " + paramKey, font: { size: 12 } },
+            xaxis: { title: "t (s)", gridcolor: "#1e293b" }, yaxis: { gridcolor: "#1e293b" },
+            legend: { orientation: "h", y: -0.2, font: { size: 9 } },
             margin: { t: 30, b: 45, l: 40, r: 10 },
           }, { responsive: true });
         }
@@ -1514,6 +1547,37 @@
               row.appendChild(inp);
               card.appendChild(row);
             });
+            // show/hide x(t), v(t)
+            var toggleRow = elF("div", { style: "display:flex;gap:8px;margin-top:4px;font-size:10px;color:#94a3b8;" });
+            var showXCb = elF("input", { type: "checkbox" }); showXCb.checked = true;
+            var showVCb = elF("input", { type: "checkbox" }); showVCb.checked = true;
+            sc.showX = showXCb; sc.showV = showVCb;
+            var xLabel = elF("label", { style: "display:flex;align-items:center;gap:2px;cursor:pointer;" });
+            xLabel.appendChild(showXCb); xLabel.appendChild(document.createTextNode("x(t)"));
+            var vLabel = elF("label", { style: "display:flex;align-items:center;gap:2px;cursor:pointer;" });
+            vLabel.appendChild(showVCb); vLabel.appendChild(document.createTextNode("v(t)"));
+            toggleRow.appendChild(xLabel); toggleRow.appendChild(vLabel);
+            showXCb.addEventListener("change", (function (s) { return function () { simOne(s); }; })(sid));
+            showVCb.addEventListener("change", (function (s) { return function () { simOne(s); }; })(sid));
+            card.appendChild(toggleRow);
+
+            // parameter sweep
+            var sweepRow = elF("div", { style: "display:flex;gap:4px;margin-top:4px;align-items:center;" });
+            var sweepSelect = elF("select", { style: "padding:2px 4px;font-size:9px;border-radius:3px;border:1px solid #334155;background:#0b1220;color:#e2e8f0;" });
+            (LABELS[sid] || []).forEach(function (p) {
+              var opt = elF("option", { value: p.key }); opt.textContent = p.key; sweepSelect.appendChild(opt);
+            });
+            var sweepInput = elF("input", { type: "text", value: "0.5,1.0,2.0", style: "width:80px;padding:2px 4px;font-size:9px;border-radius:3px;border:1px solid #334155;background:#0b1220;color:#e2e8f0;" });
+            var sweepBtn = elF("button", { style: "padding:2px 6px;font-size:9px;border-radius:3px;border:1px solid #475569;background:#1f2937;color:#cbd5e1;cursor:pointer;" }, "Sweep");
+            sweepBtn.addEventListener("click", (function (s, sel, inp) {
+              return function () {
+                var vals = inp.value.split(",").map(function (v) { return Number(v.trim()); }).filter(function (v) { return isFinite(v); });
+                if (vals.length) sweepParam(s, sel.value, vals);
+              };
+            })(sid, sweepSelect, sweepInput));
+            sweepRow.appendChild(sweepSelect); sweepRow.appendChild(sweepInput); sweepRow.appendChild(sweepBtn);
+            card.appendChild(sweepRow);
+
             configEl.appendChild(card);
             scenarios[sid] = sc;
           });
