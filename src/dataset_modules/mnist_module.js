@@ -771,42 +771,75 @@
 
         // info
         mountEl.appendChild(elF("div", { style: "font-size:12px;color:#94a3b8;margin-bottom:8px;" },
-          label + " | Train: " + (res.trainCount || xData.length) + " | Classes: " + nClasses + " | Shape: " + imgW + "x" + imgH));
+          label + " | Classes: " + nClasses + " | Shape: " + imgW + "x" + imgH));
 
-        if (!xData.length) { mountEl.appendChild(elF("div", { style: "color:#64748b;" }, "No image data available")); return; }
+        // get all splits
+        var splits = [
+          { name: "Train", x: (res.records && res.records.train && res.records.train.x) || [], y: (res.records && res.records.train && res.records.train.y) || [] },
+          { name: "Val", x: (res.records && res.records.val && res.records.val.x) || [], y: (res.records && res.records.val && res.records.val.y) || [] },
+          { name: "Test", x: (res.records && res.records.test && res.records.test.x) || [], y: (res.records && res.records.test && res.records.test.y) || [] },
+        ];
 
-        // group by class
-        var byClass = {};
-        for (var i = 0; i < yData.length; i++) {
-          var cls = Number(yData[i]);
-          if (!byClass[cls]) byClass[cls] = [];
-          byClass[cls].push(i);
+        // fallback if no records splits but have xTrain etc
+        if (!splits[0].x.length && xData.length) {
+          splits = [{ name: "All", x: xData, y: yData }];
         }
 
-        var canvases = [];
-        var classRow = elF("div", { style: "display:flex;flex-wrap:wrap;gap:8px;align-items:flex-end;" });
-        for (var ci = 0; ci < nClasses; ci++) {
-          var canvas = document.createElement("canvas");
-          canvas.width = imgW; canvas.height = imgH;
-          canvas.style.cssText = "width:56px;height:56px;border:1px solid #334155;border-radius:4px;image-rendering:pixelated;background:#000;";
-          var cellWrap = elF("div", { style: "text-align:center;" });
-          cellWrap.appendChild(canvas);
-          cellWrap.appendChild(elF("div", { style: "font-size:10px;color:#94a3b8;margin-top:2px;max-width:56px;overflow:hidden;text-overflow:ellipsis;" }, cNames[ci] || String(ci)));
-          classRow.appendChild(cellWrap);
-          canvases.push({ cls: ci, canvas: canvas });
-        }
-        mountEl.appendChild(classRow);
+        var allCanvases = [];
 
-        function drawGrid(randomize) {
+        splits.forEach(function (split) {
+          if (!split.x.length) return;
+
+          // split header + count
+          var splitDiv = elF("div", { style: "margin-bottom:12px;" });
+          splitDiv.appendChild(elF("div", { style: "font-size:11px;color:#67e8f9;font-weight:600;margin-bottom:4px;" },
+            split.name + " (" + split.x.length + " samples)"));
+
+          // group by class
+          var byClass = {};
+          for (var i = 0; i < split.y.length; i++) {
+            var cls = Number(split.y[i]);
+            if (!byClass[cls]) byClass[cls] = [];
+            byClass[cls].push(i);
+          }
+
+          // image grid for this split
+          var canvases = [];
+          var classRow = elF("div", { style: "display:flex;flex-wrap:wrap;gap:6px;align-items:flex-end;" });
+          for (var ci = 0; ci < nClasses; ci++) {
+            var canvas = document.createElement("canvas");
+            canvas.width = imgW; canvas.height = imgH;
+            canvas.style.cssText = "width:44px;height:44px;border:1px solid #334155;border-radius:3px;image-rendering:pixelated;background:#000;";
+            var cellWrap = elF("div", { style: "text-align:center;" });
+            cellWrap.appendChild(canvas);
+            var count = (byClass[ci] || []).length;
+            cellWrap.appendChild(elF("div", { style: "font-size:9px;color:#64748b;" }, String(count)));
+            classRow.appendChild(cellWrap);
+            canvases.push({ cls: ci, canvas: canvas, byClass: byClass, xData: split.x });
+          }
+          splitDiv.appendChild(classRow);
+
+          // random button per split
+          var randBtn = elF("button", { style: "margin-top:4px;padding:2px 8px;font-size:10px;border-radius:4px;border:1px solid #475569;background:#1f2937;color:#cbd5e1;cursor:pointer;" }, "Random " + split.name);
+          randBtn.addEventListener("click", (function (cvs) {
+            return function () { drawSplitGrid(cvs, imgW, imgH, true); };
+          })(canvases));
+          splitDiv.appendChild(randBtn);
+
+          mountEl.appendChild(splitDiv);
+          allCanvases = allCanvases.concat(canvases);
+        });
+
+        function drawSplitGrid(canvases, w, h, randomize) {
           canvases.forEach(function (item) {
-            var indices = byClass[item.cls] || [];
+            var indices = item.byClass[item.cls] || [];
             if (!indices.length) return;
             var idx = randomize ? indices[Math.floor(Math.random() * indices.length)] : indices[0];
-            var pixels = xData[idx];
+            var pixels = item.xData[idx];
             if (!pixels) return;
             var ctx = item.canvas.getContext("2d");
-            var imgData = ctx.createImageData(imgW, imgH);
-            for (var pi = 0; pi < pixels.length && pi < imgW * imgH; pi++) {
+            var imgData = ctx.createImageData(w, h);
+            for (var pi = 0; pi < pixels.length && pi < w * h; pi++) {
               var v = Math.round(pixels[pi] * 255);
               imgData.data[pi * 4] = v; imgData.data[pi * 4 + 1] = v; imgData.data[pi * 4 + 2] = v; imgData.data[pi * 4 + 3] = 255;
             }
@@ -814,8 +847,16 @@
           });
         }
 
-        var randBtn = elF("button", { style: "margin-top:8px;padding:4px 12px;font-size:11px;border-radius:6px;border:1px solid #0ea5e9;background:#0284c7;color:#fff;cursor:pointer;" }, "Random");
-        randBtn.addEventListener("click", function () { drawGrid(true); });
+        // class name labels
+        var labelRow = elF("div", { style: "display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px;" });
+        for (var ni = 0; ni < nClasses; ni++) {
+          labelRow.appendChild(elF("span", { style: "font-size:9px;color:#94a3b8;width:44px;text-align:center;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:inline-block;" }, cNames[ni] || String(ni)));
+        }
+        mountEl.insertBefore(labelRow, mountEl.children[1] || null);
+
+        // Random All button
+        var randBtn = elF("button", { style: "margin-top:4px;padding:4px 12px;font-size:11px;border-radius:6px;border:1px solid #0ea5e9;background:#0284c7;color:#fff;cursor:pointer;" }, "Random All");
+        randBtn.addEventListener("click", function () { drawSplitGrid(allCanvases, imgW, imgH, true); });
         mountEl.appendChild(randBtn);
 
         // class distribution bar chart
@@ -838,7 +879,7 @@
           mountEl.appendChild(histWrap);
         }
 
-        drawGrid(false);
+        drawSplitGrid(allCanvases, imgW, imgH, false);
   }
 
   var modules = [
