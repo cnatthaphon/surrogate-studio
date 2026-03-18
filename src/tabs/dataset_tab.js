@@ -129,9 +129,10 @@
           var name = (_nameInput && _nameInput.value.trim()) || "";
           var sid = _schemaSelect ? _schemaSelect.value : "";
           if (!name) { onStatus("Enter a name"); return; }
-          var id = "ds_" + Date.now();
+          var id = "ds_" + Date.now() + "_" + Math.floor(Math.random() * 10000);
           if (store) store.upsertDataset({ id: id, name: name, schemaId: sid, status: "draft", createdAt: Date.now() });
           if (stateApi) { stateApi.setActiveSchema(sid); stateApi.setActiveDataset(id); }
+          console.log("[dataset_tab] created:", id, name, "schema:", sid, "total:", _listDatasets().length);
           onStatus("Created: " + name);
           _renderLeftPanel(); _renderMainPanel(); _renderRightPanel();
         },
