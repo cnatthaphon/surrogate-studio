@@ -216,7 +216,7 @@
       }
     }
 
-    // === RIGHT: use core renderConfigForm from module spec ===
+    // === RIGHT: global config from schema + module-specific config ===
     function _renderRightPanel() {
       var rightEl = layout.rightEl;
       rightEl.innerHTML = "";
@@ -228,38 +228,68 @@
 
       rightEl.appendChild(el("h3", {}, "Config: " + escapeHtml(ds.name || ds.id)));
 
-      // use dataset's own schema for module, not active schema
+      // 1. GLOBAL config from schema (shared across all dataset types)
+      var dsSchema = schemaRegistry ? schemaRegistry.getDatasetSchema(ds.schemaId) : null;
+      var splitDefaults = (dsSchema && dsSchema.splitDefaults) || {};
+      var splitModes = (dsSchema && dsSchema.metadata && dsSchema.metadata.splitModes) || [];
+
+      var globalSchema = [
+        { key: "seed", label: "Random Seed", type: "number" },
+      ];
+      // split mode from schema
+      if (splitModes.length) {
+        globalSchema.push({
+          key: "splitMode", label: "Split mode", type: "select",
+          options: splitModes.map(function (m) { return { value: m.id, label: m.label || m.id }; }),
+        });
+      }
+      globalSchema.push({ key: "trainFrac", label: "Train fraction", type: "number", min: 0.01, max: 0.99, step: 0.01 });
+      globalSchema.push({ key: "valFrac", label: "Val fraction", type: "number", min: 0.01, max: 0.99, step: 0.01 });
+      globalSchema.push({ key: "testFrac", label: "Test fraction", type: "number", min: 0.01, max: 0.99, step: 0.01, disabled: true });
+
+      var globalValue = {
+        seed: 42,
+        splitMode: splitDefaults.mode || "random",
+        trainFrac: Number(splitDefaults.train || 0.7).toFixed(2),
+        valFrac: Number(splitDefaults.val || 0.15).toFixed(2),
+        testFrac: Number(splitDefaults.test || 0.15).toFixed(2),
+      };
+
+      if (uiEngine && typeof uiEngine.renderConfigForm === "function") {
+        rightEl.appendChild(el("div", { style: "font-size:11px;color:#67e8f9;margin-bottom:4px;font-weight:600;" }, "Global"));
+        var globalMount = el("div", {});
+        _configFormApi = uiEngine.renderConfigForm({
+          mountEl: globalMount, schema: globalSchema, value: globalValue,
+          fieldNamePrefix: "ds", rowClassName: "osc-form-row",
+        });
+        rightEl.appendChild(globalMount);
+      }
+
+      // 2. MODULE-SPECIFIC config (from module.getDatasetConfigSpec, excluding global fields)
       var mod = _getModuleForSchema(ds.schemaId);
-      if (mod && mod.uiApi && typeof mod.uiApi.getDatasetConfigSpec === "function" && uiEngine && typeof uiEngine.renderConfigForm === "function") {
+      if (mod && mod.uiApi && typeof mod.uiApi.getDatasetConfigSpec === "function" && uiEngine) {
         var spec = mod.uiApi.getDatasetConfigSpec({});
         var sections = Array.isArray(spec.sections) ? spec.sections : [];
-        // flatten sections into schema array for renderConfigForm
-        var formSchema = [];
-        var formValue = {};
-        sections.forEach(function (sec) {
-          if (sec.title) formSchema.push({ key: "__section_" + (sec.id || sec.title), label: sec.title, type: "heading" });
-          var fields = Array.isArray(sec.schema) ? sec.schema : [];
-          var defaults = (sec.value && typeof sec.value === "object") ? sec.value : {};
-          fields.forEach(function (f) {
-            var key = f.key || f.id;
-            if (!key) return;
-            formSchema.push({
-              key: key, label: f.label || key, type: f.type || "text",
-              options: f.options, min: f.min, max: f.max, step: f.step, disabled: f.disabled,
+        // skip first section (common/global) since we render it from schema
+        var moduleSectons = sections.length > 1 ? sections.slice(1) : [];
+        if (moduleSectons.length) {
+          moduleSectons.forEach(function (sec) {
+            rightEl.appendChild(el("div", { style: "font-size:11px;color:#67e8f9;margin-top:8px;margin-bottom:4px;font-weight:600;" }, sec.title || "Module Config"));
+            var fields = Array.isArray(sec.schema) ? sec.schema : [];
+            var defaults = (sec.value && typeof sec.value === "object") ? sec.value : {};
+            var modSchema = [];
+            var modValue = {};
+            fields.forEach(function (f) {
+              var key = f.key || f.id;
+              if (!key) return;
+              modSchema.push({ key: key, label: f.label || key, type: f.type || "text", options: f.options, min: f.min, max: f.max, step: f.step, disabled: f.disabled });
+              modValue[key] = defaults[key] !== undefined ? defaults[key] : (f.value || "");
             });
-            formValue[key] = defaults[key] !== undefined ? defaults[key] : (f.value || "");
+            var modMount = el("div", {});
+            uiEngine.renderConfigForm({ mountEl: modMount, schema: modSchema, value: modValue, fieldNamePrefix: "dsmod", rowClassName: "osc-form-row" });
+            rightEl.appendChild(modMount);
           });
-        });
-
-        var formMount = el("div", {});
-        _configFormApi = uiEngine.renderConfigForm({
-          mountEl: formMount,
-          schema: formSchema,
-          value: formValue,
-          fieldNamePrefix: "ds",
-          rowClassName: "osc-form-row",
-        });
-        rightEl.appendChild(formMount);
+        }
       }
 
       // Generate button
@@ -272,19 +302,21 @@
       var mod = _getModuleForSchema(dsRecord.schemaId || _getSchemaId());
       if (!mod || typeof mod.build !== "function") { onStatus("No build function"); return; }
 
-      // collect config from core form
+      // collect ALL config from all forms on right panel (global + module-specific)
       var formConfig = {};
-      if (_configFormApi && typeof _configFormApi.getConfig === "function") {
-        formConfig = _configFormApi.getConfig();
-      }
+      var allInputs = layout.rightEl.querySelectorAll("[data-config-key]");
+      allInputs.forEach(function (inp) {
+        var key = inp.getAttribute("data-config-key");
+        if (inp.type === "checkbox") formConfig[key] = inp.checked;
+        else if (inp.type === "number") formConfig[key] = Number(inp.value);
+        else formConfig[key] = inp.value;
+      });
       var schemaId = dsRecord.schemaId || _getSchemaId();
 
-      // build config from form values — pass all form fields directly to module.build()
-      // module.build() knows how to interpret its own config fields
+      // compute derived values
       if (!formConfig.steps && formConfig.durationSec && formConfig.dt) {
         formConfig.steps = Math.floor(Number(formConfig.durationSec) / Number(formConfig.dt));
       }
-      // map MNIST form keys to build keys
       if (formConfig.mnistTotalCount) formConfig.totalCount = Number(formConfig.mnistTotalCount);
       var buildConfig = Object.assign({ schemaId: schemaId, moduleId: mod.id, variant: schemaId }, formConfig);
 

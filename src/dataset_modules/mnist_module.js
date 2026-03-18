@@ -831,9 +831,9 @@
 
           // random button per split
           var randBtn = elF("button", { style: "margin-top:4px;padding:2px 8px;font-size:10px;border-radius:4px;border:1px solid #475569;background:#1f2937;color:#cbd5e1;cursor:pointer;" }, "Random " + split.name);
-          randBtn.addEventListener("click", (function (cvs) {
-            return function () { drawSplitGrid(cvs, imgW, imgH, true); };
-          })(canvases));
+          randBtn.addEventListener("click", (function (cvs, w, h) {
+            return function () { drawSplitGrid(cvs, w, h, true); };
+          })(canvases.slice(), imgW, imgH));
           splitDiv.appendChild(randBtn);
 
           mountEl.appendChild(splitDiv);
