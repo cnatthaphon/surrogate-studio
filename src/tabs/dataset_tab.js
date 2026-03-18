@@ -228,7 +228,8 @@
 
       rightEl.appendChild(el("h3", {}, "Config: " + escapeHtml(ds.name || ds.id)));
 
-      var mod = _getModule();
+      // use dataset's own schema for module, not active schema
+      var mod = _getModuleForSchema(ds.schemaId);
       if (mod && mod.uiApi && typeof mod.uiApi.getDatasetConfigSpec === "function" && uiEngine && typeof uiEngine.renderConfigForm === "function") {
         var spec = mod.uiApi.getDatasetConfigSpec({});
         var sections = Array.isArray(spec.sections) ? spec.sections : [];
@@ -268,7 +269,7 @@
     }
 
     function _handleGenerate(dsRecord) {
-      var mod = _getModule();
+      var mod = _getModuleForSchema(dsRecord.schemaId || _getSchemaId());
       if (!mod || typeof mod.build !== "function") { onStatus("No build function"); return; }
 
       // collect config from core form
