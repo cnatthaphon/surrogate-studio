@@ -8,23 +8,18 @@
   "use strict";
 
   function create(deps) {
-    var layout = deps.layout;       // { leftEl, mainEl, rightEl }
-    var stateApi = deps.stateApi;   // OSCAppStateCore
-    var store = deps.store;         // OSCWorkspaceStore instance
+    var layout = deps.layout;
+    var stateApi = deps.stateApi;
+    var store = deps.store;
     var schemaRegistry = deps.schemaRegistry;
-    var datasetRuntime = deps.datasetRuntime;   // OSCDatasetRuntime
-    var datasetModules = deps.datasetModules;   // OSCDatasetModules
-    var processingCore = deps.processingCore;   // OSCDatasetProcessingCore
-    var imageRender = deps.imageRender;         // OSCImageRenderCore (optional)
-    var uiEngine = deps.uiEngine;              // OSCUiSharedEngine
+    var datasetModules = deps.datasetModules;
+    var modal = deps.modal;
     var onStatus = deps.onStatus || function () {};
-    var escapeHtml = deps.escapeHtml || function (s) { return String(s || ""); };
-    var elFactory = deps.el || function (tag, attrs, children) {
+    var el = deps.el || function (tag, attrs, children) {
       var e = document.createElement(tag);
       if (attrs) Object.keys(attrs).forEach(function (k) {
         if (k === "className") e.className = attrs[k];
         else if (k === "textContent") e.textContent = attrs[k];
-        else if (k === "innerHTML") e.innerHTML = attrs[k];
         else e.setAttribute(k, attrs[k]);
       });
       if (children) (Array.isArray(children) ? children : [children]).forEach(function (c) {
@@ -33,114 +28,73 @@
       });
       return e;
     };
+    var escapeHtml = deps.escapeHtml || function (s) { return String(s || ""); };
 
-    var _configFormApi = null;
+    var _mountId = 0;
 
-    function _getSchemaId() {
-      return stateApi ? stateApi.getActiveSchema() : "";
-    }
+    function _getSchemaId() { return stateApi ? stateApi.getActiveSchema() : ""; }
 
     function _getModule() {
       var schemaId = _getSchemaId();
-      // getModuleForSchema returns clones without build; must use getModule(id) for build
-      if (datasetModules && typeof datasetModules.getModuleForSchema === "function") {
-        var mods = datasetModules.getModuleForSchema(schemaId);
-        var modList = Array.isArray(mods) ? mods : [];
-        if (modList.length && datasetModules.getModule) {
-          return datasetModules.getModule(modList[0].id);
-        }
-      }
+      if (!datasetModules) return null;
+      var mods = datasetModules.getModuleForSchema(schemaId);
+      var modList = Array.isArray(mods) ? mods : [];
+      if (modList.length && datasetModules.getModule) return datasetModules.getModule(modList[0].id);
       return null;
     }
 
-    function _listSavedDatasets() {
+    function _listDatasets() {
       if (!store) return [];
       var schemaId = _getSchemaId();
-      if (typeof store.listDatasets === "function") {
-        return store.listDatasets({ schemaId: schemaId });
-      }
-      if (typeof store.query === "function") {
-        return store.query("dataset").filter(function (d) { return d.schemaId === schemaId; });
-      }
-      return [];
+      return (typeof store.listDatasets === "function" ? store.listDatasets({ schemaId: schemaId }) : []);
     }
 
-    function _buildConfigSpec() {
-      var schemaId = _getSchemaId();
-      var mod = _getModule();
-
-      // use module-provided config spec (full sections with defaults)
-      if (mod && mod.uiApi && typeof mod.uiApi.getDatasetConfigSpec === "function") {
-        try {
-          var spec = mod.uiApi.getDatasetConfigSpec({});
-          if (spec) {
-            // flatten sections into fields array for rendering
-            var fields = [];
-            var values = {};
-            var sections = Array.isArray(spec.sections) ? spec.sections : (Array.isArray(spec.fields) ? [{ schema: spec.fields }] : []);
-            sections.forEach(function (section) {
-              var schema = Array.isArray(section.schema) ? section.schema : [];
-              var sectionValues = (section.value && typeof section.value === "object") ? section.value : {};
-              schema.forEach(function (field) {
-                var key = field.key || field.id;
-                if (!key) return;
-                var val = sectionValues[key] !== undefined ? sectionValues[key] : field.value;
-                fields.push({
-                  kind: field.type === "select" ? "select" : (field.type || "text"),
-                  key: key,
-                  label: field.label || key,
-                  value: val !== undefined ? val : "",
-                  min: field.min,
-                  max: field.max,
-                  step: field.step,
-                  disabled: field.disabled,
-                  options: field.options,
-                });
-                values[key] = val;
-              });
-            });
-            if (fields.length) return { fields: fields, values: values };
-          }
-        } catch (e) {}
-      }
-
-      // fallback: build from schema
-      var dsSchema = schemaRegistry ? schemaRegistry.getDatasetSchema(schemaId) : null;
-      var preconfig = (mod && mod.preconfig && mod.preconfig.dataset) || (dsSchema || {});
-      var fields = [
-        { kind: "number", key: "seed", label: "Random seed", value: Number(preconfig.seed || 42) },
-        { kind: "number", key: "totalCount", label: "Total samples", value: Number(preconfig.totalCount || 200) },
-      ];
-      var splitDefaults = (dsSchema && dsSchema.splitDefaults) || {};
-      fields.push({ kind: "number", key: "trainFrac", label: "Train fraction", value: Number(splitDefaults.train || 0.7), min: 0.1, max: 0.95, step: 0.05 });
-      fields.push({ kind: "number", key: "valFrac", label: "Val fraction", value: Number(splitDefaults.val || 0.15), min: 0.05, max: 0.5, step: 0.05 });
-      fields.push({ kind: "number", key: "testFrac", label: "Test fraction", value: Number(splitDefaults.test || 0.15), min: 0.05, max: 0.5, step: 0.05 });
-      return { fields: fields };
-    }
-
-    // --- render ---
-
+    // --- LEFT: item list ---
     function _renderLeftPanel() {
-      var el = layout.leftEl;
-      el.innerHTML = "";
-      el.appendChild(elFactory("h3", {}, "Saved Datasets"));
+      var leftEl = layout.leftEl;
+      leftEl.innerHTML = "";
+      leftEl.appendChild(el("h3", {}, "Datasets"));
 
-      var datasets = _listSavedDatasets();
+      var datasets = _listDatasets();
       var activeId = stateApi ? stateApi.getActiveDataset() : "";
 
       if (!datasets.length) {
-        el.appendChild(elFactory("div", { className: "osc-empty" }, "No datasets yet. Generate one from the config panel."));
+        leftEl.appendChild(el("div", { className: "osc-empty" }, "No datasets. Click + New to create one."));
       } else {
-        var list = elFactory("ul", { className: "osc-item-list" });
+        var list = el("ul", { className: "osc-item-list" });
         datasets.forEach(function (ds) {
-          var li = elFactory("li", {
-            "data-id": ds.id,
-            className: ds.id === activeId ? "active" : "",
+          var li = el("li", { className: ds.id === activeId ? "active" : "" });
+          var nameSpan = el("strong", {}, ds.name || ds.id);
+          li.appendChild(nameSpan);
+          li.appendChild(el("div", { style: "font-size:10px;color:#64748b;" },
+            (ds.schemaId || "") + (ds.status === "ready" ? " | ready" : "")));
+
+          // action buttons
+          var actRow = el("div", { style: "display:flex;gap:4px;margin-top:2px;" });
+          var renBtn = el("button", { style: "padding:1px 4px;font-size:9px;border-radius:3px;border:1px solid #475569;background:#1f2937;color:#94a3b8;cursor:pointer;" }, "rename");
+          renBtn.addEventListener("click", function (e) {
+            e.stopPropagation();
+            var newName = prompt("Rename dataset:", ds.name || ds.id);
+            if (newName && newName.trim()) {
+              ds.name = newName.trim();
+              if (store) store.upsertDataset(ds);
+              _renderLeftPanel();
+            }
           });
-          li.appendChild(elFactory("strong", {}, ds.name || ds.id));
-          var meta = elFactory("div", { style: "font-size:11px;color:#64748b;" });
-          meta.textContent = (ds.schemaId || "") + " | " + (ds.totalCount || "?") + " samples";
-          li.appendChild(meta);
+          var delBtn = el("button", { style: "padding:1px 4px;font-size:9px;border-radius:3px;border:1px solid #7c2d12;background:#431407;color:#fdba74;cursor:pointer;" }, "delete");
+          delBtn.addEventListener("click", function (e) {
+            e.stopPropagation();
+            if (confirm("Delete dataset '" + (ds.name || ds.id) + "'?")) {
+              if (store) store.removeDataset(ds.id);
+              if (stateApi && stateApi.getActiveDataset() === ds.id) stateApi.setActiveDataset("");
+              _renderLeftPanel();
+              _renderMainPanel();
+            }
+          });
+          actRow.appendChild(renBtn);
+          actRow.appendChild(delBtn);
+          li.appendChild(actRow);
+
           li.addEventListener("click", function () {
             if (stateApi) stateApi.setActiveDataset(ds.id);
             _renderLeftPanel();
@@ -148,30 +102,26 @@
           });
           list.appendChild(li);
         });
-        el.appendChild(list);
+        leftEl.appendChild(list);
       }
 
-      // new dataset button → opens modal popup
-      var modal = deps.modal; // from layout.modal
-      var newBtn = elFactory("button", { className: "osc-btn", style: "margin-top:8px;width:100%;" }, "+ New Dataset");
+      // + New button
+      var newBtn = el("button", { className: "osc-btn", style: "margin-top:8px;width:100%;" }, "+ New Dataset");
       newBtn.addEventListener("click", function () {
-        console.log("[dataset_tab] + New clicked, modal=", modal, "modal.open=", modal && modal.open);
-        if (!modal || typeof modal.open !== "function") { console.error("[dataset_tab] modal not available"); return; }
+        if (!modal) return;
         var _nameInput, _schemaSelect;
         modal.open({
           title: "New Dataset",
           renderForm: function (mount) {
             var schemas = schemaRegistry ? schemaRegistry.listSchemas() : [];
             var currentSchema = _getSchemaId();
-            // name
-            mount.appendChild(elFactory("label", { style: "font-size:12px;color:#94a3b8;display:block;margin-bottom:2px;" }, "Dataset Name"));
-            _nameInput = elFactory("input", { type: "text", placeholder: "my_dataset", style: "width:100%;padding:6px 8px;margin-bottom:8px;border-radius:6px;border:1px solid #334155;background:#0b1220;color:#e2e8f0;" });
+            mount.appendChild(el("label", { style: "font-size:12px;color:#94a3b8;display:block;margin-bottom:2px;" }, "Dataset Name"));
+            _nameInput = el("input", { type: "text", placeholder: "my_dataset", style: "width:100%;padding:6px 8px;margin-bottom:8px;border-radius:6px;border:1px solid #334155;background:#0b1220;color:#e2e8f0;" });
             mount.appendChild(_nameInput);
-            // schema
-            mount.appendChild(elFactory("label", { style: "font-size:12px;color:#94a3b8;display:block;margin-bottom:2px;" }, "Schema"));
-            _schemaSelect = elFactory("select", { style: "width:100%;padding:6px 8px;border-radius:6px;border:1px solid #334155;background:#0b1220;color:#e2e8f0;" });
+            mount.appendChild(el("label", { style: "font-size:12px;color:#94a3b8;display:block;margin-bottom:2px;" }, "Schema"));
+            _schemaSelect = el("select", { style: "width:100%;padding:6px 8px;border-radius:6px;border:1px solid #334155;background:#0b1220;color:#e2e8f0;" });
             schemas.forEach(function (s) {
-              var opt = elFactory("option", { value: s.id });
+              var opt = el("option", { value: s.id });
               opt.textContent = s.label || s.id;
               if (s.id === currentSchema) opt.selected = true;
               _schemaSelect.appendChild(opt);
@@ -183,213 +133,206 @@
             var name = _nameInput ? _nameInput.value.trim() : "";
             var sid = _schemaSelect ? _schemaSelect.value : "";
             if (!name) { onStatus("Enter a name"); return; }
-            // create draft record in store immediately
             var id = "ds_" + Date.now();
-            if (store && typeof store.upsertDataset === "function") {
-              store.upsertDataset({ id: id, name: name, schemaId: sid, status: "draft", createdAt: Date.now() });
-            }
-            if (stateApi) stateApi.setActiveSchema(sid);
-            if (stateApi) stateApi.setActiveDataset(id);
-            onStatus("Created dataset: " + name);
+            if (store) store.upsertDataset({ id: id, name: name, schemaId: sid, status: "draft", createdAt: Date.now() });
+            if (stateApi) { stateApi.setActiveSchema(sid); stateApi.setActiveDataset(id); }
+            onStatus("Created: " + name);
             _renderLeftPanel();
             _renderMainPanel();
             _renderRightPanel();
           },
         });
       });
-      el.appendChild(newBtn);
+      leftEl.appendChild(newBtn);
     }
 
+    // --- MIDDLE: delegate to module or show dataset info ---
     function _renderMainPanel() {
-      var el = layout.mainEl;
-      el.innerHTML = "";
+      var mainEl = layout.mainEl;
+      mainEl.innerHTML = "";
+      var currentMountId = _mountId;
 
       var activeId = stateApi ? stateApi.getActiveDataset() : "";
-      if (activeId) {
-        // show dataset details
-        var ds = store ? store.getDataset(activeId) : null;
-        if (!ds) {
-          el.appendChild(elFactory("div", { className: "osc-empty" }, "Dataset not found"));
-          return;
-        }
-
-        var card = elFactory("div", { className: "osc-card" });
-        card.appendChild(elFactory("h3", { style: "color:#67e8f9;margin:0 0 8px;" }, ds.name || ds.id));
-
-        var info = elFactory("div", { style: "font-size:12px;color:#cbd5e1;margin-bottom:8px;" });
-        info.innerHTML = "<strong>Schema:</strong> " + escapeHtml(ds.schemaId || "") +
-          " | <strong>Samples:</strong> " + (ds.totalCount || "?") +
-          " | <strong>Seed:</strong> " + (ds.seed || "?");
-        card.appendChild(info);
-
-        // split info
-        if (ds.splits) {
-          var splitInfo = elFactory("div", { style: "font-size:12px;color:#94a3b8;" });
-          splitInfo.textContent = "Train: " + (ds.splits.train || 0) + " | Val: " + (ds.splits.val || 0) + " | Test: " + (ds.splits.test || 0);
-          card.appendChild(splitInfo);
-        }
-
-        // dataset preview mount
-        var previewMount = elFactory("div", { id: "dataset-preview-mount", style: "margin-top:12px;" });
-        card.appendChild(previewMount);
-
-        // delete button
-        var deleteBtn = elFactory("button", { className: "osc-btn secondary", style: "margin-top:8px;" }, "Delete Dataset");
-        deleteBtn.addEventListener("click", function () {
-          if (store && typeof store.removeDataset === "function") store.removeDataset(activeId);
-          if (stateApi) stateApi.setActiveDataset("");
-          _renderLeftPanel();
-          _renderMainPanel();
-        });
-        card.appendChild(deleteBtn);
-        el.appendChild(card);
-      } else {
-        // show generation prompt
-        var card = elFactory("div", { className: "osc-card" });
-        var schemaId = _getSchemaId();
-        var mod = _getModule();
-        card.appendChild(elFactory("h3", { style: "color:#67e8f9;margin:0 0 8px;" },
-          "Generate " + escapeHtml(schemaId) + " Dataset"));
-        card.appendChild(elFactory("p", { style: "color:#94a3b8;font-size:13px;" },
-          mod ? ("Using module: " + escapeHtml(mod.label || mod.id)) : "No module available for this schema"));
-        el.appendChild(card);
-      }
-    }
-
-    function _renderRightPanel() {
-      var el = layout.rightEl;
-      el.innerHTML = "";
-      el.appendChild(elFactory("h3", {}, "Dataset Config"));
-
-      var configSpec = _buildConfigSpec();
-
-      // render config form
-      if (uiEngine && typeof uiEngine.renderConfigForm === "function") {
-        var formMount = elFactory("div", {});
-        _configFormApi = uiEngine.renderConfigForm({
-          mountEl: formMount,
-          schema: configSpec.fields || [],
-        });
-        el.appendChild(formMount);
-      } else {
-        // simple fallback form
-        var formCard = elFactory("div", { className: "osc-card" });
-        (configSpec.fields || []).forEach(function (field) {
-          var row = elFactory("div", { className: "osc-form-row" });
-          row.appendChild(elFactory("label", {}, field.label || field.key));
-          var input = elFactory("input", {
-            type: field.kind === "number" ? "number" : "text",
-            value: String(field.value != null ? field.value : ""),
-            "data-key": field.key,
-          });
-          if (field.min != null) input.setAttribute("min", field.min);
-          if (field.max != null) input.setAttribute("max", field.max);
-          if (field.step != null) input.setAttribute("step", field.step);
-          row.appendChild(input);
-          formCard.appendChild(row);
-        });
-        el.appendChild(formCard);
-      }
-
-      // generate button
-      var genBtn = elFactory("button", { className: "osc-btn", style: "margin-top:8px;width:100%;" }, "Generate Dataset");
-      genBtn.addEventListener("click", function () { _handleGenerate(); });
-      el.appendChild(genBtn);
-    }
-
-    function _handleGenerate() {
-      var schemaId = _getSchemaId();
-      var mod = _getModule();
-      if (!mod || typeof mod.build !== "function") {
-        onStatus("No build function for module");
+      if (!activeId) {
+        mainEl.appendChild(el("div", { className: "osc-empty" }, "Select or create a dataset."));
         return;
       }
 
-      // collect config from form
-      var formConfig = {};
-      if (_configFormApi && typeof _configFormApi.getConfig === "function") {
-        formConfig = _configFormApi.getConfig();
+      var ds = store ? store.getDataset(activeId) : null;
+      if (!ds) {
+        mainEl.appendChild(el("div", { className: "osc-empty" }, "Dataset not found."));
+        return;
+      }
+
+      // if dataset has data and module has renderDataset → delegate
+      var mod = _getModule();
+      if (mod && mod.playgroundApi && typeof mod.playgroundApi.renderPlayground === "function" && ds.status === "ready" && ds.data) {
+        // reuse module renderer for dataset preview
+        mod.playgroundApi.renderPlayground(mainEl, {
+          el: el, escapeHtml: escapeHtml,
+          Plotly: (typeof window !== "undefined" && window.Plotly) ? window.Plotly : null,
+          configEl: null, // don't render config in main panel
+          isCurrent: function () { return currentMountId === _mountId; },
+          datasetRecord: ds,
+        });
+        return;
+      }
+
+      // default: show dataset info card
+      var card = el("div", { className: "osc-card" });
+      card.appendChild(el("h3", { style: "color:#67e8f9;margin:0 0 8px;" }, ds.name || ds.id));
+      card.appendChild(el("div", { style: "font-size:12px;color:#94a3b8;" },
+        "Schema: " + escapeHtml(ds.schemaId || "") + " | Status: " + (ds.status || "draft")));
+
+      if (ds.data) {
+        var data = ds.data;
+        var info = [];
+        if (data.trainCount || (data.xTrain && data.xTrain.length)) info.push("Train: " + (data.trainCount || (data.xTrain || []).length));
+        if (data.valCount || (data.xVal && data.xVal.length)) info.push("Val: " + (data.valCount || (data.xVal || []).length));
+        if (data.testCount || (data.xTest && data.xTest.length)) info.push("Test: " + (data.testCount || (data.xTest || []).length));
+        if (data.classCount) info.push("Classes: " + data.classCount);
+        if (data.featureSize) info.push("Features: " + data.featureSize);
+        if (info.length) card.appendChild(el("div", { style: "font-size:12px;color:#cbd5e1;margin-top:4px;" }, info.join(" | ")));
       } else {
-        // read from DOM inputs and selects
-        var inputs = layout.rightEl.querySelectorAll("input[data-key], select[data-key]");
-        inputs.forEach(function (inp) {
-          var key = inp.getAttribute("data-key");
-          var val = inp.type === "number" ? Number(inp.value) : inp.value;
-          formConfig[key] = val;
+        card.appendChild(el("div", { style: "font-size:12px;color:#64748b;margin-top:4px;" }, "Configure and generate from the right panel."));
+      }
+      mainEl.appendChild(card);
+    }
+
+    // --- RIGHT: config from module + generate button ---
+    function _renderRightPanel() {
+      var rightEl = layout.rightEl;
+      rightEl.innerHTML = "";
+
+      var activeId = stateApi ? stateApi.getActiveDataset() : "";
+      var ds = activeId && store ? store.getDataset(activeId) : null;
+      if (!ds) {
+        rightEl.appendChild(el("h3", {}, "Dataset Config"));
+        rightEl.appendChild(el("div", { className: "osc-empty" }, "Select or create a dataset."));
+        return;
+      }
+
+      rightEl.appendChild(el("h3", {}, "Config: " + escapeHtml(ds.name || ds.id)));
+
+      var mod = _getModule();
+
+      // render config form from module's getDatasetConfigSpec
+      if (mod && mod.uiApi && typeof mod.uiApi.getDatasetConfigSpec === "function") {
+        var spec = mod.uiApi.getDatasetConfigSpec({});
+        var sections = Array.isArray(spec.sections) ? spec.sections : [];
+        sections.forEach(function (section) {
+          var secDiv = el("div", { style: "margin-bottom:8px;" });
+          if (section.title) secDiv.appendChild(el("div", { style: "font-size:11px;color:#67e8f9;margin-bottom:4px;font-weight:600;" }, section.title));
+          var fields = Array.isArray(section.schema) ? section.schema : [];
+          var defaults = (section.value && typeof section.value === "object") ? section.value : {};
+          fields.forEach(function (field) {
+            var key = field.key || field.id;
+            if (!key) return;
+            var row = el("div", { style: "display:flex;justify-content:space-between;align-items:center;margin-bottom:3px;" });
+            row.appendChild(el("span", { style: "font-size:10px;color:#94a3b8;min-width:90px;" }, field.label || key));
+            var val = defaults[key] !== undefined ? defaults[key] : (field.value || "");
+            var inp;
+            if (field.type === "select" && Array.isArray(field.options)) {
+              inp = el("select", { "data-config-key": key, style: "width:90px;padding:2px 4px;font-size:10px;border-radius:4px;border:1px solid #334155;background:#0b1220;color:#e2e8f0;" });
+              field.options.forEach(function (opt) {
+                var o = el("option", { value: opt.value });
+                o.textContent = opt.label || opt.value;
+                if (String(opt.value) === String(val)) o.selected = true;
+                inp.appendChild(o);
+              });
+            } else if (field.type === "checkbox") {
+              inp = el("input", { type: "checkbox", "data-config-key": key });
+              inp.checked = Boolean(val);
+              inp.style.cssText = "width:auto;";
+            } else {
+              inp = el("input", { type: field.type || "text", value: String(val), "data-config-key": key,
+                style: "width:90px;padding:2px 4px;font-size:10px;border-radius:4px;border:1px solid #334155;background:#0b1220;color:#e2e8f0;" });
+              if (field.min != null) inp.setAttribute("min", field.min);
+              if (field.max != null) inp.setAttribute("max", field.max);
+              if (field.step != null) inp.setAttribute("step", field.step);
+            }
+            row.appendChild(inp);
+            secDiv.appendChild(row);
+          });
+          rightEl.appendChild(secDiv);
         });
       }
 
-      onStatus("Generating dataset...");
-      try {
-        // pass all form config directly to module build — module knows what it needs
-        var buildConfig = Object.assign({ schemaId: schemaId, moduleId: mod.id }, formConfig);
-        // ensure steps is computed if module needs it
-        if (!buildConfig.steps && buildConfig.durationSec && buildConfig.dt) {
-          buildConfig.steps = Math.floor(Number(buildConfig.durationSec) / Number(buildConfig.dt));
-        }
-        var result = mod.build(buildConfig);
+      // Generate button
+      var genBtn = el("button", { className: "osc-btn", style: "width:100%;margin-top:8px;" }, "Generate Dataset");
+      genBtn.addEventListener("click", function () { _handleGenerate(ds); });
+      rightEl.appendChild(genBtn);
+    }
 
-        // handle promise or sync result
-        var handleResult = function (ds) {
-          if (!ds) { onStatus("Generation returned empty"); return; }
-          // save to store
-          var id = "ds_" + Date.now();
-          var pendingName = stateApi ? stateApi.get("pendingDatasetName") : "";
-          var record = {
-            id: id,
-            name: pendingName || (schemaId + "_" + id),
-            schemaId: schemaId,
-            moduleId: mod.id,
-            seed: Number(formConfig.seed || 42),
-            totalCount: Number(formConfig.totalCount || 200),
-            splits: ds.splits || {},
-            createdAt: Date.now(),
-            data: ds,
-          };
-          if (store && typeof store.upsertDataset === "function") store.upsertDataset(record);
-          if (stateApi) stateApi.setActiveDataset(id);
-          onStatus("Dataset generated: " + id);
+    function _collectConfig() {
+      var config = {};
+      var inputs = layout.rightEl.querySelectorAll("[data-config-key]");
+      inputs.forEach(function (inp) {
+        var key = inp.getAttribute("data-config-key");
+        if (inp.type === "checkbox") config[key] = inp.checked;
+        else if (inp.type === "number") config[key] = Number(inp.value);
+        else config[key] = inp.value;
+      });
+      return config;
+    }
+
+    function _handleGenerate(dsRecord) {
+      var mod = _getModule();
+      if (!mod || typeof mod.build !== "function") { onStatus("No build function"); return; }
+
+      var formConfig = _collectConfig();
+      var schemaId = dsRecord.schemaId || _getSchemaId();
+
+      // compute steps if needed
+      if (!formConfig.steps && formConfig.durationSec && formConfig.dt) {
+        formConfig.steps = Math.floor(Number(formConfig.durationSec) / Number(formConfig.dt));
+      }
+
+      var buildConfig = Object.assign({ schemaId: schemaId, moduleId: mod.id }, formConfig);
+      onStatus("Generating...");
+
+      try {
+        var result = mod.build(buildConfig);
+        var currentMountId = _mountId;
+        var handleResult = function (data) {
+          if (currentMountId !== _mountId) return;
+          if (!data) { onStatus("Generation returned empty"); return; }
+          // update store
+          var updated = Object.assign({}, dsRecord, {
+            data: data,
+            status: "ready",
+            generatedAt: Date.now(),
+            config: formConfig,
+          });
+          if (store) store.upsertDataset(updated);
+          onStatus("Dataset ready: " + (dsRecord.name || dsRecord.id));
           _renderLeftPanel();
           _renderMainPanel();
         };
-
         if (result && typeof result.then === "function") {
-          result.then(handleResult).catch(function (err) { onStatus("Error: " + String(err.message || err)); });
+          result.then(handleResult).catch(function (err) { onStatus("Error: " + err.message); });
         } else {
           handleResult(result);
         }
       } catch (err) {
-        onStatus("Error: " + String(err.message || err));
+        onStatus("Error: " + err.message);
       }
     }
 
+    // --- lifecycle ---
     function mount() {
-      console.log("[dataset_tab] mount() called, leftEl=", layout.leftEl, "mainEl=", layout.mainEl);
-      console.log("[dataset_tab] leftEl.parentNode=", layout.leftEl.parentNode, "visible=", layout.leftEl.offsetParent !== null);
+      _mountId++;
       _renderLeftPanel();
       _renderMainPanel();
       _renderRightPanel();
-      console.log("[dataset_tab] after render, leftEl.innerHTML length=", layout.leftEl.innerHTML.length, "children=", layout.leftEl.children.length);
     }
-
     function unmount() {
-      _configFormApi = null;
-      layout.leftEl.innerHTML = "";
-      layout.mainEl.innerHTML = "";
-      layout.rightEl.innerHTML = "";
+      _mountId++;
+      layout.leftEl.innerHTML = ""; layout.mainEl.innerHTML = ""; layout.rightEl.innerHTML = "";
     }
+    function refresh() { mount(); }
 
-    function refresh() {
-      _renderLeftPanel();
-      _renderMainPanel();
-      _renderRightPanel();
-    }
-
-    return {
-      mount: mount,
-      unmount: unmount,
-      refresh: refresh,
-    };
+    return { mount: mount, unmount: unmount, refresh: refresh };
   }
 
   return { create: create };
