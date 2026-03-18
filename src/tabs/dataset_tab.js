@@ -279,33 +279,63 @@
       }
       var schemaId = dsRecord.schemaId || _getSchemaId();
 
-      // use module's getDatasetBuildConfig if available (transforms form config to build config)
-      var buildConfig;
-      if (mod.uiApi && typeof mod.uiApi.getDatasetBuildConfig === "function") {
-        buildConfig = mod.uiApi.getDatasetBuildConfig({ formConfig: formConfig });
-        buildConfig = Object.assign({ schemaId: schemaId, moduleId: mod.id }, buildConfig);
-      } else {
-        if (!formConfig.steps && formConfig.durationSec && formConfig.dt) {
-          formConfig.steps = Math.floor(Number(formConfig.durationSec) / Number(formConfig.dt));
-        }
-        buildConfig = Object.assign({ schemaId: schemaId, moduleId: mod.id }, formConfig);
+      // build config from form values — pass all form fields directly to module.build()
+      // module.build() knows how to interpret its own config fields
+      if (!formConfig.steps && formConfig.durationSec && formConfig.dt) {
+        formConfig.steps = Math.floor(Number(formConfig.durationSec) / Number(formConfig.dt));
+      }
+      // map MNIST form keys to build keys
+      if (formConfig.mnistTotalCount) formConfig.totalCount = Number(formConfig.mnistTotalCount);
+      var buildConfig = Object.assign({ schemaId: schemaId, moduleId: mod.id, variant: schemaId }, formConfig);
+
+      // show loading state
+      onStatus("Generating " + (dsRecord.name || dsRecord.id) + "...");
+      dsRecord.status = "generating";
+      if (store) store.upsertDataset(dsRecord);
+      _renderLeftPanel();
+      var mainEl = layout.mainEl;
+      mainEl.innerHTML = "";
+      var loadingEl = el("div", { style: "display:flex;align-items:center;gap:8px;padding:24px;" });
+      loadingEl.appendChild(el("div", { style: "width:20px;height:20px;border:2px solid #334155;border-top-color:#0ea5e9;border-radius:50;animation:spin 0.8s linear infinite;" }));
+      loadingEl.appendChild(el("span", { style: "color:#67e8f9;font-size:13px;" }, "Generating dataset..."));
+      mainEl.appendChild(loadingEl);
+
+      // add spinner animation
+      var styleEl = document.getElementById("osc-spinner-style");
+      if (!styleEl) {
+        styleEl = document.createElement("style");
+        styleEl.id = "osc-spinner-style";
+        styleEl.textContent = "@keyframes spin { to { transform: rotate(360deg); } }";
+        document.head.appendChild(styleEl);
       }
 
-      onStatus("Generating...");
       var currentMountId = _mountId;
       try {
         var result = mod.build(buildConfig);
         var handle = function (data) {
           if (currentMountId !== _mountId) return;
-          if (!data) { onStatus("Empty result"); return; }
+          if (!data) { onStatus("Empty result"); _renderMainPanel(); return; }
           var updated = Object.assign({}, dsRecord, { data: data, status: "ready", generatedAt: Date.now(), config: formConfig });
           if (store) store.upsertDataset(updated);
-          onStatus("Ready: " + (dsRecord.name || dsRecord.id));
+          onStatus("\u2713 Ready: " + (dsRecord.name || dsRecord.id));
           _renderLeftPanel(); _renderMainPanel();
         };
-        if (result && typeof result.then === "function") result.then(handle).catch(function (e) { onStatus("Error: " + e.message); });
-        else handle(result);
-      } catch (e) { onStatus("Error: " + e.message); }
+        if (result && typeof result.then === "function") {
+          result.then(handle).catch(function (e) {
+            dsRecord.status = "error";
+            if (store) store.upsertDataset(dsRecord);
+            onStatus("Error: " + e.message);
+            _renderLeftPanel(); _renderMainPanel();
+          });
+        } else {
+          handle(result);
+        }
+      } catch (e) {
+        dsRecord.status = "error";
+        if (store) store.upsertDataset(dsRecord);
+        onStatus("Error: " + e.message);
+        _renderLeftPanel(); _renderMainPanel();
+      }
     }
 
     function mount() { _mountId++; _renderLeftPanel(); _renderMainPanel(); _renderRightPanel(); }
