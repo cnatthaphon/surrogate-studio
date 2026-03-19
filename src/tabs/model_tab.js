@@ -274,15 +274,55 @@
           countStaticParams: oscCore ? oscCore.countStaticParams : function () { return 0; },
           normalizeOutputTargetsList: mbc ? mbc.normalizeOutputTargetsList : function (raw, fb, keys) { return Array.isArray(raw) ? raw : [String(raw || "x")]; },
           outputTargetsSummaryText: function (targets) { return "targets=[" + (Array.isArray(targets) ? targets.join(",") : String(targets || "")) + "]"; },
-          normalizeOneHotKey: function (raw) { return String(raw || "scenario").trim().toLowerCase(); },
-          oneHotLabel: function (key) { return String(key || ""); },
-          normalizeHistorySeriesKey: function (raw) { return String(raw || "x").trim().toLowerCase(); },
-          historySeriesLabel: function (key) { return String(key || "x"); },
+          normalizeOneHotKey: function (raw, schemaId) {
+            var sid = schemaRegistry ? schemaRegistry.resolveSchemaId(schemaId) : "";
+            var ms = schemaRegistry ? schemaRegistry.getModelSchema(sid) : null;
+            var meta = (ms && ms.metadata && ms.metadata.featureNodes) || {};
+            var oneHots = Array.isArray(meta.oneHot) ? meta.oneHot : [];
+            var key = String(raw || "").trim().toLowerCase();
+            var allowed = oneHots.map(function (o) { return o.key; });
+            return allowed.indexOf(key) >= 0 ? key : (allowed[0] || "scenario");
+          },
+          oneHotLabel: function (key, schemaId) {
+            var sid = schemaRegistry ? schemaRegistry.resolveSchemaId(schemaId) : "";
+            var ms = schemaRegistry ? schemaRegistry.getModelSchema(sid) : null;
+            var meta = (ms && ms.metadata && ms.metadata.featureNodes) || {};
+            var oneHots = Array.isArray(meta.oneHot) ? meta.oneHot : [];
+            var hit = oneHots.find(function (o) { return o.key === key; });
+            return (hit && hit.label) || key || "";
+          },
+          normalizeHistorySeriesKey: function (raw, schemaId) {
+            var sid = schemaRegistry ? schemaRegistry.resolveSchemaId(schemaId) : "";
+            var ms = schemaRegistry ? schemaRegistry.getModelSchema(sid) : null;
+            var meta = (ms && ms.metadata && ms.metadata.featureNodes) || {};
+            var series = Array.isArray(meta.historySeries) ? meta.historySeries : [];
+            var key = String(raw || "").trim().toLowerCase();
+            var allowed = series.map(function (s) { return s.key; });
+            return allowed.indexOf(key) >= 0 ? key : (allowed[0] || "x");
+          },
+          historySeriesLabel: function (key, schemaId) {
+            var sid = schemaRegistry ? schemaRegistry.resolveSchemaId(schemaId) : "";
+            var ms = schemaRegistry ? schemaRegistry.getModelSchema(sid) : null;
+            var meta = (ms && ms.metadata && ms.metadata.featureNodes) || {};
+            var series = Array.isArray(meta.historySeries) ? meta.historySeries : [];
+            var hit = series.find(function (s) { return s.key === key; });
+            return (hit && hit.label) || key || "x";
+          },
           getImageSourceSpec: function (rawKey, schemaId) {
-            var ds = schemaRegistry ? schemaRegistry.getDatasetSchema(schemaId) : null;
-            var sampleType = (ds && ds.sampleType) || "";
-            if (sampleType === "image") return { featureSize: 784, shape: [28, 28, 1] };
-            return { featureSize: 0, shape: [] };
+            var sid = schemaRegistry ? schemaRegistry.resolveSchemaId(schemaId) : schemaId;
+            var ms = schemaRegistry ? schemaRegistry.getModelSchema(sid) : null;
+            var meta = (ms && ms.metadata && ms.metadata.featureNodes) || {};
+            var imgDefs = Array.isArray(meta.imageSource) ? meta.imageSource : [];
+            var key = String(rawKey || "").trim().toLowerCase();
+            var hit = imgDefs.find(function (d) { return d.key === key; }) || imgDefs[0] || null;
+            if (hit) {
+              var shape = Array.isArray(hit.shape) ? hit.shape : [28, 28, 1];
+              var h = shape[0] || 28, w = shape[1] || 28, c = shape[2] || 1;
+              return { sourceKey: hit.key, label: hit.label || hit.key, featureSize: hit.featureSize || h * w * c, shape: shape, height: h, width: w, channels: c };
+            }
+            var ds = schemaRegistry ? schemaRegistry.getDatasetSchema(sid) : null;
+            if (ds && ds.sampleType === "image") return { sourceKey: "pixel_values", label: "pixel values", featureSize: 784, shape: [28, 28, 1], height: 28, width: 28, channels: 1 };
+            return { sourceKey: "", label: "none", featureSize: 0, shape: [], height: 0, width: 0, channels: 0 };
           },
           estimateNodeFeatureWidth: function () { return 0; },
         });
