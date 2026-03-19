@@ -369,8 +369,36 @@
             return;
           }
           if (f.kind === "checkbox_grid") {
-            // render as info text (complex widget not supported yet)
-            rightEl.appendChild(el("div", { style: "font-size:10px;color:#64748b;margin-bottom:4px;" }, "Parameter mask: configure in preset"));
+            // render param mask as individual checkboxes from schema params
+            var schemaId = _getSchemaId();
+            var paramDefs = schemaRegistry ? schemaRegistry.getParamDefs(schemaId) : [];
+            var mask = (nodeData.data && nodeData.data.paramMask) || {};
+            if (paramDefs.length) {
+              var maskDiv = el("div", { style: "margin-bottom:6px;" });
+              maskDiv.appendChild(el("div", { style: "font-size:10px;color:#94a3b8;margin-bottom:2px;font-weight:600;" }, "Parameter Mask"));
+              var grid = el("div", { style: "display:flex;flex-wrap:wrap;gap:4px;" });
+              paramDefs.forEach(function (pd) {
+                var key = pd.key || pd;
+                var label = pd.label || key;
+                var checked = mask[key] !== false;
+                var cb = el("input", { type: "checkbox", "data-param-key": key });
+                cb.checked = checked;
+                cb.style.cssText = "width:auto;margin:0;";
+                cb.addEventListener("change", function () {
+                  var newMask = Object.assign({}, mask);
+                  newMask[key] = cb.checked;
+                  if (_graphRuntime && typeof _graphRuntime.applyNodeConfigValue === "function") {
+                    _graphRuntime.applyNodeConfigValue(_editor, _selectedNodeId, "paramMask", newMask);
+                  }
+                });
+                var wrap = el("label", { style: "display:flex;align-items:center;gap:2px;font-size:9px;color:#94a3b8;cursor:pointer;" });
+                wrap.appendChild(cb);
+                wrap.appendChild(document.createTextNode(label));
+                grid.appendChild(wrap);
+              });
+              maskDiv.appendChild(grid);
+              rightEl.appendChild(maskDiv);
+            }
             return;
           }
           // map kind to type for renderConfigForm
@@ -411,10 +439,12 @@
         }
       }
 
-      // fallback: raw data display
+      // fallback: raw data display (skip objects)
       var data = nodeData.data || {};
       Object.keys(data).forEach(function (k) {
-        rightEl.appendChild(el("div", { style: "font-size:11px;color:#94a3b8;margin-bottom:2px;" }, k + ": " + String(data[k])));
+        var v = data[k];
+        if (v && typeof v === "object") return; // skip objects like paramMask
+        rightEl.appendChild(el("div", { style: "font-size:11px;color:#94a3b8;margin-bottom:2px;" }, k + ": " + String(v)));
       });
     }
 
