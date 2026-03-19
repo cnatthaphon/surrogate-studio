@@ -181,7 +181,7 @@
             var btn = el("button", { style: "padding:2px 6px;font-size:10px;border-radius:4px;border:1px solid #475569;background:#1f2937;color:#cbd5e1;cursor:pointer;" }, item.label || item.type);
             btn.addEventListener("click", function () {
               if (_graphRuntime && _editor && typeof _graphRuntime.createNodeByType === "function") {
-                _graphRuntime.createNodeByType(_editor, 250, 200, item.type, item.config || {});
+                _graphRuntime.createNodeByType(_editor, item.type, 250, 200, item.config || {});
               }
             });
             row.appendChild(btn);
@@ -195,12 +195,39 @@
       mainEl.appendChild(editorDiv);
 
       // action bar
-      var actBar = el("div", { style: "margin-top:8px;display:flex;gap:6px;" });
+      var actBar = el("div", { style: "margin-top:8px;display:flex;gap:6px;flex-wrap:wrap;" });
       var saveBtn = el("button", { className: "osc-btn" }, "Save Model");
       saveBtn.addEventListener("click", function () { _handleSave(); });
       var clearBtn = el("button", { className: "osc-btn secondary" }, "Clear");
       clearBtn.addEventListener("click", function () { if (_editor) try { _editor.clear(); } catch (e) {} });
-      actBar.appendChild(saveBtn); actBar.appendChild(clearBtn);
+      var exportBtn = el("button", { className: "osc-btn secondary" }, "Export JSON");
+      exportBtn.addEventListener("click", function () {
+        if (!_editor) return;
+        var json = JSON.stringify(_editor.export(), null, 2);
+        var blob = new Blob([json], { type: "application/json" });
+        var a = document.createElement("a"); a.href = URL.createObjectURL(blob);
+        a.download = "model_graph.json"; a.click(); URL.revokeObjectURL(a.href);
+        onStatus("Exported graph JSON");
+      });
+      var importBtn = el("button", { className: "osc-btn secondary" }, "Import JSON");
+      var importFile = el("input", { type: "file", style: "display:none;" });
+      importFile.setAttribute("accept", ".json,application/json");
+      importFile.addEventListener("change", function () {
+        if (!importFile.files || !importFile.files[0] || !_editor) return;
+        var reader = new FileReader();
+        reader.onload = function (ev) {
+          try {
+            var data = JSON.parse(ev.target.result);
+            _editor.import(data);
+            onStatus("Imported graph");
+          } catch (e) { onStatus("Import error: " + e.message); }
+        };
+        reader.readAsText(importFile.files[0]);
+      });
+      importBtn.addEventListener("click", function () { importFile.click(); });
+      var autoArrangeBtn = el("button", { className: "osc-btn secondary" }, "Auto Arrange");
+      autoArrangeBtn.addEventListener("click", function () { onStatus("Auto arrange: not yet implemented"); });
+      actBar.appendChild(saveBtn); actBar.appendChild(clearBtn); actBar.appendChild(exportBtn); actBar.appendChild(importBtn); actBar.appendChild(autoArrangeBtn);
       mainEl.appendChild(actBar);
 
       // init Drawflow
@@ -287,16 +314,48 @@
         (nodeData.name || "node") + " #" + selectedId));
 
       // get config spec from modelGraphCore — pass full node object (not just name)
-      if (_graphRuntime && typeof _graphRuntime.getNodeConfigSpec === "function" && uiEngine && typeof uiEngine.renderConfigForm === "function") {
-        var spec = _graphRuntime.getNodeConfigSpec(nodeData);
-        var fields = Array.isArray(spec) ? spec : (spec && Array.isArray(spec.fields) ? spec.fields : []);
-        if (fields.length) {
+      if (_graphRuntime && typeof _graphRuntime.getNodeConfigSpec === "function") {
+        var rawSpec = _graphRuntime.getNodeConfigSpec(nodeData);
+        var allFields = Array.isArray(rawSpec) ? rawSpec : (rawSpec && Array.isArray(rawSpec.fields) ? rawSpec.fields : []);
+
+        // render messages as text, filter out unsupported kinds, map to renderConfigForm schema
+        var formFields = [];
+        allFields.forEach(function (f) {
+          if (f.kind === "message") {
+            // render as static text
+            if (f.text) rightEl.appendChild(el("div", { style: "font-size:10px;color:#64748b;margin-bottom:4px;padding:2px 4px;border-left:2px solid #334155;" }, f.text));
+            return;
+          }
+          if (f.kind === "checkbox_grid") {
+            // render as info text (complex widget not supported yet)
+            rightEl.appendChild(el("div", { style: "font-size:10px;color:#64748b;margin-bottom:4px;" }, "Parameter mask: configure in preset"));
+            return;
+          }
+          // map kind to type for renderConfigForm
+          var field = {
+            key: f.key,
+            label: f.label || f.key || "",
+            type: f.kind === "select" ? "select" : (f.kind === "checkbox" ? "checkbox" : (f.kind === "number" ? "number" : "text")),
+            options: f.options,
+            min: f.min,
+            max: f.max,
+            step: f.step,
+          };
+          formFields.push(field);
+        });
+
+        if (formFields.length && uiEngine && typeof uiEngine.renderConfigForm === "function") {
+          // build value from node data
+          var formValue = {};
+          formFields.forEach(function (f) {
+            if (f.key && nodeData.data) formValue[f.key] = nodeData.data[f.key];
+          });
           var formMount = el("div", {});
-          var formApi = uiEngine.renderConfigForm({
+          uiEngine.renderConfigForm({
             mountEl: formMount,
-            schema: fields,
+            schema: formFields,
             rowClassName: "osc-form-row",
-            value: nodeData.data || {},
+            value: formValue,
             onChange: function (nextConfig) {
               if (_graphRuntime && typeof _graphRuntime.applyNodeConfigValue === "function") {
                 Object.keys(nextConfig || {}).forEach(function (k) {
