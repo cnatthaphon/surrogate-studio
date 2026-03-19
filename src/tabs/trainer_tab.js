@@ -175,45 +175,60 @@
     }
 
     function _renderTrainSubTab(mainEl, t, activeId) {
-      // loss chart
+      // loss chart — always show (empty or with data)
       _lossChartDiv = el("div", { style: "height:280px;margin-bottom:8px;" });
       mainEl.appendChild(_lossChartDiv);
 
-      // epoch log
       var epochs = store && typeof store.getTrainerEpochs === "function" ? store.getTrainerEpochs(activeId) : [];
       if (epochs.length) {
         _plotLossChart(epochs);
-        var table = el("table", { className: "osc-metric-table" });
-        var thead = el("tr", {});
-        ["Epoch", "Loss", "Val Loss", "LR", "Improved"].forEach(function (h) { thead.appendChild(el("th", {}, h)); });
-        table.appendChild(thead);
-        epochs.forEach(function (ep) {
-          var tr = el("tr", {});
-          tr.appendChild(el("td", {}, String(ep.epoch || "")));
-          tr.appendChild(el("td", {}, ep.loss != null ? Number(ep.loss).toExponential(3) : "—"));
-          tr.appendChild(el("td", {}, ep.val_loss != null ? Number(ep.val_loss).toExponential(3) : "—"));
-          tr.appendChild(el("td", {}, ep.current_lr != null ? Number(ep.current_lr).toExponential(2) : "—"));
-          tr.appendChild(el("td", {}, ep.improved ? "\u2713" : ""));
-          table.appendChild(tr);
-        });
-        mainEl.appendChild(table);
       } else {
-        mainEl.appendChild(el("div", { className: "osc-empty" }, "No training history. Configure and start training from right panel."));
+        // empty chart placeholder
+        var Plotly = (typeof window !== "undefined" && window.Plotly) ? window.Plotly : null;
+        if (Plotly) {
+          Plotly.newPlot(_lossChartDiv, [], {
+            paper_bgcolor: "#0b1220", plot_bgcolor: "#0b1220", font: { color: "#e2e8f0", size: 10 },
+            title: { text: "Training Progress (waiting...)", font: { size: 12 } },
+            xaxis: { title: "Epoch", gridcolor: "#1e293b" }, yaxis: { title: "Loss", gridcolor: "#1e293b" },
+            margin: { t: 30, b: 50, l: 50, r: 10 },
+          }, { responsive: true });
+        }
       }
+
+      // epoch table — always show header
+      var table = el("table", { className: "osc-metric-table" });
+      var thead = el("tr", {});
+      ["Epoch", "Loss", "Val Loss", "LR", "Improved"].forEach(function (h) { thead.appendChild(el("th", {}, h)); });
+      table.appendChild(thead);
+      epochs.forEach(function (ep) {
+        var tr = el("tr", {});
+        tr.appendChild(el("td", {}, String(ep.epoch || "")));
+        tr.appendChild(el("td", {}, ep.loss != null ? Number(ep.loss).toExponential(3) : "—"));
+        tr.appendChild(el("td", {}, ep.val_loss != null ? Number(ep.val_loss).toExponential(3) : "—"));
+        tr.appendChild(el("td", {}, ep.current_lr != null ? Number(ep.current_lr).toExponential(2) : "—"));
+        tr.appendChild(el("td", {}, ep.improved ? "\u2713" : ""));
+        table.appendChild(tr);
+      });
+      if (!epochs.length) {
+        var emptyRow = el("tr", {});
+        emptyRow.appendChild(el("td", { style: "color:#64748b;text-align:center;" }, "—"));
+        emptyRow.setAttribute("colspan", "5");
+        table.appendChild(emptyRow);
+      }
+      mainEl.appendChild(table);
 
       // live log
       _epochLogEl = el("div", { style: "margin-top:8px;font-size:11px;color:#94a3b8;max-height:150px;overflow-y:auto;" });
+      if (t.status === "running") _epochLogEl.appendChild(el("div", {}, "Training in progress..."));
       mainEl.appendChild(_epochLogEl);
     }
 
     function _renderTestSubTab(mainEl, t, activeId) {
-      if (!t.metrics) {
-        mainEl.appendChild(el("div", { className: "osc-empty" }, "Train first to see test results."));
-        return;
-      }
+      // metrics table — always show with placeholder
       var card = el("div", { className: "osc-card" });
       card.appendChild(el("div", { style: "font-size:13px;color:#67e8f9;margin-bottom:8px;font-weight:600;" }, "Test Results"));
-      var m = t.metrics;
+
+      var m = t.metrics || {};
       var rows = [
         ["Val MSE", m.mse != null ? Number(m.mse).toExponential(3) : "—"],
         ["Val MAE", m.mae != null ? Number(m.mae).toExponential(3) : "—"],
@@ -223,14 +238,51 @@
         ["Best Val Loss", m.bestValLoss != null ? Number(m.bestValLoss).toExponential(3) : "—"],
         ["Final LR", m.finalLr != null ? Number(m.finalLr).toExponential(3) : "—"],
         ["Stopped Early", m.stoppedEarly ? "Yes" : "No"],
+        ["Head Count", m.headCount || "—"],
       ];
       var table = el("table", { className: "osc-metric-table" });
       rows.forEach(function (r) {
-        var tr = el("tr", {}); tr.appendChild(el("td", { style: "color:#94a3b8;" }, r[0])); tr.appendChild(el("td", {}, r[1]));
+        var tr = el("tr", {});
+        tr.appendChild(el("td", { style: "color:#94a3b8;" }, r[0]));
+        tr.appendChild(el("td", { style: r[1] !== "—" ? "color:#4ade80;" : "" }, r[1]));
         table.appendChild(tr);
       });
       card.appendChild(table);
       mainEl.appendChild(card);
+
+      if (!t.metrics) {
+        mainEl.appendChild(el("div", { style: "font-size:12px;color:#64748b;padding:8px;" }, "Train first to see test results and predictions."));
+        return;
+      }
+
+      // pred vs ground truth chart placeholder
+      var predCard = el("div", { className: "osc-card", style: "margin-top:8px;" });
+      predCard.appendChild(el("div", { style: "font-size:13px;color:#67e8f9;margin-bottom:8px;font-weight:600;" }, "Prediction vs Ground Truth"));
+      var predChartDiv = el("div", { style: "height:280px;" });
+      predCard.appendChild(predChartDiv);
+      mainEl.appendChild(predCard);
+
+      // TODO: actual pred vs truth chart requires running inference on test set
+      // For now show summary
+      var Plotly = (typeof window !== "undefined" && window.Plotly) ? window.Plotly : null;
+      if (Plotly) {
+        var epochs = store && typeof store.getTrainerEpochs === "function" ? store.getTrainerEpochs(activeId) : [];
+        if (epochs.length) {
+          var trainLoss = epochs.map(function (e) { return e.loss; });
+          var valLoss = epochs.map(function (e) { return e.val_loss; });
+          var ep = epochs.map(function (e) { return e.epoch; });
+          Plotly.newPlot(predChartDiv, [
+            { x: ep, y: trainLoss, mode: "lines+markers", name: "Train Loss", line: { color: "#22d3ee" } },
+            { x: ep, y: valLoss, mode: "lines+markers", name: "Val Loss", line: { color: "#f59e0b" } },
+          ], {
+            paper_bgcolor: "#0b1220", plot_bgcolor: "#0b1220", font: { color: "#e2e8f0", size: 10 },
+            title: { text: "Final Training Curves", font: { size: 12 } },
+            xaxis: { title: "Epoch", gridcolor: "#1e293b" }, yaxis: { title: "Loss", gridcolor: "#1e293b" },
+            legend: { orientation: "h", y: -0.15 },
+            margin: { t: 30, b: 50, l: 50, r: 10 },
+          }, { responsive: true });
+        }
+      }
     }
 
     function _plotLossChart(epochs) {
@@ -262,7 +314,16 @@
       var t = store ? store.getTrainerCard(activeId) : null;
       if (!t) return;
 
-      rightEl.appendChild(el("h3", {}, "Training Config"));
+      var hasTrained = t.status === "done" || t.status === "error" || (store.getTrainerEpochs(activeId) || []).length > 0;
+      var isLocked = hasTrained && t.datasetId && t.modelId;
+
+      rightEl.appendChild(el("h3", {}, hasTrained ? "Continue Training" : "Training Config"));
+
+      if (isLocked) {
+        var lockInfo = el("div", { style: "font-size:10px;color:#f59e0b;margin-bottom:6px;padding:4px 6px;border:1px solid #7c2d12;border-radius:4px;background:#431407;" });
+        lockInfo.textContent = "Dataset + Model locked after training. Clear session to change.";
+        rightEl.appendChild(lockInfo);
+      }
 
       // dataset + model selection (same schema)
       var schemaId = t.schemaId || _getSchemaId();
@@ -273,8 +334,8 @@
       var lrTypes = trainingEngine ? trainingEngine.LR_SCHEDULER_TYPES : ["plateau", "step", "exponential", "cosine", "none"];
 
       var formSchema = [
-        { key: "datasetId", label: "Dataset (" + schemaId + ")", type: "select", options: datasets.map(function (d) { return { value: d.id, label: d.name || d.id }; }) },
-        { key: "modelId", label: "Model (" + schemaId + ")", type: "select", options: models.map(function (m) { return { value: m.id, label: m.name || m.id }; }) },
+        { key: "datasetId", label: "Dataset (" + schemaId + ")", type: "select", options: datasets.map(function (d) { return { value: d.id, label: d.name || d.id }; }), disabled: isLocked },
+        { key: "modelId", label: "Model (" + schemaId + ")", type: "select", options: models.map(function (m) { return { value: m.id, label: m.name || m.id }; }), disabled: isLocked },
         { key: "runtimeBackend", label: "Backend", type: "select", options: backends },
         { key: "epochs", label: "Epochs", type: "number", min: 1, max: 1000 },
         { key: "batchSize", label: "Batch size", type: "number", min: 1 },
@@ -305,15 +366,35 @@
 
       // buttons
       var btnRow = el("div", { style: "display:flex;gap:4px;margin-top:8px;" });
-      var trainBtn = el("button", { className: "osc-btn", style: "flex:1;" }, "Start Training");
+      var trainLabel = hasTrained ? "Continue Training" : "Start Training";
+      var trainBtn = el("button", { className: "osc-btn", style: "flex:1;" }, trainLabel);
       trainBtn.addEventListener("click", _handleTrain);
       var exportBtn = el("button", { className: "osc-btn secondary", style: "flex:1;" }, "Export Notebook");
       exportBtn.addEventListener("click", function () { _handleExport(); });
       btnRow.appendChild(trainBtn); btnRow.appendChild(exportBtn);
       rightEl.appendChild(btnRow);
 
-      // server runtime
-      rightEl.appendChild(el("div", { style: "margin-top:12px;font-size:10px;color:#64748b;" }, "Server runtime: detect automatically when available. Client training uses TF.js."));
+      // clear session button
+      if (hasTrained) {
+        var clearBtn = el("button", { className: "osc-btn secondary", style: "width:100%;margin-top:4px;border-color:#7c2d12;color:#fdba74;" }, "Clear Session (reset training)");
+        clearBtn.addEventListener("click", function () {
+          if (!confirm("Clear training history and unlock dataset/model?")) return;
+          t.status = "draft";
+          t.metrics = null;
+          t.datasetId = "";
+          t.modelId = "";
+          t.modelArtifacts = null;
+          if (store) { store.upsertTrainerCard(t); store.replaceTrainerEpochs(activeId, []); }
+          onStatus("Session cleared");
+          _renderLeftPanel(); _renderMainPanel(); _renderRightPanel();
+        });
+        rightEl.appendChild(clearBtn);
+      }
+
+      // info
+      rightEl.appendChild(el("div", { style: "margin-top:12px;font-size:10px;color:#64748b;" },
+        "Backend: Auto tries WebGPU \u2192 WebGL \u2192 WASM \u2192 CPU. " +
+        "file:// uses main-thread fallback (may freeze). Use local server for Worker."));
     }
 
     function _handleTrain() {
@@ -381,7 +462,13 @@
       var W = typeof window !== "undefined" ? window : {};
       var workerBridge = W.OSCTrainingWorkerBridge;
 
-      if (workerBridge && typeof workerBridge.runTrainingInWorker === "function") {
+      var useWorker = workerBridge && typeof workerBridge.runTrainingInWorker === "function";
+      // test if Worker is available (file:// blocks Workers)
+      if (useWorker) {
+        try { var _tw = new Worker("./src/training_worker.js"); _tw.terminate(); } catch (e) { useWorker = false; console.warn("[trainer] Worker not available:", e.message); }
+      }
+
+      if (useWorker) {
         // === WORKER PATH (non-blocking) ===
         buildResult.model.save(tf.io.withSaveHandler(function (artifacts) {
           onStatus("Training via Worker...");
