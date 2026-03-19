@@ -300,7 +300,7 @@
       var trainBtn = el("button", { className: "osc-btn", style: "flex:1;" }, "Start Training");
       trainBtn.addEventListener("click", _handleTrain);
       var exportBtn = el("button", { className: "osc-btn secondary", style: "flex:1;" }, "Export Notebook");
-      exportBtn.addEventListener("click", function () { onStatus("Export: pending implementation"); });
+      exportBtn.addEventListener("click", function () { _handleExport(); });
       btnRow.appendChild(trainBtn); btnRow.appendChild(exportBtn);
       rightEl.appendChild(btnRow);
 
@@ -412,6 +412,64 @@
         onStatus("Error: " + err.message);
         _renderLeftPanel(); _renderMainPanel();
       });
+    }
+
+    function _handleExport() {
+      var activeId = stateApi ? stateApi.getActiveTrainer() : "";
+      var tCard = activeId && store ? store.getTrainerCard(activeId) : null;
+      if (!tCard) { onStatus("Select a trainer"); return; }
+      if (!tCard.datasetId || !tCard.modelId) { onStatus("Set dataset + model first"); return; }
+
+      var dataset = store ? store.getDataset(tCard.datasetId) : null;
+      var model = store ? store.getModel(tCard.modelId) : null;
+      if (!dataset || !dataset.data) { onStatus("Dataset not ready"); return; }
+      if (!model || !model.graph) { onStatus("Model has no graph"); return; }
+
+      var W = typeof window !== "undefined" ? window : {};
+      var NBC = W.OSCNotebookCore || null;
+      if (!NBC || typeof NBC.createNotebookBundleZipFromConfig !== "function") {
+        onStatus("Notebook export module not available");
+        return;
+      }
+
+      onStatus("Exporting notebook...");
+      try {
+        var config = _configFormApi && typeof _configFormApi.getConfig === "function" ? _configFormApi.getConfig() : {};
+        var dsData = dataset.data;
+        var isBundle = dsData.kind === "dataset_bundle" && dsData.datasets;
+        var activeDs = isBundle ? dsData.datasets[dsData.activeVariantId || Object.keys(dsData.datasets)[0]] : dsData;
+
+        var exportConfig = {
+          schemaId: tCard.schemaId,
+          datasetName: dataset.name || dataset.id,
+          modelName: model.name || model.id,
+          graph: model.graph,
+          trainConfig: {
+            epochs: Number(config.epochs || 20),
+            batchSize: Number(config.batchSize || 32),
+            learningRate: Number(config.learningRate || 0.001),
+            optimizer: String(config.optimizerType || "adam"),
+          },
+          dataset: activeDs,
+        };
+
+        var result = NBC.createNotebookBundleZipFromConfig(exportConfig);
+        if (result && typeof result.then === "function") {
+          result.then(function (blob) {
+            if (!blob) { onStatus("Export returned empty"); return; }
+            var a = document.createElement("a");
+            a.href = URL.createObjectURL(blob);
+            a.download = (tCard.name || "notebook") + "_bundle.zip";
+            a.click();
+            URL.revokeObjectURL(a.href);
+            onStatus("\u2713 Exported: " + a.download);
+          }).catch(function (err) { onStatus("Export error: " + err.message); });
+        } else {
+          onStatus("Export: unexpected result type");
+        }
+      } catch (err) {
+        onStatus("Export error: " + err.message);
+      }
     }
 
     function mount() { _mountId++; _subTab = "train"; _renderLeftPanel(); _renderMainPanel(); _renderRightPanel(); }
