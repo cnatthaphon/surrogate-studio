@@ -282,11 +282,19 @@
         { key: "optimizerType", label: "Optimizer", type: "select", options: optTypes.map(function (t) { return { value: t, label: t }; }) },
         { key: "lrSchedulerType", label: "LR scheduler", type: "select", options: lrTypes.map(function (t) { return { value: t, label: t }; }) },
         { key: "earlyStoppingPatience", label: "Early stop patience", type: "number", min: 0 },
+        { key: "restoreBestWeights", label: "Restore best weights", type: "checkbox" },
+        { key: "lrPatience", label: "LR patience", type: "number", min: 1 },
+        { key: "lrFactor", label: "LR factor", type: "number", min: 0.05, max: 0.99, step: 0.05 },
+        { key: "minLr", label: "Min LR", type: "number", min: 0.0000001, step: 0.0000001 },
+        { key: "gradClipNorm", label: "Grad clip norm (0=off)", type: "number", min: 0, step: 0.1 },
+        { key: "gradClipValue", label: "Grad clip value (0=off)", type: "number", min: 0, step: 0.1 },
       ];
       var formValue = {
         datasetId: t.datasetId || "", modelId: t.modelId || "",
         runtimeBackend: "auto", epochs: 20, batchSize: 32, learningRate: 0.001,
         optimizerType: "adam", lrSchedulerType: "plateau", earlyStoppingPatience: 5,
+        restoreBestWeights: true, lrPatience: 3, lrFactor: 0.5, minLr: 0.000001,
+        gradClipNorm: 0, gradClipValue: 0,
       };
 
       if (uiEngine && typeof uiEngine.renderConfigForm === "function") {
@@ -405,7 +413,12 @@
             lrSchedulerType: String(config.lrSchedulerType || "plateau"),
             useLrScheduler: String(config.lrSchedulerType || "plateau") !== "none",
             earlyStoppingPatience: Number(config.earlyStoppingPatience || 5),
-            restoreBestWeights: true,
+            restoreBestWeights: config.restoreBestWeights !== false,
+            lrPatience: Number(config.lrPatience || 3),
+            lrFactor: Number(config.lrFactor || 0.5),
+            minLr: Number(config.minLr || 0.000001),
+            gradClipNorm: Number(config.gradClipNorm || 0),
+            gradClipValue: Number(config.gradClipValue || 0),
             onEpochData: function (payload) {
               if (currentMountId !== _mountId) return;
               var logEntry = { epoch: payload.epoch, loss: payload.loss, val_loss: payload.val_loss, current_lr: payload.current_lr, improved: payload.improved };
@@ -468,7 +481,12 @@
           optimizerType: String(config.optimizerType || "adam"),
           lrSchedulerType: String(config.lrSchedulerType || "plateau"),
           earlyStoppingPatience: Number(config.earlyStoppingPatience || 5),
-          restoreBestWeights: true,
+          restoreBestWeights: config.restoreBestWeights !== false,
+          lrPatience: Number(config.lrPatience || 3),
+          lrFactor: Number(config.lrFactor || 0.5),
+          minLr: Number(config.minLr || 0.000001),
+          gradClipNorm: Number(config.gradClipNorm || 0),
+          gradClipValue: Number(config.gradClipValue || 0),
           onEpochEnd: function (epoch, logs) {
             if (currentMountId !== _mountId) return;
             var logEntry = { epoch: epoch + 1, loss: logs.loss, val_loss: logs.val_loss, current_lr: logs.current_lr, improved: logs.improved };
