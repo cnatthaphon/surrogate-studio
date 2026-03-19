@@ -286,14 +286,16 @@
       rightEl.appendChild(el("div", { style: "font-size:12px;color:#67e8f9;margin-bottom:8px;" },
         (nodeData.name || "node") + " #" + selectedId));
 
-      // get config spec from modelGraphCore
+      // get config spec from modelGraphCore — pass full node object (not just name)
       if (_graphRuntime && typeof _graphRuntime.getNodeConfigSpec === "function" && uiEngine && typeof uiEngine.renderConfigForm === "function") {
-        var spec = _graphRuntime.getNodeConfigSpec(nodeData.name);
-        if (spec && Array.isArray(spec.fields) && spec.fields.length) {
+        var spec = _graphRuntime.getNodeConfigSpec(nodeData);
+        var fields = Array.isArray(spec) ? spec : (spec && Array.isArray(spec.fields) ? spec.fields : []);
+        if (fields.length) {
           var formMount = el("div", {});
           var formApi = uiEngine.renderConfigForm({
             mountEl: formMount,
-            schema: spec.fields,
+            schema: fields,
+            rowClassName: "osc-form-row",
             value: nodeData.data || {},
             onChange: function (nextConfig) {
               if (_graphRuntime && typeof _graphRuntime.applyNodeConfigValue === "function") {
