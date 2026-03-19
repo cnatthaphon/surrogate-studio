@@ -519,20 +519,17 @@
         var target = String(d.targetType || d.target || "x");
         var rawLoss = String(d.loss || "mse");
         var loss = rawLoss === "use_global" ? "mse" : rawLoss;
+        // target options from schema — not hardcoded
+        var outputKeys = (typeof api.getOutputKeys === "function") ? api.getOutputKeys(sid) : [];
+        var targetOptions = outputKeys.length
+          ? outputKeys.map(function (k) { return { value: k.key || k, label: k.label || k.key || k }; })
+          : [{ value: "x", label: "x" }];
         addField({
           kind: "select",
           key: "targetType",
           label: "Target",
           value: target,
-          options: [
-            { value: "x", label: "x" },
-            { value: "v", label: "v" },
-            { value: "xv", label: "x+v" },
-            { value: "traj", label: "traj (full sequence)" },
-            { value: "params", label: "params" },
-            { value: "label", label: "label" },
-            { value: "logits", label: "logits" }
-          ]
+          options: targetOptions
         });
         addField({
           kind: "select",
