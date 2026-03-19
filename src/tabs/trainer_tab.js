@@ -24,16 +24,34 @@
       return e;
     };
     var escapeHtml = deps.escapeHtml || function (s) { return String(s || ""); };
-    var getTf = deps.getTf || function () { var W = typeof window !== "undefined" ? window : {}; return W.tf || null; };
+    var getTf = function () { var W = typeof window !== "undefined" ? window : {}; return W.tf || null; };
 
     var _mountId = 0;
     var _configFormApi = null;
     var _isTraining = false;
+    var _lossChartDiv = null;
+    var _epochLogEl = null;
+    var _subTab = "train"; // "train" | "test"
 
-    function _getSchemaId() { return stateApi ? stateApi.getActiveSchema() : ""; }
+    function _getSchemaId() {
+      var aid = stateApi ? stateApi.getActiveTrainer() : "";
+      if (aid && store) { var t = store.getTrainerCard(aid); if (t && t.schemaId) return t.schemaId; }
+      return stateApi ? stateApi.getActiveSchema() : "";
+    }
     function _listTrainers() { return store && typeof store.listTrainerCards === "function" ? store.listTrainerCards({}) : []; }
-    function _listDatasets() { return store && typeof store.listDatasets === "function" ? store.listDatasets({ schemaId: _getSchemaId() }) : []; }
-    function _listModels() { return store && typeof store.listModels === "function" ? store.listModels({ schemaId: _getSchemaId() }) : []; }
+    function _listDatasets(schemaId) { return store && typeof store.listDatasets === "function" ? store.listDatasets({}).filter(function (d) { return d.status === "ready" && (!schemaId || d.schemaId === schemaId); }) : []; }
+    function _listModels(schemaId) { return store && typeof store.listModels === "function" ? store.listModels({}).filter(function (m) { return !schemaId || m.schemaId === schemaId; }) : []; }
+
+    // detect available backends
+    function _getAvailableBackends() {
+      var backends = [{ value: "auto", label: "Auto" }, { value: "cpu", label: "CPU" }];
+      var tf = getTf();
+      if (tf) {
+        try { if (typeof tf.setBackend === "function") { backends.push({ value: "webgl", label: "WebGL (GPU)" }); } } catch (e) {}
+        try { backends.push({ value: "wasm", label: "WASM" }); } catch (e) {}
+      }
+      return backends;
+    }
 
     // === LEFT ===
     function _renderLeftPanel() {
@@ -44,10 +62,10 @@
       var trainers = _listTrainers();
       var activeId = stateApi ? stateApi.getActiveTrainer() : "";
       var items = trainers.map(function (t) {
-        var statusIcon = t.status === "done" ? "\u2713" : (t.status === "running" ? "\u23f3" : "");
+        var icon = t.status === "done" ? "\u2713 " : (t.status === "running" ? "\u23f3 " : "");
         return {
           id: t.id, title: t.name || t.id, active: t.id === activeId,
-          metaLines: [t.schemaId || "", statusIcon + (t.status || ""), t.createdAt ? new Date(t.createdAt).toLocaleTimeString() : ""].filter(Boolean),
+          metaLines: [t.schemaId || "", icon + (t.status || "draft")].filter(Boolean),
           actions: [{ id: "delete", label: "\u2715" }],
         };
       });
@@ -56,42 +74,48 @@
       leftEl.appendChild(listMount);
       if (uiEngine && typeof uiEngine.renderItemList === "function") {
         uiEngine.renderItemList({
-          mountEl: listMount, items: items, emptyText: "No trainers. Click + New.",
-          onOpen: function (id) { if (stateApi) stateApi.setActiveTrainer(id); _renderLeftPanel(); _renderMainPanel(); _renderRightPanel(); },
+          mountEl: listMount, items: items, emptyText: "No trainers.",
+          onOpen: function (id) {
+            if (stateApi) stateApi.setActiveTrainer(id);
+            _renderLeftPanel(); _renderMainPanel(); _renderRightPanel();
+          },
           onAction: function (id, act) {
-            if (act === "delete") {
-              if (confirm("Delete trainer?")) { if (store) store.removeTrainerCard(id); if (stateApi && stateApi.getActiveTrainer() === id) stateApi.setActiveTrainer(""); _renderLeftPanel(); _renderMainPanel(); _renderRightPanel(); }
+            if (act === "delete" && confirm("Delete?")) {
+              if (store) store.removeTrainerCard(id);
+              if (stateApi && stateApi.getActiveTrainer() === id) stateApi.setActiveTrainer("");
+              _renderLeftPanel(); _renderMainPanel(); _renderRightPanel();
             }
           },
         });
       }
 
       var newBtn = el("button", { className: "osc-btn", style: "margin-top:8px;width:100%;" }, "+ New Trainer");
-      newBtn.addEventListener("click", function () { _openNewModal(); });
+      newBtn.addEventListener("click", _openNewModal);
       leftEl.appendChild(newBtn);
     }
 
     function _openNewModal() {
       if (!modal) return;
-      var _nameInput, _schemaSelect;
+      var _ni, _ss;
       modal.open({
         title: "New Training Session",
-        renderForm: function (mount) {
+        renderForm: function (m) {
           var schemas = schemaRegistry ? schemaRegistry.listSchemas() : [];
-          mount.appendChild(el("label", { style: "font-size:12px;color:#94a3b8;display:block;margin-bottom:2px;" }, "Name"));
-          _nameInput = el("input", { type: "text", placeholder: "train_1", style: "width:100%;padding:6px 8px;margin-bottom:8px;border-radius:6px;border:1px solid #334155;background:#0b1220;color:#e2e8f0;" });
-          mount.appendChild(_nameInput);
-          mount.appendChild(el("label", { style: "font-size:12px;color:#94a3b8;display:block;margin-bottom:2px;" }, "Schema"));
-          _schemaSelect = el("select", { style: "width:100%;padding:6px 8px;border-radius:6px;border:1px solid #334155;background:#0b1220;color:#e2e8f0;" });
-          (schemas).forEach(function (s) { var opt = el("option", { value: s.id }); opt.textContent = s.label || s.id; if (s.id === _getSchemaId()) opt.selected = true; _schemaSelect.appendChild(opt); });
-          mount.appendChild(_schemaSelect);
-          setTimeout(function () { _nameInput.focus(); }, 50);
+          m.appendChild(el("label", { style: "font-size:12px;color:#94a3b8;display:block;margin-bottom:2px;" }, "Name"));
+          _ni = el("input", { type: "text", placeholder: "train_1", style: "width:100%;padding:6px 8px;margin-bottom:8px;border-radius:6px;border:1px solid #334155;background:#0b1220;color:#e2e8f0;" });
+          m.appendChild(_ni);
+          m.appendChild(el("label", { style: "font-size:12px;color:#94a3b8;display:block;margin-bottom:2px;" }, "Schema"));
+          _ss = el("select", { style: "width:100%;padding:6px 8px;border-radius:6px;border:1px solid #334155;background:#0b1220;color:#e2e8f0;" });
+          schemas.forEach(function (s) { var o = el("option", { value: s.id }); o.textContent = s.label || s.id; if (s.id === _getSchemaId()) o.selected = true; _ss.appendChild(o); });
+          m.appendChild(_ss);
+          setTimeout(function () { _ni.focus(); }, 50);
         },
         onCreate: function () {
-          var name = (_nameInput && _nameInput.value.trim()) || "";
-          var sid = _schemaSelect ? _schemaSelect.value : "";
+          var name = (_ni && _ni.value.trim()) || "";
+          var sid = _ss ? _ss.value : "";
           if (!name) { onStatus("Enter a name"); return; }
-          var id = "t_" + Date.now();
+          var id = "t_" + Date.now() + "_" + Math.floor(Math.random() * 10000);
+          console.log("[trainer_tab] creating:", id, name, sid);
           if (store) store.upsertTrainerCard({ id: id, name: name, schemaId: sid, status: "draft", createdAt: Date.now() });
           if (stateApi) { stateApi.setActiveSchema(sid); stateApi.setActiveTrainer(id); }
           onStatus("Created: " + name);
@@ -100,7 +124,7 @@
       });
     }
 
-    // === MIDDLE: session info + epoch log ===
+    // === MIDDLE: train/test sub-tabs ===
     function _renderMainPanel() {
       var mainEl = layout.mainEl;
       mainEl.innerHTML = "";
@@ -109,24 +133,54 @@
       var t = store ? store.getTrainerCard(activeId) : null;
       if (!t) { mainEl.appendChild(el("div", { className: "osc-empty" }, "Not found.")); return; }
 
-      var card = el("div", { className: "osc-card" });
-      card.appendChild(el("h3", { style: "color:#67e8f9;margin:0 0 8px;" }, t.name || t.id));
-      card.appendChild(el("div", { style: "font-size:12px;color:#94a3b8;" },
+      // header
+      var header = el("div", { className: "osc-card", style: "margin-bottom:8px;" });
+      header.appendChild(el("h3", { style: "color:#67e8f9;margin:0 0 4px;" }, t.name || t.id));
+      header.appendChild(el("div", { style: "font-size:12px;color:#94a3b8;" },
         "Schema: " + escapeHtml(t.schemaId || "") + " | Status: " + (t.status || "draft") +
-        (t.datasetId ? " | Dataset: " + t.datasetId : "") + (t.modelId ? " | Model: " + t.modelId : "")));
-
+        (t.datasetId ? " | Dataset: " + (function () { var d = store.getDataset(t.datasetId); return d ? d.name : t.datasetId; })() : "") +
+        (t.modelId ? " | Model: " + (function () { var m = store.getModel(t.modelId); return m ? m.name : t.modelId; })() : "")));
       if (t.metrics) {
-        card.appendChild(el("div", { style: "font-size:12px;color:#cbd5e1;margin-top:4px;" },
+        header.appendChild(el("div", { style: "font-size:12px;color:#4ade80;margin-top:4px;" },
           "MAE: " + (t.metrics.mae != null ? Number(t.metrics.mae).toExponential(3) : "—") +
           " | Test MAE: " + (t.metrics.testMae != null ? Number(t.metrics.testMae).toExponential(3) : "—") +
           " | Best epoch: " + (t.metrics.bestEpoch || "—")));
       }
+      mainEl.appendChild(header);
+
+      // sub-tabs
+      var tabBar = el("div", { style: "display:flex;gap:4px;margin-bottom:8px;" });
+      ["train", "test"].forEach(function (tabId) {
+        var btn = el("button", {
+          style: "padding:4px 12px;font-size:12px;border-radius:6px;cursor:pointer;border:1px solid " +
+            (_subTab === tabId ? "#0ea5e9" : "#334155") + ";background:" +
+            (_subTab === tabId ? "#0c2340" : "#1f2937") + ";color:" +
+            (_subTab === tabId ? "#67e8f9" : "#cbd5e1") + ";",
+        }, tabId.charAt(0).toUpperCase() + tabId.slice(1));
+        btn.addEventListener("click", function () { _subTab = tabId; _renderMainPanel(); });
+        tabBar.appendChild(btn);
+      });
+      mainEl.appendChild(tabBar);
+
+      if (_subTab === "train") {
+        _renderTrainSubTab(mainEl, t, activeId);
+      } else {
+        _renderTestSubTab(mainEl, t, activeId);
+      }
+    }
+
+    function _renderTrainSubTab(mainEl, t, activeId) {
+      // loss chart
+      _lossChartDiv = el("div", { style: "height:280px;margin-bottom:8px;" });
+      mainEl.appendChild(_lossChartDiv);
 
       // epoch log
       var epochs = store && typeof store.getTrainerEpochs === "function" ? store.getTrainerEpochs(activeId) : [];
       if (epochs.length) {
-        var table = el("table", { className: "osc-metric-table", style: "margin-top:8px;" });
-        var thead = el("tr", {}); ["Epoch", "Loss", "Val Loss", "LR"].forEach(function (h) { thead.appendChild(el("th", {}, h)); });
+        _plotLossChart(epochs);
+        var table = el("table", { className: "osc-metric-table" });
+        var thead = el("tr", {});
+        ["Epoch", "Loss", "Val Loss", "LR", "Improved"].forEach(function (h) { thead.appendChild(el("th", {}, h)); });
         table.appendChild(thead);
         epochs.forEach(function (ep) {
           var tr = el("tr", {});
@@ -134,12 +188,62 @@
           tr.appendChild(el("td", {}, ep.loss != null ? Number(ep.loss).toExponential(3) : "—"));
           tr.appendChild(el("td", {}, ep.val_loss != null ? Number(ep.val_loss).toExponential(3) : "—"));
           tr.appendChild(el("td", {}, ep.current_lr != null ? Number(ep.current_lr).toExponential(2) : "—"));
+          tr.appendChild(el("td", {}, ep.improved ? "\u2713" : ""));
           table.appendChild(tr);
         });
-        card.appendChild(table);
+        mainEl.appendChild(table);
+      } else {
+        mainEl.appendChild(el("div", { className: "osc-empty" }, "No training history. Configure and start training from right panel."));
       }
 
+      // live log
+      _epochLogEl = el("div", { style: "margin-top:8px;font-size:11px;color:#94a3b8;max-height:150px;overflow-y:auto;" });
+      mainEl.appendChild(_epochLogEl);
+    }
+
+    function _renderTestSubTab(mainEl, t, activeId) {
+      if (!t.metrics) {
+        mainEl.appendChild(el("div", { className: "osc-empty" }, "Train first to see test results."));
+        return;
+      }
+      var card = el("div", { className: "osc-card" });
+      card.appendChild(el("div", { style: "font-size:13px;color:#67e8f9;margin-bottom:8px;font-weight:600;" }, "Test Results"));
+      var m = t.metrics;
+      var rows = [
+        ["Val MSE", m.mse != null ? Number(m.mse).toExponential(3) : "—"],
+        ["Val MAE", m.mae != null ? Number(m.mae).toExponential(3) : "—"],
+        ["Test MSE", m.testMse != null ? Number(m.testMse).toExponential(3) : "—"],
+        ["Test MAE", m.testMae != null ? Number(m.testMae).toExponential(3) : "—"],
+        ["Best Epoch", m.bestEpoch || "—"],
+        ["Best Val Loss", m.bestValLoss != null ? Number(m.bestValLoss).toExponential(3) : "—"],
+        ["Final LR", m.finalLr != null ? Number(m.finalLr).toExponential(3) : "—"],
+        ["Stopped Early", m.stoppedEarly ? "Yes" : "No"],
+      ];
+      var table = el("table", { className: "osc-metric-table" });
+      rows.forEach(function (r) {
+        var tr = el("tr", {}); tr.appendChild(el("td", { style: "color:#94a3b8;" }, r[0])); tr.appendChild(el("td", {}, r[1]));
+        table.appendChild(tr);
+      });
+      card.appendChild(table);
       mainEl.appendChild(card);
+    }
+
+    function _plotLossChart(epochs) {
+      var Plotly = (typeof window !== "undefined" && window.Plotly) ? window.Plotly : null;
+      if (!Plotly || !_lossChartDiv || !epochs.length) return;
+      var ep = epochs.map(function (e) { return e.epoch; });
+      var loss = epochs.map(function (e) { return e.loss; });
+      var valLoss = epochs.map(function (e) { return e.val_loss; });
+      Plotly.newPlot(_lossChartDiv, [
+        { x: ep, y: loss, mode: "lines", name: "Train Loss", line: { color: "#22d3ee" } },
+        { x: ep, y: valLoss, mode: "lines", name: "Val Loss", line: { color: "#f59e0b" } },
+      ], {
+        paper_bgcolor: "#0b1220", plot_bgcolor: "#0b1220", font: { color: "#e2e8f0", size: 10 },
+        title: { text: "Training Progress", font: { size: 12 } },
+        xaxis: { title: "Epoch", gridcolor: "#1e293b" }, yaxis: { title: "Loss", gridcolor: "#1e293b" },
+        legend: { orientation: "h", y: -0.15 },
+        margin: { t: 30, b: 50, l: 50, r: 10 },
+      }, { responsive: true });
     }
 
     // === RIGHT: training config ===
@@ -150,35 +254,53 @@
 
       var activeId = stateApi ? stateApi.getActiveTrainer() : "";
       if (!activeId) { rightEl.appendChild(el("h3", {}, "Config")); rightEl.appendChild(el("div", { className: "osc-empty" }, "Select a trainer.")); return; }
+      var t = store ? store.getTrainerCard(activeId) : null;
+      if (!t) return;
 
       rightEl.appendChild(el("h3", {}, "Training Config"));
 
-      // dataset + model selectors
-      var datasets = _listDatasets().filter(function (d) { return d.status === "ready"; });
-      var models = _listModels();
+      // dataset + model selection (same schema)
+      var schemaId = t.schemaId || _getSchemaId();
+      var datasets = _listDatasets(schemaId);
+      var models = _listModels(schemaId);
+      var backends = _getAvailableBackends();
       var optTypes = trainingEngine ? trainingEngine.OPTIMIZER_TYPES : ["adam", "sgd", "rmsprop", "adagrad"];
       var lrTypes = trainingEngine ? trainingEngine.LR_SCHEDULER_TYPES : ["plateau", "step", "exponential", "cosine", "none"];
 
       var formSchema = [
-        { key: "datasetId", label: "Dataset", type: "select", options: datasets.map(function (d) { return { value: d.id, label: d.name || d.id }; }) },
-        { key: "modelId", label: "Model", type: "select", options: models.map(function (m) { return { value: m.id, label: m.name || m.id }; }) },
-        { key: "epochs", label: "Epochs", type: "number", value: 20, min: 1, max: 1000 },
-        { key: "batchSize", label: "Batch size", type: "number", value: 32, min: 1 },
-        { key: "learningRate", label: "Learning rate", type: "number", value: 0.001, min: 0.0000001, step: 0.0001 },
+        { key: "datasetId", label: "Dataset (" + schemaId + ")", type: "select", options: datasets.map(function (d) { return { value: d.id, label: d.name || d.id }; }) },
+        { key: "modelId", label: "Model (" + schemaId + ")", type: "select", options: models.map(function (m) { return { value: m.id, label: m.name || m.id }; }) },
+        { key: "runtimeBackend", label: "Backend", type: "select", options: backends },
+        { key: "epochs", label: "Epochs", type: "number", min: 1, max: 1000 },
+        { key: "batchSize", label: "Batch size", type: "number", min: 1 },
+        { key: "learningRate", label: "Learning rate", type: "number", min: 0.0000001, step: 0.0001 },
         { key: "optimizerType", label: "Optimizer", type: "select", options: optTypes.map(function (t) { return { value: t, label: t }; }) },
         { key: "lrSchedulerType", label: "LR scheduler", type: "select", options: lrTypes.map(function (t) { return { value: t, label: t }; }) },
-        { key: "earlyStoppingPatience", label: "Early stop patience", type: "number", value: 5, min: 0 },
+        { key: "earlyStoppingPatience", label: "Early stop patience", type: "number", min: 0 },
       ];
+      var formValue = {
+        datasetId: t.datasetId || "", modelId: t.modelId || "",
+        runtimeBackend: "auto", epochs: 20, batchSize: 32, learningRate: 0.001,
+        optimizerType: "adam", lrSchedulerType: "plateau", earlyStoppingPatience: 5,
+      };
 
       if (uiEngine && typeof uiEngine.renderConfigForm === "function") {
         var formMount = el("div", {});
-        _configFormApi = uiEngine.renderConfigForm({ mountEl: formMount, schema: formSchema, fieldNamePrefix: "train", rowClassName: "osc-form-row" });
+        _configFormApi = uiEngine.renderConfigForm({ mountEl: formMount, schema: formSchema, value: formValue, fieldNamePrefix: "train", rowClassName: "osc-form-row" });
         rightEl.appendChild(formMount);
       }
 
-      var trainBtn = el("button", { className: "osc-btn", style: "width:100%;margin-top:8px;" }, "Start Training");
-      trainBtn.addEventListener("click", function () { _handleTrain(); });
-      rightEl.appendChild(trainBtn);
+      // buttons
+      var btnRow = el("div", { style: "display:flex;gap:4px;margin-top:8px;" });
+      var trainBtn = el("button", { className: "osc-btn", style: "flex:1;" }, "Start Training");
+      trainBtn.addEventListener("click", _handleTrain);
+      var exportBtn = el("button", { className: "osc-btn secondary", style: "flex:1;" }, "Export Notebook");
+      exportBtn.addEventListener("click", function () { onStatus("Export: pending implementation"); });
+      btnRow.appendChild(trainBtn); btnRow.appendChild(exportBtn);
+      rightEl.appendChild(btnRow);
+
+      // server runtime
+      rightEl.appendChild(el("div", { style: "margin-top:12px;font-size:10px;color:#64748b;" }, "Server runtime: detect automatically when available. Client training uses TF.js."));
     }
 
     function _handleTrain() {
@@ -193,40 +315,50 @@
 
       var dataset = store ? store.getDataset(config.datasetId) : null;
       var model = store ? store.getModel(config.modelId) : null;
-      if (!dataset || !dataset.data) { onStatus("Dataset not ready"); return; }
-      if (!model || !model.graph) { onStatus("Model has no graph"); return; }
-      if (dataset.schemaId !== model.schemaId) { onStatus("Schema mismatch"); return; }
+      if (!dataset || !dataset.data) { onStatus("Dataset not ready — generate first"); return; }
+      if (!model || !model.graph) { onStatus("Model has no graph — save from Model tab first"); return; }
+      if (dataset.schemaId !== model.schemaId) { onStatus("Schema mismatch: " + dataset.schemaId + " vs " + model.schemaId); return; }
 
       var tf = getTf();
       if (!tf) { onStatus("TF.js not loaded"); return; }
-      if (!modelBuilder) { onStatus("Model builder missing"); return; }
-      if (!trainingEngine) { onStatus("Training engine missing"); return; }
+      if (!modelBuilder) { onStatus("Model builder not available"); return; }
+      if (!trainingEngine) { onStatus("Training engine not available"); return; }
 
-      var schemaId = tCard.schemaId || _getSchemaId();
-      var allowedOutputKeys = schemaRegistry ? (schemaRegistry.getOutputKeys(schemaId) || ["x"]) : ["x"];
-      var defaultTarget = allowedOutputKeys.indexOf("x") >= 0 ? "x" : (allowedOutputKeys[0] || "x");
+      // set backend
+      var backend = String(config.runtimeBackend || "auto");
+      if (backend !== "auto" && typeof tf.setBackend === "function") {
+        try { tf.setBackend(backend); } catch (e) { console.warn("Backend set failed:", e.message); }
+      }
+
+      var schemaId = tCard.schemaId;
+      var allowedOutputKeys = schemaRegistry ? schemaRegistry.getOutputKeys(schemaId) : ["x"];
+      var defaultTarget = allowedOutputKeys[0] || "x";
       var dsData = dataset.data;
+      // handle bundle format
+      var isBundle = dsData.kind === "dataset_bundle" && dsData.datasets;
+      var activeDs = isBundle ? dsData.datasets[dsData.activeVariantId || Object.keys(dsData.datasets)[0]] : dsData;
       var graphMode = modelBuilder.inferGraphMode(model.graph, "direct");
-      var featureSize = Number(dsData.featureSize || (dsData.xTrain && dsData.xTrain[0] && dsData.xTrain[0].length) || 1);
+      var featureSize = Number(activeDs.featureSize || (activeDs.xTrain && activeDs.xTrain[0] && activeDs.xTrain[0].length) || 1);
 
       var buildResult;
       try {
         buildResult = modelBuilder.buildModelFromGraph(tf, model.graph, {
           mode: graphMode, featureSize: featureSize,
-          seqFeatureSize: Number(dsData.seqFeatureSize || featureSize),
-          windowSize: Number(dsData.windowSize || 1),
+          seqFeatureSize: Number(activeDs.seqFeatureSize || featureSize),
+          windowSize: Number(activeDs.windowSize || 1),
           allowedOutputKeys: allowedOutputKeys, defaultTarget: defaultTarget,
-          paramNames: dsData.paramNames, paramSize: dsData.paramSize, numClasses: dsData.numClasses || dsData.classCount || 10,
+          paramNames: activeDs.paramNames, paramSize: activeDs.paramSize, numClasses: activeDs.numClasses || activeDs.classCount || 10,
         });
       } catch (err) { onStatus("Build error: " + err.message); return; }
 
-      // update trainer card
+      // update trainer
       tCard.datasetId = config.datasetId;
       tCard.modelId = config.modelId;
       tCard.status = "running";
       tCard.config = config;
-      if (store) store.upsertTrainerCard(tCard);
+      if (store) { store.upsertTrainerCard(tCard); store.replaceTrainerEpochs(activeId, []); }
       _isTraining = true;
+      _subTab = "train";
       onStatus("Training...");
       _renderLeftPanel(); _renderMainPanel();
 
@@ -234,12 +366,12 @@
       trainingEngine.trainModel(tf, {
         model: buildResult.model, isSequence: buildResult.isSequence, headConfigs: buildResult.headConfigs,
         dataset: {
-          xTrain: dsData.xTrain, yTrain: dsData.yTrain, seqTrain: dsData.seqTrain,
-          xVal: dsData.xVal, yVal: dsData.yVal, seqVal: dsData.seqVal,
-          xTest: dsData.xTest, yTest: dsData.yTest, seqTest: dsData.seqTest,
-          pTrain: dsData.pTrain, pVal: dsData.pVal, pTest: dsData.pTest,
-          targetMode: dsData.targetMode || defaultTarget,
-          paramNames: dsData.paramNames, paramSize: dsData.paramSize, numClasses: dsData.numClasses || dsData.classCount,
+          xTrain: activeDs.xTrain, yTrain: activeDs.yTrain, seqTrain: activeDs.seqTrain,
+          xVal: activeDs.xVal, yVal: activeDs.yVal, seqVal: activeDs.seqVal,
+          xTest: activeDs.xTest, yTest: activeDs.yTest, seqTest: activeDs.seqTest,
+          pTrain: activeDs.pTrain, pVal: activeDs.pVal, pTest: activeDs.pTest,
+          targetMode: activeDs.targetMode || defaultTarget,
+          paramNames: activeDs.paramNames, paramSize: activeDs.paramSize, numClasses: activeDs.numClasses || activeDs.classCount,
         },
         epochs: Number(config.epochs || 20), batchSize: Number(config.batchSize || 32),
         learningRate: Number(config.learningRate || 0.001),
@@ -249,8 +381,16 @@
         restoreBestWeights: true,
         onEpochEnd: function (epoch, logs) {
           if (currentMountId !== _mountId) return;
-          if (store) store.appendTrainerEpoch(activeId, { epoch: epoch + 1, loss: logs.loss, val_loss: logs.val_loss, current_lr: logs.current_lr });
-          _renderMainPanel(); // update epoch table
+          var logEntry = { epoch: epoch + 1, loss: logs.loss, val_loss: logs.val_loss, current_lr: logs.current_lr, improved: logs.improved };
+          if (store) store.appendTrainerEpoch(activeId, logEntry);
+          // live update
+          var epochs = store.getTrainerEpochs(activeId);
+          if (_lossChartDiv) _plotLossChart(epochs);
+          if (_epochLogEl) {
+            var line = el("div", {}, "Epoch " + (epoch + 1) + ": loss=" + Number(logs.loss).toExponential(3) + " val_loss=" + (logs.val_loss != null ? Number(logs.val_loss).toExponential(3) : "—"));
+            _epochLogEl.appendChild(line);
+            _epochLogEl.scrollTop = _epochLogEl.scrollHeight;
+          }
         },
       }).then(function (result) {
         _isTraining = false;
@@ -258,7 +398,7 @@
         tCard.status = "done";
         tCard.metrics = { mae: result.mae, testMae: result.testMae, mse: result.mse, testMse: result.testMse, bestEpoch: result.bestEpoch, bestValLoss: result.bestValLoss, finalLr: result.finalLr, stoppedEarly: result.stoppedEarly };
         if (store) store.upsertTrainerCard(tCard);
-        onStatus("Done: MAE=" + (result.mae != null ? Number(result.mae).toExponential(3) : "—"));
+        onStatus("\u2713 Done: MAE=" + (result.mae != null ? Number(result.mae).toExponential(3) : "—"));
         _renderLeftPanel(); _renderMainPanel();
       }).catch(function (err) {
         _isTraining = false;
@@ -269,7 +409,7 @@
       });
     }
 
-    function mount() { _mountId++; _renderLeftPanel(); _renderMainPanel(); _renderRightPanel(); }
+    function mount() { _mountId++; _subTab = "train"; _renderLeftPanel(); _renderMainPanel(); _renderRightPanel(); }
     function unmount() { _mountId++; if (_configFormApi && typeof _configFormApi.destroy === "function") _configFormApi.destroy(); _configFormApi = null; layout.leftEl.innerHTML = ""; layout.mainEl.innerHTML = ""; layout.rightEl.innerHTML = ""; }
     function refresh() { mount(); }
 
