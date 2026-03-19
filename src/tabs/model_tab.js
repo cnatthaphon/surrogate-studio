@@ -81,13 +81,9 @@
           onOpen: function (itemId) {
             if (stateApi) stateApi.setActiveModel(itemId);
             _selectedNodeId = null;
-            // load graph into existing editor — don't re-create Drawflow
-            if (_editor) {
-              try { _editor.clear(); } catch (e) {}
-              var m = store ? store.getModel(itemId) : null;
-              if (m && m.graph) { try { _editor.import(m.graph); } catch (e) {} }
-            }
+            _editor = null; _graphRuntime = null;
             _renderLeftPanel();
+            _renderMainPanel();
             _renderRightPanel();
           },
           onAction: function (itemId, actionId) {
