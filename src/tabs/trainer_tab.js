@@ -66,7 +66,7 @@
         return {
           id: t.id, title: t.name || t.id, active: t.id === activeId,
           metaLines: [t.schemaId || "", icon + (t.status || "draft")].filter(Boolean),
-          actions: [{ id: "delete", label: "\u2715" }],
+          actions: [{ id: "rename", label: "\u270e" }, { id: "delete", label: "\u2715" }],
         };
       });
 
@@ -80,7 +80,12 @@
             _renderLeftPanel(); _renderMainPanel(); _renderRightPanel();
           },
           onAction: function (id, act) {
-            if (act === "delete" && confirm("Delete?")) {
+            if (act === "rename") {
+              var t = store ? store.getTrainerCard(id) : null;
+              if (!t) return;
+              var name = prompt("Rename:", t.name || t.id);
+              if (name && name.trim()) { t.name = name.trim(); store.upsertTrainerCard(t); _renderLeftPanel(); }
+            } else if (act === "delete" && confirm("Delete?")) {
               if (store) store.removeTrainerCard(id);
               if (stateApi && stateApi.getActiveTrainer() === id) stateApi.setActiveTrainer("");
               _renderLeftPanel(); _renderMainPanel(); _renderRightPanel();
