@@ -304,10 +304,12 @@
 
       var selectedId = null;
       try { selectedId = _editor.node_selected; } catch (e) {}
+      console.log("[model_tab] renderRight selectedId:", selectedId, typeof selectedId);
       if (!selectedId) { rightEl.appendChild(el("div", { className: "osc-empty" }, "Click a node to configure.")); return; }
 
       var nodeData;
-      try { nodeData = _editor.getNodeFromId(selectedId); } catch (e) { return; }
+      try { nodeData = _editor.getNodeFromId(selectedId); } catch (e) { console.log("[model_tab] getNodeFromId error:", e.message); return; }
+      console.log("[model_tab] nodeData:", nodeData ? { name: nodeData.name, class: nodeData.class, dataKeys: Object.keys(nodeData.data || {}) } : "null");
       if (!nodeData) return;
 
       rightEl.appendChild(el("div", { style: "font-size:12px;color:#67e8f9;margin-bottom:8px;" },
