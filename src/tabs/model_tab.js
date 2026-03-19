@@ -281,8 +281,18 @@
           defaultParamMask: oscCore ? oscCore.defaultParamMask : function () { return {}; },
           normalizeParamMask: oscCore ? oscCore.normalizeParamMask : function (m) { return m || {}; },
           countStaticParams: oscCore ? oscCore.countStaticParams : function () { return 0; },
-          normalizeOutputTargetsList: mbc ? mbc.normalizeOutputTargetsList : function (raw, fb, keys) { return Array.isArray(raw) ? raw : [String(raw || "x")]; },
-          outputTargetsSummaryText: function (targets) { return "targets=[" + (Array.isArray(targets) ? targets.join(",") : String(targets || "")) + "]"; },
+          normalizeOutputTargetsList: function (raw, fb, schemaIdOrKeys) {
+            // model_graph_core passes schemaId as 3rd arg — resolve to keys
+            var keys = Array.isArray(schemaIdOrKeys) ? schemaIdOrKeys : (schemaRegistry ? schemaRegistry.getOutputKeys(String(schemaIdOrKeys || "")) : []);
+            if (mbc) return mbc.normalizeOutputTargetsList(raw, fb, keys);
+            return Array.isArray(raw) ? raw : [String(raw || "x")];
+          },
+          outputTargetsSummaryText: function (targets, schemaId) {
+            var keys = schemaRegistry ? schemaRegistry.getOutputKeys(String(schemaId || "")) : [];
+            var t = Array.isArray(targets) ? targets : [String(targets || "")];
+            if (keys.length) t = t.filter(function (x) { return keys.indexOf(x) >= 0; });
+            return "targets=[" + t.join(",") + "]";
+          },
           normalizeOneHotKey: function (raw, schemaId) {
             var sid = schemaRegistry ? schemaRegistry.resolveSchemaId(schemaId) : "";
             var ms = schemaRegistry ? schemaRegistry.getModelSchema(sid) : null;
