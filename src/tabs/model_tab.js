@@ -26,6 +26,7 @@
 
     var _editor = null;
     var _graphRuntime = null;
+    var _selectedNodeId = null;
 
     function _getSchemaId() {
       // prefer active model's schema, fallback to active schema
@@ -288,10 +289,11 @@
         console.log("[model_tab] graphRuntime created, methods:", Object.keys(_graphRuntime).length);
       }
       _editor.on("nodeSelected", function (id) {
-        console.log("[model_tab] node selected:", id);
+        _selectedNodeId = Number(id);
+        console.log("[model_tab] node selected:", _selectedNodeId);
         _renderRightPanel();
       });
-      _editor.on("nodeUnselected", function () { _renderRightPanel(); });
+      _editor.on("nodeUnselected", function () { _selectedNodeId = null; _renderRightPanel(); });
     }
 
     // === RIGHT: node config (from core) ===
@@ -302,18 +304,16 @@
 
       if (!_editor) { rightEl.appendChild(el("div", { className: "osc-empty" }, "Editor not initialized.")); return; }
 
-      var selectedId = null;
-      try { selectedId = _editor.node_selected; } catch (e) {}
-      console.log("[model_tab] renderRight selectedId:", selectedId, typeof selectedId);
-      if (!selectedId) { rightEl.appendChild(el("div", { className: "osc-empty" }, "Click a node to configure.")); return; }
+      if (!_selectedNodeId) { rightEl.appendChild(el("div", { className: "osc-empty" }, "Click a node to configure.")); return; }
 
       var nodeData;
-      try { nodeData = _editor.getNodeFromId(selectedId); } catch (e) { console.log("[model_tab] getNodeFromId error:", e.message); return; }
-      console.log("[model_tab] nodeData:", nodeData ? { name: nodeData.name, class: nodeData.class, dataKeys: Object.keys(nodeData.data || {}) } : "null");
+      try { nodeData = _editor.getNodeFromId(_selectedNodeId); } catch (e) { return; }
+      if (!nodeData) return;
+      console.log("[model_tab] config for:", nodeData.name, "data:", Object.keys(nodeData.data || {}));
       if (!nodeData) return;
 
       rightEl.appendChild(el("div", { style: "font-size:12px;color:#67e8f9;margin-bottom:8px;" },
-        (nodeData.name || "node") + " #" + selectedId));
+        (nodeData.name || "node") + " #" + _selectedNodeId));
 
       // get config spec from modelGraphCore — pass full node object (not just name)
       if (_graphRuntime && typeof _graphRuntime.getNodeConfigSpec === "function") {
@@ -361,7 +361,7 @@
             onChange: function (nextConfig) {
               if (_graphRuntime && typeof _graphRuntime.applyNodeConfigValue === "function") {
                 Object.keys(nextConfig || {}).forEach(function (k) {
-                  _graphRuntime.applyNodeConfigValue(_editor, selectedId, k, nextConfig[k]);
+                  _graphRuntime.applyNodeConfigValue(_editor, _selectedNodeId, k, nextConfig[k]);
                 });
               }
             },
