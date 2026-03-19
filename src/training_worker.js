@@ -323,7 +323,19 @@
       }
       await tf.ready();
     };
-    return trySetBackend(requested === "auto" ? "cpu" : requested);
+    if (requested !== "auto") return trySetBackend(requested);
+    // auto: try best available in order
+    return (async function () {
+      var order = ["webgpu", "webgl", "wasm", "cpu"];
+      for (var i = 0; i < order.length; i++) {
+        try {
+          if (order[i] !== "cpu") loadBackendScript(order[i]);
+          var ok = await tf.setBackend(order[i]);
+          if (ok) { await tf.ready(); return; }
+        } catch (_) {}
+      }
+      await tf.ready();
+    })();
   }
 
   async function runTraining(message) {
