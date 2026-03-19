@@ -364,54 +364,141 @@
       if (store) { store.upsertTrainerCard(tCard); store.replaceTrainerEpochs(activeId, []); }
       _isTraining = true;
       _subTab = "train";
-      onStatus("Training...");
+      onStatus("Training... (serializing model)");
       _renderLeftPanel(); _renderMainPanel();
 
       var currentMountId = _mountId;
-      trainingEngine.trainModel(tf, {
-        model: buildResult.model, isSequence: buildResult.isSequence, headConfigs: buildResult.headConfigs,
-        dataset: {
-          xTrain: activeDs.xTrain, yTrain: activeDs.yTrain, seqTrain: activeDs.seqTrain,
-          xVal: activeDs.xVal, yVal: activeDs.yVal, seqVal: activeDs.seqVal,
-          xTest: activeDs.xTest, yTest: activeDs.yTest, seqTest: activeDs.seqTest,
-          pTrain: activeDs.pTrain, pVal: activeDs.pVal, pTest: activeDs.pTest,
-          targetMode: activeDs.targetMode || defaultTarget,
-          paramNames: activeDs.paramNames, paramSize: activeDs.paramSize, numClasses: activeDs.numClasses || activeDs.classCount,
-        },
-        epochs: Number(config.epochs || 20), batchSize: Number(config.batchSize || 32),
-        learningRate: Number(config.learningRate || 0.001),
-        optimizerType: String(config.optimizerType || "adam"),
-        lrSchedulerType: String(config.lrSchedulerType || "plateau"),
-        earlyStoppingPatience: Number(config.earlyStoppingPatience || 5),
-        restoreBestWeights: true,
-        onEpochEnd: function (epoch, logs) {
+
+      // serialize model to artifacts for worker
+      var W = typeof window !== "undefined" ? window : {};
+      var workerBridge = W.OSCTrainingWorkerBridge;
+
+      if (workerBridge && typeof workerBridge.runTrainingInWorker === "function") {
+        // === WORKER PATH (non-blocking) ===
+        buildResult.model.save(tf.io.withSaveHandler(function (artifacts) {
+          onStatus("Training via Worker...");
+
+          workerBridge.runTrainingInWorker({
+            runId: activeId,
+            modelArtifacts: artifacts,
+            isSequence: buildResult.isSequence,
+            headConfigs: buildResult.headConfigs,
+            dataset: {
+              mode: graphMode,
+              windowSize: Number(activeDs.windowSize || 1),
+              seqFeatureSize: Number(activeDs.seqFeatureSize || featureSize),
+              featureSize: featureSize,
+              targetMode: activeDs.targetMode || defaultTarget,
+              targetSize: buildResult.headConfigs.length === 1 ? (buildResult.headConfigs[0].units || 1) : 1,
+              paramSize: Number(activeDs.paramSize || 0),
+              paramNames: activeDs.paramNames || [],
+              xTrain: activeDs.xTrain, yTrain: activeDs.yTrain, seqTrain: activeDs.seqTrain || [],
+              xVal: activeDs.xVal, yVal: activeDs.yVal, seqVal: activeDs.seqVal || [],
+              xTest: activeDs.xTest || [], yTest: activeDs.yTest || [], seqTest: activeDs.seqTest || [],
+              pTrain: activeDs.pTrain || [], pVal: activeDs.pVal || [], pTest: activeDs.pTest || [],
+            },
+            runtimeConfig: { runtimeId: "js_client", backend: String(config.runtimeBackend || "auto") },
+            epochs: Number(config.epochs || 20),
+            batchSize: Number(config.batchSize || 32),
+            learningRate: Number(config.learningRate || 0.001),
+            optimizerType: String(config.optimizerType || "adam"),
+            lrSchedulerType: String(config.lrSchedulerType || "plateau"),
+            useLrScheduler: String(config.lrSchedulerType || "plateau") !== "none",
+            earlyStoppingPatience: Number(config.earlyStoppingPatience || 5),
+            restoreBestWeights: true,
+            onEpochData: function (payload) {
+              if (currentMountId !== _mountId) return;
+              var logEntry = { epoch: payload.epoch, loss: payload.loss, val_loss: payload.val_loss, current_lr: payload.current_lr, improved: payload.improved };
+              if (store) store.appendTrainerEpoch(activeId, logEntry);
+              var epochs = store.getTrainerEpochs(activeId);
+              if (_lossChartDiv) _plotLossChart(epochs);
+              if (_epochLogEl) {
+                var line = el("div", {}, "Epoch " + payload.epoch + ": loss=" + Number(payload.loss).toExponential(3) + " val=" + (payload.val_loss != null ? Number(payload.val_loss).toExponential(3) : "—"));
+                _epochLogEl.appendChild(line);
+                _epochLogEl.scrollTop = _epochLogEl.scrollHeight;
+              }
+            },
+            onStatus: function (msg) { onStatus(msg); },
+          }, {
+            workerPath: (function () {
+              // resolve worker path relative to current script
+              try {
+                var scripts = document.querySelectorAll("script[src*='training_worker']");
+                if (scripts.length) return scripts[0].src;
+              } catch (e) {}
+              return "./src/training_worker.js";
+            })(),
+          }).then(function (result) {
+            _isTraining = false;
+            if (currentMountId !== _mountId) return;
+            tCard.status = "done";
+            tCard.metrics = result;
+            if (result.modelArtifacts) tCard.modelArtifacts = result.modelArtifacts; // save weights
+            if (store) store.upsertTrainerCard(tCard);
+            onStatus("\u2713 Done (Worker): MAE=" + (result.mae != null ? Number(result.mae).toExponential(3) : "—"));
+            _renderLeftPanel(); _renderMainPanel();
+            buildResult.model.dispose();
+          }).catch(function (err) {
+            _isTraining = false;
+            tCard.status = "error"; tCard.error = err.message;
+            if (store) store.upsertTrainerCard(tCard);
+            onStatus("Worker error: " + err.message);
+            _renderLeftPanel(); _renderMainPanel();
+            buildResult.model.dispose();
+          });
+
+          return { modelArtifactsInfo: { dateSaved: new Date(), modelTopologyType: "JSON" } };
+        }));
+
+      } else {
+        // === FALLBACK: main thread (will freeze UI) ===
+        onStatus("Training on main thread (no worker)...");
+        trainingEngine.trainModel(tf, {
+          model: buildResult.model, isSequence: buildResult.isSequence, headConfigs: buildResult.headConfigs,
+          dataset: {
+            xTrain: activeDs.xTrain, yTrain: activeDs.yTrain, seqTrain: activeDs.seqTrain,
+            xVal: activeDs.xVal, yVal: activeDs.yVal, seqVal: activeDs.seqVal,
+            xTest: activeDs.xTest, yTest: activeDs.yTest, seqTest: activeDs.seqTest,
+            pTrain: activeDs.pTrain, pVal: activeDs.pVal, pTest: activeDs.pTest,
+            targetMode: activeDs.targetMode || defaultTarget,
+            paramNames: activeDs.paramNames, paramSize: activeDs.paramSize, numClasses: activeDs.numClasses || activeDs.classCount,
+          },
+          epochs: Number(config.epochs || 20), batchSize: Number(config.batchSize || 32),
+          learningRate: Number(config.learningRate || 0.001),
+          optimizerType: String(config.optimizerType || "adam"),
+          lrSchedulerType: String(config.lrSchedulerType || "plateau"),
+          earlyStoppingPatience: Number(config.earlyStoppingPatience || 5),
+          restoreBestWeights: true,
+          onEpochEnd: function (epoch, logs) {
+            if (currentMountId !== _mountId) return;
+            var logEntry = { epoch: epoch + 1, loss: logs.loss, val_loss: logs.val_loss, current_lr: logs.current_lr, improved: logs.improved };
+            if (store) store.appendTrainerEpoch(activeId, logEntry);
+            var epochs = store.getTrainerEpochs(activeId);
+            if (_lossChartDiv) _plotLossChart(epochs);
+            if (_epochLogEl) {
+              var line = el("div", {}, "Epoch " + (epoch + 1) + ": loss=" + Number(logs.loss).toExponential(3) + " val_loss=" + (logs.val_loss != null ? Number(logs.val_loss).toExponential(3) : "—"));
+              _epochLogEl.appendChild(line);
+              _epochLogEl.scrollTop = _epochLogEl.scrollHeight;
+            }
+          },
+        }).then(function (result) {
+          _isTraining = false;
           if (currentMountId !== _mountId) return;
-          var logEntry = { epoch: epoch + 1, loss: logs.loss, val_loss: logs.val_loss, current_lr: logs.current_lr, improved: logs.improved };
-          if (store) store.appendTrainerEpoch(activeId, logEntry);
-          // live update
-          var epochs = store.getTrainerEpochs(activeId);
-          if (_lossChartDiv) _plotLossChart(epochs);
-          if (_epochLogEl) {
-            var line = el("div", {}, "Epoch " + (epoch + 1) + ": loss=" + Number(logs.loss).toExponential(3) + " val_loss=" + (logs.val_loss != null ? Number(logs.val_loss).toExponential(3) : "—"));
-            _epochLogEl.appendChild(line);
-            _epochLogEl.scrollTop = _epochLogEl.scrollHeight;
-          }
-        },
-      }).then(function (result) {
-        _isTraining = false;
-        if (currentMountId !== _mountId) return;
-        tCard.status = "done";
-        tCard.metrics = { mae: result.mae, testMae: result.testMae, mse: result.mse, testMse: result.testMse, bestEpoch: result.bestEpoch, bestValLoss: result.bestValLoss, finalLr: result.finalLr, stoppedEarly: result.stoppedEarly };
-        if (store) store.upsertTrainerCard(tCard);
-        onStatus("\u2713 Done: MAE=" + (result.mae != null ? Number(result.mae).toExponential(3) : "—"));
-        _renderLeftPanel(); _renderMainPanel();
-      }).catch(function (err) {
-        _isTraining = false;
-        tCard.status = "error"; tCard.error = err.message;
-        if (store) store.upsertTrainerCard(tCard);
-        onStatus("Error: " + err.message);
-        _renderLeftPanel(); _renderMainPanel();
-      });
+          tCard.status = "done";
+          tCard.metrics = { mae: result.mae, testMae: result.testMae, mse: result.mse, testMse: result.testMse, bestEpoch: result.bestEpoch, bestValLoss: result.bestValLoss, finalLr: result.finalLr, stoppedEarly: result.stoppedEarly };
+          if (store) store.upsertTrainerCard(tCard);
+          onStatus("\u2713 Done: MAE=" + (result.mae != null ? Number(result.mae).toExponential(3) : "—"));
+          _renderLeftPanel(); _renderMainPanel();
+          buildResult.model.dispose();
+        }).catch(function (err) {
+          _isTraining = false;
+          tCard.status = "error"; tCard.error = err.message;
+          if (store) store.upsertTrainerCard(tCard);
+          onStatus("Error: " + err.message);
+          _renderLeftPanel(); _renderMainPanel();
+          buildResult.model.dispose();
+        });
+      }
     }
 
     function _handleExport() {
