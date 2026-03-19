@@ -80,9 +80,10 @@
           mountEl: listMount, items: items, emptyText: "No models. Click + New.",
           onOpen: function (itemId) {
             if (stateApi) stateApi.setActiveModel(itemId);
-            var m = store ? store.getModel(itemId) : null;
-            if (m && m.graph && _editor) { try { _editor.import(m.graph); } catch (e) {} }
+            _selectedNodeId = null;
             _renderLeftPanel();
+            _renderMainPanel();
+            _renderRightPanel();
           },
           onAction: function (itemId, actionId) {
             if (actionId === "rename") {
@@ -233,6 +234,13 @@
 
       // init Drawflow
       _initEditor(editorDiv);
+
+      // load active model's graph if exists
+      var activeId = stateApi ? stateApi.getActiveModel() : "";
+      if (activeId && store && _editor) {
+        var m = store.getModel(activeId);
+        if (m && m.graph) { try { _editor.import(m.graph); } catch (e) {} }
+      }
     }
 
     function _initEditor(container) {
