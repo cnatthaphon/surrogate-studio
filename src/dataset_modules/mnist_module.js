@@ -598,6 +598,7 @@
     var totalAvailable = Math.max(1, Number(source.numExamples) || 0);
     var counts = countsFromConfig(c, totalAvailable, splitMode, fr);
     var forceEqual = Boolean(c.forceEqualClass);
+    if (forceEqual) splitMode = "stratified_label"; // force stratified when equal class requested
     var sampled;
     if (forceEqual) {
       // balanced sampling: equal count per class
