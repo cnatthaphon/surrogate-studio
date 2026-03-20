@@ -255,33 +255,136 @@
         return;
       }
 
-      // pred vs ground truth chart placeholder
+      // pred vs ground truth
       var predCard = el("div", { className: "osc-card", style: "margin-top:8px;" });
       predCard.appendChild(el("div", { style: "font-size:13px;color:#67e8f9;margin-bottom:8px;font-weight:600;" }, "Prediction vs Ground Truth"));
       var predChartDiv = el("div", { style: "height:280px;" });
       predCard.appendChild(predChartDiv);
+      var predStatusEl = el("div", { style: "font-size:11px;color:#94a3b8;margin-top:4px;" });
+      predCard.appendChild(predStatusEl);
       mainEl.appendChild(predCard);
 
-      // TODO: actual pred vs truth chart requires running inference on test set
-      // For now show summary
       var Plotly = (typeof window !== "undefined" && window.Plotly) ? window.Plotly : null;
-      if (Plotly) {
-        var epochs = store && typeof store.getTrainerEpochs === "function" ? store.getTrainerEpochs(activeId) : [];
-        if (epochs.length) {
-          var trainLoss = epochs.map(function (e) { return e.loss; });
-          var valLoss = epochs.map(function (e) { return e.val_loss; });
-          var ep = epochs.map(function (e) { return e.epoch; });
-          Plotly.newPlot(predChartDiv, [
-            { x: ep, y: trainLoss, mode: "lines+markers", name: "Train Loss", line: { color: "#22d3ee" } },
-            { x: ep, y: valLoss, mode: "lines+markers", name: "Val Loss", line: { color: "#f59e0b" } },
-          ], {
-            paper_bgcolor: "#0b1220", plot_bgcolor: "#0b1220", font: { color: "#e2e8f0", size: 10 },
-            title: { text: "Final Training Curves", font: { size: 12 } },
-            xaxis: { title: "Epoch", gridcolor: "#1e293b" }, yaxis: { title: "Loss", gridcolor: "#1e293b" },
-            legend: { orientation: "h", y: -0.15 },
-            margin: { t: 30, b: 50, l: 50, r: 10 },
-          }, { responsive: true });
+      var tf = getTf();
+
+      // try to run inference if we have model artifacts + test data
+      if (tf && t.modelArtifacts && t.datasetId && modelBuilder) {
+        predStatusEl.textContent = "Loading model for inference...";
+        try {
+          var dataset = store ? store.getDataset(t.datasetId) : null;
+          var modelRec = store ? store.getModel(t.modelId) : null;
+          if (dataset && dataset.data && modelRec && modelRec.graph) {
+            var dsData = dataset.data;
+            var isBundle = dsData.kind === "dataset_bundle" && dsData.datasets;
+            var activeDs = isBundle ? dsData.datasets[dsData.activeVariantId || Object.keys(dsData.datasets)[0]] : dsData;
+            // normalize MNIST format
+            var schemaId = t.schemaId;
+            var allowedOutputKeys = schemaRegistry ? schemaRegistry.getOutputKeys(schemaId) : ["x"];
+            var defaultTarget = allowedOutputKeys[0] || "x";
+            var isClassification = defaultTarget === "label" || defaultTarget === "logits";
+            if (!activeDs.xTrain && activeDs.records) {
+              var nCls = activeDs.classCount || 10;
+              function oh(l, n) { var a = new Array(n).fill(0); a[l] = 1; return a; }
+              activeDs = {
+                xTest: (activeDs.records.test && activeDs.records.test.x) || [],
+                yTest: isClassification ? ((activeDs.records.test && activeDs.records.test.y) || []).map(function (l) { return oh(l, nCls); }) : ((activeDs.records.test && activeDs.records.test.y) || []),
+                featureSize: (activeDs.records.test && activeDs.records.test.x && activeDs.records.test.x[0]) ? activeDs.records.test.x[0].length : 784,
+                numClasses: nCls,
+              };
+            }
+
+            // rebuild model from graph + load saved weights
+            var graphMode = modelBuilder.inferGraphMode(modelRec.graph, "direct");
+            var featureSize = Number(activeDs.featureSize || (activeDs.xTest && activeDs.xTest[0] && activeDs.xTest[0].length) || 1);
+            var rebuiltModel = modelBuilder.buildModelFromGraph(tf, modelRec.graph, {
+              mode: graphMode, featureSize: featureSize, windowSize: 1, seqFeatureSize: featureSize,
+              allowedOutputKeys: allowedOutputKeys, defaultTarget: defaultTarget, numClasses: activeDs.numClasses || 10,
+            });
+
+            // load saved weights
+            if (t.modelArtifacts && t.modelArtifacts.weightSpecs && t.modelArtifacts.weightData) {
+              try { rebuiltModel.model.loadWeights(t.modelArtifacts.weightSpecs.map(function (s, i) { return tf.tensor(new Float32Array(t.modelArtifacts.weightData, s.offset || 0), s.shape); })); } catch (e) {}
+            }
+
+            // run inference on test set (first 50 samples)
+            var testN = Math.min(50, (activeDs.xTest || []).length);
+            if (testN > 0) {
+              var xSlice = activeDs.xTest.slice(0, testN);
+              var ySlice = activeDs.yTest.slice(0, testN);
+              var predTensor = tf.tensor2d(xSlice);
+              var predRaw = rebuiltModel.model.predict(predTensor);
+              var preds = (Array.isArray(predRaw) ? predRaw[0] : predRaw).arraySync();
+              predTensor.dispose();
+              if (Array.isArray(predRaw)) predRaw.forEach(function (t) { t.dispose(); }); else predRaw.dispose();
+
+              if (isClassification) {
+                // classification: show accuracy
+                var correct = 0;
+                for (var ci = 0; ci < testN; ci++) {
+                  var predLabel = preds[ci].indexOf(Math.max.apply(null, preds[ci]));
+                  var trueLabel = ySlice[ci].indexOf(Math.max.apply(null, ySlice[ci]));
+                  if (predLabel === trueLabel) correct++;
+                }
+                predStatusEl.textContent = "Test accuracy: " + (correct / testN * 100).toFixed(1) + "% (" + correct + "/" + testN + ")";
+
+                // confusion-like bar chart
+                if (Plotly) {
+                  var predLabels = preds.map(function (p) { return p.indexOf(Math.max.apply(null, p)); });
+                  var trueLabels = ySlice.map(function (y) { return y.indexOf(Math.max.apply(null, y)); });
+                  Plotly.newPlot(predChartDiv, [
+                    { x: trueLabels, y: predLabels, mode: "markers", type: "scatter", name: "Pred vs True", marker: { size: 6, color: "#22d3ee" } },
+                    { x: [0, 9], y: [0, 9], mode: "lines", name: "Perfect", line: { color: "#4ade80", dash: "dash" } },
+                  ], {
+                    paper_bgcolor: "#0b1220", plot_bgcolor: "#0b1220", font: { color: "#e2e8f0", size: 10 },
+                    title: { text: "Predicted vs True Label (" + testN + " samples)", font: { size: 12 } },
+                    xaxis: { title: "True Label", gridcolor: "#1e293b" }, yaxis: { title: "Predicted Label", gridcolor: "#1e293b" },
+                    margin: { t: 30, b: 50, l: 50, r: 10 },
+                  }, { responsive: true });
+                }
+              } else {
+                // regression: scatter plot pred vs truth
+                var truthFlat = ySlice.map(function (y) { return Array.isArray(y) ? y[0] : y; });
+                var predFlat = preds.map(function (p) { return Array.isArray(p) ? p[0] : p; });
+                predStatusEl.textContent = "Showing " + testN + " test predictions";
+
+                if (Plotly) {
+                  var indices = Array.from({ length: testN }, function (_, i) { return i; });
+                  Plotly.newPlot(predChartDiv, [
+                    { x: indices, y: truthFlat, mode: "lines", name: "Ground Truth", line: { color: "#22d3ee" } },
+                    { x: indices, y: predFlat, mode: "lines", name: "Prediction", line: { color: "#f59e0b", dash: "dot" } },
+                  ], {
+                    paper_bgcolor: "#0b1220", plot_bgcolor: "#0b1220", font: { color: "#e2e8f0", size: 10 },
+                    title: { text: "Pred vs Truth (first " + testN + " test samples)", font: { size: 12 } },
+                    xaxis: { title: "Sample", gridcolor: "#1e293b" }, yaxis: { title: "Value", gridcolor: "#1e293b" },
+                    legend: { orientation: "h", y: -0.15 },
+                    margin: { t: 30, b: 50, l: 50, r: 10 },
+                  }, { responsive: true });
+                }
+              }
+            }
+            rebuiltModel.model.dispose();
+          }
+        } catch (e) {
+          predStatusEl.textContent = "Inference error: " + e.message;
         }
+      } else {
+        // no artifacts — show training curves as fallback
+        if (Plotly) {
+          var epochs = store && typeof store.getTrainerEpochs === "function" ? store.getTrainerEpochs(activeId) : [];
+          if (epochs.length) {
+            Plotly.newPlot(predChartDiv, [
+              { x: epochs.map(function (e) { return e.epoch; }), y: epochs.map(function (e) { return e.loss; }), mode: "lines+markers", name: "Train Loss", line: { color: "#22d3ee" } },
+              { x: epochs.map(function (e) { return e.epoch; }), y: epochs.map(function (e) { return e.val_loss; }), mode: "lines+markers", name: "Val Loss", line: { color: "#f59e0b" } },
+            ], {
+              paper_bgcolor: "#0b1220", plot_bgcolor: "#0b1220", font: { color: "#e2e8f0", size: 10 },
+              title: { text: "Training Curves", font: { size: 12 } },
+              xaxis: { title: "Epoch", gridcolor: "#1e293b" }, yaxis: { title: "Loss", gridcolor: "#1e293b" },
+              legend: { orientation: "h", y: -0.15 },
+              margin: { t: 30, b: 50, l: 50, r: 10 },
+            }, { responsive: true });
+          }
+        }
+        predStatusEl.textContent = "Model weights not saved — showing training curves only.";
       }
     }
 
@@ -608,8 +711,15 @@
           _isTraining = false;
           if (currentMountId !== _mountId) return;
           tCard.status = "done";
-          tCard.metrics = { mae: result.mae, testMae: result.testMae, mse: result.mse, testMse: result.testMse, bestEpoch: result.bestEpoch, bestValLoss: result.bestValLoss, finalLr: result.finalLr, stoppedEarly: result.stoppedEarly };
-          if (store) store.upsertTrainerCard(tCard);
+          tCard.metrics = { mae: result.mae, testMae: result.testMae, mse: result.mse, testMse: result.testMse, bestEpoch: result.bestEpoch, bestValLoss: result.bestValLoss, finalLr: result.finalLr, stoppedEarly: result.stoppedEarly, headCount: result.headCount };
+          // save model weights for test inference
+          try {
+            buildResult.model.save(tf.io.withSaveHandler(function (artifacts) {
+              tCard.modelArtifacts = artifacts;
+              if (store) store.upsertTrainerCard(tCard);
+              return { modelArtifactsInfo: { dateSaved: new Date() } };
+            }));
+          } catch (e) { if (store) store.upsertTrainerCard(tCard); }
           onStatus("\u2713 Done: MAE=" + (result.mae != null ? Number(result.mae).toExponential(3) : "—"));
           _renderLeftPanel(); _renderMainPanel();
           buildResult.model.dispose();
@@ -637,7 +747,8 @@
 
       var W = typeof window !== "undefined" ? window : {};
       var NBC = W.OSCNotebookCore || null;
-      if (!NBC || typeof NBC.createNotebookBundleZipFromConfig !== "function") {
+      var DBA = W.OSCDatasetBundleAdapter || null;
+      if (!NBC || typeof NBC.createSingleNotebookFileFromConfig !== "function") {
         onStatus("Notebook export module not available");
         return;
       }
@@ -645,38 +756,34 @@
       onStatus("Exporting notebook...");
       try {
         var config = _configFormApi && typeof _configFormApi.getConfig === "function" ? _configFormApi.getConfig() : {};
-        var dsData = dataset.data;
-        var isBundle = dsData.kind === "dataset_bundle" && dsData.datasets;
-        var activeDs = isBundle ? dsData.datasets[dsData.activeVariantId || Object.keys(dsData.datasets)[0]] : dsData;
 
-        var exportConfig = {
-          schemaId: tCard.schemaId,
-          datasetName: dataset.name || dataset.id,
-          modelName: model.name || model.id,
-          graph: model.graph,
-          trainConfig: {
+        NBC.createSingleNotebookFileFromConfig({
+          seed: 42,
+          datasetBundleAdapter: DBA,
+          sessions: [{
+            id: tCard.id,
+            name: tCard.name || "session",
+            schemaId: tCard.schemaId,
+            graph: model.graph,
+            runtime: "python_server",
             epochs: Number(config.epochs || 20),
             batchSize: Number(config.batchSize || 32),
             learningRate: Number(config.learningRate || 0.001),
-            optimizer: String(config.optimizerType || "adam"),
-          },
-          dataset: activeDs,
-        };
-
-        var result = NBC.createNotebookBundleZipFromConfig(exportConfig);
-        if (result && typeof result.then === "function") {
-          result.then(function (blob) {
-            if (!blob) { onStatus("Export returned empty"); return; }
-            var a = document.createElement("a");
-            a.href = URL.createObjectURL(blob);
-            a.download = (tCard.name || "notebook") + "_bundle.zip";
-            a.click();
-            URL.revokeObjectURL(a.href);
-            onStatus("\u2713 Exported: " + a.download);
-          }).catch(function (err) { onStatus("Export error: " + err.message); });
-        } else {
-          onStatus("Export: unexpected result type");
-        }
+            datasetData: dataset.data,
+            datasetCsvPath: "dataset.csv",
+            modelGraphPath: "model_graph.json",
+          }],
+        }).then(function (result) {
+          if (!result || !result.buffer) { onStatus("Export returned empty"); return; }
+          var str = typeof result.buffer === "string" ? result.buffer : (result.buffer.toString ? result.buffer.toString() : String(result.buffer));
+          var blob = new Blob([str], { type: "application/json" });
+          var a = document.createElement("a");
+          a.href = URL.createObjectURL(blob);
+          a.download = (tCard.name || "notebook") + ".ipynb";
+          a.click();
+          URL.revokeObjectURL(a.href);
+          onStatus("\u2713 Exported: " + a.download);
+        }).catch(function (err) { onStatus("Export error: " + err.message); });
       } catch (err) {
         onStatus("Export error: " + err.message);
       }
