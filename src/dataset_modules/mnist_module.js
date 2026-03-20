@@ -617,6 +617,11 @@
           sampled.push(pool[idx]);
         }
       }
+      // shuffle so split doesn't group by class
+      for (var shi = sampled.length - 1; shi > 0; shi--) {
+        var shj = Math.floor(rng() * (shi + 1));
+        var tmp = sampled[shi]; sampled[shi] = sampled[shj]; sampled[shj] = tmp;
+      }
     } else {
       sampled = splitMode === "stratified_label"
         ? sampleIndicesStratified(counts.total, source.labelsUint8, rng)
