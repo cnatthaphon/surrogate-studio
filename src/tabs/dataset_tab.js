@@ -249,12 +249,14 @@
       globalSchema.push({ key: "valFrac", label: "Val fraction", type: "number", min: 0.01, max: 0.99, step: 0.01 });
       globalSchema.push({ key: "testFrac", label: "Test fraction", type: "number", min: 0.01, max: 0.99, step: 0.01, disabled: true });
 
+      // merge saved config (from previous generate) with schema defaults
+      var savedCfg = (ds.config && typeof ds.config === "object") ? ds.config : {};
       var globalValue = {
-        seed: 42,
-        splitMode: splitDefaults.mode || "random",
-        trainFrac: Number(splitDefaults.train || 0.7).toFixed(2),
-        valFrac: Number(splitDefaults.val || 0.15).toFixed(2),
-        testFrac: Number(splitDefaults.test || 0.15).toFixed(2),
+        seed: savedCfg.seed || 42,
+        splitMode: savedCfg.splitMode || splitDefaults.mode || "random",
+        trainFrac: Number(savedCfg.trainFrac || splitDefaults.train || 0.7).toFixed(2),
+        valFrac: Number(savedCfg.valFrac || splitDefaults.val || 0.15).toFixed(2),
+        testFrac: Number(savedCfg.testFrac || splitDefaults.test || 0.15).toFixed(2),
       };
 
       if (uiEngine && typeof uiEngine.renderConfigForm === "function") {
@@ -286,7 +288,7 @@
             var key = f.key || f.id;
             if (!key) return;
             modSchema.push({ key: key, label: f.label || key, type: f.type || "text", options: f.options, min: f.min, max: f.max, step: f.step, disabled: f.disabled });
-            modValue[key] = defaults[key] !== undefined ? defaults[key] : (f.value || "");
+            modValue[key] = savedCfg[key] !== undefined ? savedCfg[key] : (defaults[key] !== undefined ? defaults[key] : (f.value || ""));
           });
           var modMount = el("div", {});
           uiEngine.renderConfigForm({ mountEl: modMount, schema: modSchema, value: modValue, fieldNamePrefix: "dsmod", rowClassName: "osc-form-row" });
