@@ -39,7 +39,11 @@
       return stateApi ? stateApi.getActiveSchema() : "";
     }
     function _listTrainers() { return store && typeof store.listTrainerCards === "function" ? store.listTrainerCards({}) : []; }
-    function _listDatasets(schemaId) { return store && typeof store.listDatasets === "function" ? store.listDatasets({}).filter(function (d) { return d.status === "ready" && (!schemaId || d.schemaId === schemaId); }) : []; }
+    function _listDatasets(schemaId) {
+      if (!store || typeof store.listDatasets !== "function") return [];
+      return store.listDatasets({}).filter(function (d) { return !schemaId || d.schemaId === schemaId; })
+        .sort(function (a, b) { return (a.status === "ready" ? 0 : 1) - (b.status === "ready" ? 0 : 1); });
+    }
     function _listModels(schemaId) { return store && typeof store.listModels === "function" ? store.listModels({}).filter(function (m) { return !schemaId || m.schemaId === schemaId; }) : []; }
 
     // detect available backends
@@ -437,7 +441,7 @@
       var lrTypes = trainingEngine ? trainingEngine.LR_SCHEDULER_TYPES : ["plateau", "step", "exponential", "cosine", "none"];
 
       var formSchema = [
-        { key: "datasetId", label: "Dataset (" + schemaId + ")", type: "select", options: datasets.map(function (d) { return { value: d.id, label: d.name || d.id }; }), disabled: isLocked },
+        { key: "datasetId", label: "Dataset (" + schemaId + ")", type: "select", options: datasets.map(function (d) { return { value: d.id, label: (d.name || d.id) + (d.status === "ready" ? " \u2713" : " (draft)") }; }), disabled: isLocked },
         { key: "modelId", label: "Model (" + schemaId + ")", type: "select", options: models.map(function (m) { return { value: m.id, label: m.name || m.id }; }), disabled: isLocked },
         { key: "runtimeBackend", label: "Backend", type: "select", options: backends },
         { key: "epochs", label: "Epochs", type: "number", min: 1, max: 1000 },
