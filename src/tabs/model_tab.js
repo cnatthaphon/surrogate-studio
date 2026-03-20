@@ -148,6 +148,13 @@
     function _renderMainPanel() {
       var mainEl = layout.mainEl;
       mainEl.innerHTML = "";
+
+      var activeId = stateApi ? stateApi.getActiveModel() : "";
+      if (!activeId) {
+        mainEl.appendChild(el("div", { className: "osc-empty" }, "Select or create a model."));
+        return;
+      }
+
       var schemaId = _getSchemaId();
 
       // preset bar
@@ -359,6 +366,10 @@
     function _renderRightPanel() {
       var rightEl = layout.rightEl;
       rightEl.innerHTML = "";
+
+      var activeId = stateApi ? stateApi.getActiveModel() : "";
+      if (!activeId) { rightEl.appendChild(el("h3", {}, "Config")); rightEl.appendChild(el("div", { className: "osc-empty" }, "Select a model.")); return; }
+
       rightEl.appendChild(el("h3", {}, "Node Config"));
 
       if (!_editor) { rightEl.appendChild(el("div", { className: "osc-empty" }, "Editor not initialized.")); return; }
