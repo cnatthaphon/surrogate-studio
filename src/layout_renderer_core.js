@@ -88,7 +88,8 @@
     if (children) {
       (Array.isArray(children) ? children : [children]).forEach(function (c) {
         if (typeof c === "string") e.appendChild(document.createTextNode(c));
-        else if (c) e.appendChild(c);
+        else if (typeof c === "number") e.appendChild(document.createTextNode(String(c)));
+        else if (c && c.nodeType) e.appendChild(c);
       });
     }
     return e;

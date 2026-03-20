@@ -570,7 +570,7 @@
 
       } else {
         // === FALLBACK: main thread (will freeze UI) ===
-        onStatus("Training on main thread (no worker)...");
+        onStatus("\u26a0 Training on main thread (UI will freeze). Use http:// server for smooth Worker training.");
         trainingEngine.trainModel(tf, {
           model: buildResult.model, isSequence: buildResult.isSequence, headConfigs: buildResult.headConfigs,
           dataset: {
