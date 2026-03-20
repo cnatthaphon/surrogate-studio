@@ -1,0 +1,103 @@
+{
+  "drawflow": {
+    "Home": {
+      "data": {
+        "1": {
+          "name": "input_layer",
+          "data": {
+            "mode": "flat"
+          },
+          "inputs": {},
+          "outputs": {
+            "output_1": {
+              "connections": [
+                {
+                  "node": "2",
+                  "input": "input_1"
+                }
+              ]
+            }
+          }
+        },
+        "2": {
+          "name": "dense_layer",
+          "data": {
+            "units": 32,
+            "activation": "relu"
+          },
+          "inputs": {
+            "input_1": {
+              "connections": [
+                {
+                  "node": "1",
+                  "output": "output_1"
+                }
+              ]
+            }
+          },
+          "outputs": {
+            "output_1": {
+              "connections": [
+                {
+                  "node": "3",
+                  "input": "input_1"
+                }
+              ]
+            }
+          }
+        },
+        "3": {
+          "name": "dense_layer",
+          "data": {
+            "units": 16,
+            "activation": "relu"
+          },
+          "inputs": {
+            "input_1": {
+              "connections": [
+                {
+                  "node": "2",
+                  "output": "output_1"
+                }
+              ]
+            }
+          },
+          "outputs": {
+            "output_1": {
+              "connections": [
+                {
+                  "node": "4",
+                  "input": "input_1"
+                }
+              ]
+            }
+          }
+        },
+        "4": {
+          "name": "output_layer",
+          "data": {
+            "matchWeight": 1,
+            "targets": [
+              "x"
+            ],
+            "targetType": "x",
+            "loss": "mse",
+            "wx": 1,
+            "wv": 1
+          },
+          "inputs": {
+            "input_1": {
+              "connections": [
+                {
+                  "node": "3",
+                  "output": "output_1"
+                }
+              ]
+            }
+          },
+          "outputs": {}
+        }
+      }
+    }
+  }
+}
