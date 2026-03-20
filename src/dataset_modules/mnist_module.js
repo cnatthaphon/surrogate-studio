@@ -754,7 +754,7 @@
 
       // playground: fetch preview and show all samples (no split)
       mountEl.appendChild(elF("div", { style: "color:#67e8f9;font-size:13px;" }, "Loading " + label + " data..."));
-      buildMnistDataset({ seed: 42, totalCount: 100, variant: variant }).then(function (res) {
+      buildMnistDataset({ seed: 42, totalCount: 999999, variant: variant }).then(function (res) {
         _renderImageResult(mountEl, elF, res, label, defaultClassNames, isCurrent, false);
       }).catch(function (err) {
         mountEl.innerHTML = "";
