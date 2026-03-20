@@ -431,6 +431,24 @@
       // handle bundle format
       var isBundle = dsData.kind === "dataset_bundle" && dsData.datasets;
       var activeDs = isBundle ? dsData.datasets[dsData.activeVariantId || Object.keys(dsData.datasets)[0]] : dsData;
+      // normalize dataset format: MNIST uses records.{train,val,test}.{x,y}, oscillator uses xTrain/yTrain
+      if (!activeDs.xTrain && activeDs.records) {
+        var nClasses = activeDs.classCount || 10;
+        function oneHot(label, n) { var arr = new Array(n).fill(0); arr[label] = 1; return arr; }
+        var isClassification = defaultTarget === "label" || defaultTarget === "logits";
+        activeDs = {
+          xTrain: (activeDs.records.train && activeDs.records.train.x) || [],
+          yTrain: isClassification ? ((activeDs.records.train && activeDs.records.train.y) || []).map(function (l) { return oneHot(l, nClasses); }) : ((activeDs.records.train && activeDs.records.train.y) || []),
+          xVal: (activeDs.records.val && activeDs.records.val.x) || [],
+          yVal: isClassification ? ((activeDs.records.val && activeDs.records.val.y) || []).map(function (l) { return oneHot(l, nClasses); }) : ((activeDs.records.val && activeDs.records.val.y) || []),
+          xTest: (activeDs.records.test && activeDs.records.test.x) || [],
+          yTest: isClassification ? ((activeDs.records.test && activeDs.records.test.y) || []).map(function (l) { return oneHot(l, nClasses); }) : ((activeDs.records.test && activeDs.records.test.y) || []),
+          featureSize: activeDs.xTrain ? undefined : ((activeDs.records.train && activeDs.records.train.x && activeDs.records.train.x[0]) ? activeDs.records.train.x[0].length : 784),
+          numClasses: nClasses,
+          targetMode: isClassification ? "logits" : (activeDs.targetMode || defaultTarget),
+        };
+      }
+
       var graphMode = modelBuilder.inferGraphMode(model.graph, "direct");
       var featureSize = Number(activeDs.featureSize || (activeDs.xTrain && activeDs.xTrain[0] && activeDs.xTrain[0].length) || 1);
 
