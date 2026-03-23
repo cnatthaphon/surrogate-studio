@@ -199,6 +199,10 @@
     var initialTab = cfg.defaultTab || "playground";
     layoutApi.showTab(initialTab);
 
+    // expose store globally for debugging and inter-tab access
+    var W = typeof window !== "undefined" ? window : {};
+    W._surrogateStore = store;
+
     // public API
     return {
       showTab: function (id) { layoutApi.showTab(id); },

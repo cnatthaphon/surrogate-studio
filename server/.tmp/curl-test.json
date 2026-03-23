@@ -1,0 +1,124 @@
+{
+  "runId": "curl-test",
+  "graph": {
+    "drawflow": {
+      "Home": {
+        "data": {
+          "1": {
+            "name": "input_layer",
+            "data": {
+              "mode": "flat"
+            },
+            "inputs": {},
+            "outputs": {
+              "output_1": {
+                "connections": [
+                  {
+                    "node": "2",
+                    "input": "input_1"
+                  }
+                ]
+              }
+            }
+          },
+          "2": {
+            "name": "dense_layer",
+            "data": {
+              "units": 8,
+              "activation": "relu"
+            },
+            "inputs": {
+              "input_1": {
+                "connections": [
+                  {
+                    "node": "1",
+                    "output": "output_1"
+                  }
+                ]
+              }
+            },
+            "outputs": {
+              "output_1": {
+                "connections": [
+                  {
+                    "node": "3",
+                    "input": "input_1"
+                  }
+                ]
+              }
+            }
+          },
+          "3": {
+            "name": "output_layer",
+            "data": {
+              "target": "xv",
+              "loss": "mse"
+            },
+            "inputs": {
+              "input_1": {
+                "connections": [
+                  {
+                    "node": "2",
+                    "output": "output_1"
+                  }
+                ]
+              }
+            },
+            "outputs": {}
+          }
+        }
+      }
+    }
+  },
+  "dataset": {
+    "featureSize": 4,
+    "targetMode": "xv",
+    "xTrain": [
+      [
+        1,
+        2,
+        3,
+        4
+      ],
+      [
+        5,
+        6,
+        7,
+        8
+      ]
+    ],
+    "yTrain": [
+      [
+        1,
+        2,
+        3,
+        4
+      ],
+      [
+        5,
+        6,
+        7,
+        8
+      ]
+    ],
+    "xVal": [
+      [
+        1,
+        2,
+        3,
+        4
+      ]
+    ],
+    "yVal": [
+      [
+        1,
+        2,
+        3,
+        4
+      ]
+    ]
+  },
+  "epochs": 2,
+  "batchSize": 2,
+  "learningRate": 0.01
+}
