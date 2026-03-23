@@ -81,6 +81,58 @@ function main() {
   assert.strictEqual(result.predictions[1], 2.0, "warmup preserved");
   assert(result.predictions[2] !== 0, "rollout produces values");
 
+  // --- confusionMatrix ---
+  var cmx = PC.confusionMatrix([0,1,2,0,1,2,0,1,2,0], [0,1,1,0,2,2,0,1,0,0], 3);
+  assert.strictEqual(cmx.length, 3, "3x3 matrix");
+  assert.strictEqual(cmx[0][0], 4, "class 0 correct=4");
+  assert.strictEqual(cmx[1][1], 2, "class 1 correct=2");
+  assert.strictEqual(cmx[2][1], 1, "class 2 predicted as 1");
+  // row sums = support per class
+  assert.strictEqual(cmx[0].reduce(function(a,b){return a+b;},0), 4);
+  assert.strictEqual(cmx[1].reduce(function(a,b){return a+b;},0), 3);
+  assert.strictEqual(cmx[2].reduce(function(a,b){return a+b;},0), 3);
+
+  // --- precisionRecallF1 ---
+  var prf = PC.precisionRecallF1(cmx);
+  assert.strictEqual(prf.length, 3, "one per class");
+  assert(prf[0].precision > 0, "class 0 precision > 0");
+  assert(prf[0].recall > 0, "class 0 recall > 0");
+  assert(prf[0].f1 > 0, "class 0 f1 > 0");
+  // class 0: tp=4, fp=1(class2 predicted 0), fn=0 → precision=4/5=0.8, recall=4/4=1.0
+  assert(Math.abs(prf[0].precision - 0.8) < 0.01, "class 0 precision=0.8");
+  assert(Math.abs(prf[0].recall - 1.0) < 0.01, "class 0 recall=1.0");
+  // f1 = 2*0.8*1.0/(0.8+1.0) = 0.8889
+  assert(Math.abs(prf[0].f1 - 0.8889) < 0.01, "class 0 f1~0.889");
+
+  // --- r2Score ---
+  var r2 = PC.r2Score([1,2,3,4,5], [1.1, 2.2, 2.8, 4.1, 5.3]);
+  assert(r2 > 0.95, "r2 > 0.95 for near-perfect");
+  var r2_perfect = PC.r2Score([1,2,3], [1,2,3]);
+  assert.strictEqual(r2_perfect, 1, "perfect r2=1");
+  var r2_bad = PC.r2Score([1,2,3], [3,2,1]);
+  assert(r2_bad < 0, "inverted r2 < 0");
+
+  // --- rocCurveOneVsRest ---
+  var rocTruth = [0,1,2,0,1,2];
+  var rocProbs = [
+    [0.9,0.05,0.05], [0.1,0.8,0.1], [0.1,0.1,0.8],
+    [0.8,0.1,0.1],   [0.2,0.7,0.1], [0.1,0.2,0.7]
+  ];
+  var roc0 = PC.rocCurveOneVsRest(rocTruth, rocProbs, 0);
+  assert(roc0.auc >= 0.9, "class 0 AUC high for clean separation");
+  assert(roc0.fpr.length > 2, "fpr has points");
+  assert(roc0.tpr.length === roc0.fpr.length, "fpr/tpr same length");
+  // when all scores are identical, AUC should be 0.5 (no discrimination)
+  var rocFlat = PC.rocCurveOneVsRest([0,1,0,1], [[0.5,0.5],[0.5,0.5],[0.5,0.5],[0.5,0.5]], 0);
+  assert(rocFlat.fpr.length > 0, "flat ROC has points");
+
+  // --- computeResiduals ---
+  var resid = PC.computeResiduals([1,2,3], [1.1, 1.8, 3.2]);
+  assert.strictEqual(resid.length, 3);
+  assert(Math.abs(resid[0] - 0.1) < 0.001, "residual[0]=0.1");
+  assert(Math.abs(resid[1] - (-0.2)) < 0.001, "residual[1]=-0.2");
+  assert(Math.abs(resid[2] - 0.2) < 0.001, "residual[2]=0.2");
+
   console.log("PASS test_contract_prediction_core");
 }
 

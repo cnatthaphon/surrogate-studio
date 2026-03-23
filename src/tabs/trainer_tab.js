@@ -16,6 +16,7 @@
     var modelBuilder = deps.modelBuilder;
     var uiEngine = deps.uiEngine;
     var modal = deps.modal;
+    var predictionCore = deps.predictionCore;
     var onStatus = deps.onStatus || function () {};
     var el = deps.el || function (tag, a, c) {
       var e = document.createElement(tag);
@@ -30,7 +31,7 @@
     var _configFormApi = null;
     var _isTraining = false;
     var _lossChartDiv = null;
-    var _epochLogEl = null;
+    var _epochTableBody = null;
     var _subTab = "train"; // "train" | "test"
 
     function _getSchemaId() {
@@ -46,6 +47,9 @@
     }
     function _listModels(schemaId) { return store && typeof store.listModels === "function" ? store.listModels({}).filter(function (m) { return !schemaId || m.schemaId === schemaId; }) : []; }
 
+    var getServerAdapter = function () { var W = typeof window !== "undefined" ? window : {}; return W.OSCServerRuntimeAdapter || null; };
+    var _serverAvailable = null; // null = unchecked, true/false = checked
+
     // detect available backends
     function _getAvailableBackends() {
       var backends = [{ value: "auto", label: "Auto" }, { value: "cpu", label: "CPU" }];
@@ -53,6 +57,11 @@
       if (tf) {
         try { if (typeof tf.setBackend === "function") { backends.push({ value: "webgl", label: "WebGL (GPU)" }); } } catch (e) {}
         try { backends.push({ value: "wasm", label: "WASM" }); } catch (e) {}
+      }
+      // add PyTorch Server if adapter is loaded
+      var sra = getServerAdapter();
+      if (sra) {
+        backends.push({ value: "pytorch_server", label: "PyTorch Server" });
       }
       return backends;
     }
@@ -148,7 +157,8 @@
       header.appendChild(el("div", { style: "font-size:12px;color:#94a3b8;" },
         "Schema: " + escapeHtml(t.schemaId || "") + " | Status: " + (t.status || "draft") +
         (t.datasetId ? " | Dataset: " + (function () { var d = store.getDataset(t.datasetId); return d ? d.name : t.datasetId; })() : "") +
-        (t.modelId ? " | Model: " + (function () { var m = store.getModel(t.modelId); return m ? m.name : t.modelId; })() : "")));
+        (t.modelId ? " | Model: " + (function () { var m = store.getModel(t.modelId); return m ? m.name : t.modelId; })() : "") +
+        (t.backend ? " | Backend: " + String(t.backend) : "")));
       if (t.metrics) {
         header.appendChild(el("div", { style: "font-size:12px;color:#4ade80;margin-top:4px;" },
           "MAE: " + (t.metrics.mae != null ? Number(t.metrics.mae).toExponential(3) : "—") +
@@ -187,7 +197,6 @@
       if (epochs.length) {
         _plotLossChart(epochs);
       } else {
-        // empty chart placeholder
         var Plotly = (typeof window !== "undefined" && window.Plotly) ? window.Plotly : null;
         if (Plotly) {
           Plotly.newPlot(_lossChartDiv, [], {
@@ -199,197 +208,612 @@
         }
       }
 
-      // epoch table — always show header
-      var table = el("table", { className: "osc-metric-table" });
+      // epoch table — persistent, rows appended live during training
+      var tableWrap = el("div", { style: "max-height:300px;overflow-y:auto;" });
+      var table = el("table", { className: "osc-metric-table", style: "width:100%;" });
       var thead = el("tr", {});
       ["Epoch", "Loss", "Val Loss", "LR", "Improved"].forEach(function (h) { thead.appendChild(el("th", {}, h)); });
       table.appendChild(thead);
-      epochs.forEach(function (ep) {
-        var tr = el("tr", {});
-        tr.appendChild(el("td", {}, String(ep.epoch || "")));
-        tr.appendChild(el("td", {}, ep.loss != null ? Number(ep.loss).toExponential(3) : "—"));
-        tr.appendChild(el("td", {}, ep.val_loss != null ? Number(ep.val_loss).toExponential(3) : "—"));
-        tr.appendChild(el("td", {}, ep.current_lr != null ? Number(ep.current_lr).toExponential(2) : "—"));
-        tr.appendChild(el("td", {}, ep.improved ? "\u2713" : ""));
-        table.appendChild(tr);
-      });
-      if (!epochs.length) {
-        var emptyRow = el("tr", {});
-        emptyRow.appendChild(el("td", { style: "color:#64748b;text-align:center;" }, "—"));
-        emptyRow.setAttribute("colspan", "5");
-        table.appendChild(emptyRow);
-      }
-      mainEl.appendChild(table);
+      var tbody = el("tbody", {});
+      table.appendChild(tbody);
+      _epochTableBody = tbody;
 
-      // live log
-      _epochLogEl = el("div", { style: "margin-top:8px;font-size:11px;color:#94a3b8;max-height:150px;overflow-y:auto;" });
-      if (t.status === "running") _epochLogEl.appendChild(el("div", {}, "Training in progress..."));
-      mainEl.appendChild(_epochLogEl);
+      // fill existing epochs
+      epochs.forEach(function (ep) { _appendEpochRow(ep); });
+
+      if (!epochs.length && t.status !== "running") {
+        var emptyRow = el("tr", {});
+        emptyRow.appendChild(el("td", { style: "color:#64748b;text-align:center;", colspan: "5" }, "Waiting for training..."));
+        tbody.appendChild(emptyRow);
+      }
+
+      tableWrap.appendChild(table);
+      mainEl.appendChild(tableWrap);
+    }
+
+    function _appendEpochRow(ep) {
+      if (!_epochTableBody) return;
+      // remove "waiting" placeholder if present
+      if (_epochTableBody.children.length === 1) {
+        var first = _epochTableBody.children[0];
+        if (first && first.querySelector && first.querySelector("[colspan]")) {
+          _epochTableBody.removeChild(first);
+        }
+      }
+      var tr = el("tr", {});
+      tr.appendChild(el("td", {}, String(ep.epoch || "")));
+      tr.appendChild(el("td", {}, ep.loss != null ? Number(ep.loss).toExponential(3) : "—"));
+      tr.appendChild(el("td", {}, ep.val_loss != null ? Number(ep.val_loss).toExponential(3) : "—"));
+      tr.appendChild(el("td", {}, ep.current_lr != null ? Number(ep.current_lr).toExponential(2) : "—"));
+      tr.appendChild(el("td", { style: ep.improved ? "color:#4ade80;" : "" }, ep.improved ? "\u2713" : ""));
+      _epochTableBody.appendChild(tr);
+      // auto-scroll to bottom
+      var wrap = _epochTableBody.parentElement && _epochTableBody.parentElement.parentElement;
+      if (wrap && wrap.scrollHeight > wrap.clientHeight) wrap.scrollTop = wrap.scrollHeight;
     }
 
     function _renderTestSubTab(mainEl, t, activeId) {
-      // metrics table — always show with placeholder
-      var card = el("div", { className: "osc-card" });
-      card.appendChild(el("div", { style: "font-size:13px;color:#67e8f9;margin-bottom:8px;font-weight:600;" }, "Test Results"));
-
-      var m = t.metrics || {};
-      var rows = [
-        ["Val MSE", m.mse != null ? Number(m.mse).toExponential(3) : "—"],
-        ["Val MAE", m.mae != null ? Number(m.mae).toExponential(3) : "—"],
-        ["Test MSE", m.testMse != null ? Number(m.testMse).toExponential(3) : "—"],
-        ["Test MAE", m.testMae != null ? Number(m.testMae).toExponential(3) : "—"],
-        ["Best Epoch", m.bestEpoch || "—"],
-        ["Best Val Loss", m.bestValLoss != null ? Number(m.bestValLoss).toExponential(3) : "—"],
-        ["Final LR", m.finalLr != null ? Number(m.finalLr).toExponential(3) : "—"],
-        ["Stopped Early", m.stoppedEarly ? "Yes" : "No"],
-        ["Head Count", m.headCount || "—"],
-      ];
-      var table = el("table", { className: "osc-metric-table" });
-      rows.forEach(function (r) {
-        var tr = el("tr", {});
-        tr.appendChild(el("td", { style: "color:#94a3b8;" }, r[0]));
-        tr.appendChild(el("td", { style: r[1] !== "—" ? "color:#4ade80;" : "" }, r[1]));
-        table.appendChild(tr);
-      });
-      card.appendChild(table);
-      mainEl.appendChild(card);
+      var Plotly = (typeof window !== "undefined" && window.Plotly) ? window.Plotly : null;
+      var tf = getTf();
+      var pc = predictionCore || (typeof window !== "undefined" && window.OSCPredictionCore) || null;
+      var _darkLayout = { paper_bgcolor: "#0b1220", plot_bgcolor: "#0b1220", font: { color: "#e2e8f0", size: 10 }, margin: { t: 30, b: 50, l: 50, r: 10 } };
 
       if (!t.metrics) {
         mainEl.appendChild(el("div", { style: "font-size:12px;color:#64748b;padding:8px;" }, "Train first to see test results and predictions."));
         return;
       }
 
-      // pred vs ground truth
-      var predCard = el("div", { className: "osc-card", style: "margin-top:8px;" });
-      predCard.appendChild(el("div", { style: "font-size:13px;color:#67e8f9;margin-bottom:8px;font-weight:600;" }, "Prediction vs Ground Truth"));
-      var predChartDiv = el("div", { style: "height:280px;" });
-      predCard.appendChild(predChartDiv);
-      var predStatusEl = el("div", { style: "font-size:11px;color:#94a3b8;margin-top:4px;" });
-      predCard.appendChild(predStatusEl);
-      mainEl.appendChild(predCard);
+      // --- determine task type ---
+      var schemaId = t.schemaId;
+      var allowedOutputKeys = schemaRegistry ? schemaRegistry.getOutputKeys(schemaId) : ["x"];
+      var defaultTarget = (allowedOutputKeys[0] && (allowedOutputKeys[0].key || allowedOutputKeys[0])) || "x";
+      var isClassification = defaultTarget === "label" || defaultTarget === "logits";
 
-      var Plotly = (typeof window !== "undefined" && window.Plotly) ? window.Plotly : null;
-      var tf = getTf();
+      // --- load dataset + model for inference ---
+      if (!tf || !t.modelArtifacts || !t.datasetId || !modelBuilder) {
+        _renderFallbackCurves(mainEl, activeId, Plotly, _darkLayout);
+        return;
+      }
 
-      // try to run inference if we have model artifacts + test data
-      if (tf && t.modelArtifacts && t.datasetId && modelBuilder) {
-        predStatusEl.textContent = "Loading model for inference...";
-        try {
-          var dataset = store ? store.getDataset(t.datasetId) : null;
-          var modelRec = store ? store.getModel(t.modelId) : null;
-          if (dataset && dataset.data && modelRec && modelRec.graph) {
-            var dsData = dataset.data;
-            var isBundle = dsData.kind === "dataset_bundle" && dsData.datasets;
-            var activeDs = isBundle ? dsData.datasets[dsData.activeVariantId || Object.keys(dsData.datasets)[0]] : dsData;
-            // normalize MNIST format
-            var schemaId = t.schemaId;
-            var allowedOutputKeys = schemaRegistry ? schemaRegistry.getOutputKeys(schemaId) : ["x"];
-            var defaultTarget = allowedOutputKeys[0] || "x";
-            var isClassification = defaultTarget === "label" || defaultTarget === "logits";
-            if (!activeDs.xTrain && activeDs.records) {
-              var nCls = activeDs.classCount || 10;
-              function oh(l, n) { var a = new Array(n).fill(0); a[l] = 1; return a; }
-              activeDs = {
-                xTest: (activeDs.records.test && activeDs.records.test.x) || [],
-                yTest: isClassification ? ((activeDs.records.test && activeDs.records.test.y) || []).map(function (l) { return oh(l, nCls); }) : ((activeDs.records.test && activeDs.records.test.y) || []),
-                featureSize: (activeDs.records.test && activeDs.records.test.x && activeDs.records.test.x[0]) ? activeDs.records.test.x[0].length : 784,
-                numClasses: nCls,
-              };
+      var statusEl = el("div", { style: "font-size:11px;color:#94a3b8;padding:4px 8px;" }, "Running inference on full test set...");
+      mainEl.appendChild(statusEl);
+
+      try {
+        var dataset = store ? store.getDataset(t.datasetId) : null;
+        var modelRec = store ? store.getModel(t.modelId) : null;
+        if (!dataset || !dataset.data || !modelRec || !modelRec.graph) {
+          statusEl.textContent = "Dataset or model not found.";
+          return;
+        }
+
+        var dsData = dataset.data;
+        var isBundle = dsData.kind === "dataset_bundle" && dsData.datasets;
+        var activeDs = isBundle ? dsData.datasets[dsData.activeVariantId || Object.keys(dsData.datasets)[0]] : dsData;
+        var rawRecords = activeDs.records || null;
+        var nCls = activeDs.classCount || 10;
+        var imgShape = Array.isArray(activeDs.imageShape) ? activeDs.imageShape : [28, 28, 1];
+
+        // normalize MNIST format for inference
+        if (!activeDs.xTest && activeDs.records) {
+          var oh = function (l, n) { var a = new Array(n).fill(0); a[l] = 1; return a; };
+          activeDs = {
+            xTest: (activeDs.records.test && activeDs.records.test.x) || [],
+            yTest: isClassification
+              ? ((activeDs.records.test && activeDs.records.test.y) || []).map(function (l) { return oh(l, nCls); })
+              : ((activeDs.records.test && activeDs.records.test.y) || []),
+            yTestRaw: (activeDs.records.test && activeDs.records.test.y) || [],
+            featureSize: (activeDs.records.test && activeDs.records.test.x && activeDs.records.test.x[0]) ? activeDs.records.test.x[0].length : 784,
+            numClasses: nCls,
+          };
+        }
+
+        // rebuild model
+        var graphMode = modelBuilder.inferGraphMode(modelRec.graph, "direct");
+        var featureSize = Number(activeDs.featureSize || (activeDs.xTest && activeDs.xTest[0] && activeDs.xTest[0].length) || 1);
+        var rebuiltModel = modelBuilder.buildModelFromGraph(tf, modelRec.graph, {
+          mode: graphMode, featureSize: featureSize, windowSize: 1, seqFeatureSize: featureSize,
+          allowedOutputKeys: allowedOutputKeys, defaultTarget: defaultTarget, numClasses: activeDs.numClasses || nCls,
+        });
+
+        // load saved weights
+        var hasWeights = t.modelArtifacts && t.modelArtifacts.weightSpecs &&
+          (t.modelArtifacts.weightData || t.modelArtifacts.weightValues);
+        if (hasWeights) {
+          try {
+            // reconstruct flat float array from either ArrayBuffer or values array
+            var flatWeights;
+            if (t.modelArtifacts.weightValues && Array.isArray(t.modelArtifacts.weightValues)) {
+              flatWeights = new Float32Array(t.modelArtifacts.weightValues);
+            } else if (t.modelArtifacts.weightData && t.modelArtifacts.weightData.byteLength) {
+              flatWeights = new Float32Array(t.modelArtifacts.weightData);
+            } else {
+              throw new Error("No weight data available");
             }
 
-            // rebuild model from graph + load saved weights
-            var graphMode = modelBuilder.inferGraphMode(modelRec.graph, "direct");
-            var featureSize = Number(activeDs.featureSize || (activeDs.xTest && activeDs.xTest[0] && activeDs.xTest[0].length) || 1);
-            var rebuiltModel = modelBuilder.buildModelFromGraph(tf, modelRec.graph, {
-              mode: graphMode, featureSize: featureSize, windowSize: 1, seqFeatureSize: featureSize,
-              allowedOutputKeys: allowedOutputKeys, defaultTarget: defaultTarget, numClasses: activeDs.numClasses || 10,
-            });
-
-            // load saved weights
-            if (t.modelArtifacts && t.modelArtifacts.weightSpecs && t.modelArtifacts.weightData) {
-              try { rebuiltModel.model.loadWeights(t.modelArtifacts.weightSpecs.map(function (s, i) { return tf.tensor(new Float32Array(t.modelArtifacts.weightData, s.offset || 0), s.shape); })); } catch (e) {}
-            }
-
-            // run inference on test set (first 50 samples)
-            var testN = Math.min(50, (activeDs.xTest || []).length);
-            if (testN > 0) {
-              var xSlice = activeDs.xTest.slice(0, testN);
-              var ySlice = activeDs.yTest.slice(0, testN);
-              var predTensor = tf.tensor2d(xSlice);
-              var predRaw = rebuiltModel.model.predict(predTensor);
-              var preds = (Array.isArray(predRaw) ? predRaw[0] : predRaw).arraySync();
-              predTensor.dispose();
-              if (Array.isArray(predRaw)) predRaw.forEach(function (t) { t.dispose(); }); else predRaw.dispose();
-
-              if (isClassification) {
-                // classification: show accuracy
-                var correct = 0;
-                for (var ci = 0; ci < testN; ci++) {
-                  var predLabel = preds[ci].indexOf(Math.max.apply(null, preds[ci]));
-                  var trueLabel = ySlice[ci].indexOf(Math.max.apply(null, ySlice[ci]));
-                  if (predLabel === trueLabel) correct++;
-                }
-                predStatusEl.textContent = "Test accuracy: " + (correct / testN * 100).toFixed(1) + "% (" + correct + "/" + testN + ")";
-
-                // confusion-like bar chart
-                if (Plotly) {
-                  var predLabels = preds.map(function (p) { return p.indexOf(Math.max.apply(null, p)); });
-                  var trueLabels = ySlice.map(function (y) { return y.indexOf(Math.max.apply(null, y)); });
-                  Plotly.newPlot(predChartDiv, [
-                    { x: trueLabels, y: predLabels, mode: "markers", type: "scatter", name: "Pred vs True", marker: { size: 6, color: "#22d3ee" } },
-                    { x: [0, 9], y: [0, 9], mode: "lines", name: "Perfect", line: { color: "#4ade80", dash: "dash" } },
-                  ], {
-                    paper_bgcolor: "#0b1220", plot_bgcolor: "#0b1220", font: { color: "#e2e8f0", size: 10 },
-                    title: { text: "Predicted vs True Label (" + testN + " samples)", font: { size: 12 } },
-                    xaxis: { title: "True Label", gridcolor: "#1e293b" }, yaxis: { title: "Predicted Label", gridcolor: "#1e293b" },
-                    margin: { t: 30, b: 50, l: 50, r: 10 },
-                  }, { responsive: true });
-                }
-              } else {
-                // regression: scatter plot pred vs truth
-                var truthFlat = ySlice.map(function (y) { return Array.isArray(y) ? y[0] : y; });
-                var predFlat = preds.map(function (p) { return Array.isArray(p) ? p[0] : p; });
-                predStatusEl.textContent = "Showing " + testN + " test predictions";
-
-                if (Plotly) {
-                  var indices = Array.from({ length: testN }, function (_, i) { return i; });
-                  Plotly.newPlot(predChartDiv, [
-                    { x: indices, y: truthFlat, mode: "lines", name: "Ground Truth", line: { color: "#22d3ee" } },
-                    { x: indices, y: predFlat, mode: "lines", name: "Prediction", line: { color: "#f59e0b", dash: "dot" } },
-                  ], {
-                    paper_bgcolor: "#0b1220", plot_bgcolor: "#0b1220", font: { color: "#e2e8f0", size: 10 },
-                    title: { text: "Pred vs Truth (first " + testN + " test samples)", font: { size: 12 } },
-                    xaxis: { title: "Sample", gridcolor: "#1e293b" }, yaxis: { title: "Value", gridcolor: "#1e293b" },
-                    legend: { orientation: "h", y: -0.15 },
-                    margin: { t: 30, b: 50, l: 50, r: 10 },
-                  }, { responsive: true });
-                }
+            // load by order: match saved specs to rebuilt model weights
+            var modelWeights = rebuiltModel.model.getWeights();
+            var newWeights = [];
+            var readOffset = 0;
+            for (var wi = 0; wi < modelWeights.length; wi++) {
+              var wShape = modelWeights[wi].shape;
+              var wSize = wShape.reduce(function (a, b) { return a * b; }, 1);
+              if (readOffset + wSize <= flatWeights.length) {
+                newWeights.push(tf.tensor(flatWeights.subarray(readOffset, readOffset + wSize), wShape));
+                readOffset += wSize;
               }
             }
-            rebuiltModel.model.dispose();
+            if (newWeights.length === modelWeights.length) {
+              rebuiltModel.model.setWeights(newWeights);
+            } else {
+              console.warn("[test] Weight count mismatch: model=" + modelWeights.length + " loaded=" + newWeights.length);
+            }
+          } catch (e) {
+            console.warn("[test] Weight load failed:", e.message);
           }
-        } catch (e) {
-          predStatusEl.textContent = "Inference error: " + e.message;
+        }
+
+        var maxAvailable = (activeDs.xTest || []).length;
+
+        // --- run inference on ALL test data (metrics computed on full set) ---
+        var allX = activeDs.xTest;
+        var allY = activeDs.yTest;
+        var allPreds;
+        // batch predict to avoid OOM
+        var batchSize = 256;
+        var allPredsArr = [];
+        for (var bi = 0; bi < maxAvailable; bi += batchSize) {
+          var bEnd = Math.min(bi + batchSize, maxAvailable);
+          var batchX = allX.slice(bi, bEnd);
+          var bTensor = tf.tensor2d(batchX);
+          var bRaw = rebuiltModel.model.predict(bTensor);
+          var bData = (Array.isArray(bRaw) ? bRaw[0] : bRaw).arraySync();
+          allPredsArr = allPredsArr.concat(bData);
+          bTensor.dispose();
+          if (Array.isArray(bRaw)) bRaw.forEach(function (pt) { pt.dispose(); }); else bRaw.dispose();
+        }
+        allPreds = allPredsArr;
+
+        statusEl.textContent = "Evaluated " + maxAvailable + " test samples.";
+
+        // container for all metric charts
+        var metricsContainer = el("div", {});
+        mainEl.appendChild(metricsContainer);
+
+        if (isClassification) {
+          _renderClassificationMetrics(metricsContainer, allPreds, allY, maxAvailable, nCls, rawRecords, imgShape, activeDs, Plotly, _darkLayout, pc);
+        } else {
+          _renderRegressionMetrics(metricsContainer, allPreds, allY, maxAvailable, Plotly, _darkLayout, pc);
+        }
+
+        rebuiltModel.model.dispose();
+
+      } catch (e) {
+        statusEl.textContent = "Inference error: " + e.message;
+      }
+    }
+
+    // === Classification metrics ===
+    function _renderClassificationMetrics(container, preds, ySlice, testN, nCls, rawRecords, imgShape, activeDs, Plotly, darkLayout, pc) {
+      var predLabels = preds.map(function (p) { return p.indexOf(Math.max.apply(null, p)); });
+      var trueLabels = ySlice.map(function (y) { return Array.isArray(y) ? y.indexOf(Math.max.apply(null, y)) : Number(y); });
+
+      // overall accuracy — big number card
+      var correct = 0;
+      for (var ci = 0; ci < testN; ci++) { if (predLabels[ci] === trueLabels[ci]) correct++; }
+      var accuracy = correct / testN;
+
+      var accCard = el("div", { className: "osc-card", style: "margin-top:8px;text-align:center;padding:16px;" });
+      accCard.appendChild(el("div", { style: "font-size:11px;color:#94a3b8;text-transform:uppercase;letter-spacing:1px;" }, "Test Accuracy"));
+      accCard.appendChild(el("div", { style: "font-size:36px;font-weight:700;color:" + (accuracy >= 0.8 ? "#4ade80" : accuracy >= 0.5 ? "#fbbf24" : "#f43f5e") + ";" }, (accuracy * 100).toFixed(1) + "%"));
+      accCard.appendChild(el("div", { style: "font-size:11px;color:#64748b;" }, correct + " / " + testN + " correct"));
+      container.appendChild(accCard);
+
+      if (!pc) return;
+
+      // confusion matrix heatmap — normalized by row (recall per class)
+      var cm = pc.confusionMatrix(trueLabels, predLabels, nCls);
+      var cmNorm = cm.map(function (row) {
+        var rowSum = row.reduce(function (a, b) { return a + b; }, 0);
+        return row.map(function (v) { return rowSum > 0 ? v / rowSum : 0; });
+      });
+      if (Plotly) {
+        var cmCard = el("div", { className: "osc-card", style: "margin-top:8px;" });
+        cmCard.appendChild(el("div", { style: "font-size:13px;color:#67e8f9;margin-bottom:8px;font-weight:600;" }, "Confusion Matrix (row-normalized)"));
+        var cmDiv = el("div", { style: "height:380px;" });
+        cmCard.appendChild(cmDiv);
+        container.appendChild(cmCard);
+
+        var classLabels = [];
+        for (var li = 0; li < nCls; li++) classLabels.push(String(li));
+
+        // text annotations: show count + percentage
+        var cmText = [];
+        for (var tr = 0; tr < nCls; tr++) {
+          var textRow = [];
+          for (var tc = 0; tc < nCls; tc++) {
+            textRow.push(cm[tr][tc] + "\n" + (cmNorm[tr][tc] * 100).toFixed(0) + "%");
+          }
+          cmText.push(textRow);
+        }
+
+        Plotly.newPlot(cmDiv, [{
+          z: cmNorm, x: classLabels, y: classLabels, type: "heatmap",
+          colorscale: "Blues", showscale: true, zmin: 0, zmax: 1,
+          text: cmText, texttemplate: "%{text}", textfont: { size: 9 },
+          hoverongaps: false,
+          colorbar: { title: "Recall", titleside: "right", tickformat: ".0%", len: 0.9 },
+        }], Object.assign({}, darkLayout, {
+          title: { text: "True (rows) vs Predicted (columns)", font: { size: 11, color: "#94a3b8" } },
+          xaxis: { title: "Predicted Class", gridcolor: "#1e293b", tickvals: classLabels, side: "bottom" },
+          yaxis: { title: "True Class", gridcolor: "#1e293b", tickvals: classLabels, autorange: "reversed" },
+          margin: { t: 35, b: 60, l: 60, r: 80 },
+        }), { responsive: true });
+      }
+
+      // per-class precision, recall, F1 table
+      var prfData = pc.precisionRecallF1(cm);
+      var prfCard = el("div", { className: "osc-card", style: "margin-top:8px;" });
+      prfCard.appendChild(el("div", { style: "font-size:13px;color:#67e8f9;margin-bottom:8px;font-weight:600;" }, "Per-Class Metrics"));
+
+      var prfTable = el("table", { style: "width:100%;border-collapse:collapse;font-size:11px;" });
+      var thead = el("tr", {});
+      ["Class", "Precision", "Recall", "F1", "Support"].forEach(function (h) {
+        thead.appendChild(el("th", { style: "text-align:left;padding:4px 8px;color:#94a3b8;border-bottom:1px solid #1e293b;" }, h));
+      });
+      prfTable.appendChild(thead);
+
+      var macroP = 0, macroR = 0, macroF1 = 0, totalSupport = 0;
+      var weakClasses = [];
+      prfData.forEach(function (row) {
+        var rowTr = el("tr", {});
+        rowTr.appendChild(el("td", { style: "padding:4px 8px;color:#e2e8f0;font-weight:600;" }, String(row.class)));
+        rowTr.appendChild(_metricBarCell(row.precision));
+        rowTr.appendChild(_metricBarCell(row.recall));
+        rowTr.appendChild(_metricBarCell(row.f1));
+        rowTr.appendChild(el("td", { style: "padding:4px 8px;color:#94a3b8;text-align:right;" }, String(row.support)));
+        prfTable.appendChild(rowTr);
+        macroP += row.precision; macroR += row.recall; macroF1 += row.f1; totalSupport += row.support;
+        if (row.f1 < 0.7) weakClasses.push({ cls: row.class, f1: row.f1, precision: row.precision, recall: row.recall });
+      });
+
+      var macroTr = el("tr", { style: "border-top:2px solid #334155;" });
+      macroTr.appendChild(el("td", { style: "padding:4px 8px;color:#67e8f9;font-weight:700;" }, "Macro Avg"));
+      macroTr.appendChild(_metricBarCell(nCls > 0 ? macroP / nCls : 0));
+      macroTr.appendChild(_metricBarCell(nCls > 0 ? macroR / nCls : 0));
+      macroTr.appendChild(_metricBarCell(nCls > 0 ? macroF1 / nCls : 0));
+      macroTr.appendChild(el("td", { style: "padding:4px 8px;color:#94a3b8;text-align:right;" }, String(totalSupport)));
+      prfTable.appendChild(macroTr);
+      prfCard.appendChild(prfTable);
+      container.appendChild(prfCard);
+
+      // ROC curves (one-vs-rest) + insights
+      if (Plotly && preds[0] && Array.isArray(preds[0])) {
+        var rocCard = el("div", { className: "osc-card", style: "margin-top:8px;" });
+        rocCard.appendChild(el("div", { style: "font-size:13px;color:#67e8f9;margin-bottom:8px;font-weight:600;" }, "ROC Curves (One-vs-Rest)"));
+        var rocDiv = el("div", { style: "height:320px;" });
+        rocCard.appendChild(rocDiv);
+
+        var rocColors = ["#22d3ee", "#f59e0b", "#4ade80", "#f43f5e", "#a78bfa", "#fb923c", "#2dd4bf", "#e879f9", "#fbbf24", "#38bdf8"];
+        var rocTraces = [];
+        var aucPerClass = [];
+        for (var rc = 0; rc < nCls; rc++) {
+          var rocData = pc.rocCurveOneVsRest(trueLabels, preds, rc);
+          aucPerClass.push({ cls: rc, auc: rocData.auc });
+          var step = Math.max(1, Math.floor(rocData.fpr.length / 200));
+          var fprSub = [], tprSub = [];
+          for (var ri = 0; ri < rocData.fpr.length; ri += step) { fprSub.push(rocData.fpr[ri]); tprSub.push(rocData.tpr[ri]); }
+          rocTraces.push({
+            x: fprSub, y: tprSub, mode: "lines",
+            name: "Class " + rc + " (AUC=" + rocData.auc.toFixed(3) + ")",
+            line: { color: rocColors[rc % rocColors.length], width: 1.5 },
+          });
+        }
+        rocTraces.push({ x: [0, 1], y: [0, 1], mode: "lines", name: "Random", line: { color: "#475569", dash: "dash", width: 1 }, showlegend: false });
+
+        var meanAuc = aucPerClass.reduce(function (a, b) { return a + b.auc; }, 0) / nCls;
+        Plotly.newPlot(rocDiv, rocTraces, Object.assign({}, darkLayout, {
+          title: { text: "Mean AUC: " + meanAuc.toFixed(3), font: { size: 12 } },
+          xaxis: { title: "False Positive Rate", gridcolor: "#1e293b", range: [0, 1] },
+          yaxis: { title: "True Positive Rate", gridcolor: "#1e293b", range: [0, 1] },
+          legend: { font: { size: 9 }, bgcolor: "rgba(0,0,0,0)" },
+          margin: { t: 35, b: 55, l: 50, r: 10 },
+        }), { responsive: true });
+
+        rocCard.appendChild(rocDiv);
+        container.appendChild(rocCard);
+
+        // === Insights & Recommendations ===
+        var insightCard = el("div", { className: "osc-card", style: "margin-top:8px;border-left:3px solid #a78bfa;" });
+        insightCard.appendChild(el("div", { style: "font-size:13px;color:#a78bfa;margin-bottom:8px;font-weight:600;" }, "Insights & Recommendations"));
+
+        var insights = [];
+        // overall assessment
+        if (meanAuc >= 0.95) {
+          insights.push({ icon: "\u2705", text: "Excellent discriminability (mean AUC " + meanAuc.toFixed(3) + "). The model separates classes very well." });
+        } else if (meanAuc >= 0.85) {
+          insights.push({ icon: "\u2705", text: "Good discriminability (mean AUC " + meanAuc.toFixed(3) + "). Minor improvements possible." });
+        } else if (meanAuc >= 0.7) {
+          insights.push({ icon: "\u26a0\ufe0f", text: "Moderate discriminability (mean AUC " + meanAuc.toFixed(3) + "). Consider more epochs, larger model, or data augmentation." });
+        } else {
+          insights.push({ icon: "\u274c", text: "Poor discriminability (mean AUC " + meanAuc.toFixed(3) + "). Model struggles to separate classes. Review architecture or training data." });
+        }
+
+        // find weak AUC classes
+        var lowAucClasses = aucPerClass.filter(function (a) { return a.auc < 0.8; });
+        if (lowAucClasses.length > 0) {
+          var lowList = lowAucClasses.map(function (a) { return "class " + a.cls + " (AUC=" + a.auc.toFixed(3) + ")"; }).join(", ");
+          insights.push({ icon: "\ud83d\udd0d", text: "Low AUC classes: " + lowList + ". These classes are hard to distinguish from others \u2014 check if they are visually similar or underrepresented." });
+        }
+
+        // precision vs recall balance
+        if (weakClasses.length > 0) {
+          weakClasses.forEach(function (w) {
+            var msg = "Class " + w.cls + " (F1=" + (w.f1 * 100).toFixed(1) + "%): ";
+            if (w.precision < w.recall) {
+              msg += "Low precision \u2014 model often predicts this class incorrectly (too many false positives). The model is over-predicting this class.";
+            } else if (w.recall < w.precision) {
+              msg += "Low recall \u2014 model misses many samples of this class (too many false negatives). The model is under-detecting this class.";
+            } else {
+              msg += "Both precision and recall are low \u2014 the model struggles with this class overall.";
+            }
+            insights.push({ icon: "\u26a0\ufe0f", text: msg });
+          });
+        }
+
+        // suggestion based on accuracy vs AUC gap
+        if (meanAuc > 0.9 && accuracy < 0.8) {
+          insights.push({ icon: "\ud83d\udca1", text: "AUC is high but accuracy is relatively low. The model has good ranking ability but the decision boundary may not be optimal. Consider calibration or threshold tuning." });
+        }
+
+        if (accuracy >= 0.9 && weakClasses.length === 0) {
+          insights.push({ icon: "\ud83c\udf1f", text: "Strong performance across all classes. Ready for deployment or further benchmarking." });
+        }
+
+        insights.forEach(function (ins) {
+          var line = el("div", { style: "font-size:11px;color:#cbd5e1;padding:3px 0;display:flex;gap:6px;align-items:flex-start;" });
+          line.appendChild(el("span", { style: "flex-shrink:0;" }, ins.icon));
+          line.appendChild(el("span", {}, ins.text));
+          insightCard.appendChild(line);
+        });
+        container.appendChild(insightCard);
+      }
+
+      // image prediction grid — one row per class
+      if (rawRecords && rawRecords.test && rawRecords.test.x) {
+        var imgW = imgShape[0] || 28, imgH = imgShape[1] || 28;
+        var gridCard = el("div", { className: "osc-card", style: "margin-top:8px;" });
+        gridCard.appendChild(el("div", { style: "font-size:13px;color:#67e8f9;margin-bottom:8px;font-weight:600;" }, "Predictions vs Ground Truth (by class)"));
+
+        // group by true class
+        var byClass = {};
+        for (var gi = 0; gi < testN; gi++) {
+          var tCls = trueLabels[gi];
+          if (!byClass[tCls]) byClass[tCls] = { correct: [], wrong: [] };
+          if (predLabels[gi] === tCls) byClass[tCls].correct.push(gi);
+          else byClass[tCls].wrong.push(gi);
+        }
+
+        var maxPerClass = 8;
+        for (var clsI = 0; clsI < nCls; clsI++) {
+          var group = byClass[clsI];
+          if (!group) continue;
+          var classAcc = group.correct.length / (group.correct.length + group.wrong.length);
+
+          var classRow = el("div", { style: "margin-bottom:10px;" });
+          var classHeader = el("div", { style: "font-size:11px;margin-bottom:4px;display:flex;align-items:center;gap:8px;" });
+          classHeader.appendChild(el("span", { style: "font-weight:700;color:#e2e8f0;" }, "Class " + clsI));
+          classHeader.appendChild(el("span", { style: "color:" + (classAcc >= 0.8 ? "#4ade80" : classAcc >= 0.5 ? "#fbbf24" : "#f43f5e") + ";font-size:10px;" },
+            (classAcc * 100).toFixed(0) + "% (" + group.correct.length + "/" + (group.correct.length + group.wrong.length) + ")"));
+          classRow.appendChild(classHeader);
+
+          var imgRow = el("div", { style: "display:flex;flex-wrap:wrap;gap:3px;" });
+
+          // show some correct (green) then some wrong (red)
+          var showCorrect = group.correct.slice(0, maxPerClass);
+          var showWrong = group.wrong.slice(0, maxPerClass);
+
+          function _drawImgCell(idx, pLbl, tLbl, isOk) {
+            var borderColor = isOk ? "#166534" : "#991b1b";
+            var bgColor = isOk ? "#052e16" : "#450a0a";
+            var cell = el("div", { style: "text-align:center;border:2px solid " + borderColor + ";border-radius:3px;padding:1px;background:" + bgColor + ";" });
+            var canvas = document.createElement("canvas");
+            canvas.width = imgW; canvas.height = imgH;
+            canvas.style.cssText = "width:32px;height:32px;image-rendering:pixelated;display:block;";
+            var pixels = rawRecords.test.x[idx];
+            if (pixels) {
+              var ctx = canvas.getContext("2d");
+              var iData = ctx.createImageData(imgW, imgH);
+              var imgCh = imgShape[2] || 1;
+              var planeSize = imgW * imgH;
+              for (var px = 0; px < planeSize; px++) {
+                if (imgCh >= 3) {
+                  // RGB: 3 values per pixel (HWC layout)
+                  iData.data[px * 4] = Math.round((pixels[px * 3] || 0) * 255);
+                  iData.data[px * 4 + 1] = Math.round((pixels[px * 3 + 1] || 0) * 255);
+                  iData.data[px * 4 + 2] = Math.round((pixels[px * 3 + 2] || 0) * 255);
+                } else {
+                  // Grayscale: 1 value per pixel
+                  var vv = Math.round((pixels[px] || 0) * 255);
+                  iData.data[px * 4] = vv; iData.data[px * 4 + 1] = vv; iData.data[px * 4 + 2] = vv;
+                }
+                iData.data[px * 4 + 3] = 255;
+              }
+              ctx.putImageData(iData, 0, 0);
+            }
+            cell.appendChild(canvas);
+            if (!isOk) {
+              cell.appendChild(el("div", { style: "font-size:7px;color:#f43f5e;line-height:1;" }, "\u2192" + pLbl));
+            }
+            return cell;
+          }
+
+          showCorrect.forEach(function (idx) { imgRow.appendChild(_drawImgCell(idx, predLabels[idx], trueLabels[idx], true)); });
+          if (showCorrect.length && showWrong.length) {
+            imgRow.appendChild(el("div", { style: "width:1px;background:#334155;align-self:stretch;margin:0 2px;" }));
+          }
+          showWrong.forEach(function (idx) { imgRow.appendChild(_drawImgCell(idx, predLabels[idx], trueLabels[idx], false)); });
+
+          classRow.appendChild(imgRow);
+          gridCard.appendChild(classRow);
+        }
+        gridCard.appendChild(el("div", { style: "font-size:9px;color:#64748b;margin-top:6px;" }, "Green border = correct | Red border = misclassified (predicted label shown below)"));
+        container.appendChild(gridCard);
+      }
+    }
+
+    // === Regression metrics ===
+    function _renderRegressionMetrics(container, preds, ySlice, testN, Plotly, darkLayout, pc) {
+      // For multi-dim regression (e.g. 40-dim reconstruction), flatten ALL values for metrics
+      var isMultiDim = ySlice[0] && Array.isArray(ySlice[0]) && ySlice[0].length > 1;
+      var truthFlat, predFlat;
+      if (isMultiDim) {
+        truthFlat = []; predFlat = [];
+        for (var fi = 0; fi < testN; fi++) {
+          var yt = ySlice[fi], pp = preds[fi];
+          if (Array.isArray(yt)) { for (var di = 0; di < yt.length; di++) { truthFlat.push(Number(yt[di] || 0)); predFlat.push(Number((pp && pp[di]) || 0)); } }
+          else { truthFlat.push(Number(yt || 0)); predFlat.push(Number((pp && pp[0]) || 0)); }
         }
       } else {
-        // no artifacts — show training curves as fallback
-        if (Plotly) {
-          var epochs = store && typeof store.getTrainerEpochs === "function" ? store.getTrainerEpochs(activeId) : [];
-          if (epochs.length) {
-            Plotly.newPlot(predChartDiv, [
-              { x: epochs.map(function (e) { return e.epoch; }), y: epochs.map(function (e) { return e.loss; }), mode: "lines+markers", name: "Train Loss", line: { color: "#22d3ee" } },
-              { x: epochs.map(function (e) { return e.epoch; }), y: epochs.map(function (e) { return e.val_loss; }), mode: "lines+markers", name: "Val Loss", line: { color: "#f59e0b" } },
-            ], {
-              paper_bgcolor: "#0b1220", plot_bgcolor: "#0b1220", font: { color: "#e2e8f0", size: 10 },
-              title: { text: "Training Curves", font: { size: 12 } },
-              xaxis: { title: "Epoch", gridcolor: "#1e293b" }, yaxis: { title: "Loss", gridcolor: "#1e293b" },
-              legend: { orientation: "h", y: -0.15 },
-              margin: { t: 30, b: 50, l: 50, r: 10 },
-            }, { responsive: true });
-          }
-        }
-        predStatusEl.textContent = "Model weights not saved — showing training curves only.";
+        truthFlat = ySlice.map(function (y) { return Array.isArray(y) ? y[0] : Number(y); });
+        predFlat = preds.map(function (p) { return Array.isArray(p) ? p[0] : Number(p); });
       }
+
+      var r2 = pc ? pc.r2Score(truthFlat, predFlat) : 0;
+      var regMetrics = pc ? pc.computeRegressionMetrics(truthFlat, predFlat) : { mae: 0, rmse: 0, bias: 0 };
+      var residuals = pc ? pc.computeResiduals(truthFlat, predFlat) : [];
+
+      var metricsRow = el("div", { style: "display:flex;gap:8px;margin-top:8px;flex-wrap:wrap;" });
+
+      function bigMetricCard(label, value, color) {
+        var c = el("div", { className: "osc-card", style: "flex:1;min-width:100px;text-align:center;padding:12px 8px;" });
+        c.appendChild(el("div", { style: "font-size:10px;color:#94a3b8;text-transform:uppercase;letter-spacing:1px;" }, label));
+        c.appendChild(el("div", { style: "font-size:24px;font-weight:700;color:" + color + ";margin-top:4px;" }, value));
+        return c;
+      }
+
+      var r2Color = r2 >= 0.9 ? "#4ade80" : r2 >= 0.7 ? "#fbbf24" : "#f43f5e";
+      metricsRow.appendChild(bigMetricCard("R\u00B2", r2.toFixed(4), r2Color));
+      metricsRow.appendChild(bigMetricCard("MAE", regMetrics.mae.toExponential(3), "#22d3ee"));
+      metricsRow.appendChild(bigMetricCard("RMSE", regMetrics.rmse.toExponential(3), "#f59e0b"));
+      metricsRow.appendChild(bigMetricCard("Bias", regMetrics.bias.toExponential(3), "#a78bfa"));
+      container.appendChild(metricsRow);
+
+      if (!Plotly) return;
+
+      // pred vs truth scatter with identity line
+      var scatterCard = el("div", { className: "osc-card", style: "margin-top:8px;" });
+      scatterCard.appendChild(el("div", { style: "font-size:13px;color:#67e8f9;margin-bottom:8px;font-weight:600;" }, "Predicted vs Truth"));
+      var scatterDiv = el("div", { style: "height:300px;" });
+      scatterCard.appendChild(scatterDiv);
+      container.appendChild(scatterCard);
+
+      var minVal = Math.min.apply(null, truthFlat.concat(predFlat));
+      var maxVal = Math.max.apply(null, truthFlat.concat(predFlat));
+      Plotly.newPlot(scatterDiv, [
+        { x: truthFlat, y: predFlat, mode: "markers", name: "Predictions", marker: { size: 4, color: "#22d3ee", opacity: 0.7 } },
+        { x: [minVal, maxVal], y: [minVal, maxVal], mode: "lines", name: "Identity", line: { color: "#4ade80", dash: "dash", width: 1.5 } },
+      ], Object.assign({}, darkLayout, {
+        title: { text: "Pred vs Truth (R\u00B2=" + r2.toFixed(4) + ")", font: { size: 12 } },
+        xaxis: { title: "Ground Truth", gridcolor: "#1e293b" },
+        yaxis: { title: "Predicted", gridcolor: "#1e293b" },
+        legend: { orientation: "h", y: -0.15 },
+      }), { responsive: true });
+
+      // residual plot
+      var residCard = el("div", { className: "osc-card", style: "margin-top:8px;" });
+      residCard.appendChild(el("div", { style: "font-size:13px;color:#67e8f9;margin-bottom:8px;font-weight:600;" }, "Residuals"));
+      var residDiv = el("div", { style: "height:260px;" });
+      residCard.appendChild(residDiv);
+      container.appendChild(residCard);
+
+      Plotly.newPlot(residDiv, [
+        { x: predFlat, y: residuals, mode: "markers", name: "Residuals", marker: { size: 4, color: "#f59e0b", opacity: 0.6 } },
+        { x: [minVal, maxVal], y: [0, 0], mode: "lines", name: "Zero", line: { color: "#475569", dash: "dash", width: 1 }, showlegend: false },
+      ], Object.assign({}, darkLayout, {
+        title: { text: "Residuals vs Predicted", font: { size: 12 } },
+        xaxis: { title: "Predicted", gridcolor: "#1e293b" },
+        yaxis: { title: "Residual (pred - truth)", gridcolor: "#1e293b" },
+        margin: { t: 35, b: 55, l: 55, r: 10 },
+      }), { responsive: true });
+
+      // time series overlay
+      var tsCard = el("div", { className: "osc-card", style: "margin-top:8px;" });
+      tsCard.appendChild(el("div", { style: "font-size:13px;color:#67e8f9;margin-bottom:8px;font-weight:600;" }, "Sample Predictions"));
+      var tsDiv = el("div", { style: "height:260px;" });
+      tsCard.appendChild(tsDiv);
+      container.appendChild(tsCard);
+
+      var tsIndices = [];
+      for (var ti = 0; ti < testN; ti++) tsIndices.push(ti);
+      Plotly.newPlot(tsDiv, [
+        { x: tsIndices, y: truthFlat, mode: "lines", name: "Ground Truth", line: { color: "#22d3ee", width: 1.5 } },
+        { x: tsIndices, y: predFlat, mode: "lines", name: "Prediction", line: { color: "#f59e0b", dash: "dot", width: 1.5 } },
+      ], Object.assign({}, darkLayout, {
+        title: { text: "Pred vs Truth (" + testN + " test samples)", font: { size: 12 } },
+        xaxis: { title: "Sample", gridcolor: "#1e293b" },
+        yaxis: { title: "Value", gridcolor: "#1e293b" },
+        legend: { orientation: "h", y: -0.15 },
+      }), { responsive: true });
+
+      // insights
+      var insightCard = el("div", { className: "osc-card", style: "margin-top:8px;border-left:3px solid #a78bfa;" });
+      insightCard.appendChild(el("div", { style: "font-size:13px;color:#a78bfa;margin-bottom:8px;font-weight:600;" }, "Insights & Recommendations"));
+      var regInsights = [];
+      if (r2 >= 0.95) regInsights.push({ icon: "\u2705", text: "Excellent fit (R\u00B2=" + r2.toFixed(4) + "). Model explains >95% of the variance." });
+      else if (r2 >= 0.8) regInsights.push({ icon: "\u2705", text: "Good fit (R\u00B2=" + r2.toFixed(4) + "). Consider more epochs or deeper model for further improvement." });
+      else if (r2 >= 0.5) regInsights.push({ icon: "\u26a0\ufe0f", text: "Moderate fit (R\u00B2=" + r2.toFixed(4) + "). Significant unexplained variance. Try larger model, more features, or longer training." });
+      else regInsights.push({ icon: "\u274c", text: "Poor fit (R\u00B2=" + r2.toFixed(4) + "). Model barely captures the relationship. Reconsider architecture, features, or data quality." });
+
+      if (Math.abs(regMetrics.bias) > regMetrics.mae * 0.3) {
+        regInsights.push({ icon: "\ud83d\udd0d", text: "Systematic bias detected (bias=" + regMetrics.bias.toExponential(3) + "). Model consistently " + (regMetrics.bias > 0 ? "over-predicts" : "under-predicts") + ". Check normalization or add bias correction." });
+      }
+      if (regMetrics.rmse > regMetrics.mae * 1.5) {
+        regInsights.push({ icon: "\u26a0\ufe0f", text: "RMSE >> MAE indicates some large outlier errors. Check residual plot for patterns \u2014 may benefit from robust loss function or outlier handling." });
+      }
+
+      regInsights.forEach(function (ins) {
+        var line = el("div", { style: "font-size:11px;color:#cbd5e1;padding:3px 0;display:flex;gap:6px;align-items:flex-start;" });
+        line.appendChild(el("span", { style: "flex-shrink:0;" }, ins.icon));
+        line.appendChild(el("span", {}, ins.text));
+        insightCard.appendChild(line);
+      });
+      container.appendChild(insightCard);
+    }
+
+    // === Helper: metric bar cell for P/R/F1 table ===
+    function _metricBarCell(val) {
+      var pct = Math.round(val * 100);
+      var barColor = val >= 0.8 ? "#4ade80" : val >= 0.5 ? "#fbbf24" : "#f43f5e";
+      var td = el("td", { style: "padding:4px 8px;position:relative;min-width:80px;" });
+      var bar = el("div", { style: "position:absolute;left:0;top:0;bottom:0;width:" + pct + "%;background:" + barColor + ";opacity:0.15;border-radius:2px;" });
+      td.appendChild(bar);
+      td.appendChild(el("span", { style: "position:relative;color:" + barColor + ";font-weight:600;font-size:11px;" }, (val * 100).toFixed(1) + "%"));
+      return td;
+    }
+
+    // === Fallback: training curves only ===
+    function _renderFallbackCurves(mainEl, activeId, Plotly, darkLayout) {
+      var card = el("div", { className: "osc-card", style: "margin-top:8px;" });
+      card.appendChild(el("div", { style: "font-size:13px;color:#67e8f9;margin-bottom:8px;font-weight:600;" }, "Training Curves"));
+      var chartDiv = el("div", { style: "height:280px;" });
+      card.appendChild(chartDiv);
+      mainEl.appendChild(card);
+
+      if (Plotly) {
+        var epochs = store && typeof store.getTrainerEpochs === "function" ? store.getTrainerEpochs(activeId) : [];
+        if (epochs.length) {
+          Plotly.newPlot(chartDiv, [
+            { x: epochs.map(function (e) { return e.epoch; }), y: epochs.map(function (e) { return e.loss; }), mode: "lines+markers", name: "Train Loss", line: { color: "#22d3ee" } },
+            { x: epochs.map(function (e) { return e.epoch; }), y: epochs.map(function (e) { return e.val_loss; }), mode: "lines+markers", name: "Val Loss", line: { color: "#f59e0b" } },
+          ], Object.assign({}, darkLayout, {
+            title: { text: "Training Curves", font: { size: 12 } },
+            xaxis: { title: "Epoch", gridcolor: "#1e293b" },
+            yaxis: { title: "Loss", gridcolor: "#1e293b" },
+            legend: { orientation: "h", y: -0.15 },
+          }), { responsive: true });
+        }
+      }
+      mainEl.appendChild(el("div", { style: "font-size:11px;color:#94a3b8;padding:4px 8px;" }, "Model weights not saved \u2014 showing training curves only."));
     }
 
     function _plotLossChart(epochs) {
@@ -440,10 +864,13 @@
       var optTypes = trainingEngine ? trainingEngine.OPTIMIZER_TYPES : ["adam", "sgd", "rmsprop", "adagrad"];
       var lrTypes = trainingEngine ? trainingEngine.LR_SCHEDULER_TYPES : ["plateau", "step", "exponential", "cosine", "none"];
 
+      var sra = getServerAdapter();
+      var defaultServerUrl = sra ? sra.DEFAULT_SERVER : "http://localhost:3777";
       var formSchema = [
         { key: "datasetId", label: "Dataset (" + schemaId + ")", type: "select", options: datasets.map(function (d) { return { value: d.id, label: (d.name || d.id) + (d.status === "ready" ? " \u2713" : " (draft)") }; }), disabled: isLocked },
         { key: "modelId", label: "Model (" + schemaId + ")", type: "select", options: models.map(function (m) { return { value: m.id, label: m.name || m.id }; }), disabled: isLocked },
         { key: "runtimeBackend", label: "Backend", type: "select", options: backends },
+        { key: "serverUrl", label: "Server URL", type: "text", placeholder: defaultServerUrl },
         { key: "epochs", label: "Epochs", type: "number", min: 1, max: 1000 },
         { key: "batchSize", label: "Batch size", type: "number", min: 1 },
         { key: "learningRate", label: "Learning rate", type: "number", min: 0.0000001, step: 0.0001 },
@@ -459,7 +886,7 @@
       ];
       var formValue = {
         datasetId: t.datasetId || "", modelId: t.modelId || "",
-        runtimeBackend: "auto", epochs: 20, batchSize: 32, learningRate: 0.001,
+        runtimeBackend: "auto", serverUrl: defaultServerUrl, epochs: 20, batchSize: 32, learningRate: 0.001,
         optimizerType: "adam", lrSchedulerType: "plateau", earlyStoppingPatience: 5,
         restoreBestWeights: true, lrPatience: 3, lrFactor: 0.5, minLr: 0.000001,
         gradClipNorm: 0, gradClipValue: 0,
@@ -583,12 +1010,75 @@
 
       var currentMountId = _mountId;
 
-      // serialize model to artifacts for worker
       var W = typeof window !== "undefined" ? window : {};
-      var workerBridge = W.OSCTrainingWorkerBridge;
+      var backend = String(config.runtimeBackend || "auto");
 
+      // === PYTORCH SERVER PATH ===
+      var serverAdapter = getServerAdapter();
+      if (backend === "pytorch_server" && serverAdapter) {
+        onStatus("Training on PyTorch Server...");
+        serverAdapter.runTrainingOnServer({
+          runId: activeId,
+          schemaId: schemaId,
+          graph: model.graph,
+          dataset: {
+            mode: graphMode, featureSize: featureSize, targetMode: activeDs.targetMode || defaultTarget,
+            xTrain: activeDs.xTrain, yTrain: activeDs.yTrain, xVal: activeDs.xVal, yVal: activeDs.yVal,
+            xTest: activeDs.xTest, yTest: activeDs.yTest,
+            pTrain: activeDs.pTrain, pVal: activeDs.pVal, pTest: activeDs.pTest,
+            paramNames: activeDs.paramNames, paramSize: activeDs.paramSize,
+            numClasses: activeDs.numClasses || activeDs.classCount || 0,
+          },
+          headConfigs: buildResult.headConfigs,
+          epochs: Number(config.epochs || 20), batchSize: Number(config.batchSize || 32),
+          learningRate: Number(config.learningRate || 0.001), optimizerType: String(config.optimizerType || "adam"),
+          lrSchedulerType: String(config.lrSchedulerType || "plateau"),
+          earlyStoppingPatience: Number(config.earlyStoppingPatience || 5),
+          restoreBestWeights: config.restoreBestWeights !== false,
+          gradClipNorm: Number(config.gradClipNorm || 0),
+          onEpochData: function (payload) {
+            if (currentMountId !== _mountId) return;
+            var logEntry = { epoch: payload.epoch, loss: payload.loss, val_loss: payload.val_loss, current_lr: payload.current_lr, improved: payload.improved };
+            if (store) store.appendTrainerEpoch(activeId, logEntry);
+            var epochs = store.getTrainerEpochs(activeId);
+            if (_lossChartDiv) _plotLossChart(epochs);
+            _appendEpochRow(logEntry);
+          },
+          onStatus: function (msg) { onStatus(msg); },
+          onReady: function (msg) { onStatus("Server ready: " + (msg.backend || "pytorch")); },
+        }, {
+          serverUrl: String(config.serverUrl || serverAdapter.DEFAULT_SERVER),
+        }).then(function (result) {
+          _isTraining = false;
+          if (currentMountId !== _mountId) return;
+          tCard.status = "done";
+          tCard.metrics = result;
+          tCard.backend = result.resolvedBackend || result.backend || "pytorch";
+          if (result.modelArtifacts) {
+            if (result.modelArtifacts.weightData && !result.modelArtifacts.weightValues) {
+              result.modelArtifacts.weightValues = result.modelArtifacts.weightData;
+              delete result.modelArtifacts.weightData;
+            }
+            tCard.modelArtifacts = result.modelArtifacts;
+          }
+          if (store) store.upsertTrainerCard(tCard);
+          onStatus("\u2713 Done (PyTorch): MAE=" + (result.mae != null ? Number(result.mae).toExponential(3) : "—"));
+          _renderLeftPanel(); _renderMainPanel();
+          buildResult.model.dispose();
+        }).catch(function (err) {
+          _isTraining = false;
+          tCard.status = "error"; tCard.error = err.message;
+          if (store) store.upsertTrainerCard(tCard);
+          onStatus("Server error: " + err.message);
+          _renderLeftPanel(); _renderMainPanel();
+          buildResult.model.dispose();
+        });
+        return;
+      }
+
+      // === WORKER PATH (non-blocking) ===
+      var workerBridge = W.OSCTrainingWorkerBridge;
       var useWorker = workerBridge && typeof workerBridge.runTrainingInWorker === "function";
-      // test if Worker is available (file:// blocks Workers)
       if (useWorker) {
         try { var _tw = new Worker("./src/training_worker.js"); _tw.terminate(); } catch (e) { useWorker = false; console.warn("[trainer] Worker not available:", e.message); }
       }
@@ -637,11 +1127,7 @@
               if (store) store.appendTrainerEpoch(activeId, logEntry);
               var epochs = store.getTrainerEpochs(activeId);
               if (_lossChartDiv) _plotLossChart(epochs);
-              if (_epochLogEl) {
-                var line = el("div", {}, "Epoch " + payload.epoch + ": loss=" + Number(payload.loss).toExponential(3) + " val=" + (payload.val_loss != null ? Number(payload.val_loss).toExponential(3) : "—"));
-                _epochLogEl.appendChild(line);
-                _epochLogEl.scrollTop = _epochLogEl.scrollHeight;
-              }
+              _appendEpochRow(logEntry);
             },
             onStatus: function (msg) { onStatus(msg); },
           }, {
@@ -658,7 +1144,16 @@
             if (currentMountId !== _mountId) return;
             tCard.status = "done";
             tCard.metrics = result;
-            if (result.modelArtifacts) tCard.modelArtifacts = result.modelArtifacts; // save weights
+            tCard.backend = result.resolvedBackend || String(config.runtimeBackend || "auto");
+            // convert worker's ArrayBuffer to JSON-safe array before store.upsert
+            if (result.modelArtifacts) {
+              var wa = result.modelArtifacts;
+              if (wa.weightData && wa.weightData.byteLength) {
+                wa.weightValues = Array.from(new Float32Array(wa.weightData));
+                delete wa.weightData;
+              }
+              tCard.modelArtifacts = wa;
+            }
             if (store) store.upsertTrainerCard(tCard);
             onStatus("\u2713 Done (Worker): MAE=" + (result.mae != null ? Number(result.mae).toExponential(3) : "—"));
             _renderLeftPanel(); _renderMainPanel();
@@ -705,25 +1200,39 @@
             if (store) store.appendTrainerEpoch(activeId, logEntry);
             var epochs = store.getTrainerEpochs(activeId);
             if (_lossChartDiv) _plotLossChart(epochs);
-            if (_epochLogEl) {
-              var line = el("div", {}, "Epoch " + (epoch + 1) + ": loss=" + Number(logs.loss).toExponential(3) + " val_loss=" + (logs.val_loss != null ? Number(logs.val_loss).toExponential(3) : "—"));
-              _epochLogEl.appendChild(line);
-              _epochLogEl.scrollTop = _epochLogEl.scrollHeight;
-            }
+            _appendEpochRow(logEntry);
           },
         }).then(function (result) {
           _isTraining = false;
           if (currentMountId !== _mountId) return;
           tCard.status = "done";
           tCard.metrics = { mae: result.mae, testMae: result.testMae, mse: result.mse, testMse: result.testMse, bestEpoch: result.bestEpoch, bestValLoss: result.bestValLoss, finalLr: result.finalLr, stoppedEarly: result.stoppedEarly, headCount: result.headCount };
-          // save model weights for test inference
+          tCard.backend = (tf.getBackend && tf.getBackend()) || String(config.runtimeBackend || "auto");
+          // save model weights for test inference — extract manually
           try {
-            buildResult.model.save(tf.io.withSaveHandler(function (artifacts) {
-              tCard.modelArtifacts = artifacts;
-              if (store) store.upsertTrainerCard(tCard);
-              return { modelArtifactsInfo: { dateSaved: new Date() } };
-            }));
-          } catch (e) { if (store) store.upsertTrainerCard(tCard); }
+            var allWeights = buildResult.model.getWeights();
+            var totalBytes = 0;
+            var specs = allWeights.map(function (w, i) {
+              var shape = w.shape;
+              var size = shape.reduce(function (a, b) { return a * b; }, 1);
+              var spec = { name: "w" + i, shape: shape, dtype: "float32", offset: totalBytes };
+              totalBytes += size * 4;
+              return spec;
+            });
+            var buffer = new ArrayBuffer(totalBytes);
+            var offset = 0;
+            allWeights.forEach(function (w) {
+              var data = w.dataSync();
+              new Float32Array(buffer, offset, data.length).set(data);
+              offset += data.length * 4;
+            });
+            // Store as Float32Array values (JSON-serializable) since ArrayBuffer is lost in JSON clone
+            var floatArr = Array.from(new Float32Array(buffer));
+            tCard.modelArtifacts = { weightSpecs: specs, weightValues: floatArr };
+          } catch (e) {
+            console.warn("[trainer] Weight save failed:", e.message);
+          }
+          if (store) store.upsertTrainerCard(tCard);
           onStatus("\u2713 Done: MAE=" + (result.mae != null ? Number(result.mae).toExponential(3) : "—"));
           _renderLeftPanel(); _renderMainPanel();
           buildResult.model.dispose();
@@ -761,9 +1270,16 @@
       try {
         var config = _configFormApi && typeof _configFormApi.getConfig === "function" ? _configFormApi.getConfig() : {};
 
-        NBC.createSingleNotebookFileFromConfig({
+        var NRA = W.OSCNotebookRuntimeAssets || null;
+        var runtimeFiles = NRA && NRA.files ? Object.keys(NRA.files) : [];
+        var runtimeLoader = NRA && NRA.files ? function (name) { return NRA.files[name] || ""; } : null;
+
+        NBC.createNotebookBundleZipFromConfig({
           seed: 42,
+          zipFileName: String(tCard.name || "trainer").replace(/\s+/g, "_") + "_bundle.zip",
           datasetBundleAdapter: DBA,
+          runtimeFiles: runtimeFiles,
+          runtimeLoader: runtimeLoader,
           sessions: [{
             id: tCard.id,
             name: tCard.name || "session",
@@ -778,15 +1294,23 @@
             modelGraphPath: "model_graph.json",
           }],
         }).then(function (result) {
-          if (!result || !result.buffer) { onStatus("Export returned empty"); return; }
-          var str = typeof result.buffer === "string" ? result.buffer : (result.buffer.toString ? result.buffer.toString() : String(result.buffer));
-          var blob = new Blob([str], { type: "application/json" });
+          if (!result) { onStatus("Export returned empty"); return; }
+          var blob = result.blob || null;
+          var fileName = result.fileName || (tCard.name || "notebook") + ".zip";
+
+          if (!blob) {
+            // try to create blob from buffer/text
+            var text = result.buffer || result.text || result.notebookText || null;
+            if (text) blob = new Blob([text], { type: "application/x-ipynb+json" });
+          }
+          if (!blob) { onStatus("Export produced no downloadable file"); return; }
+
           var a = document.createElement("a");
           a.href = URL.createObjectURL(blob);
-          a.download = (tCard.name || "notebook") + ".ipynb";
+          a.download = fileName;
           a.click();
           URL.revokeObjectURL(a.href);
-          onStatus("\u2713 Exported: " + a.download);
+          onStatus("\u2713 Exported: " + fileName);
         }).catch(function (err) { onStatus("Export error: " + err.message); });
       } catch (err) {
         onStatus("Export error: " + err.message);

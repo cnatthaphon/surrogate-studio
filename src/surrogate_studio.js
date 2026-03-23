@@ -128,6 +128,7 @@
         schemaRegistry: SchemaRegistry,
         trainingEngine: TrainingEngine,
         modelBuilder: ModelBuilderCore,
+        predictionCore: PredictionCore,
         uiEngine: UiEngine,
         onStatus: setStatus,
         escapeHtml: escapeHtml,
@@ -156,6 +157,7 @@
         store: store,
         schemaRegistry: SchemaRegistry,
         predictionCore: PredictionCore,
+        modelBuilder: ModelBuilderCore,
         onStatus: setStatus,
         escapeHtml: escapeHtml,
         el: elHelper,
@@ -183,8 +185,19 @@
 
     // schema changes are handled by individual tabs (e.g. playground left panel)
 
+    // auto-select items already in store (for demos with pre-loaded data)
+    if (store && stateApi) {
+      var preDatasets = typeof store.listDatasets === "function" ? store.listDatasets({}) : [];
+      var preModels = typeof store.listModels === "function" ? store.listModels({}) : [];
+      var preTrainers = typeof store.listTrainerCards === "function" ? store.listTrainerCards({}) : [];
+      if (preDatasets.length && !stateApi.getActiveDataset()) stateApi.setActiveDataset(preDatasets[0].id);
+      if (preModels.length && !stateApi.getActiveModel()) stateApi.setActiveModel(preModels[0].id);
+      if (preTrainers.length && !stateApi.getActiveTrainer()) stateApi.setActiveTrainer(preTrainers[0].id);
+    }
+
     // show default tab
-    layoutApi.showTab("playground");
+    var initialTab = cfg.defaultTab || "playground";
+    layoutApi.showTab(initialTab);
 
     // public API
     return {

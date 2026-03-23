@@ -22,6 +22,8 @@
       imageIdxUrl: "https://yann.lecun.com/exdb/mnist/train-images-idx3-ubyte.gz",
       labelIdxUrl: "https://yann.lecun.com/exdb/mnist/train-labels-idx1-ubyte.gz",
       classNames: ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"],
+      // Original split: first 55000 in sprite are train (IDX has 60000), last 10000 are test
+      originalTrainCount: 55000,
     },
     fashion_mnist: {
       id: "fashion_mnist",
@@ -33,6 +35,7 @@
         "T-shirt/top", "Trouser", "Pullover", "Dress", "Coat",
         "Sandal", "Shirt", "Sneaker", "Bag", "Ankle boot",
       ],
+      originalTrainCount: 50000,
     },
   };
   var CACHE = Object.create(null);
@@ -149,6 +152,7 @@
       urls: null,
       loadedAt: Date.now(),
       synthetic: true,
+      originalTrainCount: Math.round(total * 0.8333),
     };
   }
 
@@ -353,6 +357,7 @@
           labels: meta.labelIdxUrl,
         },
         loadedAt: Date.now(),
+        originalTrainCount: meta.originalTrainCount || 0,
       };
     });
   }
@@ -394,6 +399,7 @@
           labels: meta.labelIdxUrl,
         },
         loadedAt: Date.now(),
+        originalTrainCount: meta.originalTrainCount || 0,
       };
     });
   }
@@ -498,6 +504,7 @@
           label: meta.labelUrl,
         },
         loadedAt: Date.now(),
+        originalTrainCount: meta.originalTrainCount || 0,
       };
     });
   }

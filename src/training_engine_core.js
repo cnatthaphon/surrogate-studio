@@ -135,12 +135,15 @@
     if (headTarget === "logits" || headTarget === "label") {
       return rowsMain;
     }
-    if (headTarget === "xv") return rowsMain;
-    if (headTarget === "traj" || headTarget === "x") {
+    if (headTarget === "xv" || headTarget === "traj") return rowsMain;
+    if (headTarget === "x") {
+      // if data is multi-dim (e.g. 40 features), return as-is; only extract [0] for 2-col xv format
+      if (rowsMain[0] && Array.isArray(rowsMain[0]) && rowsMain[0].length > 2) return rowsMain;
       return rowsMain.map(function (r) { return [Number(Array.isArray(r) ? r[0] : r || 0)]; });
     }
     if (headTarget === "v") {
       if (String(targetMode) === "v") return rowsMain.map(function (r) { return [Number(Array.isArray(r) ? r[0] : r || 0)]; });
+      if (rowsMain[0] && Array.isArray(rowsMain[0]) && rowsMain[0].length > 2) return rowsMain;
       return rowsMain.map(function (r) { return [Number(Array.isArray(r) ? (r[1] || 0) : 0)]; });
     }
     return rowsMain;
@@ -225,12 +228,13 @@
       var testRows = (dataset.yTest && dataset.yTest.length)
         ? extractHeadRows(dataset.yTest, dataset.pTest, targetMode, head, datasetMeta)
         : null;
-      var cols = target === "xv" ? 2
-        : (target === "params" ? Math.max(1, Number(dataset.paramSize || (trainRows[0] && trainRows[0].length) || 1))
+      var inferredCols = trainRows[0] ? (Array.isArray(trainRows[0]) ? trainRows[0].length : 1) : 1;
+      var cols = (target === "xv" || target === "traj") ? Math.max(1, inferredCols)
+        : (target === "params" ? Math.max(1, Number(dataset.paramSize || inferredCols))
         : (target === "latent_diff" ? Math.max(1, Number(head.units || 1))
         : (target === "latent_kl" ? Math.max(2, Number(head.units || 2))
-        : (target === "logits" || target === "label" ? Math.max(1, Number(dataset.numClasses || (trainRows[0] && trainRows[0].length) || 1))
-        : 1))));
+        : (target === "logits" || target === "label" ? Math.max(1, Number(dataset.numClasses || inferredCols))
+        : Math.max(1, inferredCols)))));
       yTrainTensors.push(rowsToTensor(tf, trainRows, cols));
       yValTensors.push(rowsToTensor(tf, valRows, cols));
       if (testRows) yTestTensors.push(rowsToTensor(tf, testRows, cols));

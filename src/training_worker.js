@@ -636,8 +636,10 @@
       await ensureTfInitialized();
       await tf.ready();
       await ensureTfBackend(msg.runtimeConfig || {});
-      self.postMessage({ kind: "ready", backend: tf.getBackend() });
+      var resolvedBackend = tf.getBackend();
+      self.postMessage({ kind: "ready", backend: resolvedBackend });
       const out = await runTraining(msg);
+      if (out) out.resolvedBackend = resolvedBackend;
       const transfer = [];
       const wd = out && out.modelArtifacts ? out.modelArtifacts.weightData : null;
       if (wd instanceof ArrayBuffer) {

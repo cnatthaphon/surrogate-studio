@@ -2751,6 +2751,7 @@
           viewer: "image",
         },
         splitModes: [
+          { id: "original", label: "Original (source train/test)", stratifyKey: "" },
           { id: "random", label: "Random (global)", stratifyKey: "" },
           { id: "stratified_label", label: "Stratified by label", stratifyKey: "label" }
         ],
@@ -3064,6 +3065,7 @@
           viewer: "image",
         },
         splitModes: [
+          { id: "original", label: "Original (source train/test)", stratifyKey: "" },
           { id: "random", label: "Random (global)", stratifyKey: "" },
           { id: "stratified_label", label: "Stratified by label", stratifyKey: "label" }
         ],
@@ -3355,7 +3357,86 @@
       },
     }
   });
-  return {
-    registeredSchemaIds: schemaRegistry.listSchemas().map(function (x) { return String(x.id || ""); })
+  // ===== CIFAR-10 =====
+  registerSchema({
+    id: "cifar10",
+    label: "cifar10",
+    description: "CIFAR-10 image dataset schema — 32x32 RGB, 10 classes",
+    dataset: {
+      id: "cifar10",
+      label: "CIFAR-10 images",
+      sampleType: "image",
+      splitUnit: "sample",
+      splitDefaults: { mode: "stratified_label", train: 0.80, val: 0.10, test: 0.10 },
+      metadata: {
+        ui: { sidebarMode: "generic", viewer: "image" },
+        splitModes: [
+          { id: "original", label: "Original (source train/test)", stratifyKey: "" },
+          { id: "random", label: "Random (global)", stratifyKey: "" },
+          { id: "stratified_label", label: "Stratified by label", stratifyKey: "label" }
+        ],
+        display: { chartType: "label_histogram", tableColumns: ["split", "index", "label", "class_name", "pixel_values"] }
+      }
+    },
+    model: {
+      outputs: [
+        { key: "label", label: "class label (0-9)" },
+        { key: "logits", label: "class logits" }
+      ],
+      params: [],
+      presets: [
+        {
+          id: "cifar10_mlp_baseline",
+          label: "CIFAR-10: MLP Baseline",
+          metadata: {
+            graphSpec: {
+              nodes: [
+                { key: "image", type: "image_source", x: 140, y: 60, config: { sourceKey: "pixel_values" } },
+                { key: "input", type: "input", x: 420, y: 120, config: { mode: "flat" } },
+                { key: "dense_1", type: "dense", x: 620, y: 120, config: { units: 512, activation: "relu" } },
+                { key: "dropout_1", type: "dropout", x: 800, y: 120, config: { rate: 0.3 } },
+                { key: "dense_2", type: "dense", x: 980, y: 120, config: { units: 256, activation: "relu" } },
+                { key: "dropout_2", type: "dropout", x: 1160, y: 120, config: { rate: 0.2 } },
+                { key: "output", type: "output", x: 1340, y: 120, config: { target: "label", targetType: "label", loss: "cross_entropy", units: 10, unitsHint: 10, matchWeight: 1 } }
+              ],
+              edges: [
+                { from: "image", to: "input", out: "output_1", in: "input_1" },
+                { from: "input", to: "dense_1", out: "output_1", in: "input_1" },
+                { from: "dense_1", to: "dropout_1", out: "output_1", in: "input_1" },
+                { from: "dropout_1", to: "dense_2", out: "output_1", in: "input_1" },
+                { from: "dense_2", to: "dropout_2", out: "output_1", in: "input_1" },
+                { from: "dropout_2", to: "output", out: "output_1", in: "input_1" }
+              ]
+            }
+          }
+        }
+      ],
+      metadata: {
+        featureNodes: {
+          imageSource: [
+            { key: "pixel_values", label: "pixel values (32x32x3)", featureSize: 3072, shape: [32, 32, 3] }
+          ],
+          oneHot: [
+            { key: "label", label: "label", values: ["airplane", "automobile", "bird", "cat", "deer", "dog", "frog", "horse", "ship", "truck"] }
+          ],
+          policy: { allowHistory: false, allowWindowHistory: false, allowParams: false, allowOneHot: true, allowImageSource: true },
+          palette: { items: _imagePaletteItems() }
+        }
+      },
+    },
+    preconfig: {
+      dataset: { defaultModuleId: "cifar10", splitDefaults: { mode: "stratified_label", train: 0.80, val: 0.10, test: 0.10 } },
+      model: { defaultPreset: "cifar10_mlp_baseline" },
+    }
+  });
+
+  var exports = {
+    registeredSchemaIds: schemaRegistry.listSchemas().map(function (x) { return String(x.id || ""); }),
+    trajectoryPaletteItems: _trajectoryPaletteItems,
+    imagePaletteItems: _imagePaletteItems,
   };
+  // make palette builders accessible globally for demo schemas
+  var W = typeof window !== "undefined" ? window : (typeof globalThis !== "undefined" ? globalThis : {});
+  if (W) W.OSCSchemaBuiltinPalettes = { trajectory: _trajectoryPaletteItems, image: _imagePaletteItems };
+  return exports;
 });

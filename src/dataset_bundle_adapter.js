@@ -299,6 +299,54 @@
     };
   }
 
+  // Generic CSV builder for any dataset with xTrain/yTrain or records
+  function buildGenericCsvFromDataset(ds) {
+    if (!ds) return null;
+    var splits = [];
+
+    if (ds.xTrain && ds.xTrain.length) {
+      for (var i = 0; i < ds.xTrain.length; i++) splits.push({ split: "train", x: ds.xTrain[i], y: ds.yTrain ? ds.yTrain[i] : ds.xTrain[i] });
+    }
+    if (ds.xVal && ds.xVal.length) {
+      for (var j = 0; j < ds.xVal.length; j++) splits.push({ split: "val", x: ds.xVal[j], y: ds.yVal ? ds.yVal[j] : ds.xVal[j] });
+    }
+    if (ds.xTest && ds.xTest.length) {
+      for (var k = 0; k < ds.xTest.length; k++) splits.push({ split: "test", x: ds.xTest[k], y: ds.yTest ? ds.yTest[k] : ds.xTest[k] });
+    }
+
+    // try records format
+    if (!splits.length && ds.records) {
+      ["train", "val", "test"].forEach(function (s) {
+        var rec = ds.records[s];
+        if (rec && rec.x) {
+          for (var ri = 0; ri < rec.x.length; ri++) splits.push({ split: s, x: rec.x[ri], y: rec.y ? rec.y[ri] : rec.x[ri] });
+        }
+      });
+    }
+
+    if (!splits.length) return null;
+
+    var featureLen = Array.isArray(splits[0].x) ? splits[0].x.length : 1;
+    var targetLen = Array.isArray(splits[0].y) ? splits[0].y.length : 1;
+
+    // header
+    var header = ["split"];
+    for (var fi = 0; fi < featureLen; fi++) header.push("f" + fi);
+    for (var ti = 0; ti < targetLen; ti++) header.push("t" + ti);
+    var lines = [header.join(",")];
+
+    splits.forEach(function (row) {
+      var vals = [row.split];
+      var xArr = Array.isArray(row.x) ? row.x : [row.x];
+      var yArr = Array.isArray(row.y) ? row.y : [row.y];
+      for (var xi = 0; xi < featureLen; xi++) vals.push(String(xArr[xi] != null ? xArr[xi] : 0));
+      for (var yi = 0; yi < targetLen; yi++) vals.push(String(yArr[yi] != null ? yArr[yi] : 0));
+      lines.push(vals.join(","));
+    });
+
+    return lines.join("\n");
+  }
+
   function buildNotebookDatasetFiles(input) {
     var cfg = input || {};
     var ds = cfg.dataset;
@@ -356,6 +404,29 @@
           { path: "dataset/" + splitNameMnist, content: JSON.stringify(manifestMnist, null, 2), contentType: "application/json;charset=utf-8;" },
         ],
         manifest: manifestMnist,
+      };
+    }
+
+    // Generic tabular fallback: convert xTrain/yTrain (or records) to CSV
+    var genericCsv = buildGenericCsvFromDataset(ds);
+    if (genericCsv) {
+      var csvNameGeneric = stem + ".csv";
+      var splitNameGeneric = stem + ".split_manifest.json";
+      var manifestGen = {
+        version: 1, source: sourceTag, schemaId: schemaId,
+        format: "csv_manifest", datasetFile: csvNameGeneric, splitConfig: splitCfg,
+        mode: String((ds && ds.mode) || "regression"),
+        featureSize: Number(ds.featureSize || (ds.xTrain && ds.xTrain[0] && ds.xTrain[0].length) || 0),
+        seed: Number(ds.seed == null ? 42 : ds.seed),
+      };
+      return {
+        schemaId: schemaId, datasetName: datasetName, format: "csv_manifest",
+        datasetRef: "dataset/" + csvNameGeneric, splitRef: "dataset/" + splitNameGeneric,
+        files: [
+          { path: "dataset/" + csvNameGeneric, content: genericCsv, contentType: "text/csv;charset=utf-8;" },
+          { path: "dataset/" + splitNameGeneric, content: JSON.stringify(manifestGen, null, 2), contentType: "application/json;charset=utf-8;" },
+        ],
+        manifest: manifestGen,
       };
     }
 

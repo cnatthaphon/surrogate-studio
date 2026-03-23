@@ -45,6 +45,54 @@
       return (meta.palette && Array.isArray(meta.palette.items)) ? meta.palette.items : [];
     }
 
+    // Convert Drawflow export format to graphSpec {nodes, edges} and render via graphRuntime
+    function _loadGraphIntoEditor(graph, schemaId) {
+      if (!_editor || !_graphRuntime) return;
+
+      // extract Drawflow data
+      var data = (graph && graph.drawflow && graph.drawflow.Home && graph.drawflow.Home.data) ||
+                 (graph && graph.Home && graph.Home.data) || graph || {};
+      var ids = Object.keys(data);
+      if (!ids.length) return;
+
+      // convert to graphSpec format: {nodes: [...], edges: [...]}
+      var nodes = [];
+      var edges = [];
+      ids.forEach(function (id) {
+        var n = data[id];
+        if (!n) return;
+        var rawName = String(n.name || n.class || "");
+        var type = rawName.replace(/_layer$/, "").replace(/_block$/, "");
+        nodes.push({
+          key: String(id),
+          type: type,
+          x: Number(n.pos_x || 100),
+          y: Number(n.pos_y || 100),
+          config: n.data || {},
+        });
+        var outs = n.outputs || {};
+        Object.keys(outs).forEach(function (outPort) {
+          var conns = (outs[outPort] && outs[outPort].connections) || [];
+          conns.forEach(function (c) {
+            edges.push({
+              from: String(id),
+              to: String(c.node),
+              out: outPort,
+              in: c.input || "input_1",
+            });
+          });
+        });
+      });
+
+      var graphSpec = { nodes: nodes, edges: edges };
+      try {
+        _graphRuntime.renderPresetGraphSpec(_editor, graphSpec, schemaId || _getSchemaId());
+      } catch (e) {
+        console.warn("[model_tab] renderPresetGraphSpec failed:", e.message, "— falling back to import");
+        try { _editor.import(graph); } catch (e2) { console.warn("[model_tab] import also failed:", e2.message); }
+      }
+    }
+
     function _getPresets() {
       if (!schemaRegistry) return [];
       var schema = schemaRegistry.getModelSchema(_getSchemaId());
@@ -247,7 +295,9 @@
       var activeId = stateApi ? stateApi.getActiveModel() : "";
       if (activeId && store && _editor) {
         var m = store.getModel(activeId);
-        if (m && m.graph) { try { _editor.import(m.graph); } catch (e) {} }
+        if (m && m.graph) {
+          _loadGraphIntoEditor(m.graph, m.schemaId || _getSchemaId());
+        }
       }
     }
 

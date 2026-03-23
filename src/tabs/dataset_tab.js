@@ -192,29 +192,26 @@
       }
       if (parts.length) mainEl.appendChild(el("div", { style: "font-size:12px;color:#cbd5e1;padding:4px 8px;" }, parts.join(" | ")));
 
-      // delegate dataset preview to module
+      // delegate dataset preview to module or core renderer
       var mod = _getModuleForSchema(ds.schemaId);
+      var previewMount = el("div", { style: "margin-top:8px;" });
+      mainEl.appendChild(previewMount);
+      var previewDeps = {
+        el: el, escapeHtml: escapeHtml,
+        Plotly: (typeof window !== "undefined" && window.Plotly) ? window.Plotly : null,
+        isCurrent: function () { return currentMountId === _mountId; },
+        datasetData: d,
+      };
+
       if (mod && mod.playgroundApi && typeof mod.playgroundApi.renderDataset === "function") {
         // module has dedicated dataset renderer
-        var previewMount = el("div", { style: "margin-top:8px;" });
-        mainEl.appendChild(previewMount);
-        mod.playgroundApi.renderDataset(previewMount, {
-          el: el, escapeHtml: escapeHtml,
-          Plotly: (typeof window !== "undefined" && window.Plotly) ? window.Plotly : null,
-          isCurrent: function () { return currentMountId === _mountId; },
-          datasetData: d,
-        });
+        mod.playgroundApi.renderDataset(previewMount, previewDeps);
+      } else if (d && d.records && d.classNames && (typeof window !== "undefined") && window.OSCImageRenderCore) {
+        // standard image classification format → use core renderer with splits
+        window.OSCImageRenderCore.renderDatasetResult(previewMount, d, { el: el, showSplits: true, label: ds.name || d.schemaId });
       } else if (mod && mod.playgroundApi && typeof mod.playgroundApi.renderPlayground === "function") {
         // fallback to playground renderer with dataset data
-        var previewMount2 = el("div", { style: "margin-top:8px;" });
-        mainEl.appendChild(previewMount2);
-        mod.playgroundApi.renderPlayground(previewMount2, {
-          el: el, escapeHtml: escapeHtml,
-          Plotly: (typeof window !== "undefined" && window.Plotly) ? window.Plotly : null,
-          configEl: null,
-          isCurrent: function () { return currentMountId === _mountId; },
-          datasetData: d,
-        });
+        mod.playgroundApi.renderPlayground(previewMount, previewDeps);
       }
     }
 
@@ -321,7 +318,7 @@
       if (!formConfig.steps && formConfig.durationSec && formConfig.dt) {
         formConfig.steps = Math.floor(Number(formConfig.durationSec) / Number(formConfig.dt));
       }
-      if (formConfig.mnistTotalCount) formConfig.totalCount = Number(formConfig.mnistTotalCount);
+      if (!formConfig.totalCount && formConfig.mnistTotalCount) formConfig.totalCount = Number(formConfig.mnistTotalCount);
       var buildConfig = Object.assign({ schemaId: schemaId, moduleId: mod.id, variant: schemaId }, formConfig);
 
       // show loading state

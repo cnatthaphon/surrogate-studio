@@ -102,12 +102,20 @@
     var schemaId = String(cfg.schemaId || "mnist").trim().toLowerCase();
     var defaultSplitMode = String(cfg.defaultSplitMode || "random").trim().toLowerCase() || "random";
     var defaultTotalCount = Number(cfg.defaultTotalCount || 1400);
+    var hasOriginalSplit = cfg.hasOriginalSplit !== false;
+    var maxSamples = Number(cfg.maxSamples || 60000); // source max (MNIST=65000, CIFAR-10=10000)
     var defaultDatasetConfig = {
       seed: 42,
       splitMode: defaultSplitMode,
       trainFrac: 0.8,
       valFrac: 0.1,
       testFrac: 0.1,
+      useFullSource: false,
+      totalCount: defaultTotalCount,
+      trainCount: Math.round(defaultTotalCount * 0.8),
+      valCount: Math.round(defaultTotalCount * 0.1),
+      testCount: Math.round(defaultTotalCount * 0.1),
+      // backward compat aliases
       mnistTotalCount: defaultTotalCount,
       mnistTrainCount: Math.round(defaultTotalCount * 0.8),
       mnistValCount: Math.round(defaultTotalCount * 0.1),
@@ -120,20 +128,30 @@
 
     function normalizeDatasetUiState(raw) {
       var base = Object.assign({}, defaultDatasetConfig, raw || {});
+      var useFullSource = Boolean(base.useFullSource);
+      // support both old (mnist*) and new (generic) key names
+      var total = useFullSource ? maxSamples : (base.totalCount || base.mnistTotalCount || defaultTotalCount);
       var splitMode = normalizeSplitMode(base.splitMode || defaultSplitMode);
       var fr = normalizeSplitFractions(base.trainFrac, base.valFrac, base.testFrac);
       var counts = countsFromConfig({
-        totalCount: base.mnistTotalCount,
-        trainCount: base.mnistTrainCount,
-        valCount: base.mnistValCount,
-        testCount: base.mnistTestCount,
-      }, Math.max(30, clampInt(base.mnistTotalCount, 30, 70000)), splitMode, fr);
+        totalCount: total,
+        trainCount: base.trainCount || base.mnistTrainCount,
+        valCount: base.valCount || base.mnistValCount,
+        testCount: base.testCount || base.mnistTestCount,
+      }, Math.max(30, clampInt(total, 30, 70000)), splitMode, fr);
       return {
         seed: clampInt(base.seed, 0, 2147483647),
         splitMode: splitMode,
         trainFrac: fr.train,
         valFrac: fr.val,
         testFrac: fr.test,
+        useFullSource: useFullSource,
+        totalCount: counts.total,
+        trainCount: counts.train,
+        valCount: counts.val,
+        testCount: counts.test,
+        forceEqualClass: Boolean(base.forceEqualClass),
+        // backward compat
         mnistTotalCount: counts.total,
         mnistTrainCount: counts.train,
         mnistValCount: counts.val,
@@ -206,6 +224,12 @@
     return {
       getDatasetConfigSpec: function (ctx) {
         var uiState = normalizeDatasetUiState(getScopedConfig(ctx, "dataset", schemaId, defaultDatasetConfig));
+        var splitOptions = buildSplitModeOptions(ctx, schemaId, defaultSplitMode);
+        // add "original" split mode if dataset has original train/test
+        if (hasOriginalSplit) {
+          var hasOrig = splitOptions.some(function (o) { return o.value === "original"; });
+          if (!hasOrig) splitOptions.unshift({ value: "original", label: "Original (source train/test)" });
+        }
         return {
           sections: [
             {
@@ -213,15 +237,16 @@
               title: "Dataset Config",
               schema: [
                 { key: "seed", label: "Random Seed", type: "number", step: 1 },
-                { key: "splitMode", label: "Split mode", type: "select", options: buildSplitModeOptions(ctx, schemaId, defaultSplitMode) },
+                { key: "splitMode", label: "Split mode", type: "select", options: splitOptions },
                 { key: "trainFrac", label: "Train fraction", type: "number", min: 0.01, max: 0.99, step: 0.01 },
                 { key: "valFrac", label: "Val fraction", type: "number", min: 0.01, max: 0.99, step: 0.01 },
                 { key: "testFrac", label: "Test fraction (auto)", type: "number", step: 0.01, disabled: true },
-                { key: "mnistTotalCount", label: "Total samples", type: "number", min: 30, step: 10 },
+                { key: "useFullSource", label: "Use full source (" + maxSamples + " samples)", type: "checkbox" },
+                { key: "totalCount", label: "Total samples (max " + maxSamples + ")", type: "number", min: 30, max: maxSamples, step: 10 },
                 { key: "forceEqualClass", label: "Force equal class count", type: "checkbox" },
-                { key: "mnistTrainCount", label: "Train samples (auto)", type: "number", disabled: true },
-                { key: "mnistValCount", label: "Val samples (auto)", type: "number", disabled: true },
-                { key: "mnistTestCount", label: "Test samples (auto)", type: "number", disabled: true }
+                { key: "trainCount", label: "Train samples (auto)", type: "number", disabled: true },
+                { key: "valCount", label: "Val samples (auto)", type: "number", disabled: true },
+                { key: "testCount", label: "Test samples (auto)", type: "number", disabled: true }
               ],
               value: {
                 seed: String(uiState.seed),
@@ -229,11 +254,12 @@
                 trainFrac: Number(uiState.trainFrac || 0.8).toFixed(4),
                 valFrac: Number(uiState.valFrac || 0.1).toFixed(4),
                 testFrac: Number(uiState.testFrac || 0.1).toFixed(4),
-                mnistTotalCount: String(uiState.mnistTotalCount),
+                useFullSource: Boolean(uiState.useFullSource),
+                totalCount: String(uiState.totalCount),
                 forceEqualClass: Boolean(uiState.forceEqualClass),
-                mnistTrainCount: String(uiState.mnistTrainCount),
-                mnistValCount: String(uiState.mnistValCount),
-                mnistTestCount: String(uiState.mnistTestCount),
+                trainCount: String(uiState.trainCount),
+                valCount: String(uiState.valCount),
+                testCount: String(uiState.testCount),
               }
             }
           ],
@@ -267,10 +293,10 @@
           trainFrac: uiState.trainFrac,
           valFrac: uiState.valFrac,
           testFrac: uiState.testFrac,
-          trainCount: uiState.mnistTrainCount,
-          valCount: uiState.mnistValCount,
-          testCount: uiState.mnistTestCount,
-          totalCount: uiState.mnistTotalCount,
+          trainCount: uiState.trainCount,
+          valCount: uiState.valCount,
+          testCount: uiState.testCount,
+          totalCount: uiState.totalCount,
           forceEqualClass: Boolean(uiState.forceEqualClass),
         };
       },
@@ -596,9 +622,59 @@
     var seed = clampInt(c.seed, 1, 2147483647);
     var rng = createRng(seed);
     var totalAvailable = Math.max(1, Number(source.numExamples) || 0);
+
+    // --- "original" split: use source's actual train/test boundary ---
+    if (splitMode === "original") {
+      // source.originalTrainCount = exact boundary from the original dataset
+      // e.g. MNIST sprite: first 55000 are train, rest are test
+      var origTrainN = source.originalTrainCount || Math.round(totalAvailable * 0.8333);
+      var origTestN = totalAvailable - origTrainN;
+
+      // apply totalCount limit — scale both pools proportionally
+      var requestedTotal = clampInt(c.totalCount || c.mnistTotalCount || totalAvailable, 30, totalAvailable);
+      var trainPoolSize = Math.min(origTrainN, Math.round(requestedTotal * origTrainN / totalAvailable));
+      var testPoolSize = Math.min(origTestN, requestedTotal - trainPoolSize);
+      if (testPoolSize < 1 && origTestN > 0) { testPoolSize = 1; trainPoolSize = requestedTotal - 1; }
+
+      // carve val from train pool (using val fraction)
+      var valFromTrain = Math.max(1, Math.round(trainPoolSize * fr.val));
+      var finalTrainN = trainPoolSize - valFromTrain;
+
+      // build indices from original boundaries — NO re-sorting
+      var trainPool = []; for (var oi = 0; oi < origTrainN; oi++) trainPool.push(oi);
+      var testPool = []; for (var oj = origTrainN; oj < totalAvailable; oj++) testPool.push(oj);
+
+      // shuffle within each pool (preserve boundary, randomize order within)
+      for (var si = trainPool.length - 1; si > 0; si--) { var sj = Math.floor(rng() * (si + 1)); var st = trainPool[si]; trainPool[si] = trainPool[sj]; trainPool[sj] = st; }
+      for (var ti = testPool.length - 1; ti > 0; ti--) { var tj = Math.floor(rng() * (ti + 1)); var tt = testPool[ti]; testPool[ti] = testPool[tj]; testPool[tj] = tt; }
+
+      var trainIdx = trainPool.slice(0, finalTrainN);
+      var valIdx = trainPool.slice(finalTrainN, finalTrainN + valFromTrain);
+      var testIdx = testPool.slice(0, testPoolSize);
+
+      var train = makeSplitFromIndices(trainIdx, source);
+      var val = makeSplitFromIndices(valIdx, source);
+      var test = makeSplitFromIndices(testIdx, source);
+      var labels = train.y.concat(val.y, test.y);
+      return {
+        schemaId: String(source.schemaId || source.variant || cfg.schemaId || "mnist").trim().toLowerCase(),
+        datasetModuleId: String(source.variant || "mnist"),
+        source: String(source.source || "tfjs_mnist_sprite"), sourceUrls: source.urls || null,
+        mode: "classification", imageShape: source.imageShape || [28, 28, 1],
+        classCount: source.classCount || CLASS_COUNT, classNames: source.classNames.slice(),
+        splitConfig: { mode: "original", train: 0, val: 0, test: 0, stratifyKey: "", trainCount: train.x.length, valCount: val.x.length, testCount: test.x.length },
+        splitCounts: { train: train.x.length, val: val.x.length, test: test.x.length },
+        trainCount: train.x.length, valCount: val.x.length, testCount: test.x.length,
+        labelsHistogram: labelHistogram(labels, source.classNames),
+        records: { train: train, val: val, test: test },
+        preview: { firstLabels: train.y.slice(0, 24), sampleCount: train.x.length + val.x.length + test.x.length },
+        seed: seed,
+      };
+    }
+
     var counts = countsFromConfig(c, totalAvailable, splitMode, fr);
     var forceEqual = Boolean(c.forceEqualClass);
-    if (forceEqual) splitMode = "stratified_label"; // force stratified when equal class requested
+    if (forceEqual) splitMode = "stratified_label";
     var sampled;
     if (forceEqual) {
       // balanced sampling: equal count per class
@@ -725,6 +801,11 @@
     return buildDatasetFromSource(c, source);
   }
 
+  function _getCoreRenderer() {
+    var W = typeof window !== "undefined" ? window : (typeof globalThis !== "undefined" ? globalThis : {});
+    return W.OSCImageRenderCore || null;
+  }
+
   function createImagePlaygroundRenderer(variant, label, defaultClassNames) {
     return function renderPlayground(mountEl, deps) {
       if (!mountEl) return;
@@ -744,18 +825,28 @@
 
       mountEl.innerHTML = "";
       var isCurrent = (deps && typeof deps.isCurrent === "function") ? deps.isCurrent : function () { return true; };
+      var core = _getCoreRenderer();
 
       // if dataset data already provided (from dataset tab), show with train/val/test splits
       var providedData = deps && deps.datasetData;
       if (providedData) {
-        _renderImageResult(mountEl, elF, providedData, label, defaultClassNames, isCurrent, true);
+        if (core) {
+          core.renderDatasetResult(mountEl, providedData, { el: elF, showSplits: true, label: label });
+        } else {
+          _renderImageResult(mountEl, elF, providedData, label, defaultClassNames, isCurrent, true);
+        }
         return;
       }
 
       // playground: fetch preview and show all samples (no split)
       mountEl.appendChild(elF("div", { style: "color:#67e8f9;font-size:13px;" }, "Loading " + label + " data..."));
       buildMnistDataset({ seed: 42, totalCount: 999999, variant: variant }).then(function (res) {
-        _renderImageResult(mountEl, elF, res, label, defaultClassNames, isCurrent, false);
+        if (!isCurrent()) return;
+        if (core) {
+          core.renderDatasetResult(mountEl, res, { el: elF, showSplits: false, label: label });
+        } else {
+          _renderImageResult(mountEl, elF, res, label, defaultClassNames, isCurrent, false);
+        }
       }).catch(function (err) {
         mountEl.innerHTML = "";
         mountEl.appendChild(elF("div", { style: "color:#f43f5e;" }, "Error: " + String(err.message || err)));
@@ -857,9 +948,18 @@
             if (!pixels) return;
             var ctx = item.canvas.getContext("2d");
             var imgData = ctx.createImageData(w, h);
-            for (var pi = 0; pi < pixels.length && pi < w * h; pi++) {
-              var v = Math.round(pixels[pi] * 255);
-              imgData.data[pi * 4] = v; imgData.data[pi * 4 + 1] = v; imgData.data[pi * 4 + 2] = v; imgData.data[pi * 4 + 3] = 255;
+            var planeSize = w * h;
+            var isRgb = pixels.length >= planeSize * 3;
+            for (var pi = 0; pi < planeSize; pi++) {
+              if (isRgb) {
+                imgData.data[pi * 4] = Math.round((pixels[pi * 3] || 0) * 255);
+                imgData.data[pi * 4 + 1] = Math.round((pixels[pi * 3 + 1] || 0) * 255);
+                imgData.data[pi * 4 + 2] = Math.round((pixels[pi * 3 + 2] || 0) * 255);
+              } else {
+                var v = Math.round((pixels[pi] || 0) * 255);
+                imgData.data[pi * 4] = v; imgData.data[pi * 4 + 1] = v; imgData.data[pi * 4 + 2] = v;
+              }
+              imgData.data[pi * 4 + 3] = 255;
             }
             ctx.putImageData(imgData, 0, 0);
             if (item.idxLabel) item.idxLabel.textContent = "#" + idx;
@@ -945,6 +1045,7 @@
         schemaId: "mnist",
         defaultSplitMode: "random",
         defaultTotalCount: 1400,
+        maxSamples: 65000,
       }),
     },
   ];

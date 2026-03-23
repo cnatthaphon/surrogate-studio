@@ -4,12 +4,20 @@
   "description": "A schema-driven ML experimentation platform.",
   "main": "src/workflow_api_core.js",
   "scripts": {
-    "test": "node scripts/test_contract_all.js"
+    "test": "node scripts/test_contract_all.js",
+    "test:unit": "node scripts/test_contract_prediction_core.js",
+    "test:pipeline": "node scripts/test_headless_multi_schema_pipeline.js",
+    "test:browser": "node scripts/test_browser_ui.js",
+    "test:all": "node scripts/test_contract_all.js && node scripts/test_headless_multi_schema_pipeline.js && node scripts/test_browser_ui.js"
   },
   "dependencies": {
     "@tensorflow/tfjs": "^4.22.0"
   },
   "keywords": [],
   "author": "",
-  "license": "ISC"
+  "license": "ISC",
+  "devDependencies": {
+    "puppeteer": "^24.40.0",
+    "puppeteer-core": "^24.40.0"
+  }
 }

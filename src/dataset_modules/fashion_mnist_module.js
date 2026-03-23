@@ -95,6 +95,7 @@
         schemaId: "fashion_mnist",
         defaultSplitMode: "stratified_label",
         defaultTotalCount: 1400,
+        maxSamples: 60000,
       }) : null;
     })(),
   };

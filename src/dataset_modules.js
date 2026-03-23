@@ -13,6 +13,7 @@
         safeRequire("./dataset_modules/oscillator_module.js"),
         safeRequire("./dataset_modules/mnist_module.js"),
         safeRequire("./dataset_modules/fashion_mnist_module.js"),
+        safeRequire("./dataset_modules/cifar10_module.js"),
       ]
     );
     return;

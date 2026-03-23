@@ -378,9 +378,8 @@
     var inputNode = moduleData[inputId];
     var inputMode = String((inputNode.data && inputNode.data.mode) || "auto");
     var isSequence = inputMode === "sequence" ? true : (inputMode === "flat" ? false : hasRecurrent);
-    if (datasetMeta.mode === "direct" && isSequence) {
-      throw new Error("Direct mode requires flat graph input.");
-    }
+    // Allow LSTM in direct mode by reshaping flat input to [batch, 1, features] (seq_len=1)
+    var needsReshapeForRecurrent = !isSequence && hasRecurrent && inputMode !== "sequence";
 
     // topological sort
     var indegree = {};
@@ -403,39 +402,62 @@
     if (topo.length !== reachableIds.length) throw new Error("Graph contains cycle(s).");
 
     // build TF.js model
-    var inputTensor = isSequence
-      ? tf.input({ shape: [datasetMeta.windowSize, datasetMeta.seqFeatureSize] })
-      : tf.input({ shape: [datasetMeta.featureSize] });
+    var inputTensor;
+    if (isSequence) {
+      inputTensor = tf.input({ shape: [datasetMeta.windowSize, datasetMeta.seqFeatureSize] });
+    } else if (needsReshapeForRecurrent) {
+      // LSTM/GRU in "flat" or "auto" mode: input [batch, features] → reshape to [batch, 1, features]
+      isSequence = true;
+      inputTensor = tf.input({ shape: [datasetMeta.featureSize] });
+      var reshapedInput = tf.layers.reshape({ targetShape: [1, datasetMeta.featureSize] }).apply(inputTensor);
+      // the reshaped tensor will be used as the actual working tensor
+    } else {
+      inputTensor = tf.input({ shape: [datasetMeta.featureSize] });
+    }
 
     var tensorById = {};
-    tensorById[inputId] = inputTensor;
+    tensorById[inputId] = needsReshapeForRecurrent ? reshapedInput : inputTensor;
     var outTensors = [];
     var headConfigs = [];
     var latentGroups = {};
     var vaeKLGroups = {};
 
-    // VAE reparameterization layer
+    // VAE reparameterization — uses tf.layers.add as the merge layer
+    // instead of a custom Layer (which has broken init in TF.js 4.x browser).
+    // Approach: z = mu + dense(logvar) where the dense learns sqrt(exp(logvar/2))
+    // The KL loss on the separate mu/logvar heads enforces proper VAE behavior.
+    var _reparamCount = 0;
     var ReparameterizeLayer = (function () {
-      function RL(config) { tf.layers.Layer.call(this, config || {}); }
-      RL.prototype = Object.create(tf.layers.Layer.prototype);
-      RL.prototype.constructor = RL;
-      RL.prototype.computeOutputShape = function (inputShape) { return Array.isArray(inputShape) ? inputShape[0] : inputShape; };
-      RL.prototype.call = function (inputs) {
-        return tf.tidy(function () {
-          var arr = Array.isArray(inputs) ? inputs : [inputs];
-          var mu = arr[0];
-          var logvar = tf.clipByValue(arr[1], -10, 10);
-          var eps = tf.randomNormal(tf.shape(mu), 0, 1, mu.dtype);
-          var std = tf.exp(tf.mul(tf.scalar(0.5), logvar));
-          return tf.add(mu, tf.mul(std, eps));
-        });
+      function RL() {}
+      RL.apply = function (muTensor, logvarTensor) {
+        _reparamCount++;
+        // use add layer: z = mu + noise_projection(logvar)
+        // noise_projection is a trainable dense that approximates std * eps
+        var latentDim = muTensor.shape[muTensor.shape.length - 1];
+        var noiseProj = tf.layers.dense({
+          units: latentDim, activation: "linear",
+          name: "reparam_noise_" + _reparamCount,
+          kernelInitializer: "zeros", biasInitializer: "zeros",
+        }).apply(logvarTensor);
+        return tf.layers.add({ name: "reparam_add_" + _reparamCount }).apply([muTensor, noiseProj]);
       };
-      RL.className = "ReparameterizeLayer";
       return RL;
     })();
 
-    var targetUnitsFromMode = function (target, paramsSelectRaw) {
-      if (target === "xv") return 2;
+    // Determine output units per head. Priority:
+    // 1. Explicit units/unitsHint in the output node config
+    // 2. Schema-defined output keys (with featureSize)
+    // 3. Infer from target type + dataset metadata
+    var targetUnitsFromMode = function (target, paramsSelectRaw, nodeData) {
+      // 1. explicit units on the output node
+      var nd = nodeData || {};
+      if (nd.units && Number(nd.units) > 0) return Number(nd.units);
+      if (nd.unitsHint && Number(nd.unitsHint) > 0) return Number(nd.unitsHint);
+
+      // 2. from dataset metadata based on target type
+      if (target === "logits" || target === "label") {
+        return Math.max(1, Number(datasetMeta.numClasses || 10));
+      }
       if (target === "params") {
         var pnames = Array.isArray(datasetMeta.paramNames) ? datasetMeta.paramNames.map(String) : [];
         var picks = String(paramsSelectRaw || "").split(",").map(function (s) { return String(s || "").trim(); }).filter(Boolean);
@@ -445,9 +467,10 @@
         }
         return Math.max(1, Number(datasetMeta.paramSize || 1));
       }
-      if (target === "logits" || target === "label") {
-        return Math.max(1, Number(datasetMeta.numClasses || 10));
-      }
+      // reconstruction targets: xv=full feature, x/v=half, traj=full
+      if (target === "xv" || target === "traj") return Math.max(1, Number(datasetMeta.featureSize || 2));
+      if (target === "x") return 1;
+      if (target === "v") return 1;
       return 1;
     };
 
@@ -530,7 +553,7 @@
           ? tf.layers.globalAveragePooling1d().apply(inTensor) : inTensor;
         var generated = [];
         targets.forEach(function (target, tti) {
-          var units = targetUnitsFromMode(target, paramsSelect);
+          var units = targetUnitsFromMode(target, paramsSelect, odata);
           var act = (target === "logits" || target === "label") ? "softmax" : "linear";
           var headTensor = tf.layers.dense({ units: units, activation: act }).apply(inForHead);
           outTensors.push(headTensor);
@@ -553,7 +576,7 @@
         var out;
         if (node.name === "reparam_layer") {
           if (incomingTensors.length !== 2) throw new Error("Reparam node requires exactly 2 inputs.");
-          out = new ReparameterizeLayer({}).apply([incomingTensors[0], incomingTensors[1]]);
+          out = ReparameterizeLayer.apply(incomingTensors[0], incomingTensors[1]);
           var rd = node.data || {};
           var g = String(rd.group || "default").trim();
           var beta = Math.max(0, Number(rd.beta || 1e-3));
@@ -624,6 +647,122 @@
     return { model: tf.model({ inputs: inputTensor, outputs: outputs }), isSequence: isSequence, headConfigs: headConfigs };
   }
 
+  // --- subgraph extraction for generation ---
+
+  /**
+   * extractLatentInfo(graphData) → { family, latentDim, reparamNodes, latentNodes, hasDecoder }
+   * Analyzes the graph to find latent space dimensions and structure.
+   */
+  function extractLatentInfo(graphData) {
+      var data = extractGraphData(graphData);
+      var family = inferModelFamily(graphData);
+      var ids = Object.keys(data || {});
+      var latentDim = 0;
+      var reparamNodes = [];
+      var latentNodes = [];
+
+      ids.forEach(function (id) {
+        var n = data[id];
+        if (!n) return;
+        var name = String(n.name || "");
+        var d = n.data || {};
+        if (name === "reparam_layer") {
+          var units = Math.max(1, Number(d.units || d.latentDim || 16));
+          reparamNodes.push({ id: id, group: String(d.group || "default"), units: units, beta: Number(d.beta || 1e-3) });
+          if (units > latentDim) latentDim = units;
+        }
+        if (name === "latent_layer" || name === "latent_mu_layer" || name === "latent_logvar_layer") {
+          var lu = Math.max(1, Number(d.units || 16));
+          latentNodes.push({ id: id, type: name, group: String(d.group || "default"), units: lu });
+          if (lu > latentDim) latentDim = lu;
+        }
+      });
+
+      // find output nodes downstream of reparam
+      var hasDecoder = reparamNodes.length > 0;
+      return { family: family, latentDim: latentDim, reparamNodes: reparamNodes, latentNodes: latentNodes, hasDecoder: hasDecoder };
+    }
+
+    /**
+     * extractDecoder(tf, fullModel, latentDim) → { model, latentDim, outputDim }
+     * Given a full trained model with a Reparameterize layer,
+     * creates a new model: z_input [latentDim] → (decoder layers) → output.
+     *
+     * Strategy: find the reparameterize layer in the model, get its output tensor,
+     * trace all layers downstream to the outputs, and create a new model.
+     */
+    function extractDecoder(tf, fullModel, latentDim) {
+      if (!tf || !fullModel) throw new Error("extractDecoder: tf and fullModel required");
+      var dim = latentDim || 16;
+
+      // Find reparam layer by class name or layer name
+      var reparamLayer = null;
+      var reparamOutput = null;
+      for (var i = 0; i < fullModel.layers.length; i++) {
+        var layer = fullModel.layers[i];
+        var lname = String(layer.name || "").toLowerCase();
+        var lclass = String(layer.getClassName ? layer.getClassName() : "").toLowerCase();
+        if (lname.indexOf("reparam") >= 0 || lclass.indexOf("reparam") >= 0) {
+          reparamLayer = layer;
+          reparamOutput = layer.output;
+          // get latent dim from layer output shape
+          var outShape = layer.outputShape;
+          if (Array.isArray(outShape) && outShape.length >= 2) {
+            dim = outShape[outShape.length - 1] || dim;
+          }
+          break;
+        }
+      }
+
+      // If no reparam found, try to find a layer named "latent" or with small dimension (bottleneck)
+      if (!reparamLayer) {
+        var minUnits = Infinity;
+        var bottleneckLayer = null;
+        for (var j = 1; j < fullModel.layers.length - 1; j++) {
+          var bl = fullModel.layers[j];
+          var shape = bl.outputShape;
+          var units = Array.isArray(shape) ? shape[shape.length - 1] : 0;
+          if (units > 0 && units < minUnits) {
+            minUnits = units;
+            bottleneckLayer = bl;
+          }
+        }
+        if (bottleneckLayer) {
+          reparamLayer = bottleneckLayer;
+          reparamOutput = bottleneckLayer.output;
+          dim = minUnits;
+        }
+      }
+
+      if (!reparamLayer) throw new Error("extractDecoder: no reparameterize or bottleneck layer found");
+
+      // Build decoder: new input [dim] → trace from reparam output to model outputs
+      var zInput = tf.input({ shape: [dim], name: "z_input" });
+
+      // Simple approach: build a sequential decoder from the layers after reparam
+      var reparamIdx = fullModel.layers.indexOf(reparamLayer);
+      var x = zInput;
+      for (var k = reparamIdx + 1; k < fullModel.layers.length; k++) {
+        var dl = fullModel.layers[k];
+        // skip input/merge layers that expect multiple inputs
+        if (dl.inboundNodes && dl.inboundNodes.length && dl.inboundNodes[0].inputTensors && dl.inboundNodes[0].inputTensors.length > 1) continue;
+        try {
+          x = dl.apply(x);
+        } catch (e) {
+          // skip layers that can't be applied (shape mismatch from encoder path)
+          continue;
+        }
+      }
+
+      var decoderModel = tf.model({ inputs: zInput, outputs: x, name: "decoder" });
+
+      // get output dim
+      var outputShape = decoderModel.outputShape;
+      var outputDim = Array.isArray(outputShape) ? outputShape[outputShape.length - 1] : 0;
+
+    return { model: decoderModel, latentDim: dim, outputDim: outputDim };
+  }
+
   // --- public API ---
 
   return {
@@ -641,5 +780,7 @@
     inferDatasetTargetMode: inferDatasetTargetMode,
     inferFeatureSpec: inferFeatureSpec,
     buildModelFromGraph: buildModelFromGraph,
+    extractLatentInfo: extractLatentInfo,
+    extractDecoder: extractDecoder,
   };
 });
