@@ -49,21 +49,45 @@
 
     var getServerAdapter = function () { var W = typeof window !== "undefined" ? window : {}; return W.OSCServerRuntimeAdapter || null; };
     var _serverAvailable = null; // null = unchecked, true/false = checked
+    var _serverUrl = "";
+    var _serverInfo = null; // { ok, backend, python, ... }
 
     // detect available backends
     function _getAvailableBackends() {
-      var backends = [{ value: "auto", label: "Auto" }, { value: "cpu", label: "CPU" }];
+      var backends = [{ value: "auto", label: "Auto (best available)" }, { value: "cpu", label: "CPU" }];
       var tf = getTf();
       if (tf) {
         try { if (typeof tf.setBackend === "function") { backends.push({ value: "webgl", label: "WebGL (GPU)" }); } } catch (e) {}
         try { backends.push({ value: "wasm", label: "WASM" }); } catch (e) {}
       }
-      // add PyTorch Server if adapter is loaded
       var sra = getServerAdapter();
       if (sra) {
-        backends.push({ value: "pytorch_server", label: "PyTorch Server" });
+        var label = "PyTorch Server";
+        if (_serverAvailable === true) label += " \u2713";
+        else if (_serverAvailable === false) label += " \u2717";
+        backends.push({ value: "pytorch_server", label: label });
       }
       return backends;
+    }
+
+    // Check server connection
+    function _checkServerConnection(url, callback) {
+      var sra = getServerAdapter();
+      if (!sra) { callback(false); return; }
+      var serverUrl = url || _serverUrl || sra.DEFAULT_SERVER;
+      sra.checkServer(serverUrl).then(function (ok) {
+        _serverAvailable = ok;
+        if (ok) {
+          // get server info
+          fetch(serverUrl.replace(/\/$/, "") + "/api/health").then(function (r) { return r.json(); }).then(function (info) {
+            _serverInfo = info;
+            callback(true, info);
+          }).catch(function () { callback(true, null); });
+        } else {
+          _serverInfo = null;
+          callback(false);
+        }
+      });
     }
 
     // === LEFT ===
@@ -898,6 +922,46 @@
         rightEl.appendChild(formMount);
       }
 
+      // server connection panel
+      var sraForPanel = getServerAdapter();
+      if (sraForPanel) {
+        var serverPanel = el("div", { style: "margin-top:8px;padding:6px 8px;border:1px solid #1e293b;border-radius:6px;background:#0f172a;" });
+        var serverStatusEl = el("span", { style: "font-size:11px;" });
+        if (_serverAvailable === true && _serverInfo) {
+          serverStatusEl.style.color = "#4ade80";
+          serverStatusEl.textContent = "\u2713 Connected: " + (_serverInfo.backend || "pytorch") + " (" + (_serverInfo.python || "python") + ")";
+        } else if (_serverAvailable === false) {
+          serverStatusEl.style.color = "#f43f5e";
+          serverStatusEl.textContent = "\u2717 Server not reachable";
+        } else {
+          serverStatusEl.style.color = "#94a3b8";
+          serverStatusEl.textContent = "Server: not checked";
+        }
+        var testBtn = el("button", { style: "margin-left:8px;padding:2px 8px;font-size:10px;border-radius:4px;border:1px solid #475569;background:#1f2937;color:#cbd5e1;cursor:pointer;" }, "Test Connection");
+        testBtn.addEventListener("click", function () {
+          var urlInput = rightEl.querySelector("input[data-config-key='serverUrl']");
+          var url = urlInput ? urlInput.value : "";
+          _serverUrl = url;
+          serverStatusEl.style.color = "#fbbf24";
+          serverStatusEl.textContent = "Testing...";
+          _checkServerConnection(url, function (ok, info) {
+            if (ok) {
+              serverStatusEl.style.color = "#4ade80";
+              serverStatusEl.textContent = "\u2713 Connected: " + (info && info.backend || "pytorch");
+              if (info && info.python) serverStatusEl.textContent += " (" + info.python + ")";
+            } else {
+              serverStatusEl.style.color = "#f43f5e";
+              serverStatusEl.textContent = "\u2717 Cannot reach server";
+            }
+            // refresh backend dropdown to show check/cross
+            _renderRightPanel();
+          });
+        });
+        serverPanel.appendChild(serverStatusEl);
+        serverPanel.appendChild(testBtn);
+        rightEl.appendChild(serverPanel);
+      }
+
       // buttons
       var btnRow = el("div", { style: "display:flex;gap:4px;margin-top:8px;" });
       var trainLabel = hasTrained ? "Continue Training" : "Start Training";
@@ -927,8 +991,8 @@
 
       // info
       rightEl.appendChild(el("div", { style: "margin-top:12px;font-size:10px;color:#64748b;" },
-        "Backend: Auto tries WebGPU \u2192 WebGL \u2192 WASM \u2192 CPU. " +
-        "file:// uses main-thread fallback (may freeze). Use local server for Worker."));
+        "Backend: Auto tries PyTorch Server (if connected) \u2192 Worker (WebGPU/WebGL) \u2192 main thread. " +
+        "Use 'Test Connection' to check server availability."));
     }
 
     function _handleTrain() {
@@ -1012,6 +1076,12 @@
 
       var W = typeof window !== "undefined" ? window : {};
       var backend = String(config.runtimeBackend || "auto");
+
+      // Auto mode: if server is connected, use it; otherwise fall through to Worker/main-thread
+      if (backend === "auto" && _serverAvailable === true) {
+        backend = "pytorch_server";
+        onStatus("Auto: using PyTorch Server (connected)");
+      }
 
       // === PYTORCH SERVER PATH ===
       var serverAdapter = getServerAdapter();
