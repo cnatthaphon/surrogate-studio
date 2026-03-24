@@ -318,11 +318,25 @@
               var fw = trainer.modelArtifacts.weightValues
                 ? new Float32Array(trainer.modelArtifacts.weightValues)
                 : new Float32Array(trainer.modelArtifacts.weightData);
+              var savedSpecs = trainer.modelArtifacts.weightSpecs || [];
+              var isPy = savedSpecs.length > 0 && savedSpecs[0].name && savedSpecs[0].name.match(/^\d+\./);
               var mw = built.model.getWeights();
               var nw = []; var ro = 0;
               for (var wj = 0; wj < mw.length; wj++) {
                 var ws = mw[wj].shape.reduce(function (a, b) { return a * b; }, 1);
-                if (ro + ws <= fw.length) { nw.push(tf.tensor(fw.subarray(ro, ro + ws), mw[wj].shape)); ro += ws; }
+                if (ro + ws <= fw.length) {
+                  var raw = fw.subarray(ro, ro + ws);
+                  if (isPy && mw[wj].shape.length === 2 && savedSpecs[wj] && savedSpecs[wj].shape && savedSpecs[wj].shape.length === 2 &&
+                      savedSpecs[wj].shape[0] === mw[wj].shape[1] && savedSpecs[wj].shape[1] === mw[wj].shape[0]) {
+                    var tr = new Float32Array(ws);
+                    var rr = savedSpecs[wj].shape[0], cc = savedSpecs[wj].shape[1];
+                    for (var ti = 0; ti < rr; ti++) for (var tj = 0; tj < cc; tj++) tr[tj * rr + ti] = raw[ti * cc + tj];
+                    nw.push(tf.tensor(tr, mw[wj].shape));
+                  } else {
+                    nw.push(tf.tensor(raw, mw[wj].shape));
+                  }
+                  ro += ws;
+                }
               }
               if (nw.length === mw.length) built.model.setWeights(nw);
             } catch (e) { /* */ }

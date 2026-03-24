@@ -355,6 +355,9 @@
             }
 
             // load by order: match saved specs to rebuilt model weights
+            // detect if weights come from PyTorch (transposed) by checking saved specs
+            var savedSpecs = t.modelArtifacts.weightSpecs || [];
+            var isPytorch = savedSpecs.length > 0 && savedSpecs[0].name && savedSpecs[0].name.match(/^\d+\./);
             var modelWeights = rebuiltModel.model.getWeights();
             var newWeights = [];
             var readOffset = 0;
@@ -362,7 +365,25 @@
               var wShape = modelWeights[wi].shape;
               var wSize = wShape.reduce(function (a, b) { return a * b; }, 1);
               if (readOffset + wSize <= flatWeights.length) {
-                newWeights.push(tf.tensor(flatWeights.subarray(readOffset, readOffset + wSize), wShape));
+                var raw = flatWeights.subarray(readOffset, readOffset + wSize);
+                // PyTorch Dense weights are [out, in], TF.js expects [in, out] — transpose 2D matrices
+                if (isPytorch && wShape.length === 2 && savedSpecs[wi] && savedSpecs[wi].shape && savedSpecs[wi].shape.length === 2) {
+                  var pyShape = savedSpecs[wi].shape; // [out, in]
+                  if (pyShape[0] === wShape[1] && pyShape[1] === wShape[0]) {
+                    // needs transpose
+                    var transposed = new Float32Array(wSize);
+                    var rows = pyShape[0], cols = pyShape[1];
+                    for (var tr = 0; tr < rows; tr++) {
+                      for (var tc = 0; tc < cols; tc++) {
+                        transposed[tc * rows + tr] = raw[tr * cols + tc];
+                      }
+                    }
+                    newWeights.push(tf.tensor(transposed, wShape));
+                    readOffset += wSize;
+                    continue;
+                  }
+                }
+                newWeights.push(tf.tensor(raw, wShape));
                 readOffset += wSize;
               }
             }
