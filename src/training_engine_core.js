@@ -84,21 +84,9 @@
           var ce = tf.losses.softmaxCrossEntropy(yTrue, yPred);
           return tf.mul(tf.scalar(headWeight), ce);
         }
-        if (target !== "xv") {
-          var l = scalarLossByType(tf, yPred, yTrue, type);
-          return tf.mul(tf.scalar(headWeight), l);
-        }
-        var wsum = Math.max(1e-9, wx + wv);
-        var nx = wx / wsum;
-        var nv = wv / wsum;
-        var tx = yTrue.slice([0, 0], [-1, 1]);
-        var tv = yTrue.slice([0, 1], [-1, 1]);
-        var px = yPred.slice([0, 0], [-1, 1]);
-        var pv = yPred.slice([0, 1], [-1, 1]);
-        var lx = scalarLossByType(tf, px, tx, type);
-        var lv = scalarLossByType(tf, pv, tv, type);
-        var combined = tf.add(tf.mul(tf.scalar(nx), lx), tf.mul(tf.scalar(nv), lv));
-        return tf.mul(tf.scalar(headWeight), combined);
+        // generic MSE/loss on full output (works for any dimension)
+        var l = scalarLossByType(tf, yPred, yTrue, type);
+        return tf.mul(tf.scalar(headWeight), l);
       });
     };
   }
