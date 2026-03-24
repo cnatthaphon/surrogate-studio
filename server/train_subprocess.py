@@ -189,8 +189,8 @@ def main():
         name = keys[i]
         param = state[name].detach().cpu().numpy()
 
-        # Check if this is an LSTM weight_ih (followed by weight_hh, bias_ih, bias_hh)
-        if "rnn.weight_ih" in name and i + 3 < len(keys):
+        # Check if this is an RNN weight_ih (followed by weight_hh, bias_ih, bias_hh)
+        if "weight_ih_l0" in name and i + 3 < len(keys) and "weight_hh_l0" in keys[i+1]:
             w_ih = state[keys[i]].detach().cpu().numpy()     # [4*H, input]
             w_hh = state[keys[i+1]].detach().cpu().numpy()   # [4*H, hidden]
             b_ih = state[keys[i+2]].detach().cpu().numpy()    # [4*H]
@@ -252,105 +252,172 @@ def main():
 
 
 def build_model_from_graph(graph, feature_size, target_size, num_classes=0):
-    """Build PyTorch model from Drawflow graph JSON."""
+    """Build PyTorch model from Drawflow graph using functional API.
+
+    Mirrors TF.js model_builder_core.js exactly:
+    - Topological sort of graph nodes
+    - Follow edges for branching (VAE mu/logvar fork)
+    - Same layer types, same weight shapes
+    - Reparam = concat(mu, logvar) → dense(noise) → add(mu, noise)
+    """
     import torch
     import torch.nn as nn
 
-    class _RNNWrapper(nn.Module):
-        """Flat input [batch, features] → unsqueeze → RNN → last hidden."""
-        def __init__(self, rnn_cls, input_size, hidden_size):
-            super().__init__()
-            self.rnn = rnn_cls(input_size=input_size, hidden_size=hidden_size, num_layers=1, batch_first=True)
-        def forward(self, x):
-            if x.dim() == 2:
-                x = x.unsqueeze(1)
-            out, _ = self.rnn(x)
-            return out[:, -1, :]
-
-    # Extract graph nodes
-    data = {}
+    # --- Extract Drawflow graph ---
+    raw = {}
     if "drawflow" in graph and "Home" in graph["drawflow"]:
-        data = graph["drawflow"]["Home"].get("data", {})
+        raw = graph["drawflow"]["Home"].get("data", {})
     elif "Home" in graph:
-        data = graph["Home"].get("data", {})
+        raw = graph["Home"].get("data", {})
     else:
-        data = graph
+        raw = graph
 
-    # Collect layers in topological order
-    layers = []
-    node_ids = sorted(data.keys(), key=lambda k: int(k) if k.isdigit() else 0)
+    # Parse nodes + edges
+    nodes = {}
+    edges_out = {}  # nid → [{ to, from_port, to_port }]
+    edges_in = {}   # nid → [{ from, from_port, to_port }]
+    for nid in sorted(raw.keys(), key=lambda k: int(k) if k.isdigit() else 0):
+        n = raw[nid]
+        t = str(n.get("name", "")).replace("_layer", "").replace("_block", "")
+        nodes[nid] = {"type": t, "config": n.get("data", {})}
+        edges_out[nid] = []
+        edges_in.setdefault(nid, [])
+        for ok, ov in (n.get("outputs", {}) or {}).items():
+            for conn in (ov or {}).get("connections", []):
+                to_id = str(conn.get("node", ""))
+                to_port = str(conn.get("input", "input_1"))
+                edges_out[nid].append({"to": to_id, "from_port": ok, "to_port": to_port})
+                edges_in.setdefault(to_id, [])
+                edges_in[to_id].append({"from": nid, "from_port": ok, "to_port": to_port})
 
-    for nid in node_ids:
-        node = data[nid]
-        name = str(node.get("name", "")).replace("_layer", "").replace("_block", "")
-        cfg = node.get("data", {})
-        layers.append({"id": nid, "type": name, "config": cfg})
+    # Topological sort
+    indeg = {k: len(edges_in.get(k, [])) for k in nodes}
+    q = sorted([k for k in nodes if indeg[k] == 0], key=lambda x: int(x) if x.isdigit() else 0)
+    topo = []
+    while q:
+        cur = q.pop(0)
+        topo.append(cur)
+        for e in edges_out.get(cur, []):
+            indeg[e["to"]] -= 1
+            if indeg[e["to"]] == 0:
+                q.append(e["to"])
+                q.sort(key=lambda x: int(x) if x.isdigit() else 0)
 
-    # Build sequential model (simplified — follows node order)
-    modules = []
-    in_dim = feature_size
-    out_dim = target_size
+    # --- Build model using nn.Module with named submodules ---
+    class _GraphModel(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.topo = topo
+            self.node_types = {nid: nodes[nid]["type"] for nid in topo}
+            self.node_configs = {nid: nodes[nid]["config"] for nid in topo}
+            self.input_id = None
+            self.output_ids = []
+            self._edges_in = edges_in
 
-    for layer in layers:
-        t = layer["type"]
-        c = layer["config"]
+            dim_map = {}
 
-        if t == "input":
-            continue  # skip input node
-        elif t == "dense":
-            units = int(c.get("units", 32))
-            act = str(c.get("activation", "relu"))
-            modules.append(nn.Linear(in_dim, units))
-            if act == "relu": modules.append(nn.ReLU())
-            elif act == "tanh": modules.append(nn.Tanh())
-            elif act == "sigmoid": modules.append(nn.Sigmoid())
-            in_dim = units
-        elif t == "dropout":
-            rate = float(c.get("rate", 0.1))
-            modules.append(nn.Dropout(rate))
-        elif t == "batchnorm":
-            modules.append(nn.BatchNorm1d(in_dim))
-        elif t == "layernorm":
-            modules.append(nn.LayerNorm(in_dim))
-        elif t in ("latent_mu", "latent_logvar", "latent"):
-            units = int(c.get("units", 8))
-            modules.append(nn.Linear(in_dim, units))
-            in_dim = units
-        elif t == "reparam":
-            # Match TF.js: dense(logvar → noise) + add(mu, noise)
-            # In Sequential mode, we add a Linear layer that learns noise projection from logvar
-            # This matches TF.js reparam_noise layer
-            modules.append(nn.Linear(in_dim, in_dim))
-            # in_dim stays the same (output = mu + noise projection)
-        elif t == "output":
-            # output layer: project to target size
-            target = str(c.get("target", "xv"))
-            if target in ("label", "logits") and num_classes > 0:
-                modules.append(nn.Linear(in_dim, num_classes))
-            else:
-                modules.append(nn.Linear(in_dim, out_dim))
-        elif t in ("lstm", "gru", "rnn"):
-            units = int(c.get("units", 32))
-            # Use actual RNN layer to match TF.js weight layout
-            rnn_cls = {"lstm": nn.LSTM, "gru": nn.GRU, "rnn": nn.RNN}[t]
-            modules.append(_RNNWrapper(rnn_cls, in_dim, units))
-            in_dim = units
-        elif t == "image_source":
-            continue
-        elif t == "concat":
-            continue
-        elif t == "conv1d":
-            continue  # skip for now
-        elif t == "noise_schedule":
-            continue
-        else:
-            status(f"Unknown node type: {t}, skipping")
+            for nid in topo:
+                t = self.node_types[nid]
+                c = self.node_configs[nid]
+                # get input dim from parents
+                parents = edges_in.get(nid, [])
+                # sort parents by port (input_1 before input_2)
+                parents.sort(key=lambda p: p["to_port"])
+                parent_dims = [dim_map[p["from"]] for p in parents if p["from"] in dim_map]
+                in_dim = parent_dims[0] if parent_dims else feature_size
 
-    if not modules:
-        # Fallback: simple linear
-        modules = [nn.Linear(feature_size, target_size)]
+                if t == "input":
+                    self.input_id = nid
+                    dim_map[nid] = feature_size
+                elif t == "dense":
+                    units = int(c.get("units", 32))
+                    setattr(self, f"dense_{nid}", nn.Linear(in_dim, units))
+                    act = str(c.get("activation", "relu"))
+                    if act == "relu": setattr(self, f"act_{nid}", nn.ReLU())
+                    elif act == "tanh": setattr(self, f"act_{nid}", nn.Tanh())
+                    elif act == "sigmoid": setattr(self, f"act_{nid}", nn.Sigmoid())
+                    dim_map[nid] = units
+                elif t in ("latent_mu", "latent_logvar", "latent"):
+                    units = int(c.get("units", 8))
+                    setattr(self, f"dense_{nid}", nn.Linear(in_dim, units))
+                    dim_map[nid] = units
+                elif t == "reparam":
+                    # TF.js: concat(mu, logvar) → dense(2*latent → latent) → add(mu, projected)
+                    # Match: dense(in_dim → in_dim) as noise projection
+                    setattr(self, f"reparam_noise_{nid}", nn.Linear(in_dim, in_dim))
+                    dim_map[nid] = in_dim
+                elif t in ("lstm", "gru", "rnn"):
+                    units = int(c.get("units", 32))
+                    rnn_cls = {"lstm": nn.LSTM, "gru": nn.GRU, "rnn": nn.RNN}[t]
+                    setattr(self, f"rnn_{nid}", rnn_cls(
+                        input_size=in_dim, hidden_size=units, num_layers=1, batch_first=True))
+                    dim_map[nid] = units
+                elif t == "dropout":
+                    setattr(self, f"drop_{nid}", nn.Dropout(float(c.get("rate", 0.1))))
+                    dim_map[nid] = in_dim
+                elif t == "batchnorm":
+                    setattr(self, f"bn_{nid}", nn.BatchNorm1d(in_dim))
+                    dim_map[nid] = in_dim
+                elif t == "layernorm":
+                    setattr(self, f"ln_{nid}", nn.LayerNorm(in_dim))
+                    dim_map[nid] = in_dim
+                elif t == "output":
+                    target = str(c.get("target", "xv"))
+                    odim = num_classes if (target in ("label", "logits") and num_classes > 0) else target_size
+                    setattr(self, f"out_{nid}", nn.Linear(in_dim, odim))
+                    dim_map[nid] = odim
+                    self.output_ids.append(nid)
+                else:
+                    dim_map[nid] = in_dim
 
-    return nn.Sequential(*modules)
+        def forward(self, x):
+            tensors = {}
+            for nid in self.topo:
+                t = self.node_types[nid]
+                parents = self._edges_in.get(nid, [])
+                parents_sorted = sorted(parents, key=lambda p: p["to_port"])
+
+                if t == "input":
+                    tensors[nid] = x
+                    continue
+
+                # get input tensor (first parent)
+                inp = tensors[parents_sorted[0]["from"]] if parents_sorted else x
+
+                if t == "dense" or t in ("latent_mu", "latent_logvar", "latent"):
+                    out = getattr(self, f"dense_{nid}")(inp)
+                    act = getattr(self, f"act_{nid}", None)
+                    if act is not None:
+                        out = act(out)
+                    tensors[nid] = out
+                elif t == "reparam":
+                    # first parent = mu, apply noise projection and add
+                    noise = getattr(self, f"reparam_noise_{nid}")(inp)
+                    tensors[nid] = inp + noise
+                elif t in ("lstm", "gru", "rnn"):
+                    rnn = getattr(self, f"rnn_{nid}")
+                    h = inp
+                    if h.dim() == 2:
+                        h = h.unsqueeze(1)
+                    out, _ = rnn(h)
+                    tensors[nid] = out[:, -1, :]
+                elif t == "dropout":
+                    tensors[nid] = getattr(self, f"drop_{nid}")(inp)
+                elif t == "batchnorm":
+                    tensors[nid] = getattr(self, f"bn_{nid}")(inp)
+                elif t == "layernorm":
+                    tensors[nid] = getattr(self, f"ln_{nid}")(inp)
+                elif t == "output":
+                    tensors[nid] = getattr(self, f"out_{nid}")(inp)
+                else:
+                    tensors[nid] = inp
+
+            # return first output
+            if self.output_ids:
+                return tensors[self.output_ids[0]]
+            return x
+
+    return _GraphModel()
 
 
 if __name__ == "__main__":
