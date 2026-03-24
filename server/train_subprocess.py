@@ -244,7 +244,7 @@ def main():
         "stoppedEarly": no_improve >= patience if patience > 0 else False,
         "headCount": len(head_configs) or 1,
         "backend": str(device),
-        "paramCount": param_count,
+        "paramCount": len(weight_values),  # use exported count (matches TF.js after bias combining)
         "modelArtifacts": {
             "weightSpecs": weight_specs,
             "weightData": weight_values,  # flat float array (JSON-safe)
