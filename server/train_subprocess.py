@@ -235,13 +235,38 @@ def main():
         offset += len(data) * 4
         i += 1
 
-    # --- Compute final metrics ---
+    # --- Compute final metrics (val + test) ---
     model.eval()
     with torch.no_grad():
+        # Validation metrics
         x_val_t = torch.tensor(x_val).to(device)
         pred_val = model(x_val_t).cpu().numpy()
         mae = float(np.mean(np.abs(pred_val - y_val)))
         mse = float(np.mean((pred_val - y_val) ** 2))
+
+        # Test metrics (if test data provided)
+        x_test = np.array(ds.get("xTest", []), dtype=np.float32)
+        y_test = np.array(ds.get("yTest", []), dtype=np.float32)
+        test_metrics = {}
+        if x_test.size > 0 and y_test.size > 0:
+            x_test_t = torch.tensor(x_test).to(device)
+            pred_test = model(x_test_t).cpu().numpy()
+            t_flat = y_test.flatten()
+            p_flat = pred_test.flatten()
+            test_metrics["testMae"] = float(np.mean(np.abs(p_flat - t_flat)))
+            test_metrics["testMse"] = float(np.mean((p_flat - t_flat) ** 2))
+            test_metrics["testRmse"] = float(np.sqrt(test_metrics["testMse"]))
+            test_metrics["testBias"] = float(np.mean(p_flat - t_flat))
+            ss_tot = float(np.sum((t_flat - t_flat.mean()) ** 2))
+            ss_res = float(np.sum((t_flat - p_flat) ** 2))
+            test_metrics["testR2"] = 1 - ss_res / ss_tot if ss_tot > 0 else 0
+            test_metrics["testN"] = len(x_test)
+
+            # Classification metrics
+            if is_classification and num_classes > 0:
+                pred_labels = pred_test.argmax(axis=1)
+                true_labels = y_test.flatten().astype(int) if y_test.ndim == 1 or y_test.shape[1] == 1 else y_test.argmax(axis=1)
+                test_metrics["testAccuracy"] = float((pred_labels == true_labels).sum()) / len(x_test)
 
     result = {
         "mae": mae,
@@ -252,12 +277,13 @@ def main():
         "stoppedEarly": no_improve >= patience if patience > 0 else False,
         "headCount": len(head_configs) or 1,
         "backend": str(device),
-        "paramCount": len(weight_values),  # use exported count (matches TF.js after bias combining)
+        "paramCount": len(weight_values),
         "modelArtifacts": {
             "weightSpecs": weight_specs,
-            "weightData": weight_values,  # flat float array (JSON-safe)
+            "weightData": weight_values,
         },
     }
+    result.update(test_metrics)
 
     complete(result)
 

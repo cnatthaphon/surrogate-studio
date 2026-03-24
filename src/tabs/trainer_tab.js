@@ -294,77 +294,42 @@
       var defaultTarget = (allowedOutputKeys[0] && (allowedOutputKeys[0].key || allowedOutputKeys[0])) || "x";
       var isClassification = defaultTarget === "label" || defaultTarget === "logits";
 
-      // --- check if should use server-side evaluation ---
-      var isPytorchTrained = t.backend && (String(t.backend).indexOf("cuda") >= 0 || String(t.backend).indexOf("pytorch") >= 0);
-      var sra = getServerAdapter();
-
-      if (isPytorchTrained && sra && t.modelArtifacts) {
-        // Server-side test: send weights + test data to PyTorch server
-        var statusEl = el("div", { style: "font-size:11px;color:#94a3b8;padding:4px 8px;" }, "Evaluating on PyTorch Server (same runtime as training)...");
+      // --- check if server already computed test metrics (same contract as TF.js) ---
+      var m = t.metrics || {};
+      if (m.testR2 != null || m.testMae != null || m.testAccuracy != null) {
+        var statusEl = el("div", { style: "font-size:11px;color:#94a3b8;padding:4px 8px;" },
+          "Evaluated " + (m.testN || "?") + " test samples" +
+          (t.backend ? " (" + t.backend + ")" : "") + ".");
         mainEl.appendChild(statusEl);
 
-        var dataset = store ? store.getDataset(t.datasetId) : null;
-        var modelRec = store ? store.getModel(t.modelId) : null;
-        if (!dataset || !dataset.data || !modelRec) {
-          statusEl.textContent = "Dataset or model not found.";
-          return;
-        }
-        var dsData = dataset.data;
-        var isBundle = dsData.kind === "dataset_bundle" && dsData.datasets;
-        var activeDs = isBundle ? dsData.datasets[dsData.activeVariantId || Object.keys(dsData.datasets)[0]] : dsData;
-        var xTest = activeDs.xTest || (activeDs.records && activeDs.records.test && activeDs.records.test.x) || [];
-        var yTest = activeDs.yTest || (activeDs.records && activeDs.records.test && activeDs.records.test.y) || [];
-        if (!xTest.length) { statusEl.textContent = "No test data."; return; }
+        var metricsContainer = el("div", {});
+        mainEl.appendChild(metricsContainer);
 
-        var testConfig = {
-          graph: modelRec.graph,
-          dataset: {
-            featureSize: xTest[0] ? xTest[0].length : 40,
-            targetMode: defaultTarget,
-            numClasses: activeDs.numClasses || activeDs.classCount || 0,
-            xTest: xTest,
-            yTest: isClassification ? yTest : yTest,
-          },
-          weightValues: t.modelArtifacts.weightValues || t.modelArtifacts.weightData || [],
-          modelArtifacts: t.modelArtifacts,
-        };
-
-        var serverUrl = (t.config && t.config.serverUrl) || sra.DEFAULT_SERVER;
-        sra.runTestOnServer(testConfig, serverUrl).then(function (result) {
-          statusEl.textContent = "Evaluated " + (result.testN || xTest.length) + " test samples (PyTorch Server).";
-
-          var metricsContainer = el("div", {});
-          mainEl.appendChild(metricsContainer);
-
-          if (isClassification && result.accuracy != null) {
-            _renderClassificationMetrics(metricsContainer, [], [], [], result.testN || xTest.length, activeDs.classCount || 10, null, [28, 28, 1], activeDs, Plotly, _darkLayout, pc);
-          } else if (result.r2 != null) {
-            // show server-computed metrics as big number cards
-            var row = el("div", { style: "display:flex;gap:8px;margin-top:8px;flex-wrap:wrap;" });
-            function bigCard(label, value, color) {
-              var c = el("div", { className: "osc-card", style: "flex:1;min-width:100px;text-align:center;padding:12px 8px;" });
-              c.appendChild(el("div", { style: "font-size:10px;color:#94a3b8;text-transform:uppercase;letter-spacing:1px;" }, label));
-              c.appendChild(el("div", { style: "font-size:24px;font-weight:700;color:" + color + ";margin-top:4px;" }, value));
-              return c;
-            }
-            var r2Color = result.r2 >= 0.9 ? "#4ade80" : result.r2 >= 0.7 ? "#fbbf24" : "#f43f5e";
-            row.appendChild(bigCard("R\u00B2", result.r2.toFixed(4), r2Color));
-            row.appendChild(bigCard("MAE", Number(result.mae).toExponential(3), "#22d3ee"));
-            row.appendChild(bigCard("RMSE", Number(result.rmse).toExponential(3), "#f59e0b"));
-            row.appendChild(bigCard("Bias", Number(result.bias).toExponential(3), "#a78bfa"));
-            metricsContainer.appendChild(row);
-
-            metricsContainer.appendChild(el("div", { style: "font-size:10px;color:#64748b;margin-top:8px;text-align:center;" },
-              "Evaluated on PyTorch Server (" + serverUrl + ") — same runtime as training, no cross-runtime weight transfer."));
+        if (isClassification && m.testAccuracy != null) {
+          var accCard = el("div", { className: "osc-card", style: "margin-top:8px;text-align:center;padding:16px;" });
+          accCard.appendChild(el("div", { style: "font-size:11px;color:#94a3b8;text-transform:uppercase;letter-spacing:1px;" }, "Test Accuracy"));
+          var accColor = m.testAccuracy >= 0.8 ? "#4ade80" : m.testAccuracy >= 0.5 ? "#fbbf24" : "#f43f5e";
+          accCard.appendChild(el("div", { style: "font-size:36px;font-weight:700;color:" + accColor + ";" }, (m.testAccuracy * 100).toFixed(1) + "%"));
+          metricsContainer.appendChild(accCard);
+        } else if (m.testR2 != null) {
+          var row = el("div", { style: "display:flex;gap:8px;margin-top:8px;flex-wrap:wrap;" });
+          function srvCard(label, value, color) {
+            var c = el("div", { className: "osc-card", style: "flex:1;min-width:100px;text-align:center;padding:12px 8px;" });
+            c.appendChild(el("div", { style: "font-size:10px;color:#94a3b8;text-transform:uppercase;letter-spacing:1px;" }, label));
+            c.appendChild(el("div", { style: "font-size:24px;font-weight:700;color:" + color + ";margin-top:4px;" }, value));
+            return c;
           }
-        }).catch(function (err) {
-          statusEl.textContent = "Server test failed: " + err.message + ". Falling back to client-side evaluation.";
-          // fall through to TF.js evaluation below
-          _renderTestSubTabClient(mainEl, t, activeId, Plotly, _darkLayout, pc, schemaId, allowedOutputKeys, defaultTarget, isClassification);
-        });
+          var r2c = m.testR2 >= 0.9 ? "#4ade80" : m.testR2 >= 0.7 ? "#fbbf24" : "#f43f5e";
+          row.appendChild(srvCard("R\u00B2", m.testR2.toFixed(4), r2c));
+          if (m.testMae != null) row.appendChild(srvCard("MAE", Number(m.testMae).toExponential(3), "#22d3ee"));
+          if (m.testRmse != null) row.appendChild(srvCard("RMSE", Number(m.testRmse).toExponential(3), "#f59e0b"));
+          if (m.testBias != null) row.appendChild(srvCard("Bias", Number(m.testBias).toExponential(3), "#a78bfa"));
+          metricsContainer.appendChild(row);
+        }
         return;
       }
 
+      // --- client-side TF.js evaluation (for TF.js-trained models) ---
       _renderTestSubTabClient(mainEl, t, activeId, Plotly, _darkLayout, pc, schemaId, allowedOutputKeys, defaultTarget, isClassification);
     }
 
