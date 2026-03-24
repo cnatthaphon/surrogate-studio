@@ -1249,6 +1249,7 @@
       }
 
       // === WORKER PATH (non-blocking) ===
+      var W = typeof window !== "undefined" ? window : {};
       var workerBridge = W.OSCTrainingWorkerBridge;
       var useWorker = workerBridge && typeof workerBridge.runTrainingInWorker === "function";
       if (useWorker) {
