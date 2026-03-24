@@ -261,6 +261,9 @@ def main():
             ss_res = float(np.sum((t_flat - p_flat) ** 2))
             test_metrics["testR2"] = 1 - ss_res / ss_tot if ss_tot > 0 else 0
             test_metrics["testN"] = len(x_test)
+            # raw predictions for client-side visualization (charts, scatter, residuals)
+            test_metrics["testPredictions"] = pred_test.tolist()
+            test_metrics["testTruth"] = y_test.tolist()
 
             # Classification metrics
             if is_classification and num_classes > 0:
