@@ -407,7 +407,7 @@
       inputTensor = tf.input({ shape: [datasetMeta.windowSize, datasetMeta.seqFeatureSize] });
     } else if (needsReshapeForRecurrent) {
       // LSTM/GRU in "flat" or "auto" mode: input [batch, features] → reshape to [batch, 1, features]
-      isSequence = true;
+      // isSequence stays false for the caller — the model handles reshape internally
       inputTensor = tf.input({ shape: [datasetMeta.featureSize] });
       var reshapedInput = tf.layers.reshape({ targetShape: [1, datasetMeta.featureSize] }).apply(inputTensor);
       // the reshaped tensor will be used as the actual working tensor
@@ -509,7 +509,7 @@
         return tf.layers.layerNormalization({ axis: -1, epsilon: eps }).apply(inTensor);
       }
       if (node.name === "rnn_layer" || node.name === "gru_layer" || node.name === "lstm_layer") {
-        if (!isSequence) throw new Error("RNN/GRU/LSTM layers require sequence input mode.");
+        if (!isSequence && !needsReshapeForRecurrent) throw new Error("RNN/GRU/LSTM layers require sequence input mode.");
         var rnnUnits = Math.max(1, Number(node.data.units || 64));
         var dropout = clamp(Number(node.data.dropout || 0), 0, 0.8);
         var rsSetting = String(node.data.returnseq || "auto");
