@@ -984,14 +984,27 @@
         rightEl.appendChild(serverPanel);
       }
 
-      // buttons
+      // buttons — show Stop when training, Start/Continue otherwise
       var btnRow = el("div", { style: "display:flex;gap:4px;margin-top:8px;" });
-      var trainLabel = hasTrained ? "Continue Training" : "Start Training";
-      var trainBtn = el("button", { className: "osc-btn", style: "flex:1;" }, trainLabel);
-      trainBtn.addEventListener("click", _handleTrain);
+      if (_isTraining) {
+        var stopBtn = el("button", { className: "osc-btn", style: "flex:1;background:linear-gradient(135deg,#dc2626,#991b1b);border-color:#ef4444;" }, "Stop Training");
+        stopBtn.addEventListener("click", function () {
+          _isTraining = false;
+          tCard.status = "stopped";
+          if (store) store.upsertTrainerCard(tCard);
+          onStatus("Training stopped");
+          _renderLeftPanel(); _renderMainPanel(); _renderRightPanel();
+        });
+        btnRow.appendChild(stopBtn);
+      } else {
+        var trainLabel = hasTrained ? "Continue Training" : "Start Training";
+        var trainBtn = el("button", { className: "osc-btn", style: "flex:1;" }, trainLabel);
+        trainBtn.addEventListener("click", _handleTrain);
+        btnRow.appendChild(trainBtn);
+      }
       var exportBtn = el("button", { className: "osc-btn secondary", style: "flex:1;" }, "Export Notebook");
       exportBtn.addEventListener("click", function () { _handleExport(); });
-      btnRow.appendChild(trainBtn); btnRow.appendChild(exportBtn);
+      btnRow.appendChild(exportBtn);
       rightEl.appendChild(btnRow);
 
       // clear session button
@@ -1092,7 +1105,7 @@
       _isTraining = true;
       _subTab = "train";
       onStatus("Training... (serializing model)");
-      _renderLeftPanel(); _renderMainPanel();
+      _renderLeftPanel(); _renderMainPanel(); _renderRightPanel();
 
       var currentMountId = _mountId;
 

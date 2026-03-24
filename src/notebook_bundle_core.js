@@ -1374,47 +1374,51 @@
       "print(f'Feature dim: {x_train.shape[1]}, Target dim: {y_train.shape[1]}')\n"
     ));
 
-    // Cell 4: Load graph + build model
-    cells.push(makeCodeCell(
-      "with open(MODEL_GRAPH) as f:\n" +
-      "    graph = json.load(f)\n\n" +
-      "# Extract nodes from Drawflow format\n" +
-      "data = graph.get('drawflow', {}).get('Home', {}).get('data', graph)\n" +
-      "nodes = sorted(data.keys(), key=lambda k: int(k) if k.isdigit() else 0)\n\n" +
-      "# Build sequential model from graph nodes\n" +
-      "layers = []\n" +
-      "in_dim = x_train.shape[1]\n" +
-      "out_dim = y_train.shape[1]\n\n" +
-      "for nid in nodes:\n" +
-      "    n = data[nid]\n" +
-      "    t = str(n.get('name', '')).replace('_layer', '').replace('_block', '')\n" +
-      "    c = n.get('data', {})\n" +
-      "    if t == 'input': continue\n" +
-      "    elif t == 'dense':\n" +
-      "        u = int(c.get('units', 32))\n" +
-      "        layers.append(nn.Linear(in_dim, u))\n" +
-      "        act = str(c.get('activation', 'relu'))\n" +
-      "        if act == 'relu': layers.append(nn.ReLU())\n" +
-      "        elif act == 'tanh': layers.append(nn.Tanh())\n" +
-      "        elif act == 'sigmoid': layers.append(nn.Sigmoid())\n" +
-      "        in_dim = u\n" +
-      "    elif t == 'dropout': layers.append(nn.Dropout(float(c.get('rate', 0.1))))\n" +
-      "    elif t == 'batchnorm': layers.append(nn.BatchNorm1d(in_dim))\n" +
-      "    elif t in ('latent_mu', 'latent_logvar', 'latent'):\n" +
-      "        u = int(c.get('units', 8))\n" +
-      "        layers.append(nn.Linear(in_dim, u))\n" +
-      "        in_dim = u\n" +
-      "    elif t == 'reparam': pass  # skip (deterministic for training)\n" +
-      "    elif t == 'lstm':\n" +
-      "        u = int(c.get('units', 32))\n" +
-      "        layers.append(nn.Linear(in_dim, u)); layers.append(nn.Tanh())\n" +
-      "        in_dim = u\n" +
-      "    elif t == 'output':\n" +
-      "        layers.append(nn.Linear(in_dim, out_dim))\n\n" +
-      "model = nn.Sequential(*layers).to(device)\n" +
-      "print(f'Model: {sum(p.numel() for p in model.parameters())} params')\n" +
-      "print(model)\n"
-    ));
+    // Cell 4: Load graph + build model (same builder as server runtime)
+    var hasSubprocess = opts.trainSubprocessSource && opts.trainSubprocessSource.length > 100;
+    if (hasSubprocess) {
+      // embed the build_model_from_graph function from train_subprocess.py
+      var b64src = toBase64Utf8(opts.trainSubprocessSource);
+      cells.push(makeCodeCell(
+        "import base64, types, sys\n\n" +
+        "# Load model builder from train_subprocess.py (same code as server runtime)\n" +
+        "_subprocess_src = base64.b64decode('" + b64src + "').decode('utf-8')\n" +
+        "_mod = types.ModuleType('train_subprocess')\n" +
+        "exec(compile(_subprocess_src, 'train_subprocess.py', 'exec'), _mod.__dict__)\n\n" +
+        "with open(MODEL_GRAPH) as f:\n" +
+        "    graph = json.load(f)\n\n" +
+        "model = _mod.build_model_from_graph(graph, x_train.shape[1], y_train.shape[1])\n" +
+        "model = model.to(device)\n" +
+        "print(f'Model: {sum(p.numel() for p in model.parameters())} params (graph-based builder)')\n"
+      ));
+    } else {
+      // fallback: simple Sequential builder (no branching support)
+      cells.push(makeCodeCell(
+        "with open(MODEL_GRAPH) as f:\n" +
+        "    graph = json.load(f)\n\n" +
+        "data = graph.get('drawflow', {}).get('Home', {}).get('data', graph)\n" +
+        "nodes = sorted(data.keys(), key=lambda k: int(k) if k.isdigit() else 0)\n" +
+        "layers = []\n" +
+        "in_dim = x_train.shape[1]\n" +
+        "out_dim = y_train.shape[1]\n" +
+        "for nid in nodes:\n" +
+        "    n = data[nid]; t = str(n.get('name','')).replace('_layer','').replace('_block',''); c = n.get('data',{})\n" +
+        "    if t == 'input': continue\n" +
+        "    elif t == 'dense':\n" +
+        "        u = int(c.get('units',32)); layers.append(nn.Linear(in_dim, u))\n" +
+        "        act = str(c.get('activation','relu'))\n" +
+        "        if act=='relu': layers.append(nn.ReLU())\n" +
+        "        elif act=='tanh': layers.append(nn.Tanh())\n" +
+        "        elif act=='sigmoid': layers.append(nn.Sigmoid())\n" +
+        "        in_dim = u\n" +
+        "    elif t=='dropout': layers.append(nn.Dropout(float(c.get('rate',0.1)))); pass\n" +
+        "    elif t in ('latent_mu','latent_logvar','latent'): u=int(c.get('units',8)); layers.append(nn.Linear(in_dim,u)); in_dim=u\n" +
+        "    elif t=='reparam': layers.append(nn.Linear(in_dim,in_dim))\n" +
+        "    elif t=='output': layers.append(nn.Linear(in_dim, out_dim))\n" +
+        "model = nn.Sequential(*layers).to(device)\n" +
+        "print(f'Model: {sum(p.numel() for p in model.parameters())} params')\n"
+      ));
+    }
 
     // Cell 5: Train
     cells.push(makeCodeCell(
@@ -1538,6 +1542,16 @@
       out.modelGraphPath = relGraphPath;
       return out;
     });
+    // Load train_subprocess.py for model builder (shared between server + notebook)
+    var trainSubprocessSource = "";
+    try {
+      var runtimeLoader = typeof cfg.runtimeLoader === "function" ? cfg.runtimeLoader : null;
+      if (runtimeLoader) trainSubprocessSource = runtimeLoader("train_subprocess.py") || "";
+    } catch (e) { /* not available */ }
+    if (!trainSubprocessSource && isNode && FS) {
+      try { trainSubprocessSource = FS.readFileSync(PATH.resolve(PATH.dirname(__filename || "."), "..", "server", "train_subprocess.py"), "utf8"); } catch (e) { /* */ }
+    }
+
     // Decide notebook type based on schema
     var schemaId = datasetPack.schemaId || "";
     var isOscillator = schemaId === "oscillator";
@@ -1553,11 +1567,11 @@
         datasetCsvText: datasetPack.csvText,
       });
     } else {
-      // generic: build a simple notebook that reads f*/t* CSV and trains
       notebook = buildGenericNotebook({
         sessions: sessionPayloads,
         schemaId: schemaId,
         datasetCsvPath: "dataset.csv",
+        trainSubprocessSource: trainSubprocessSource,
       });
     }
 
@@ -1567,6 +1581,10 @@
       { path: "notebooks/dataset.csv", content: datasetPack.csvText },
       { path: "notebooks/run.ipynb", content: notebookText },
     ].concat(modelGraphEntries);
+    // include train_subprocess.py for standalone use
+    if (trainSubprocessSource) {
+      entries.push({ path: "notebooks/train_subprocess.py", content: trainSubprocessSource, contentType: "text/x-python" });
+    }
     var zipBytes = makeZipBytes(entries);
     var fileName = String(cfg.zipFileName || ("trainner_" + Date.now() + ".zip"));
     var outPath = cfg.outputZipPath ? String(cfg.outputZipPath) : "";
