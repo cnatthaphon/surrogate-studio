@@ -183,7 +183,10 @@ def main():
     offset = 0
 
     state = model.state_dict()
-    keys = list(state.keys())
+    # Separate: regular weights first, then BN running stats at end (matching TF.js order)
+    bn_running_keys = [k for k in state.keys() if "running_mean" in k or "running_var" in k]
+    regular_keys = [k for k in state.keys() if "num_batches_tracked" not in k and k not in bn_running_keys]
+    keys = regular_keys + bn_running_keys
     i = 0
     while i < len(keys):
         name = keys[i]
