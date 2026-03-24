@@ -1169,14 +1169,14 @@
           }
           if (store) store.upsertTrainerCard(tCard);
           onStatus("\u2713 Done (PyTorch): MAE=" + (result.mae != null ? Number(result.mae).toExponential(3) : "—"));
-          _renderLeftPanel(); _renderMainPanel();
+          _renderLeftPanel(); _renderMainPanel(); _renderRightPanel();
           buildResult.model.dispose();
         }).catch(function (err) {
           _isTraining = false;
           tCard.status = "error"; tCard.error = err.message;
           if (store) store.upsertTrainerCard(tCard);
           onStatus("Server error: " + err.message);
-          _renderLeftPanel(); _renderMainPanel();
+          _renderLeftPanel(); _renderMainPanel(); _renderRightPanel();
           buildResult.model.dispose();
         });
         return;
@@ -1262,14 +1262,14 @@
             }
             if (store) store.upsertTrainerCard(tCard);
             onStatus("\u2713 Done (Worker): MAE=" + (result.mae != null ? Number(result.mae).toExponential(3) : "—"));
-            _renderLeftPanel(); _renderMainPanel();
+            _renderLeftPanel(); _renderMainPanel(); _renderRightPanel();
             buildResult.model.dispose();
           }).catch(function (err) {
             _isTraining = false;
             tCard.status = "error"; tCard.error = err.message;
             if (store) store.upsertTrainerCard(tCard);
             onStatus("Worker error: " + err.message);
-            _renderLeftPanel(); _renderMainPanel();
+            _renderLeftPanel(); _renderMainPanel(); _renderRightPanel();
             buildResult.model.dispose();
           });
 
@@ -1340,14 +1340,14 @@
           }
           if (store) store.upsertTrainerCard(tCard);
           onStatus("\u2713 Done: MAE=" + (result.mae != null ? Number(result.mae).toExponential(3) : "—"));
-          _renderLeftPanel(); _renderMainPanel();
+          _renderLeftPanel(); _renderMainPanel(); _renderRightPanel();
           buildResult.model.dispose();
         }).catch(function (err) {
           _isTraining = false;
           tCard.status = "error"; tCard.error = err.message;
           if (store) store.upsertTrainerCard(tCard);
           onStatus("Error: " + err.message);
-          _renderLeftPanel(); _renderMainPanel();
+          _renderLeftPanel(); _renderMainPanel(); _renderRightPanel();
           buildResult.model.dispose();
         });
       }
@@ -1423,7 +1423,14 @@
       }
     }
 
-    function mount() { _mountId++; _subTab = "train"; _renderLeftPanel(); _renderMainPanel(); _renderRightPanel(); }
+    function mount() {
+      _mountId++; _subTab = "train";
+      _renderLeftPanel(); _renderMainPanel(); _renderRightPanel();
+      // auto-check server on mount
+      if (_serverAvailable === null) {
+        _checkServerConnection("", function () { _renderRightPanel(); });
+      }
+    }
     function unmount() { _mountId++; if (_configFormApi && typeof _configFormApi.destroy === "function") _configFormApi.destroy(); _configFormApi = null; layout.leftEl.innerHTML = ""; layout.mainEl.innerHTML = ""; layout.rightEl.innerHTML = ""; }
     function refresh() { mount(); }
 
