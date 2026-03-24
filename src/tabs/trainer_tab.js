@@ -1403,7 +1403,8 @@
           _isTraining = false;
           if (currentMountId !== _mountId) return;
           tCard.status = "done";
-          tCard.metrics = { mae: result.mae, testMae: result.testMae, mse: result.mse, testMse: result.testMse, bestEpoch: result.bestEpoch, bestValLoss: result.bestValLoss, finalLr: result.finalLr, stoppedEarly: result.stoppedEarly, headCount: result.headCount, paramCount: buildResult.model.countParams() };
+          tCard.metrics = result;
+          if (!tCard.metrics.paramCount) tCard.metrics.paramCount = buildResult.model.countParams();
           tCard.backend = (tf.getBackend && tf.getBackend()) || String(config.runtimeBackend || "auto");
           // save model weights for test inference — extract manually
           try {

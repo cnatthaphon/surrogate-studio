@@ -365,15 +365,51 @@
       mse /= denom;
       mae /= denom;
 
+      var testPredictions = null;
+      var testTruth = null;
+      var testR2 = null;
+      var testRmse = null;
+      var testBias = null;
+      var testN = 0;
+
       if (xTest && yTestTensors.length) {
         var predTestRaw = opts.model.predict(xTest);
         var predTests = Array.isArray(predTestRaw) ? predTestRaw : [predTestRaw];
+        // raw predictions for visualization
+        testPredictions = predTests[0].arraySync();
+        testTruth = yTestTensors[0].arraySync();
+        testN = testPredictions.length;
+
         for (var j = 0; j < predTests.length; j++) {
           testMse += tf.losses.meanSquaredError(yTestTensors[j], predTests[j]).dataSync()[0];
           testMae += tf.metrics.meanAbsoluteError(yTestTensors[j], predTests[j]).dataSync()[0];
         }
         testMse /= denom;
         testMae /= denom;
+
+        // compute R², RMSE, bias from raw predictions (same as PyTorch)
+        if (testPredictions && testTruth) {
+          var tFlat = [], pFlat = [];
+          for (var ti = 0; ti < testN; ti++) {
+            var tRow = testTruth[ti], pRow = testPredictions[ti];
+            if (Array.isArray(tRow)) { for (var td = 0; td < tRow.length; td++) { tFlat.push(tRow[td]); pFlat.push(pRow[td]); } }
+            else { tFlat.push(tRow); pFlat.push(pRow); }
+          }
+          var sumErr = 0, sumAbsErr = 0, sumSqErr = 0, meanT = 0;
+          for (var fi = 0; fi < tFlat.length; fi++) meanT += tFlat[fi];
+          meanT /= tFlat.length || 1;
+          var ssTot = 0, ssRes = 0;
+          for (var fj = 0; fj < tFlat.length; fj++) {
+            var err = pFlat[fj] - tFlat[fj];
+            sumErr += err; sumAbsErr += Math.abs(err); sumSqErr += err * err;
+            ssTot += (tFlat[fj] - meanT) * (tFlat[fj] - meanT);
+            ssRes += err * err;
+          }
+          testR2 = ssTot > 0 ? 1 - ssRes / ssTot : 0;
+          testRmse = Math.sqrt(sumSqErr / (tFlat.length || 1));
+          testBias = sumErr / (tFlat.length || 1);
+        }
+
         tf.dispose(predTests);
       }
 
@@ -385,6 +421,8 @@
 
       return {
         mse: mse, mae: mae, testMse: testMse, testMae: testMae,
+        testR2: testR2, testRmse: testRmse, testBias: testBias, testN: testN,
+        testPredictions: testPredictions, testTruth: testTruth,
         headCount: headConfigs.length,
         bestEpoch: bestEpoch > 0 ? bestEpoch : null,
         bestValLoss: Number.isFinite(bestValLoss) ? bestValLoss : null,
