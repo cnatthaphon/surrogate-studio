@@ -294,17 +294,14 @@
       var defaultTarget = (allowedOutputKeys[0] && (allowedOutputKeys[0].key || allowedOutputKeys[0])) || "x";
       var isClassification = defaultTarget === "label" || defaultTarget === "logits";
 
-      // --- check if server already computed test metrics with raw predictions ---
+      // --- check if server returned raw predictions (full charts) ---
       var m = t.metrics || {};
       if (m.testPredictions && m.testTruth && m.testPredictions.length) {
         var statusEl = el("div", { style: "font-size:11px;color:#94a3b8;padding:4px 8px;" },
           "Evaluated " + m.testPredictions.length + " test samples (" + (t.backend || "server") + ").");
         mainEl.appendChild(statusEl);
-
         var metricsContainer = el("div", {});
         mainEl.appendChild(metricsContainer);
-
-        // Use the SAME rendering functions as TF.js path — full charts
         if (isClassification) {
           _renderClassificationMetrics(metricsContainer, m.testPredictions, m.testTruth, m.testPredictions.length,
             (store.getDataset(t.datasetId) && store.getDataset(t.datasetId).data && store.getDataset(t.datasetId).data.classCount) || 10,
@@ -315,29 +312,7 @@
         return;
       }
 
-      // --- fallback: summary metrics only (no raw predictions) ---
-      if (m.testR2 != null || m.testMae != null || m.testAccuracy != null) {
-        mainEl.appendChild(el("div", { style: "font-size:11px;color:#94a3b8;padding:4px 8px;" },
-          "Evaluated " + (m.testN || "?") + " test samples (" + (t.backend || "unknown") + ")."));
-        var row = el("div", { style: "display:flex;gap:8px;margin-top:8px;flex-wrap:wrap;" });
-        function srvCard(label, value, color) {
-          var c = el("div", { className: "osc-card", style: "flex:1;min-width:100px;text-align:center;padding:12px 8px;" });
-          c.appendChild(el("div", { style: "font-size:10px;color:#94a3b8;text-transform:uppercase;letter-spacing:1px;" }, label));
-          c.appendChild(el("div", { style: "font-size:24px;font-weight:700;color:" + color + ";margin-top:4px;" }, value));
-          return c;
-        }
-        if (m.testAccuracy != null) {
-          var ac = m.testAccuracy >= 0.8 ? "#4ade80" : "#f43f5e";
-          row.appendChild(srvCard("Accuracy", (m.testAccuracy * 100).toFixed(1) + "%", ac));
-        }
-        if (m.testR2 != null) { var rc = m.testR2 >= 0.9 ? "#4ade80" : m.testR2 >= 0.7 ? "#fbbf24" : "#f43f5e"; row.appendChild(srvCard("R\u00B2", m.testR2.toFixed(4), rc)); }
-        if (m.testMae != null) row.appendChild(srvCard("MAE", Number(m.testMae).toExponential(3), "#22d3ee"));
-        if (m.testRmse != null) row.appendChild(srvCard("RMSE", Number(m.testRmse).toExponential(3), "#f59e0b"));
-        mainEl.appendChild(row);
-        return;
-      }
-
-      // --- client-side TF.js evaluation (for TF.js-trained models) ---
+      // --- client-side evaluation (TF.js rebuild + inference — full charts) ---
       _renderTestSubTabClient(mainEl, t, activeId, Plotly, _darkLayout, pc, schemaId, allowedOutputKeys, defaultTarget, isClassification);
     }
 
