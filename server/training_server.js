@@ -205,6 +205,47 @@ var server = http.createServer(function (req, res) {
     return;
   }
 
+  // POST /api/test — run test evaluation on server (same runtime as training)
+  if (req.method === "POST" && pathname === "/api/test") {
+    var body = "";
+    req.on("data", function (chunk) { body += chunk; });
+    req.on("end", function () {
+      try {
+        var config = JSON.parse(body);
+        var configPath = path.join(__dirname, ".tmp", "test-" + Date.now() + ".json");
+        if (!fs.existsSync(path.join(__dirname, ".tmp"))) fs.mkdirSync(path.join(__dirname, ".tmp"), { recursive: true });
+        fs.writeFileSync(configPath, JSON.stringify(config));
+
+        var proc = spawn(PYTHON, [path.join(__dirname, "test_subprocess.py"), configPath], {
+          stdio: ["ignore", "pipe", "pipe"],
+          cwd: path.resolve(__dirname, ".."),
+        });
+
+        var output = "";
+        proc.stdout.on("data", function (c) { output += c.toString(); });
+        proc.stderr.on("data", function (c) { /* ignore stderr */ });
+        proc.on("exit", function () {
+          try { fs.unlinkSync(configPath); } catch (e) {}
+          var result = null;
+          output.trim().split("\n").forEach(function (line) {
+            try { var m = JSON.parse(line); if (m.kind === "result") result = m.result; } catch (e) {}
+          });
+          if (result) {
+            res.writeHead(200, { "Content-Type": "application/json" });
+            res.end(JSON.stringify(result));
+          } else {
+            res.writeHead(500, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ error: "Test evaluation failed", output: output.slice(0, 500) }));
+          }
+        });
+      } catch (e) {
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: e.message }));
+      }
+    });
+    return;
+  }
+
   // GET /api/train/:id — SSE stream
   var sseMatch = pathname.match(/^\/api\/train\/([a-zA-Z0-9_-]+)$/);
   if (req.method === "GET" && sseMatch) {

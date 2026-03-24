@@ -150,8 +150,22 @@
       .catch(function () { return false; });
   }
 
+  // Run test evaluation on server (same runtime as training)
+  function runTestOnServer(config, serverUrl) {
+    var url = String(serverUrl || DEFAULT_SERVER).replace(/\/$/, "");
+    return fetch(url + "/api/test", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(config),
+    }).then(function (res) {
+      if (!res.ok) throw new Error("Server test returned " + res.status);
+      return res.json();
+    });
+  }
+
   return {
     runTrainingOnServer: runTrainingOnServer,
+    runTestOnServer: runTestOnServer,
     checkServer: checkServer,
     DEFAULT_SERVER: DEFAULT_SERVER,
   };
