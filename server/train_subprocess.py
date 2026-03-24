@@ -200,9 +200,17 @@ def main():
             b_hh = state[keys[i+3]].detach().cpu().numpy()    # [4*H]
 
             # TF.js format: kernel = w_ih.T [input, 4*H], recurrent = w_hh.T [hidden, 4*H], bias = b_ih + b_hh
-            kernel = w_ih.T  # transpose
-            recurrent = w_hh.T  # transpose
-            bias = b_ih + b_hh  # combine biases
+            # CRITICAL: PyTorch gate order = [i, f, g, o], TF.js = [i, g, f, o]
+            # Must swap forget (f) and cell candidate (g) gate blocks
+            H = w_ih.shape[0] // 4
+            def swap_gates(w):
+                """Swap gate blocks 1 (forget) and 2 (cell) for PyTorch→TF.js"""
+                chunks = [w[i*H:(i+1)*H] for i in range(4)]  # i, f, g, o
+                return np.concatenate([chunks[0], chunks[2], chunks[1], chunks[3]], axis=0)  # i, g, f, o
+
+            kernel = swap_gates(w_ih).T  # reorder gates then transpose
+            recurrent = swap_gates(w_hh).T  # reorder gates then transpose
+            bias = swap_gates(b_ih + b_hh)  # combine biases then reorder
 
             for arr, suffix, shape in [
                 (kernel, "kernel", list(kernel.shape)),
