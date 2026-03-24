@@ -4,53 +4,61 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>LSTM-VAE Demo — Ant Trajectory Reconstruction</title>
-</head>
-<body>
-  <div id="app"></div>
 
-  <!--
-    Demo page: loads ALL core scripts from main index.html (../../).
-    Then adds demo-specific data + schema + module + preset.
-    No duplicate code. Core library is the single source of truth.
-    Demo only provides: data, schema registration, module registration, preset memory.
-  -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/jerosoler/Drawflow/dist/drawflow.min.css">
+  <script src="https://cdn.jsdelivr.net/gh/jerosoler/Drawflow/dist/drawflow.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.22.0/dist/tf.min.js"></script>
+  <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+  <script src="../../src/schema_registry.js?v=1774290258"></script>
+  <script src="../../src/schema_definitions_builtin.js?v=1774290258"></script>
+  <script src="../../src/oscillator_dataset_core.js?v=1774290258"></script>
+  <script src="../../src/dataset_modules/mnist_source_loader.js?v=1774290258"></script>
+  <script src="../../src/dataset_modules/mnist_module.js?v=1774290258"></script>
+  <script src="../../src/dataset_modules/fashion_mnist_module.js?v=1774290258"></script>
+  <script src="../../src/dataset_modules/cifar10_source_loader.js?v=1774290258"></script>
+  <script src="../../src/dataset_modules/cifar10_module.js?v=1774290258"></script>
+  <script src="../../src/dataset_modules/oscillator_module.js?v=1774290258"></script>
+  <script src="../../src/dataset_modules.js?v=1774290258"></script>
+  <script src="../../src/dataset_runtime.js?v=1774290258"></script>
+  <script src="../../src/dataset_processing_core.js?v=1774290258"></script>
+  <script src="../../src/workspace_store.js?v=1774290258"></script>
+  <script src="../../src/ui_shared_engine.js?v=1774290258"></script>
+  <script src="../../src/item_panel_module.js?v=1774290258"></script>
+  <script src="../../src/config_panel_module.js?v=1774290258"></script>
+  <script src="../../src/tab_manager_core.js?v=1774290258"></script>
+  <script src="../../src/entity_create_core.js?v=1774290258"></script>
+  <script src="../../src/image_render_core.js?v=1774290258"></script>
+  <script src="../../src/model_graph_core.js?v=1774290258"></script>
+  <script src="../../src/model_graph_drawflow_adapter.js?v=1774290258"></script>
+  <script src="../../src/trainer_session_state_core.js?v=1774290258"></script>
+  <script src="../../src/training_session_core.js?v=1774290258"></script>
+  <script src="../../src/training_worker_bridge.js?v=1774290258"></script>
+  <script src="../../src/dataset_bundle_adapter.js?v=1774290258"></script>
+  <script src="../../src/notebook_bundle_core.js?v=1774290258"></script>
+  <script src="../../src/notebook_runtime_assets.js?v=1774290258"></script>
+  <script src="../../src/model_builder_core.js?v=1774290258"></script>
+  <script src="../../src/training_engine_core.js?v=1774290258"></script>
+  <script src="../../src/prediction_core.js?v=1774290258"></script>
+  <script src="../../src/generation_engine_core.js?v=1774290258"></script>
+  <script src="../../src/server_runtime_adapter.js?v=1774290258"></script>
+  <script src="../../src/app_state_core.js?v=1774290258"></script>
+  <script src="../../src/layout_renderer_core.js?v=1774290258"></script>
+  <script src="../../src/tabs/playground_tab.js?v=1774290258"></script>
+  <script src="../../src/tabs/dataset_tab.js?v=1774290258"></script>
+  <script src="../../src/tabs/model_tab.js?v=1774290258"></script>
+  <script src="../../src/tabs/trainer_tab.js?v=1774290258"></script>
+  <script src="../../src/tabs/generation_tab.js?v=1774290258"></script>
+  <script src="../../src/tabs/evaluation_tab.js?v=1774290258"></script>
+  <script src="../../src/surrogate_studio.js?v=1774290258"></script>
 
-  <script>
-    // Load all scripts from main index.html — ensures demo uses exact same core
-    (function () {
-      var BASE = "../../";
-      var xhr = new XMLHttpRequest();
-      xhr.open("GET", BASE + "index.html", false);
-      xhr.send();
-      if (xhr.status !== 200) {
-        document.getElementById("app").textContent = "Cannot load core from " + BASE + "index.html";
-        return;
-      }
-      // extract and inject CSS links
-      var cssRe = /<link\s+rel="stylesheet"\s+href="([^"]+)"/g;
-      var cssMatch;
-      while ((cssMatch = cssRe.exec(xhr.responseText)) !== null) {
-        document.write('<link rel="stylesheet" href="' + cssMatch[1] + '">');
-      }
-      // extract and inject scripts
-      var re = /<script\s+src="([^"]+)"/g;
-      var match;
-      while ((match = re.exec(xhr.responseText)) !== null) {
-        var src = match[1];
-        if (src.startsWith("./")) src = BASE + src.substring(2);
-        else if (!src.startsWith("http") && !src.startsWith("//")) src = BASE + src;
-        document.write('<script src="' + src + '"><\/script>');
-      }
-    })();
-  </script>
-
-  <!-- Demo-specific: data + schema + module + preset (NOT library code) -->
+  <!-- demo: data + schema + module + preset -->
   <script src="./ant_data.js"></script>
   <script src="./ant_trajectory_schema.js"></script>
   <script src="./ant_trajectory_module.js"></script>
   <script src="./preset.js"></script>
-
-  <!-- Initialize with pre-loaded demo store -->
+</head>
+<body>
+  <div id="app"></div>
   <script>
     var store = OSCWorkspaceStore.createMemoryStore();
     var preset = window.LSTM_VAE_DEMO_PRESET;
@@ -59,12 +67,7 @@
       if (preset.models) preset.models.forEach(function (m) { store.upsertModel(m); });
       if (preset.trainers) preset.trainers.forEach(function (t) { store.upsertTrainerCard(t); });
     }
-    SurrogateStudio.init({
-      mountEl: document.getElementById('app'),
-      defaultSchemaId: 'ant_trajectory',
-      defaultTab: 'dataset',
-      store: store,
-    });
+    SurrogateStudio.init({ mountEl: document.getElementById("app"), defaultSchemaId: "ant_trajectory", defaultTab: "dataset", store: store });
   </script>
 </body>
 </html>
