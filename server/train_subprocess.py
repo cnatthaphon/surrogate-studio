@@ -174,21 +174,55 @@ def main():
     if best_state:
         model.load_state_dict(best_state)
 
-    # --- Extract weights as flat float array ---
+    # --- Extract weights in TF.js-compatible format ---
+    # PyTorch Dense: [out, in] → TF.js: [in, out] (transpose)
+    # PyTorch LSTM: weight_ih [4*hidden, input], weight_hh [4*hidden, hidden], bias_ih, bias_hh
+    # TF.js LSTM: kernel [input, 4*hidden], recurrent_kernel [hidden, 4*hidden], bias [4*hidden]
     weight_specs = []
     weight_values = []
     offset = 0
-    for name, param in model.named_parameters():
+
+    state = model.state_dict()
+    keys = list(state.keys())
+    i = 0
+    while i < len(keys):
+        name = keys[i]
+        param = state[name].detach().cpu().numpy()
+
+        # Check if this is an LSTM weight_ih (followed by weight_hh, bias_ih, bias_hh)
+        if "rnn.weight_ih" in name and i + 3 < len(keys):
+            w_ih = state[keys[i]].detach().cpu().numpy()     # [4*H, input]
+            w_hh = state[keys[i+1]].detach().cpu().numpy()   # [4*H, hidden]
+            b_ih = state[keys[i+2]].detach().cpu().numpy()    # [4*H]
+            b_hh = state[keys[i+3]].detach().cpu().numpy()    # [4*H]
+
+            # TF.js format: kernel = w_ih.T [input, 4*H], recurrent = w_hh.T [hidden, 4*H], bias = b_ih + b_hh
+            kernel = w_ih.T  # transpose
+            recurrent = w_hh.T  # transpose
+            bias = b_ih + b_hh  # combine biases
+
+            for arr, suffix, shape in [
+                (kernel, "kernel", list(kernel.shape)),
+                (recurrent, "recurrent_kernel", list(recurrent.shape)),
+                (bias, "bias", list(bias.shape)),
+            ]:
+                data = arr.flatten().tolist()
+                weight_specs.append({"name": f"tfjs_{suffix}", "shape": shape, "dtype": "float32", "offset": offset})
+                weight_values.extend(data)
+                offset += len(data) * 4
+            i += 4
+            continue
+
+        # Regular param: transpose 2D weights (Dense layers)
+        if param.ndim == 2:
+            param = param.T  # [out, in] → [in, out]
+
+        data = param.flatten().tolist()
         shape = list(param.shape)
-        data = param.detach().cpu().numpy().flatten().tolist()
-        weight_specs.append({
-            "name": name,
-            "shape": shape,
-            "dtype": "float32",
-            "offset": offset,
-        })
+        weight_specs.append({"name": f"tfjs_{name}", "shape": shape, "dtype": "float32", "offset": offset})
         weight_values.extend(data)
-        offset += len(data) * 4  # bytes
+        offset += len(data) * 4
+        i += 1
 
     # --- Compute final metrics ---
     model.eval()
@@ -219,7 +253,19 @@ def main():
 
 def build_model_from_graph(graph, feature_size, target_size, num_classes=0):
     """Build PyTorch model from Drawflow graph JSON."""
+    import torch
     import torch.nn as nn
+
+    class _RNNWrapper(nn.Module):
+        """Flat input [batch, features] → unsqueeze → RNN → last hidden."""
+        def __init__(self, rnn_cls, input_size, hidden_size):
+            super().__init__()
+            self.rnn = rnn_cls(input_size=input_size, hidden_size=hidden_size, num_layers=1, batch_first=True)
+        def forward(self, x):
+            if x.dim() == 2:
+                x = x.unsqueeze(1)
+            out, _ = self.rnn(x)
+            return out[:, -1, :]
 
     # Extract graph nodes
     data = {}
@@ -271,9 +317,11 @@ def build_model_from_graph(graph, feature_size, target_size, num_classes=0):
             modules.append(nn.Linear(in_dim, units))
             in_dim = units
         elif t == "reparam":
-            # reparam: pass through (mu only, deterministic for simplicity)
-            # KL loss would need special handling
-            pass
+            # Match TF.js: dense(logvar → noise) + add(mu, noise)
+            # In Sequential mode, we add a Linear layer that learns noise projection from logvar
+            # This matches TF.js reparam_noise layer
+            modules.append(nn.Linear(in_dim, in_dim))
+            # in_dim stays the same (output = mu + noise projection)
         elif t == "output":
             # output layer: project to target size
             target = str(c.get("target", "xv"))
@@ -281,21 +329,11 @@ def build_model_from_graph(graph, feature_size, target_size, num_classes=0):
                 modules.append(nn.Linear(in_dim, num_classes))
             else:
                 modules.append(nn.Linear(in_dim, out_dim))
-        elif t == "lstm":
+        elif t in ("lstm", "gru", "rnn"):
             units = int(c.get("units", 32))
-            # For seq_len=1, LSTM is equivalent to a nonlinear transform
-            modules.append(nn.Linear(in_dim, units))
-            modules.append(nn.Tanh())
-            in_dim = units
-        elif t == "gru":
-            units = int(c.get("units", 32))
-            modules.append(nn.Linear(in_dim, units))
-            modules.append(nn.Tanh())
-            in_dim = units
-        elif t == "rnn":
-            units = int(c.get("units", 32))
-            modules.append(nn.Linear(in_dim, units))
-            modules.append(nn.Tanh())
+            # Use actual RNN layer to match TF.js weight layout
+            rnn_cls = {"lstm": nn.LSTM, "gru": nn.GRU, "rnn": nn.RNN}[t]
+            modules.append(_RNNWrapper(rnn_cls, in_dim, units))
             in_dim = units
         elif t == "image_source":
             continue
