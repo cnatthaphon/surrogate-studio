@@ -182,7 +182,8 @@
         "Schema: " + escapeHtml(t.schemaId || "") + " | Status: " + (t.status || "draft") +
         (t.datasetId ? " | Dataset: " + (function () { var d = store.getDataset(t.datasetId); return d ? d.name : t.datasetId; })() : "") +
         (t.modelId ? " | Model: " + (function () { var m = store.getModel(t.modelId); return m ? m.name : t.modelId; })() : "") +
-        (t.backend ? " | Backend: " + String(t.backend) : "")));
+        (t.backend ? " | Backend: " + String(t.backend) : "") +
+        (t.metrics && t.metrics.paramCount ? " | Params: " + Number(t.metrics.paramCount).toLocaleString() : "")));
       if (t.metrics) {
         header.appendChild(el("div", { style: "font-size:12px;color:#4ade80;margin-top:4px;" },
           "MAE: " + (t.metrics.mae != null ? Number(t.metrics.mae).toExponential(3) : "—") +
@@ -1144,6 +1145,7 @@
           if (currentMountId !== _mountId) return;
           tCard.status = "done";
           tCard.metrics = result;
+          if (!tCard.metrics.paramCount) tCard.metrics.paramCount = buildResult.model.countParams();
           tCard.backend = result.resolvedBackend || result.backend || "pytorch";
           if (result.modelArtifacts) {
             if (result.modelArtifacts.weightData && !result.modelArtifacts.weightValues) {
@@ -1297,7 +1299,7 @@
           _isTraining = false;
           if (currentMountId !== _mountId) return;
           tCard.status = "done";
-          tCard.metrics = { mae: result.mae, testMae: result.testMae, mse: result.mse, testMse: result.testMse, bestEpoch: result.bestEpoch, bestValLoss: result.bestValLoss, finalLr: result.finalLr, stoppedEarly: result.stoppedEarly, headCount: result.headCount };
+          tCard.metrics = { mae: result.mae, testMae: result.testMae, mse: result.mse, testMse: result.testMse, bestEpoch: result.bestEpoch, bestValLoss: result.bestValLoss, finalLr: result.finalLr, stoppedEarly: result.stoppedEarly, headCount: result.headCount, paramCount: buildResult.model.countParams() };
           tCard.backend = (tf.getBackend && tf.getBackend()) || String(config.runtimeBackend || "auto");
           // save model weights for test inference — extract manually
           try {
