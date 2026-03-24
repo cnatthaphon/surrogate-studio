@@ -345,9 +345,12 @@ def build_model_from_graph(graph, feature_size, target_size, num_classes=0):
                     setattr(self, f"dense_{nid}", nn.Linear(in_dim, units))
                     dim_map[nid] = units
                 elif t == "reparam":
-                    # TF.js: concat(mu, logvar) → dense(2*latent → latent) → add(mu, projected)
-                    # Match: dense(in_dim → in_dim) as noise projection
-                    setattr(self, f"reparam_noise_{nid}", nn.Linear(in_dim, in_dim))
+                    # TF.js: dense(logvar → noise, init=zeros) + add(mu, noise)
+                    # Match: zero-initialized Linear applied to logvar input
+                    layer = nn.Linear(in_dim, in_dim)
+                    nn.init.zeros_(layer.weight)
+                    nn.init.zeros_(layer.bias)
+                    setattr(self, f"reparam_noise_{nid}", layer)
                     dim_map[nid] = in_dim
                 elif t in ("lstm", "gru", "rnn"):
                     units = int(c.get("units", 32))
@@ -394,9 +397,12 @@ def build_model_from_graph(graph, feature_size, target_size, num_classes=0):
                         out = act(out)
                     tensors[nid] = out
                 elif t == "reparam":
-                    # first parent = mu, apply noise projection and add
-                    noise = getattr(self, f"reparam_noise_{nid}")(inp)
-                    tensors[nid] = inp + noise
+                    # TF.js: noise = dense(logvar), output = mu + noise
+                    # input_1 = mu (first parent), input_2 = logvar (second parent)
+                    mu_tensor = inp  # first parent
+                    logvar_tensor = tensors[parents_sorted[1]["from"]] if len(parents_sorted) > 1 else inp
+                    noise = getattr(self, f"reparam_noise_{nid}")(logvar_tensor)
+                    tensors[nid] = mu_tensor + noise
                 elif t in ("lstm", "gru", "rnn"):
                     rnn = getattr(self, f"rnn_{nid}")
                     h = inp

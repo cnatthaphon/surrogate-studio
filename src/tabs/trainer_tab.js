@@ -1111,15 +1111,81 @@
 
       var W = typeof window !== "undefined" ? window : {};
       var backend = String(config.runtimeBackend || "auto");
+      var serverAdapter = getServerAdapter();
+      var serverUrl = String(config.serverUrl || (serverAdapter && serverAdapter.DEFAULT_SERVER) || "");
 
-      // Auto mode: if server is connected, use it; otherwise fall through to Worker/main-thread
-      if (backend === "auto" && _serverAvailable === true) {
-        backend = "pytorch_server";
-        onStatus("Auto: using PyTorch Server (connected)");
+      // For auto or pytorch_server: verify server is reachable before using it
+      if ((backend === "auto" || backend === "pytorch_server") && serverAdapter) {
+        onStatus("Checking server...");
+        serverAdapter.checkServer(serverUrl).then(function (ok) {
+          _serverAvailable = ok;
+          if (ok && backend === "auto") {
+            onStatus("Auto: using PyTorch Server");
+            _trainWithBackend("pytorch_server", serverAdapter, serverUrl);
+          } else if (ok && backend === "pytorch_server") {
+            _trainWithBackend("pytorch_server", serverAdapter, serverUrl);
+          } else if (backend === "pytorch_server") {
+            onStatus("Server not reachable — cannot train with PyTorch Server");
+            _isTraining = false;
+            _renderRightPanel();
+          } else {
+            // auto fallback to client
+            _trainWithBackend("client", null, "");
+          }
+        });
+        return;
       }
+      _trainWithBackend(backend, null, "");
+    }
+
+    function _trainWithBackend(backend, serverAdapter, serverUrl) {
+      var activeId = stateApi ? stateApi.getActiveTrainer() : "";
+      var tCard = activeId && store ? store.getTrainerCard(activeId) : null;
+      if (!tCard) return;
+      var config = _configFormApi && typeof _configFormApi.getConfig === "function" ? _configFormApi.getConfig() : {};
+      var dataset = store.getDataset(config.datasetId);
+      var model = store.getModel(config.modelId);
+      if (!dataset || !dataset.data || !model || !model.graph) return;
+      var tf = getTf();
+      if (!tf) return;
+
+      var schemaId = tCard.schemaId;
+      var allowedOutputKeys = schemaRegistry ? schemaRegistry.getOutputKeys(schemaId) : ["x"];
+      var defaultTarget = allowedOutputKeys[0] || "x";
+      var dsData = dataset.data;
+      var isBundle = dsData.kind === "dataset_bundle" && dsData.datasets;
+      var activeDs = isBundle ? dsData.datasets[dsData.activeVariantId || Object.keys(dsData.datasets)[0]] : dsData;
+      if (!activeDs.xTrain && activeDs.records) {
+        var nClasses = activeDs.classCount || 10;
+        function oneHot(label, n) { var arr = new Array(n).fill(0); arr[label] = 1; return arr; }
+        var isClassification = defaultTarget === "label" || defaultTarget === "logits";
+        activeDs = {
+          xTrain: (activeDs.records.train && activeDs.records.train.x) || [],
+          yTrain: isClassification ? ((activeDs.records.train && activeDs.records.train.y) || []).map(function (l) { return oneHot(l, nClasses); }) : ((activeDs.records.train && activeDs.records.train.y) || []),
+          xVal: (activeDs.records.val && activeDs.records.val.x) || [],
+          yVal: isClassification ? ((activeDs.records.val && activeDs.records.val.y) || []).map(function (l) { return oneHot(l, nClasses); }) : ((activeDs.records.val && activeDs.records.val.y) || []),
+          xTest: (activeDs.records.test && activeDs.records.test.x) || [],
+          yTest: isClassification ? ((activeDs.records.test && activeDs.records.test.y) || []).map(function (l) { return oneHot(l, nClasses); }) : ((activeDs.records.test && activeDs.records.test.y) || []),
+          featureSize: (activeDs.records.train && activeDs.records.train.x && activeDs.records.train.x[0]) ? activeDs.records.train.x[0].length : 784,
+          numClasses: nClasses,
+          targetMode: isClassification ? "logits" : (activeDs.targetMode || defaultTarget),
+        };
+      }
+      var graphMode = modelBuilder.inferGraphMode(model.graph, "direct");
+      var featureSize = Number(activeDs.featureSize || (activeDs.xTrain && activeDs.xTrain[0] && activeDs.xTrain[0].length) || 1);
+      var buildResult;
+      try {
+        buildResult = modelBuilder.buildModelFromGraph(tf, model.graph, {
+          mode: graphMode, featureSize: featureSize,
+          seqFeatureSize: Number(activeDs.seqFeatureSize || featureSize),
+          windowSize: Number(activeDs.windowSize || 1),
+          allowedOutputKeys: allowedOutputKeys, defaultTarget: defaultTarget,
+          paramNames: activeDs.paramNames, paramSize: activeDs.paramSize, numClasses: activeDs.numClasses || activeDs.classCount || 10,
+        });
+      } catch (err) { onStatus("Build error: " + err.message); _isTraining = false; _renderRightPanel(); return; }
+      var currentMountId = _mountId;
 
       // === PYTORCH SERVER PATH ===
-      var serverAdapter = getServerAdapter();
       if (backend === "pytorch_server" && serverAdapter) {
         onStatus("Training on PyTorch Server...");
         serverAdapter.runTrainingOnServer({
