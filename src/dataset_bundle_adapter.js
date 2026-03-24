@@ -32,13 +32,16 @@
   }
 
   function isImageSchema(schemaId, dataset) {
+    // detect from schema metadata or data format — no hardcoded schema names
     var sid = normalizeSchemaId(schemaId, dataset);
     var registry = getSchemaRegistry();
-    if (!registry || typeof registry.getDatasetSchema !== "function") {
-      return sid === "mnist" || sid === "fashion_mnist";
+    if (registry && typeof registry.getDatasetSchema === "function") {
+      var schema = registry.getDatasetSchema(sid);
+      if (schema) return String(schema.sampleType || "").trim().toLowerCase() === "image";
     }
-    var schema = registry.getDatasetSchema(sid);
-    return String(schema && schema.sampleType || "").trim().toLowerCase() === "image";
+    // fallback: check if dataset has image-like structure
+    var ds = dataset || {};
+    return !!(ds.imageShape || ds.classNames || (ds.mode === "classification" && ds.records));
   }
 
   function normalizeSchemaId(rawSchemaId, dataset) {
@@ -359,7 +362,8 @@
       (ds && ds.splitConfig) || { mode: "random", train: 0.80, val: 0.10, test: 0.10 }
     );
 
-    if (schemaId === "oscillator" && Array.isArray(ds.trajectories) && ds.trajectories.length) {
+    // trajectory datasets with trajectories array (oscillator-like format)
+    if (Array.isArray(ds.trajectories) && ds.trajectories.length) {
       var built = buildDatasetCsvAndManifest(ds);
       if (!built || !built.csv) return null;
       var csvName = stem + ".csv";

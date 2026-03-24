@@ -126,20 +126,8 @@
     }
     return function (yTrue, yPred) {
       return tf.tidy(function () {
-        if (target !== "xv") {
-          const l = scalarLossByType(yPred, yTrue, type);
-          return tf.mul(tf.scalar(headWeight), l);
-        }
-        const wsum = Math.max(1e-9, wx + wv);
-        const nx = wx / wsum;
-        const nv = wv / wsum;
-        const tx = yTrue.slice([0, 0], [-1, 1]);
-        const tv = yTrue.slice([0, 1], [-1, 1]);
-        const px = yPred.slice([0, 0], [-1, 1]);
-        const pv = yPred.slice([0, 1], [-1, 1]);
-        const lx = scalarLossByType(px, tx, type);
-        const lv = scalarLossByType(pv, tv, type);
-        const l = tf.add(tf.mul(tf.scalar(nx), lx), tf.mul(tf.scalar(nv), lv));
+        // generic loss on full output (works for any dimension)
+        const l = scalarLossByType(yPred, yTrue, type);
         return tf.mul(tf.scalar(headWeight), l);
       });
     };

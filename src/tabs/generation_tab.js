@@ -179,10 +179,12 @@
             card.appendChild(el("div", { style: "font-size:10px;color:#94a3b8;margin-top:8px;" },
               "Generated " + result.samples.length + " samples | dim: " + (result.samples[0] ? result.samples[0].length : "?") ));
 
-            // for image datasets: render as image grid
+            // for image datasets: render as image grid (detect by checking if dim is a perfect square or 3*square)
             var sampleDim = result.samples[0] ? result.samples[0].length : 0;
-            if (sampleDim === 784 || sampleDim === 3072) {
-              var imgW = sampleDim === 3072 ? 32 : 28;
+            var imgW = Math.round(Math.sqrt(sampleDim)); // grayscale
+            if (imgW * imgW !== sampleDim) imgW = Math.round(Math.sqrt(sampleDim / 3)); // RGB
+            var isImage = (imgW * imgW === sampleDim) || (imgW * imgW * 3 === sampleDim);
+            if (isImage && imgW >= 8) {
               var imgH = imgW;
               var isRgb = sampleDim >= imgW * imgH * 3;
               var gridWrap = el("div", { style: "display:flex;flex-wrap:wrap;gap:3px;margin-top:4px;" });

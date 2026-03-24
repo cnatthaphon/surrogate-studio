@@ -265,7 +265,7 @@ function targetUnitsFromMode(target, datasetMeta, nodeData) {
     if (Number.isFinite(nodeUnits) && nodeUnits > 0) return Math.max(1, Math.round(nodeUnits));
     return Math.max(1, Number(datasetMeta.classCount || 1));
   }
-  if (target === "xv") return 2;
+  if (target === "xv" || target === "traj") return Math.max(1, Number(datasetMeta.featureSize || 2));
   if (target === "params") {
     const raw = String(data.paramsSelect || "");
     const picks = raw.split(",").map(function (s) { return String(s || "").trim(); }).filter(Boolean);
@@ -726,20 +726,8 @@ function createHeadLoss(tf, head, preparedDataset) {
   }
   return function (yTrue, yPred) {
     return tf.tidy(function () {
-      if (target !== "xv") {
-        return tf.mul(tf.scalar(matchWeight), scalarLoss(yPred, yTrue, lossType));
-      }
-      const wsum = Math.max(1e-9, wx + wv);
-      const nx = wx / wsum;
-      const nv = wv / wsum;
-      const tx = yTrue.slice([0, 0], [-1, 1]);
-      const tv = yTrue.slice([0, 1], [-1, 1]);
-      const px = yPred.slice([0, 0], [-1, 1]);
-      const pv = yPred.slice([0, 1], [-1, 1]);
-      const lx = scalarLoss(px, tx, lossType);
-      const lv = scalarLoss(pv, tv, lossType);
-      const value = tf.add(tf.mul(tf.scalar(nx), lx), tf.mul(tf.scalar(nv), lv));
-      return tf.mul(tf.scalar(matchWeight), value);
+      // generic loss on full output — no hardcoded column slicing
+      return tf.mul(tf.scalar(matchWeight), scalarLoss(yPred, yTrue, lossType));
     });
   };
 }

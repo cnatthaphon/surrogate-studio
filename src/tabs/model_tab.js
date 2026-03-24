@@ -397,7 +397,12 @@
               return { sourceKey: hit.key, label: hit.label || hit.key, featureSize: hit.featureSize || h * w * c, shape: shape, height: h, width: w, channels: c };
             }
             var ds = schemaRegistry ? schemaRegistry.getDatasetSchema(sid) : null;
-            if (ds && ds.sampleType === "image") return { sourceKey: "pixel_values", label: "pixel values", featureSize: 784, shape: [28, 28, 1], height: 28, width: 28, channels: 1 };
+            if (ds && ds.sampleType === "image") {
+              // read from schema metadata, not hardcoded
+              var modelSchema = schemaRegistry ? schemaRegistry.getModelSchema(sid) : null;
+              var imgSrc = (modelSchema && modelSchema.metadata && modelSchema.metadata.featureNodes && modelSchema.metadata.featureNodes.imageSource && modelSchema.metadata.featureNodes.imageSource[0]) || {};
+              return { sourceKey: imgSrc.key || "pixel_values", label: imgSrc.label || "pixel values", featureSize: imgSrc.featureSize || 784, shape: imgSrc.shape || [28, 28, 1], height: (imgSrc.shape && imgSrc.shape[0]) || 28, width: (imgSrc.shape && imgSrc.shape[1]) || 28, channels: (imgSrc.shape && imgSrc.shape[2]) || 1 };
+            }
             return { sourceKey: "", label: "none", featureSize: 0, shape: [], height: 0, width: 0, channels: 0 };
           },
           estimateNodeFeatureWidth: function () { return 0; },
