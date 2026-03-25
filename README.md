@@ -4,7 +4,7 @@
 
 Build datasets, design neural network architectures visually, train models, and analyze results — all from a single page. No Python install, no GPU server, no Docker. Just open the HTML file.
 
-![Playground](demo/LSTM-VAE-for-dominant-motion-extraction/images/01_playground.png)
+![Demo Workflow](demo/LSTM-VAE-for-dominant-motion-extraction/images/demo_workflow.gif)
 
 ---
 
@@ -52,9 +52,9 @@ Self-contained paper reproductions. Each demo is a folder under `demo/` with its
 
 Reproduces the LSTM-VAE from Jadhav & Barati Farimani (2022) for ant trajectory reconstruction.
 
-| Training (20 epochs) | Reconstruction (Original vs Decoded) |
+| Training | Generation |
 |:---:|:---:|
-| ![Training](demo/LSTM-VAE-for-dominant-motion-extraction/images/06_trainer_after.png) | ![Reconstruct](demo/LSTM-VAE-for-dominant-motion-extraction/images/08_generation_reconstruct.png) |
+| ![Training](demo/LSTM-VAE-for-dominant-motion-extraction/images/training.gif) | ![Generation](demo/LSTM-VAE-for-dominant-motion-extraction/images/generation.gif) |
 
 **Benchmark (50 epochs, TF.js CPU):**
 

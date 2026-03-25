@@ -4,17 +4,29 @@
 
 This demo reproduces the core LSTM-VAE architecture from Jadhav & Barati Farimani (2021) and provides interactive training, visualization, and generation — entirely in the browser using TF.js, with optional PyTorch server backend.
 
+### Demo Workflow
+
+![Full Workflow](images/demo_workflow.gif)
+
+### Dataset & Model
+
+| Dataset — Ant Trajectories | Model — Visual Graph Editor |
+|:---:|:---:|
+| ![Dataset](images/dataset.gif) | ![Model](images/model.gif) |
+
+### Training & Generation
+
+| Training — Live Loss Curve | Generation — Reconstruct & Sample |
+|:---:|:---:|
+| ![Training](images/training.gif) | ![Generation](images/generation.gif) |
+
 ### Screenshots
 
-| Playground — Ant Trajectories | Model — LSTM-VAE Graph |
-|:---:|:---:|
-| ![Playground](images/01_playground.png) | ![Model](images/03_model_lstm_vae.png) |
-
-| Training — Loss Curve & Epochs | Test — Predicted vs Truth (R², Residuals) |
+| Training Results | Test Metrics (R², Residuals) |
 |:---:|:---:|
 | ![Training](images/06_trainer_after.png) | ![Test](images/07_trainer_test.png) |
 
-| Generation — Reconstruct (Original vs Decoded) | Generation — Random Sampling from Latent |
+| Reconstruction (Original vs Decoded) | Random Sampling from Latent |
 |:---:|:---:|
 | ![Reconstruct](images/08_generation_reconstruct.png) | ![Random](images/11_generation_random.png) |
 
