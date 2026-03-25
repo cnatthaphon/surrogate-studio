@@ -92,12 +92,72 @@
     return { drawflow: { Home: { data: d } } };
   }
 
+  // Pre-build dataset from embedded ANT_DATA (no manual generate needed)
+  function _buildDataset() {
+    var raw = (typeof window !== "undefined" ? window : {}).ANT_DATA;
+    if (!raw || !raw.s) return null;
+    var allSamples = raw.s;
+    var totalCount = Math.min(1000, allSamples.length);
+    var seed = 42;
+    var rng = function () { seed = (1664525 * seed + 1013904223) >>> 0; return seed / 4294967296; };
+
+    // shuffle indices
+    var indices = [];
+    for (var i = 0; i < allSamples.length; i++) indices.push(i);
+    for (var i = indices.length - 1; i > 0; i--) {
+      var j = Math.floor(rng() * (i + 1));
+      var t = indices[i]; indices[i] = indices[j]; indices[j] = t;
+    }
+    indices = indices.slice(0, totalCount);
+
+    // split 80/10/10
+    var trainN = Math.round(totalCount * 0.8);
+    var valN = Math.round(totalCount * 0.1);
+    function extract(idx) {
+      var x = [], y = [];
+      for (var i = 0; i < idx.length; i++) { x.push(allSamples[idx[i]]); y.push(allSamples[idx[i]]); }
+      return { x: x, y: y };
+    }
+    var trainIdx = indices.slice(0, trainN);
+    var valIdx = indices.slice(trainN, trainN + valN);
+    var testIdx = indices.slice(trainN + valN);
+
+    return {
+      schemaId: "ant_trajectory",
+      datasetModuleId: "ant_trajectory",
+      source: "lstm_vae_paper",
+      mode: "regression",
+      numAnts: raw.n || 20,
+      numFeatures: raw.f || 40,
+      featureSize: raw.f || 40,
+      imageShape: null,
+      classCount: 0,
+      classNames: [],
+      splitConfig: { mode: "random", train: 0.8, val: 0.1, test: 0.1 },
+      splitCounts: { train: trainIdx.length, val: valIdx.length, test: testIdx.length },
+      trainCount: trainIdx.length,
+      valCount: valIdx.length,
+      testCount: testIdx.length,
+      xTrain: extract(trainIdx).x,
+      yTrain: extract(trainIdx).y,
+      xVal: extract(valIdx).x,
+      yVal: extract(valIdx).y,
+      xTest: extract(testIdx).x,
+      yTest: extract(testIdx).y,
+      targetMode: "xv",
+      records: { train: extract(trainIdx), val: extract(valIdx), test: extract(testIdx) },
+      seed: 42,
+    };
+  }
+
+  var prebuiltData = _buildDataset();
+
   window.LSTM_VAE_DEMO_PRESET = {
     dataset: {
       id: "demo-ant-ds",
       name: "Ant Trajectories (1000)",
       schemaId: "ant_trajectory",
-      status: "draft",
+      status: prebuiltData ? "ready" : "draft",
       config: {
         seed: 42,
         splitMode: "random",
@@ -106,7 +166,8 @@
         testFrac: 0.1,
         totalCount: 1000,
       },
-      data: null,
+      data: prebuiltData,
+      generatedAt: prebuiltData ? Date.now() : null,
       createdAt: Date.now(),
     },
 
