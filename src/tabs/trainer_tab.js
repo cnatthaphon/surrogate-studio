@@ -1050,8 +1050,8 @@
 
       // info
       rightEl.appendChild(el("div", { style: "margin-top:12px;font-size:10px;color:#64748b;" },
-        "Backend: Auto tries PyTorch Server (if connected) \u2192 Worker (WebGPU/WebGL) \u2192 main thread. " +
-        "Use 'Test Connection' to check server availability."));
+        "Auto = TF.js client (WebGPU \u2192 WebGL \u2192 WASM \u2192 CPU). " +
+        "Select 'PyTorch Server' to train on remote GPU."));
     }
 
     function _handleTrain() {
@@ -1138,27 +1138,22 @@
       var serverAdapter = getServerAdapter();
       var serverUrl = String(config.serverUrl || (serverAdapter && serverAdapter.DEFAULT_SERVER) || "");
 
-      // For auto or pytorch_server: verify server is reachable before using it
-      if ((backend === "auto" || backend === "pytorch_server") && serverAdapter) {
-        onStatus("Checking server...");
+      // PyTorch Server: only when EXPLICITLY selected — verify before use
+      if (backend === "pytorch_server" && serverAdapter) {
+        onStatus("Connecting to PyTorch Server...");
         serverAdapter.checkServer(serverUrl).then(function (ok) {
           _serverAvailable = ok;
-          if (ok && backend === "auto") {
-            onStatus("Auto: using PyTorch Server");
+          if (ok) {
             _trainWithBackend("pytorch_server", serverAdapter, serverUrl);
-          } else if (ok && backend === "pytorch_server") {
-            _trainWithBackend("pytorch_server", serverAdapter, serverUrl);
-          } else if (backend === "pytorch_server") {
-            onStatus("Server not reachable — cannot train with PyTorch Server");
+          } else {
+            onStatus("Server not reachable at " + serverUrl);
             _isTraining = false;
             _renderRightPanel();
-          } else {
-            // auto fallback to client
-            _trainWithBackend("client", null, "");
           }
         });
         return;
       }
+      // Auto + all other client backends: train on TF.js (WebGPU→WebGL→WASM→CPU)
       _trainWithBackend(backend, null, "");
     }
 
