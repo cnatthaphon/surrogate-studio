@@ -96,6 +96,7 @@
         div.appendChild(el("span", { style: "font-size:9px;padding:1px 5px;border-radius:3px;background:" + badgeColor + ";color:#fff;margin-left:4px;" }, item.family));
         div.addEventListener("click", function () {
           _selectedTrainerId = item.trainerId;
+          _generationResults = []; // clear results when switching models
           _renderLeftPanel();
           _renderMainPanel();
           _renderRightPanel();
@@ -200,10 +201,28 @@
                 gridWrap.appendChild(canvas);
               }
               card.appendChild(gridWrap);
+            } else if (Plotly && sampleDim >= 4) {
+              // trajectory/numeric: show as Plotly line chart (each sample = one trace)
+              var traceDiv = el("div", { style: "height:250px;margin-top:8px;" });
+              card.appendChild(traceDiv);
+              var traces = [];
+              var maxTraces = Math.min(result.samples.length, 8);
+              var colors = ["#22d3ee", "#f59e0b", "#4ade80", "#f43f5e", "#a78bfa", "#fb923c", "#2dd4bf", "#e879f9"];
+              for (var gi = 0; gi < maxTraces; gi++) {
+                var vals = result.samples[gi];
+                var xVals = []; for (var xi = 0; xi < vals.length; xi++) xVals.push(xi);
+                traces.push({ x: xVals, y: vals, mode: "lines", name: "Sample " + (gi + 1), line: { color: colors[gi % colors.length], width: 1.5 } });
+              }
+              Plotly.newPlot(traceDiv, traces, {
+                paper_bgcolor: "#0b1220", plot_bgcolor: "#0b1220", font: { color: "#e2e8f0", size: 10 },
+                title: { text: "Generated Samples (" + maxTraces + "/" + result.samples.length + ")", font: { size: 11 } },
+                xaxis: { title: "Feature", gridcolor: "#1e293b" }, yaxis: { title: "Value", gridcolor: "#1e293b" },
+                legend: { font: { size: 8 } }, margin: { t: 30, b: 40, l: 50, r: 10 },
+              }, { responsive: true });
             } else {
-              // trajectory/numeric: show as text
-              var previewText = result.samples.slice(0, 3).map(function (s) {
-                return "[" + (Array.isArray(s) ? s.slice(0, 5).map(function (v) { return Number(v).toFixed(3); }).join(", ") + (s.length > 5 ? "..." : "") : String(s)) + "]";
+              // small dim or no Plotly: show as text
+              var previewText = result.samples.slice(0, 5).map(function (s) {
+                return "[" + (Array.isArray(s) ? s.map(function (v) { return Number(v).toFixed(3); }).join(", ") : String(s)) + "]";
               }).join("\n");
               card.appendChild(el("pre", { style: "font-size:9px;color:#64748b;margin-top:4px;max-height:100px;overflow:auto;" }, previewText));
             }
@@ -297,7 +316,7 @@
 
       var trainer = store.getTrainerCard(_selectedTrainerId);
       var modelRec = store.getModel(trainer.modelId);
-      if (!trainer || !modelRec || !trainer.modelArtifacts) { onStatus("Model weights not available"); return; }
+      if (!trainer || !modelRec || !trainer.modelArtifacts) { onStatus("Model weights not available — train first"); return; }
 
       var config = _collectConfig();
       var method = config.method || "random";
@@ -308,48 +327,55 @@
       var currentMountId = ++_mountId;
 
       try {
-        // rebuild model
+        // rebuild FULL model with correct feature size (from dataset)
         var schemaId = trainer.schemaId;
         var allowedOutputKeys = schemaRegistry ? schemaRegistry.getOutputKeys(schemaId) : ["x"];
         var defaultTarget = (allowedOutputKeys[0] && (allowedOutputKeys[0].key || allowedOutputKeys[0])) || "x";
         var graphMode = modelBuilder.inferGraphMode(modelRec.graph, "direct");
+
+        // get feature size from trainer's dataset
+        var dataset = trainer.datasetId ? store.getDataset(trainer.datasetId) : null;
+        var dsData = dataset && dataset.data ? dataset.data : {};
+        var featureSize = Number(dsData.featureSize || (dsData.xTrain && dsData.xTrain[0] && dsData.xTrain[0].length) || 40);
         var latentInfo = modelBuilder.extractLatentInfo ? modelBuilder.extractLatentInfo(modelRec.graph) : { latentDim: 16 };
         var latentDim = latentInfo.latentDim || 16;
 
-        // for VAE random/optimize: try to extract decoder
-        // for supervised inverse: use full model
         var built = modelBuilder.buildModelFromGraph(tf, modelRec.graph, {
-          mode: graphMode, featureSize: latentDim, windowSize: 1, seqFeatureSize: latentDim,
-          allowedOutputKeys: allowedOutputKeys, defaultTarget: defaultTarget, numClasses: 10,
+          mode: graphMode, featureSize: featureSize, windowSize: 1, seqFeatureSize: featureSize,
+          allowedOutputKeys: allowedOutputKeys, defaultTarget: defaultTarget, numClasses: dsData.numClasses || dsData.classCount || 10,
         });
 
-        // load weights
-        if (trainer.modelArtifacts.weightSpecs && trainer.modelArtifacts.weightData) {
+        // load trained weights (handle both weightValues and weightData)
+        var hasWeights = trainer.modelArtifacts && (trainer.modelArtifacts.weightValues || trainer.modelArtifacts.weightData);
+        if (hasWeights) {
           try {
-            built.model.loadWeights(trainer.modelArtifacts.weightSpecs.map(function (s) {
-              return tf.tensor(new Float32Array(trainer.modelArtifacts.weightData, s.offset || 0), s.shape);
-            }));
-          } catch (e) { /* weight load may fail */ }
+            var flatWeights;
+            if (trainer.modelArtifacts.weightValues && Array.isArray(trainer.modelArtifacts.weightValues)) {
+              flatWeights = new Float32Array(trainer.modelArtifacts.weightValues);
+            } else if (trainer.modelArtifacts.weightData && trainer.modelArtifacts.weightData.byteLength) {
+              flatWeights = new Float32Array(trainer.modelArtifacts.weightData);
+            }
+            if (flatWeights) {
+              var mw = built.model.getWeights();
+              var nw = []; var off = 0;
+              for (var wi = 0; wi < mw.length; wi++) {
+                var sz = mw[wi].shape.reduce(function (a, b) { return a * b; }, 1);
+                if (off + sz <= flatWeights.length) { nw.push(tf.tensor(flatWeights.subarray(off, off + sz), mw[wi].shape)); off += sz; }
+              }
+              if (nw.length === mw.length) built.model.setWeights(nw);
+            }
+          } catch (e) { console.warn("[generation] Weight load:", e.message); }
         }
 
+        // For generation: use the FULL model (input → output)
+        // Random/optimize: sample random input, pass through model → get reconstruction
+        // Inverse: optimize input to match target output
         var genModel = built.model;
-        var genLatentDim = latentDim;
-
-        // try to extract decoder for VAE methods
-        if ((method === "random" || method === "optimize" || method === "langevin") && family === "vae" && modelBuilder.extractDecoder) {
-          try {
-            var decoded = modelBuilder.extractDecoder(tf, built.model, latentDim);
-            genModel = decoded.model;
-            genLatentDim = decoded.latentDim;
-          } catch (e) {
-            onStatus("Decoder extraction failed, using full model: " + e.message);
-          }
-        }
 
         var genConfig = {
           method: method,
           model: genModel,
-          latentDim: genLatentDim,
+          latentDim: featureSize, // use input feature size, not latent dim
           numSamples: config.numSamples || 16,
           steps: config.steps || 0,
           lr: config.lr || 0.01,
