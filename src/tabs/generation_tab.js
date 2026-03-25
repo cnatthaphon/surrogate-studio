@@ -60,11 +60,11 @@
     function _saveGen(rec) { if (store && typeof store.save === "function") store.save({ table: GEN_TABLE, values: [rec] }); }
     function _removeGen(id) { if (store && typeof store.remove === "function") store.remove({ table: GEN_TABLE, id: id }); }
 
-    // ─── Get trained trainers ───
-    function _listTrainedForSchema(schemaId) {
+    // ─── Get trainers for a schema (all statuses, for selection) ───
+    function _listTrainersForSchema(schemaId) {
       if (!store) return [];
       return (typeof store.listTrainerCards === "function" ? store.listTrainerCards({}) : [])
-        .filter(function (t) { return t.status === "done" && t.modelArtifacts && t.modelId && (!schemaId || t.schemaId === schemaId); });
+        .filter(function (t) { return t.modelId && (!schemaId || t.schemaId === schemaId); });
     }
 
     // ─── LEFT PANEL ───
@@ -259,16 +259,17 @@
       schemaRow.appendChild(schemaSel);
       configCard.appendChild(schemaRow);
 
-      // trainer/model selector (filtered by schema)
-      var trainers = _listTrainedForSchema(g.schemaId);
+      // trainer/model selector (filtered by schema, shows status)
+      var trainers = _listTrainersForSchema(g.schemaId);
       var trainerRow = el("div", { className: "osc-form-row" });
       trainerRow.appendChild(el("label", {}, "Model"));
       var trainerSel = el("select", { style: "width:100%;padding:4px;background:#1e293b;color:#e2e8f0;border:1px solid #334155;border-radius:4px;font-size:11px;" });
-      trainerSel.appendChild(el("option", { value: "" }, "-- select trained model --"));
+      trainerSel.appendChild(el("option", { value: "" }, "-- select model --"));
       trainers.forEach(function (t) {
         var model = store ? store.getModel(t.modelId) : null;
         var family = model && model.graph && modelBuilder ? modelBuilder.inferModelFamily(model.graph) : "supervised";
-        var opt = el("option", { value: t.id }, (t.name || t.id) + " (" + family + ")");
+        var statusTag = t.status === "done" ? "\u2713" : t.status === "training" ? "\u23f3" : "\u25cb";
+        var opt = el("option", { value: t.id }, statusTag + " " + (t.name || t.id) + " (" + family + ")");
         if (t.id === g.trainerId) opt.selected = true;
         trainerSel.appendChild(opt);
       });
@@ -327,9 +328,18 @@
 
       rightEl.appendChild(configCard);
 
+      // check if selected trainer is ready
+      var selectedTrainer = g.trainerId ? (store ? store.getTrainerCard(g.trainerId) : null) : null;
+      var isReady = selectedTrainer && selectedTrainer.status === "done" && selectedTrainer.modelArtifacts;
+
+      if (g.trainerId && !isReady) {
+        var statusMsg = !selectedTrainer ? "Trainer not found" : selectedTrainer.status === "training" ? "Model is still training..." : "Model not trained yet. Train it first in the Trainer tab.";
+        rightEl.appendChild(el("div", { style: "margin-top:8px;padding:8px;background:#1c1917;border:1px solid #854d0e;border-radius:6px;font-size:11px;color:#fbbf24;" }, statusMsg));
+      }
+
       // buttons
       var genBtn = el("button", { className: "osc-btn", style: "width:100%;margin-top:8px;" }, _isGenerating ? "Generating..." : "Generate");
-      if (_isGenerating) genBtn.disabled = true;
+      if (_isGenerating || !isReady) genBtn.disabled = true;
       genBtn.addEventListener("click", function () { _handleGenerate(); });
       rightEl.appendChild(genBtn);
 

@@ -109,10 +109,10 @@
     }
 
     // ─── Get trained trainers for a schema ───
-    function _listTrainedForSchema(schemaId) {
+    function _listTrainersForSchema(schemaId) {
       if (!store) return [];
       return (typeof store.listTrainerCards === "function" ? store.listTrainerCards({}) : [])
-        .filter(function (t) { return t.status === "done" && t.modelArtifacts && t.modelId && (!schemaId || t.schemaId === schemaId); });
+        .filter(function (t) { return t.modelId && (!schemaId || t.schemaId === schemaId); });
     }
 
     // ─── Get datasets for a schema ───
@@ -282,7 +282,7 @@
             tr.appendChild(el("td", { style: "color:" + (isBest ? "#4ade80" : "#cbd5e1") + ";" }, fmt));
           });
           tr.appendChild(el("td", { style: "color:#64748b;" }, String(r.testN || "\u2014")));
-          var sc = r.status === "done" ? "#4ade80" : r.status === "error" ? "#f43f5e" : "#fbbf24";
+          var sc = r.status === "done" ? "#4ade80" : r.status === "error" ? "#f43f5e" : r.status === "skipped" ? "#64748b" : "#fbbf24";
           tr.appendChild(el("td", { style: "color:" + sc + ";" }, r.status || "pending"));
           table.appendChild(tr);
         });
@@ -400,9 +400,9 @@
       configCard.appendChild(dsRow);
 
       // trainer selection (checkboxes, filtered by schema)
-      var trainers = _listTrainedForSchema(ev.schemaId);
+      var trainers = _listTrainersForSchema(ev.schemaId);
       if (trainers.length) {
-        configCard.appendChild(el("div", { style: "font-size:10px;color:#67e8f9;margin:8px 0 4px;font-weight:600;" }, "Trained Models"));
+        configCard.appendChild(el("div", { style: "font-size:10px;color:#67e8f9;margin:8px 0 4px;font-weight:600;" }, "Models"));
         trainers.forEach(function (t) {
           var row = el("div", { style: "display:flex;align-items:center;gap:6px;margin-bottom:3px;" });
           var cb = el("input", { type: "checkbox" });
@@ -416,7 +416,9 @@
             _saveEval(ev);
           });
           row.appendChild(cb);
-          var model = store ? store.getModel(t.modelId) : null;
+          var statusTag = t.status === "done" ? "\u2713" : t.status === "training" ? "\u23f3" : "\u25cb";
+          var statusColor = t.status === "done" ? "#4ade80" : t.status === "training" ? "#fbbf24" : "#64748b";
+          row.appendChild(el("span", { style: "font-size:11px;color:" + statusColor + ";" }, statusTag));
           row.appendChild(el("span", { style: "font-size:11px;color:#e2e8f0;" }, (t.name || t.id)));
           if (t.metrics && t.metrics.mae != null) {
             row.appendChild(el("span", { style: "font-size:9px;color:#64748b;" }, "MAE=" + Number(t.metrics.mae).toExponential(2)));
@@ -424,7 +426,17 @@
           configCard.appendChild(row);
         });
       } else {
-        configCard.appendChild(el("div", { style: "font-size:10px;color:#64748b;margin:8px 0;" }, "No trained models for this schema."));
+        configCard.appendChild(el("div", { style: "font-size:10px;color:#64748b;margin:8px 0;" }, "No models for this schema."));
+      }
+
+      // warn about untrained models
+      var untrainedSelected = (ev.trainerIds || []).filter(function (tid) {
+        var t = store ? store.getTrainerCard(tid) : null;
+        return !t || t.status !== "done" || !t.modelArtifacts;
+      });
+      if (untrainedSelected.length) {
+        configCard.appendChild(el("div", { style: "margin-top:6px;padding:6px;background:#1c1917;border:1px solid #854d0e;border-radius:4px;font-size:10px;color:#fbbf24;" },
+          untrainedSelected.length + " selected model(s) not trained yet \u2014 they will be skipped."));
       }
 
       // evaluator selection
@@ -518,6 +530,7 @@
         var tid = ev.trainerIds[idx];
         var r = run.results[idx];
         r.status = "running";
+        _saveEval(ev);
         _renderMainPanel();
 
         try {
@@ -527,6 +540,7 @@
         }
 
         _saveEval(ev);
+        _renderMainPanel();
         onStatus("Evaluated " + (idx + 1) + "/" + ev.trainerIds.length + ": " + r.trainerName);
         idx++;
         setTimeout(evalNext, 50);
@@ -536,12 +550,16 @@
 
     function _evaluateOneModel(tf, pc, ev, r, tid) {
       var trainer = store.getTrainerCard(tid);
+      if (!trainer) { r.status = "error"; r.error = "Trainer not found"; return; }
       var modelRec = store.getModel(trainer.modelId);
       var dataset = store.getDataset(ev.datasetId);
       r.modelName = modelRec ? modelRec.name : trainer.modelId;
 
-      if (!trainer.modelArtifacts || !modelRec || !modelRec.graph || !dataset || !dataset.data) {
-        r.status = "error"; r.error = "Missing artifacts"; return;
+      if (trainer.status !== "done" || !trainer.modelArtifacts) {
+        r.status = "skipped"; r.error = "Not trained"; return;
+      }
+      if (!modelRec || !modelRec.graph || !dataset || !dataset.data) {
+        r.status = "error"; r.error = "Missing model or dataset"; return;
       }
 
       var schemaId = ev.schemaId;
