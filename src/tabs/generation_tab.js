@@ -177,57 +177,15 @@
             }
           }
 
-          // sample preview (first few samples)
+          // sample visualization — delegates to appropriate renderer
           if (result.samples && result.samples.length) {
-            card.appendChild(el("div", { style: "font-size:10px;color:#94a3b8;margin-top:8px;" },
-              "Generated " + result.samples.length + " samples | dim: " + (result.samples[0] ? result.samples[0].length : "?") ));
-
-            // for image datasets: render as image grid (detect by checking if dim is a perfect square or 3*square)
             var sampleDim = result.samples[0] ? result.samples[0].length : 0;
-            var imgW = Math.round(Math.sqrt(sampleDim)); // grayscale
-            if (imgW * imgW !== sampleDim) imgW = Math.round(Math.sqrt(sampleDim / 3)); // RGB
-            var isImage = (imgW * imgW === sampleDim) || (imgW * imgW * 3 === sampleDim);
-            if (isImage && imgW >= 8) {
-              var imgH = imgW;
-              var isRgb = sampleDim >= imgW * imgH * 3;
-              var gridWrap = el("div", { style: "display:flex;flex-wrap:wrap;gap:3px;margin-top:4px;" });
-              var maxShow = Math.min(result.samples.length, 32);
-              for (var si = 0; si < maxShow; si++) {
-                var canvas = document.createElement("canvas");
-                canvas.width = imgW; canvas.height = imgH;
-                canvas.style.cssText = "width:40px;height:40px;border:1px solid #334155;border-radius:2px;image-rendering:pixelated;";
-                var coreRenderer = (typeof window !== "undefined" && window.OSCImageRenderCore) ? window.OSCImageRenderCore : null;
-                if (coreRenderer) {
-                  coreRenderer.drawImageToCanvas(canvas.getContext("2d"), result.samples[si], imgW, imgH);
-                }
-                gridWrap.appendChild(canvas);
-              }
-              card.appendChild(gridWrap);
-            } else if (Plotly && sampleDim >= 4) {
-              // trajectory/numeric: show as Plotly line chart (each sample = one trace)
-              var traceDiv = el("div", { style: "height:250px;margin-top:8px;" });
-              card.appendChild(traceDiv);
-              var traces = [];
-              var maxTraces = Math.min(result.samples.length, 8);
-              var colors = ["#22d3ee", "#f59e0b", "#4ade80", "#f43f5e", "#a78bfa", "#fb923c", "#2dd4bf", "#e879f9"];
-              for (var gi = 0; gi < maxTraces; gi++) {
-                var vals = result.samples[gi];
-                var xVals = []; for (var xi = 0; xi < vals.length; xi++) xVals.push(xi);
-                traces.push({ x: xVals, y: vals, mode: "lines", name: "Sample " + (gi + 1), line: { color: colors[gi % colors.length], width: 1.5 } });
-              }
-              Plotly.newPlot(traceDiv, traces, {
-                paper_bgcolor: "#0f1320", plot_bgcolor: "#0f1320", font: { color: "#cbd5e1", size: 10 },
-                title: { text: "Generated Samples (" + maxTraces + "/" + result.samples.length + ")", font: { size: 11 } },
-                xaxis: { title: "Feature", gridcolor: "#1e293b" }, yaxis: { title: "Value", gridcolor: "#1e293b" },
-                legend: { font: { size: 8 } }, margin: { t: 30, b: 40, l: 50, r: 10 },
-              }, { responsive: true });
-            } else {
-              // small dim or no Plotly: show as text
-              var previewText = result.samples.slice(0, 5).map(function (s) {
-                return "[" + (Array.isArray(s) ? s.map(function (v) { return Number(v).toFixed(3); }).join(", ") : String(s)) + "]";
-              }).join("\n");
-              card.appendChild(el("pre", { style: "font-size:9px;color:#64748b;margin-top:4px;max-height:100px;overflow:auto;" }, previewText));
-            }
+            card.appendChild(el("div", { style: "font-size:10px;color:#94a3b8;margin-top:8px;" },
+              "Generated " + result.samples.length + " samples | " + sampleDim + " dimensions"));
+
+            var vizMount = el("div", { style: "margin-top:8px;" });
+            card.appendChild(vizMount);
+            _renderGeneratedSamples(vizMount, result.samples, trainer, Plotly);
           }
           mainEl.appendChild(card);
         });
@@ -429,6 +387,123 @@
         _isGenerating = false;
         onStatus("Generation setup error: " + e.message);
       }
+    }
+
+    // Render generated samples based on schema type
+    function _renderGeneratedSamples(mountEl, samples, trainer, Plotly) {
+      if (!samples || !samples.length) return;
+      var sampleDim = samples[0].length || 0;
+      var schemaId = trainer ? trainer.schemaId : "";
+      var dsSchema = schemaRegistry ? schemaRegistry.getDatasetSchema(schemaId) : null;
+      var sampleType = (dsSchema && dsSchema.sampleType) || "";
+      var dataset = trainer && trainer.datasetId ? store.getDataset(trainer.datasetId) : null;
+      var dsData = dataset && dataset.data ? dataset.data : {};
+
+      // image datasets: render as canvas grid
+      var coreRenderer = (typeof window !== "undefined" && window.OSCImageRenderCore) ? window.OSCImageRenderCore : null;
+      if (sampleType === "image" && coreRenderer && sampleDim >= 64) {
+        var imgShape = dsData.imageShape || [28, 28, 1];
+        var imgW = imgShape[0] || 28, imgH = imgShape[1] || 28;
+        var gridWrap = el("div", { style: "display:flex;flex-wrap:wrap;gap:4px;" });
+        var maxShow = Math.min(samples.length, 32);
+        for (var si = 0; si < maxShow; si++) {
+          var canvas = document.createElement("canvas");
+          canvas.width = imgW; canvas.height = imgH;
+          canvas.style.cssText = "width:48px;height:48px;border:1px solid #2d3748;border-radius:3px;image-rendering:pixelated;";
+          coreRenderer.drawImageToCanvas(canvas.getContext("2d"), samples[si], imgW, imgH);
+          gridWrap.appendChild(canvas);
+        }
+        mountEl.appendChild(gridWrap);
+        return;
+      }
+
+      // trajectory with paired x,y features (ant data: 40 = 20 ants × 2)
+      if (Plotly && sampleDim >= 4 && sampleDim % 2 === 0) {
+        var numAgents = sampleDim / 2;
+        var colors = ["#38bdf8", "#fb923c", "#4ade80", "#f43f5e", "#a78bfa", "#fbbf24", "#2dd4bf", "#e879f9", "#818cf8", "#34d399",
+                      "#fb7185", "#c084fc", "#fcd34d", "#6ee7b7", "#f472b6", "#93c5fd", "#fdba74", "#86efac", "#d946ef", "#22d3ee"];
+
+        // show each generated sample as ant paths (x vs y per agent)
+        var maxSamples = Math.min(samples.length, 4);
+        for (var gi = 0; gi < maxSamples; gi++) {
+          var sampleDiv = el("div", { style: "margin-bottom:8px;" });
+          sampleDiv.appendChild(el("div", { style: "font-size:10px;color:#64748b;margin-bottom:2px;" }, "Sample " + (gi + 1)));
+          var chartDiv = el("div", { style: "height:220px;" });
+          sampleDiv.appendChild(chartDiv);
+          mountEl.appendChild(sampleDiv);
+
+          var traces = [];
+          var sample = samples[gi];
+          for (var agent = 0; agent < Math.min(numAgents, 20); agent++) {
+            var xPos = sample[agent * 2];
+            var yPos = sample[agent * 2 + 1];
+            traces.push({
+              x: [xPos], y: [yPos], mode: "markers", name: "Agent " + agent,
+              marker: { color: colors[agent % colors.length], size: 8 },
+            });
+          }
+          Plotly.newPlot(chartDiv, traces, {
+            paper_bgcolor: "#0f1320", plot_bgcolor: "#0f1320", font: { color: "#cbd5e1", size: 10 },
+            title: { text: "Generated Positions (Sample " + (gi + 1) + ")", font: { size: 11 } },
+            xaxis: { title: "x", gridcolor: "#1e2740", range: [0, 1] },
+            yaxis: { title: "y", gridcolor: "#1e2740", range: [0, 1], scaleanchor: "x" },
+            showlegend: false,
+            margin: { t: 30, b: 40, l: 50, r: 10 },
+          }, { responsive: true });
+        }
+
+        // also show distribution comparison: generated vs real
+        if (dataset && dsData.xTrain && dsData.xTrain.length) {
+          var compDiv = el("div", { style: "margin-top:8px;" });
+          compDiv.appendChild(el("div", { style: "font-size:10px;color:#64748b;margin-bottom:2px;" }, "Generated vs Training Data (Agent 0)"));
+          var compChart = el("div", { style: "height:220px;" });
+          compDiv.appendChild(compChart);
+          mountEl.appendChild(compDiv);
+
+          // agent 0 x values: generated vs training
+          var genX = samples.map(function (s) { return s[0]; });
+          var genY = samples.map(function (s) { return s[1]; });
+          var realX = dsData.xTrain.slice(0, 100).map(function (s) { return s[0]; });
+          var realY = dsData.xTrain.slice(0, 100).map(function (s) { return s[1]; });
+
+          Plotly.newPlot(compChart, [
+            { x: realX, y: realY, mode: "markers", name: "Real", marker: { color: "#4a5568", size: 4, opacity: 0.5 } },
+            { x: genX, y: genY, mode: "markers", name: "Generated", marker: { color: "#38bdf8", size: 7 } },
+          ], {
+            paper_bgcolor: "#0f1320", plot_bgcolor: "#0f1320", font: { color: "#cbd5e1", size: 10 },
+            title: { text: "Agent 0: Generated (blue) vs Real (gray)", font: { size: 11 } },
+            xaxis: { title: "x", gridcolor: "#1e2740" }, yaxis: { title: "y", gridcolor: "#1e2740", scaleanchor: "x" },
+            legend: { font: { size: 9 } }, margin: { t: 30, b: 40, l: 50, r: 10 },
+          }, { responsive: true });
+        }
+        return;
+      }
+
+      // generic: Plotly line chart
+      if (Plotly && sampleDim >= 2) {
+        var lineDiv = el("div", { style: "height:220px;" });
+        mountEl.appendChild(lineDiv);
+        var lineTraces = [];
+        var maxT = Math.min(samples.length, 8);
+        var lc = ["#38bdf8", "#fb923c", "#4ade80", "#f43f5e", "#a78bfa", "#fbbf24", "#2dd4bf", "#e879f9"];
+        for (var li = 0; li < maxT; li++) {
+          var xv = []; for (var xi = 0; xi < samples[li].length; xi++) xv.push(xi);
+          lineTraces.push({ x: xv, y: samples[li], mode: "lines", name: "S" + (li + 1), line: { color: lc[li % lc.length], width: 1.5 } });
+        }
+        Plotly.newPlot(lineDiv, lineTraces, {
+          paper_bgcolor: "#0f1320", plot_bgcolor: "#0f1320", font: { color: "#cbd5e1", size: 10 },
+          title: { text: "Generated Samples", font: { size: 11 } },
+          xaxis: { title: "Dimension", gridcolor: "#1e2740" }, yaxis: { title: "Value", gridcolor: "#1e2740" },
+          legend: { font: { size: 8 } }, margin: { t: 30, b: 40, l: 50, r: 10 },
+        }, { responsive: true });
+        return;
+      }
+
+      // text fallback
+      var text = samples.slice(0, 5).map(function (s, i) {
+        return "Sample " + (i + 1) + ": [" + (Array.isArray(s) ? s.slice(0, 10).map(function (v) { return Number(v).toFixed(3); }).join(", ") + (s.length > 10 ? "..." : "") : s) + "]";
+      }).join("\n");
+      mountEl.appendChild(el("pre", { style: "font-size:10px;color:#94a3b8;margin-top:4px;max-height:120px;overflow:auto;background:#171d30;padding:8px;border-radius:4px;" }, text));
     }
 
     function mount() { _renderLeftPanel(); _renderMainPanel(); _renderRightPanel(); }
