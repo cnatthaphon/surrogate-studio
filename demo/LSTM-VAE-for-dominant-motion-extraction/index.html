@@ -61,7 +61,17 @@
 <body>
   <div id="app"></div>
   <script>
-    var store=OSCWorkspaceStore.createMemoryStore();var preset=window.LSTM_VAE_DEMO_PRESET;if(preset){if(preset.dataset)store.upsertDataset(preset.dataset);if(preset.models)preset.models.forEach(function(m){store.upsertModel(m)});if(preset.trainers)preset.trainers.forEach(function(t){store.upsertTrainerCard(t)})}
+    var store=OSCWorkspaceStore.createMemoryStore();
+    var preset=window.LSTM_VAE_DEMO_PRESET;
+    if(preset){
+      if(preset.dataset)store.upsertDataset(preset.dataset);
+      if(preset.models)preset.models.forEach(function(m){store.upsertModel(m)});
+      if(preset.trainers)preset.trainers.forEach(function(t){store.upsertTrainerCard(t)});
+      // generation + evaluation items use custom tables
+      store.initTables({tables:["generationRuns","evaluations"]});
+      if(preset.generations)preset.generations.forEach(function(g){store.save({table:"generationRuns",values:[g]})});
+      if(preset.evaluations)preset.evaluations.forEach(function(e){store.save({table:"evaluations",values:[e]})});
+    }
     SurrogateStudio.init({mountEl:document.getElementById("app"),defaultSchemaId:"ant_trajectory",defaultTab:"dataset",store:store});
   </script>
 </body>

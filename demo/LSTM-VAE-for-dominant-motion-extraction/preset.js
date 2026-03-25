@@ -227,5 +227,44 @@
         },
       },
     ],
+
+    generations: [
+      {
+        id: "demo-vae-gen",
+        name: "LSTM-VAE Generation",
+        schemaId: "ant_trajectory",
+        trainerId: "demo-vae-trainer",
+        family: "vae",
+        config: { method: "reconstruct", numSamples: 16, steps: 100, lr: 0.01, temperature: 1.0, seed: 42 },
+        status: "draft",
+        runs: [],
+        createdAt: Date.now(),
+      },
+      {
+        id: "demo-ae-gen",
+        name: "MLP-AE Generation",
+        schemaId: "ant_trajectory",
+        trainerId: "demo-ae-trainer",
+        family: "supervised",
+        config: { method: "reconstruct", numSamples: 16, steps: 100, lr: 0.01, temperature: 1.0, seed: 42 },
+        status: "draft",
+        runs: [],
+        createdAt: Date.now(),
+      },
+    ],
+
+    evaluations: [
+      {
+        id: "demo-eval-benchmark",
+        name: "VAE vs AE Benchmark",
+        schemaId: "ant_trajectory",
+        datasetId: "demo-ant-ds",
+        trainerIds: ["demo-vae-trainer", "demo-ae-trainer"],
+        evaluatorIds: ["mae", "rmse", "r2", "bias", "per_ant_mae", "mean_displacement"],
+        status: "draft",
+        runs: [],
+        createdAt: Date.now(),
+      },
+    ],
   };
 })();

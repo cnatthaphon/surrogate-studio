@@ -7,6 +7,20 @@
 })(typeof globalThis !== "undefined" ? globalThis : this, function () {
   "use strict";
 
+  /**
+   * Generation Tab — item-based generation sessions.
+   *
+   * Same 3-panel pattern as all other tabs:
+   *   Left:  generation session list (renderItemList) + "+ New Generation"
+   *   Main:  results (header + generation run cards + visualizations)
+   *   Right: config (schema, model, method, params, Generate button)
+   *
+   * Each session carries its own schemaId + trainerId. Multiple schemas coexist.
+   * Results persist in workspace store (generationRuns table).
+   */
+
+  var GEN_TABLE = "generationRuns";
+
   function create(deps) {
     var layout = deps.layout;
     var stateApi = deps.stateApi;
@@ -32,292 +46,335 @@
     };
     var getTf = function () { var W = typeof window !== "undefined" ? window : {}; return W.tf || null; };
     var getGenerationEngine = function () { var W = typeof window !== "undefined" ? window : {}; return W.OSCGenerationEngineCore || null; };
+    var getUiEngine = function () { var W = typeof window !== "undefined" ? window : {}; return W.OSCUiSharedEngine || null; };
 
-    var _selectedTrainerId = null;
-    var _resultsByTrainer = {}; // keyed by trainerId → array of results
+    var _activeGenId = null;
     var _isGenerating = false;
     var _mountId = 0;
 
-    function _getSchemaId() { return stateApi ? stateApi.getActiveSchema() : ""; }
-    function _getResults() { return _selectedTrainerId ? (_resultsByTrainer[_selectedTrainerId] || []) : []; }
-    function _pushResult(r) {
-      if (!_selectedTrainerId) return;
-      if (!_resultsByTrainer[_selectedTrainerId]) _resultsByTrainer[_selectedTrainerId] = [];
-      _resultsByTrainer[_selectedTrainerId].push(r);
-      // persist to store for evaluation tab access
-      if (store && typeof store.initTables === "function") {
-        store.initTables({ tables: ["generationRuns"] });
-        var runId = "gen-" + _selectedTrainerId + "-" + Date.now();
-        store.save({ table: "generationRuns", values: [{
-          id: runId, trainerId: _selectedTrainerId, method: r.method || "unknown",
-          status: r.status || "done", numSamples: r.numSamples || 0,
-          samples: r.samples || [], originals: r.originals || null,
-          avgMse: r.avgMse != null ? r.avgMse : null,
-          metrics: r.metrics || null, createdAt: Date.now(),
-        }] });
-      }
-    }
+    if (store && typeof store.initTables === "function") store.initTables({ tables: [GEN_TABLE] });
 
-    // list trained models that have generative capability (VAE/diffusion) AND saved weights
-    function _listTrainedGenerativeModels() {
-      if (!store || !modelBuilder) return [];
-      var trainers = typeof store.listTrainerCards === "function" ? store.listTrainerCards({}) : [];
-      return trainers.filter(function (t) {
-        if (t.status !== "done" || !t.modelArtifacts || !t.modelId) return false;
-        var model = store.getModel(t.modelId);
-        if (!model || !model.graph) return false;
-        var family = modelBuilder.inferModelFamily(model.graph);
-        return family === "vae" || family === "diffusion";
-      }).map(function (t) {
-        var model = store.getModel(t.modelId);
-        var family = modelBuilder.inferModelFamily(model.graph);
-        return { trainerId: t.id, trainerName: t.name, modelId: t.modelId, modelName: model.name, family: family, schemaId: t.schemaId };
-      });
-    }
+    // ─── Store helpers ───
+    function _listGens() { return store && typeof store.list === "function" ? store.list({ table: GEN_TABLE }) : []; }
+    function _getGen(id) { return store && typeof store.get === "function" ? store.get({ table: GEN_TABLE, id: id }) : null; }
+    function _saveGen(rec) { if (store && typeof store.save === "function") store.save({ table: GEN_TABLE, values: [rec] }); }
+    function _removeGen(id) { if (store && typeof store.remove === "function") store.remove({ table: GEN_TABLE, id: id }); }
 
-    // also list supervised models for inverse/transfer
-    function _listAllTrainedModels() {
+    // ─── Get trained trainers ───
+    function _listTrainedForSchema(schemaId) {
       if (!store) return [];
-      var trainers = typeof store.listTrainerCards === "function" ? store.listTrainerCards({}) : [];
-      return trainers.filter(function (t) {
-        return t.status === "done" && t.modelArtifacts && t.modelId;
-      }).map(function (t) {
-        var model = store.getModel(t.modelId);
-        var family = model && model.graph ? modelBuilder.inferModelFamily(model.graph) : "supervised";
-        return { trainerId: t.id, trainerName: t.name, modelId: t.modelId, modelName: model ? model.name : t.modelId, family: family, schemaId: t.schemaId };
-      });
+      return (typeof store.listTrainerCards === "function" ? store.listTrainerCards({}) : [])
+        .filter(function (t) { return t.status === "done" && t.modelArtifacts && t.modelId && (!schemaId || t.schemaId === schemaId); });
     }
 
-    // === LEFT: model list ===
+    // ─── LEFT PANEL ───
     function _renderLeftPanel() {
       var leftEl = layout.leftEl;
       leftEl.innerHTML = "";
-      leftEl.appendChild(el("h3", {}, "Trained Models"));
+      leftEl.appendChild(el("h3", {}, "Generations"));
 
-      var generative = _listTrainedGenerativeModels();
-      var allModels = _listAllTrainedModels();
+      var gens = _listGens();
+      var uiEngine = getUiEngine();
 
-      if (!allModels.length) {
-        leftEl.appendChild(el("div", { className: "osc-empty" }, "No trained models. Train a model first."));
-        return;
-      }
+      var items = gens.map(function (g) {
+        var nRuns = (g.runs || []).length;
+        var statusLabel = g.status === "done" ? "\u2713 " + nRuns + " run(s)" : g.status === "generating" ? "\u23f3 generating" : "draft";
+        var familyLabel = g.family || "";
+        return {
+          id: g.id,
+          title: g.name || g.id,
+          active: g.id === _activeGenId,
+          metaLines: [g.schemaId || "", familyLabel, statusLabel].filter(Boolean),
+          actions: [
+            { id: "rename", label: "\u270e" },
+            { id: "delete", label: "\u2715" },
+          ],
+        };
+      });
 
-      // show generative models first, then supervised
-      function renderItem(item) {
-        var isActive = item.trainerId === _selectedTrainerId;
-        var div = el("div", {
-          style: "padding:6px 8px;cursor:pointer;border-radius:4px;margin-bottom:2px;border:1px solid " +
-            (isActive ? "#0ea5e9" : "#1e293b") + ";background:" + (isActive ? "#0c2340" : "#111827") + ";",
+      var listMount = el("div", {});
+      leftEl.appendChild(listMount);
+      if (uiEngine && typeof uiEngine.renderItemList === "function") {
+        uiEngine.renderItemList({
+          mountEl: listMount,
+          items: items,
+          emptyText: "No generations. Click + New.",
+          onOpen: function (itemId) {
+            _activeGenId = itemId;
+            _renderLeftPanel(); _renderMainPanel(); _renderRightPanel();
+          },
+          onAction: function (itemId, actionId) {
+            if (actionId === "rename") {
+              var g = _getGen(itemId);
+              if (!g) return;
+              var newName = prompt("Rename:", g.name || g.id);
+              if (newName && newName.trim()) { g.name = newName.trim(); _saveGen(g); _renderLeftPanel(); }
+            } else if (actionId === "delete") {
+              if (confirm("Delete this generation?")) { _removeGen(itemId); if (_activeGenId === itemId) _activeGenId = null; _renderLeftPanel(); _renderMainPanel(); _renderRightPanel(); }
+            }
+          },
         });
-        div.appendChild(el("div", { style: "font-size:12px;font-weight:600;color:" + (isActive ? "#67e8f9" : "#e2e8f0") + ";" }, item.trainerName || item.modelName));
-        var badgeColor = item.family === "vae" ? "#a78bfa" : item.family === "diffusion" ? "#f59e0b" : "#64748b";
-        div.appendChild(el("span", { style: "font-size:9px;padding:1px 5px;border-radius:3px;background:" + badgeColor + ";color:#fff;margin-left:4px;" }, item.family));
-        div.addEventListener("click", function () {
-          _selectedTrainerId = item.trainerId;
-          _renderLeftPanel();
-          _renderMainPanel();
-          _renderRightPanel();
-        });
-        leftEl.appendChild(div);
       }
 
-      if (generative.length) {
-        leftEl.appendChild(el("div", { style: "font-size:10px;color:#67e8f9;margin-bottom:4px;font-weight:600;" }, "Generative (VAE/Diffusion)"));
-        generative.forEach(renderItem);
-      }
-
-      var supervised = allModels.filter(function (m) { return m.family === "supervised"; });
-      if (supervised.length) {
-        leftEl.appendChild(el("div", { style: "font-size:10px;color:#94a3b8;margin:8px 0 4px;font-weight:600;" }, "Supervised (Inverse/Transfer)"));
-        supervised.forEach(renderItem);
-      }
+      var newBtn = el("button", { className: "osc-btn", style: "width:100%;margin-top:8px;" }, "+ New Generation");
+      newBtn.addEventListener("click", function () {
+        var defaultSchema = stateApi ? stateApi.getActiveSchema() : "";
+        var genId = "gen-" + Date.now();
+        var rec = {
+          id: genId,
+          name: "Generation " + (_listGens().length + 1),
+          schemaId: defaultSchema,
+          trainerId: "",
+          family: "",
+          config: { method: "reconstruct", numSamples: 16, steps: 100, lr: 0.01, temperature: 1.0, seed: 42 },
+          status: "draft",
+          runs: [],
+          createdAt: Date.now(),
+        };
+        _saveGen(rec);
+        _activeGenId = genId;
+        _renderLeftPanel(); _renderMainPanel(); _renderRightPanel();
+      });
+      leftEl.appendChild(newBtn);
     }
 
-    // === MAIN: generation results + preview ===
+    // ─── MAIN PANEL ───
     function _renderMainPanel() {
       var mainEl = layout.mainEl;
       mainEl.innerHTML = "";
+      var currentMountId = ++_mountId;
 
-      if (!_selectedTrainerId) {
-        mainEl.appendChild(el("div", { className: "osc-empty" }, "Select a trained model to generate from."));
+      if (!_activeGenId) {
+        mainEl.appendChild(el("div", { className: "osc-card" }, [
+          el("div", { style: "font-size:13px;color:#67e8f9;font-weight:600;" }, "Generation Lab"),
+          el("div", { style: "font-size:12px;color:#94a3b8;margin-top:4px;" },
+            "Create generation sessions to sample, reconstruct, or optimize from trained models. Each session carries its own schema and model."),
+        ]));
         return;
       }
 
-      var trainer = store ? store.getTrainerCard(_selectedTrainerId) : null;
-      if (!trainer) { mainEl.appendChild(el("div", { className: "osc-empty" }, "Trainer not found.")); return; }
-      var model = store ? store.getModel(trainer.modelId) : null;
-      var family = model && model.graph ? modelBuilder.inferModelFamily(model.graph) : "supervised";
-      var engine = getGenerationEngine();
-      var caps = engine ? engine.detectCapabilities(family) : { availableMethods: [], defaultMethod: "inverse" };
+      var g = _getGen(_activeGenId);
+      if (!g) { mainEl.appendChild(el("div", { className: "osc-empty" }, "Generation not found.")); return; }
 
       // header
+      var trainer = g.trainerId ? (store ? store.getTrainerCard(g.trainerId) : null) : null;
+      var modelRec = trainer ? (store ? store.getModel(trainer.modelId) : null) : null;
       var header = el("div", { className: "osc-card" });
-      header.appendChild(el("div", { style: "font-size:13px;color:#67e8f9;font-weight:600;" }, escapeHtml(trainer.name || trainer.id)));
-      header.appendChild(el("div", { style: "font-size:11px;color:#94a3b8;margin-top:2px;" },
-        "Family: " + family + " | Methods: " + caps.availableMethods.map(function (m) { return m.id; }).join(", ")));
+      header.appendChild(el("div", { style: "font-size:13px;color:#67e8f9;font-weight:600;" }, escapeHtml(g.name)));
+      var infoLine = "Schema: " + (g.schemaId || "none");
+      if (trainer) infoLine += " | Model: " + escapeHtml(trainer.name || trainer.id);
+      if (g.family) infoLine += " | Family: " + g.family;
+      header.appendChild(el("div", { style: "font-size:11px;color:#94a3b8;margin-top:2px;" }, infoLine));
 
-      if (model && model.graph) {
-        var latentInfo = modelBuilder.extractLatentInfo ? modelBuilder.extractLatentInfo(model.graph) : null;
+      if (modelRec && modelRec.graph && modelBuilder) {
+        var latentInfo = modelBuilder.extractLatentInfo ? modelBuilder.extractLatentInfo(modelRec.graph) : null;
         if (latentInfo && latentInfo.latentDim > 0) {
           header.appendChild(el("div", { style: "font-size:11px;color:#a78bfa;margin-top:2px;" },
-            "Latent dim: " + latentInfo.latentDim + " | Reparam nodes: " + latentInfo.reparamNodes.length));
+            "Latent dim: " + latentInfo.latentDim + " | Reparam: " + latentInfo.reparamNodes.length));
         }
       }
       mainEl.appendChild(header);
 
-      // generation results
-      var _currentResults = _getResults();
-      if (_currentResults.length) {
-        _currentResults.forEach(function (result, idx) {
-          var card = el("div", { className: "osc-card", style: "margin-top:8px;" });
-          var statusColor = result.status === "done" ? "#4ade80" : result.status === "error" ? "#f43f5e" : "#fbbf24";
-          card.appendChild(el("div", { style: "font-size:12px;color:" + statusColor + ";font-weight:600;" },
-            "#" + (idx + 1) + " " + result.method + " | " + result.numSamples + " samples | " + result.status));
-
-          // visualizations
-          var Plotly = (typeof window !== "undefined" && window.Plotly) ? window.Plotly : null;
-
-          // loss chart
-          if (result.lossHistory && result.lossHistory.length > 1) {
-            if (Plotly) {
-              var chartDiv = el("div", { style: "height:200px;margin-top:8px;" });
-              card.appendChild(chartDiv);
-              var steps = result.lossHistory.map(function (h) { return h.step; });
-              var losses = result.lossHistory.map(function (h) { return h.loss; });
-              Plotly.newPlot(chartDiv, [
-                { x: steps, y: losses, mode: "lines", name: "Loss", line: { color: "#22d3ee" } },
-              ], {
-                paper_bgcolor: "#0f1320", plot_bgcolor: "#0f1320", font: { color: "#cbd5e1", size: 10 },
-                title: { text: "Optimization Progress", font: { size: 11 } },
-                xaxis: { title: "Step", gridcolor: "#1e293b" }, yaxis: { title: "Loss", gridcolor: "#1e293b" },
-                margin: { t: 30, b: 40, l: 50, r: 10 },
-              }, { responsive: true });
-            }
-          }
-
-          // reconstruct metrics
-          if (result.avgMse != null) {
-            card.appendChild(el("div", { style: "font-size:11px;color:#4ade80;margin-top:4px;" },
-              "Avg MSE: " + result.avgMse.toExponential(4)));
-          }
-
-          // sample visualization — delegates to appropriate renderer
-          if (result.samples && result.samples.length) {
-            var sampleDim = result.samples[0] ? result.samples[0].length : 0;
-            card.appendChild(el("div", { style: "font-size:10px;color:#94a3b8;margin-top:8px;" },
-              result.method + ": " + result.samples.length + " samples | " + sampleDim + " dimensions"));
-
-            var vizMount = el("div", { style: "margin-top:8px;" });
-            card.appendChild(vizMount);
-            _renderGeneratedSamples(vizMount, result.samples, trainer, Plotly, result.originals, result.method);
-          }
-          mainEl.appendChild(card);
-        });
-      }
-    }
-
-    // === RIGHT: config ===
-    function _renderRightPanel() {
-      var rightEl = layout.rightEl;
-      rightEl.innerHTML = "";
-      rightEl.appendChild(el("h3", {}, "Generation Config"));
-
-      if (!_selectedTrainerId) {
-        rightEl.appendChild(el("div", { className: "osc-empty" }, "Select a model."));
+      // runs
+      var runs = g.runs || [];
+      if (!runs.length) {
+        mainEl.appendChild(el("div", { className: "osc-empty", style: "margin-top:8px;" }, "No results yet. Configure and generate from the right panel."));
         return;
       }
 
-      var trainer = store ? store.getTrainerCard(_selectedTrainerId) : null;
-      var model = trainer ? store.getModel(trainer.modelId) : null;
-      var family = model && model.graph ? modelBuilder.inferModelFamily(model.graph) : "supervised";
-      var engine = getGenerationEngine();
-      var caps = engine ? engine.detectCapabilities(family) : { availableMethods: [{ id: "inverse", label: "Inverse" }], defaultMethod: "inverse" };
+      runs.forEach(function (result, idx) {
+        var card = el("div", { className: "osc-card", style: "margin-top:8px;" });
+        var statusColor = result.status === "done" ? "#4ade80" : result.status === "error" ? "#f43f5e" : "#fbbf24";
+        card.appendChild(el("div", { style: "font-size:12px;color:" + statusColor + ";font-weight:600;" },
+          "#" + (idx + 1) + " " + (result.method || "?") + " | " + (result.numSamples || 0) + " samples | " + (result.status || "?")));
+
+        if (result.error) {
+          card.appendChild(el("div", { style: "font-size:10px;color:#f43f5e;margin-top:4px;" }, "Error: " + result.error));
+        }
+
+        var Plotly = (typeof window !== "undefined" && window.Plotly) ? window.Plotly : null;
+
+        // loss chart
+        if (result.lossHistory && result.lossHistory.length > 1 && Plotly) {
+          var chartDiv = el("div", { style: "height:200px;margin-top:8px;" });
+          card.appendChild(chartDiv);
+          Plotly.newPlot(chartDiv, [
+            { x: result.lossHistory.map(function (h) { return h.step; }), y: result.lossHistory.map(function (h) { return h.loss; }), mode: "lines", name: "Loss", line: { color: "#22d3ee" } },
+          ], {
+            paper_bgcolor: "#0f1320", plot_bgcolor: "#0f1320", font: { color: "#cbd5e1", size: 10 },
+            title: { text: "Optimization Progress", font: { size: 11 } },
+            xaxis: { title: "Step", gridcolor: "#1e293b" }, yaxis: { title: "Loss", gridcolor: "#1e293b" },
+            margin: { t: 30, b: 40, l: 50, r: 10 },
+          }, { responsive: true });
+        }
+
+        if (result.avgMse != null) {
+          card.appendChild(el("div", { style: "font-size:11px;color:#4ade80;margin-top:4px;" }, "Avg MSE: " + result.avgMse.toExponential(4)));
+        }
+
+        // sample visualization
+        if (result.samples && result.samples.length) {
+          var sampleDim = result.samples[0] ? result.samples[0].length : 0;
+          card.appendChild(el("div", { style: "font-size:10px;color:#94a3b8;margin-top:8px;" },
+            (result.method || "?") + ": " + result.samples.length + " samples | " + sampleDim + " dimensions"));
+          var vizMount = el("div", { style: "margin-top:8px;" });
+          card.appendChild(vizMount);
+          _renderGeneratedSamples(vizMount, result.samples, trainer, Plotly, result.originals, result.method);
+        }
+        mainEl.appendChild(card);
+      });
+    }
+
+    // ─── RIGHT PANEL ───
+    function _renderRightPanel() {
+      var rightEl = layout.rightEl;
+      rightEl.innerHTML = "";
+      rightEl.appendChild(el("h3", {}, "Gen Config"));
+
+      if (!_activeGenId) {
+        rightEl.appendChild(el("div", { className: "osc-empty" }, "Select or create a generation."));
+        return;
+      }
+
+      var g = _getGen(_activeGenId);
+      if (!g) return;
 
       var configCard = el("div", { className: "osc-card" });
 
-      // method selector
+      // schema selector
+      var schemas = schemaRegistry && typeof schemaRegistry.listSchemas === "function" ? schemaRegistry.listSchemas() : [];
+      var schemaRow = el("div", { className: "osc-form-row" });
+      schemaRow.appendChild(el("label", {}, "Schema"));
+      var schemaSel = el("select", { style: "width:100%;padding:4px;background:#1e293b;color:#e2e8f0;border:1px solid #334155;border-radius:4px;font-size:11px;" });
+      schemas.forEach(function (s) {
+        var sid = s.id || s;
+        var opt = el("option", { value: sid }, s.label || sid);
+        if (sid === g.schemaId) opt.selected = true;
+        schemaSel.appendChild(opt);
+      });
+      schemaSel.addEventListener("change", function () {
+        g.schemaId = schemaSel.value; g.trainerId = ""; g.family = "";
+        _saveGen(g); _renderRightPanel(); _renderLeftPanel();
+      });
+      schemaRow.appendChild(schemaSel);
+      configCard.appendChild(schemaRow);
+
+      // trainer/model selector (filtered by schema)
+      var trainers = _listTrainedForSchema(g.schemaId);
+      var trainerRow = el("div", { className: "osc-form-row" });
+      trainerRow.appendChild(el("label", {}, "Model"));
+      var trainerSel = el("select", { style: "width:100%;padding:4px;background:#1e293b;color:#e2e8f0;border:1px solid #334155;border-radius:4px;font-size:11px;" });
+      trainerSel.appendChild(el("option", { value: "" }, "-- select trained model --"));
+      trainers.forEach(function (t) {
+        var model = store ? store.getModel(t.modelId) : null;
+        var family = model && model.graph && modelBuilder ? modelBuilder.inferModelFamily(model.graph) : "supervised";
+        var opt = el("option", { value: t.id }, (t.name || t.id) + " (" + family + ")");
+        if (t.id === g.trainerId) opt.selected = true;
+        trainerSel.appendChild(opt);
+      });
+      trainerSel.addEventListener("change", function () {
+        g.trainerId = trainerSel.value;
+        // detect family
+        var t = g.trainerId ? (store ? store.getTrainerCard(g.trainerId) : null) : null;
+        var m = t ? (store ? store.getModel(t.modelId) : null) : null;
+        g.family = m && m.graph && modelBuilder ? modelBuilder.inferModelFamily(m.graph) : "";
+        // set default method based on family
+        var engine = getGenerationEngine();
+        if (engine && g.family) {
+          var caps = engine.detectCapabilities(g.family);
+          g.config.method = caps.defaultMethod;
+        }
+        _saveGen(g); _renderRightPanel(); _renderMainPanel(); _renderLeftPanel();
+      });
+      trainerRow.appendChild(trainerSel);
+      configCard.appendChild(trainerRow);
+
+      // method selector (based on model family)
+      var engine = getGenerationEngine();
+      var caps = engine && g.family ? engine.detectCapabilities(g.family) : { availableMethods: [{ id: "inverse", label: "Inverse" }], defaultMethod: "inverse" };
+
       var methodRow = el("div", { className: "osc-form-row" });
       methodRow.appendChild(el("label", {}, "Method"));
-      var methodSelect = el("select", { "data-key": "method", style: "width:100%;padding:4px;background:#1e293b;color:#e2e8f0;border:1px solid #334155;border-radius:4px;font-size:11px;" });
+      var methodSel = el("select", { style: "width:100%;padding:4px;background:#1e293b;color:#e2e8f0;border:1px solid #334155;border-radius:4px;font-size:11px;" });
       caps.availableMethods.forEach(function (m) {
         var opt = el("option", { value: m.id }, m.label);
-        if (m.id === caps.defaultMethod) opt.selected = true;
-        methodSelect.appendChild(opt);
+        if (m.id === (g.config.method || caps.defaultMethod)) opt.selected = true;
+        methodSel.appendChild(opt);
       });
-      methodRow.appendChild(methodSelect);
+      methodSel.addEventListener("change", function () { g.config.method = methodSel.value; _saveGen(g); });
+      methodRow.appendChild(methodSel);
       configCard.appendChild(methodRow);
 
       // numeric params
       var fields = [
-        { key: "numSamples", label: "Num samples", value: 16, min: 1, max: 1000, step: 1 },
-        { key: "steps", label: "Optimization steps", value: 100, min: 0, max: 10000, step: 10 },
-        { key: "lr", label: "Learning rate", value: 0.01, min: 0.0001, max: 1, step: 0.001 },
-        { key: "temperature", label: "Temperature", value: 1.0, min: 0.01, max: 5, step: 0.1 },
-        { key: "seed", label: "Seed", value: 42, min: 1, step: 1 },
+        { key: "numSamples", label: "Samples", value: g.config.numSamples || 16, min: 1, max: 1000, step: 1 },
+        { key: "steps", label: "Opt. steps", value: g.config.steps || 100, min: 0, max: 10000, step: 10 },
+        { key: "lr", label: "Learning rate", value: g.config.lr || 0.01, min: 0.0001, max: 1, step: 0.001 },
+        { key: "temperature", label: "Temperature", value: g.config.temperature || 1.0, min: 0.01, max: 5, step: 0.1 },
+        { key: "seed", label: "Seed", value: g.config.seed || 42, min: 1, step: 1 },
       ];
       fields.forEach(function (f) {
         var row = el("div", { className: "osc-form-row" });
         row.appendChild(el("label", { style: "font-size:11px;color:#94a3b8;" }, f.label));
-        var inp = el("input", { type: "number", value: String(f.value), "data-key": f.key, style: "width:100%;padding:4px;background:#1e293b;color:#e2e8f0;border:1px solid #334155;border-radius:4px;font-size:11px;" });
+        var inp = el("input", { type: "number", value: String(f.value), style: "width:100%;padding:4px;background:#1e293b;color:#e2e8f0;border:1px solid #334155;border-radius:4px;font-size:11px;" });
         if (f.min != null) inp.min = f.min;
         if (f.max != null) inp.max = f.max;
         if (f.step != null) inp.step = f.step;
+        inp.addEventListener("change", function () { g.config[f.key] = Number(inp.value); _saveGen(g); });
         row.appendChild(inp);
         configCard.appendChild(row);
       });
 
       rightEl.appendChild(configCard);
 
-      // generate button
-      var genBtn = el("button", { style: "margin-top:8px;width:100%;padding:8px;font-size:13px;font-weight:600;border-radius:6px;border:1px solid #0ea5e9;background:#0284c7;color:#fff;cursor:pointer;" }, "Generate");
+      // buttons
+      var genBtn = el("button", { className: "osc-btn", style: "width:100%;margin-top:8px;" }, _isGenerating ? "Generating..." : "Generate");
+      if (_isGenerating) genBtn.disabled = true;
       genBtn.addEventListener("click", function () { _handleGenerate(); });
       rightEl.appendChild(genBtn);
 
-      var clearBtn = el("button", { style: "margin-top:4px;width:100%;padding:6px;font-size:11px;border-radius:6px;border:1px solid #475569;background:#1f2937;color:#cbd5e1;cursor:pointer;" }, "Clear Results");
-      clearBtn.addEventListener("click", function () {
-        if (_selectedTrainerId) _resultsByTrainer[_selectedTrainerId] = [];
-        _renderMainPanel();
-      });
-      rightEl.appendChild(clearBtn);
+      if (g.runs && g.runs.length) {
+        var clearBtn = el("button", { className: "osc-btn secondary", style: "width:100%;margin-top:4px;" }, "Clear Results");
+        clearBtn.addEventListener("click", function () {
+          g.runs = []; g.status = "draft"; _saveGen(g);
+          _renderMainPanel(); _renderLeftPanel();
+        });
+        rightEl.appendChild(clearBtn);
+
+        rightEl.appendChild(el("div", { style: "font-size:10px;color:#64748b;margin-top:6px;text-align:center;" },
+          g.runs.length + " run(s)"));
+      }
     }
 
-    function _collectConfig() {
-      var config = {};
-      var selects = layout.rightEl.querySelectorAll("select[data-key]");
-      selects.forEach(function (sel) { config[sel.getAttribute("data-key")] = sel.value; });
-      var inputs = layout.rightEl.querySelectorAll("input[data-key]");
-      inputs.forEach(function (inp) { config[inp.getAttribute("data-key")] = Number(inp.value); });
-      return config;
-    }
-
+    // ─── GENERATE ───
     function _handleGenerate() {
       if (_isGenerating) { onStatus("Already generating..."); return; }
-      if (!_selectedTrainerId) { onStatus("Select a model first"); return; }
+      var g = _getGen(_activeGenId);
+      if (!g || !g.trainerId) { onStatus("Select a model first"); return; }
 
       var tf = getTf();
       var engine = getGenerationEngine();
       if (!tf || !engine) { onStatus("TF.js or generation engine not available"); return; }
 
-      var trainer = store.getTrainerCard(_selectedTrainerId);
+      var trainer = store.getTrainerCard(g.trainerId);
       var modelRec = store.getModel(trainer.modelId);
-      if (!trainer || !modelRec || !trainer.modelArtifacts) { onStatus("Model weights not available — train first"); return; }
+      if (!trainer || !modelRec || !trainer.modelArtifacts) { onStatus("Model weights not available"); return; }
 
-      var config = _collectConfig();
+      var config = g.config || {};
       var method = config.method || "random";
-      var family = modelBuilder.inferModelFamily(modelRec.graph);
 
       _isGenerating = true;
+      g.status = "generating";
+      _saveGen(g);
       onStatus("Generating (" + method + ")...");
       var currentMountId = ++_mountId;
 
       try {
-        // rebuild FULL model with correct feature size (from dataset)
-        var schemaId = trainer.schemaId;
+        var schemaId = trainer.schemaId || g.schemaId;
         var allowedOutputKeys = schemaRegistry ? schemaRegistry.getOutputKeys(schemaId) : ["x"];
         var defaultTarget = (allowedOutputKeys[0] && (allowedOutputKeys[0].key || allowedOutputKeys[0])) || "x";
         var graphMode = modelBuilder.inferGraphMode(modelRec.graph, "direct");
 
-        // get feature size from trainer's dataset
         var dataset = trainer.datasetId ? store.getDataset(trainer.datasetId) : null;
         var dsData = dataset && dataset.data ? dataset.data : {};
         var featureSize = Number(dsData.featureSize || (dsData.xTrain && dsData.xTrain[0] && dsData.xTrain[0].length) || 40);
@@ -329,92 +386,45 @@
           allowedOutputKeys: allowedOutputKeys, defaultTarget: defaultTarget, numClasses: dsData.numClasses || dsData.classCount || 10,
         });
 
-        // load trained weights (handle both weightValues and weightData)
-        var hasWeights = trainer.modelArtifacts && (trainer.modelArtifacts.weightValues || trainer.modelArtifacts.weightData);
-        if (hasWeights) {
-          try {
-            var flatWeights;
-            if (trainer.modelArtifacts.weightValues && Array.isArray(trainer.modelArtifacts.weightValues)) {
-              flatWeights = new Float32Array(trainer.modelArtifacts.weightValues);
-            } else if (trainer.modelArtifacts.weightData && trainer.modelArtifacts.weightData.byteLength) {
-              flatWeights = new Float32Array(trainer.modelArtifacts.weightData);
-            }
-            if (flatWeights) {
-              var mw = built.model.getWeights();
-              var nw = []; var off = 0;
-              for (var wi = 0; wi < mw.length; wi++) {
-                var sz = mw[wi].shape.reduce(function (a, b) { return a * b; }, 1);
-                if (off + sz <= flatWeights.length) { nw.push(tf.tensor(flatWeights.subarray(off, off + sz), mw[wi].shape)); off += sz; }
-              }
-              if (nw.length === mw.length) built.model.setWeights(nw);
-            }
-          } catch (e) { console.warn("[generation] Weight load:", e.message); }
-        }
+        // load weights
+        _loadWeights(tf, built.model, trainer.modelArtifacts);
 
-        // For VAE generation: extract decoder (z → output), use latent dim
-        // For supervised/inverse: use full model with feature size
+        // decoder extraction for VAE
         var genModel = built.model;
         var genLatentDim = featureSize;
-        if (family === "vae" && method !== "inverse") {
+        var family = g.family || modelBuilder.inferModelFamily(modelRec.graph);
+        if (family === "vae" && method !== "inverse" && method !== "reconstruct") {
           try {
             var decoder = modelBuilder.extractDecoder(tf, built.model, latentDim);
-            if (decoder && decoder.model) {
-              genModel = decoder.model;
-              genLatentDim = decoder.latentDim || latentDim;
-              console.log("[generation] Using decoder: latentDim=" + genLatentDim + ", outputDim=" + decoder.outputDim);
-            }
-          } catch (decErr) {
-            console.warn("[generation] extractDecoder failed, using full model:", decErr.message);
-            // fallback: for VAE, at least use the correct latent dim
-            genLatentDim = latentDim;
-          }
+            if (decoder && decoder.model) { genModel = decoder.model; genLatentDim = decoder.latentDim || latentDim; }
+          } catch (_) { genLatentDim = latentDim; }
         }
 
         var genConfig = {
-          method: method,
-          model: genModel,
-          latentDim: genLatentDim,
-          numSamples: config.numSamples || 16,
-          steps: config.steps || 0,
-          lr: config.lr || 0.01,
-          temperature: config.temperature || 1.0,
-          seed: config.seed || 42,
-          onStep: function (step, loss) {
-            if (step % 10 === 0) onStatus("Step " + step + " loss=" + (typeof loss === "number" ? loss.toExponential(3) : "?"));
-          },
+          method: method, model: genModel, latentDim: genLatentDim,
+          numSamples: config.numSamples || 16, steps: config.steps || 0,
+          lr: config.lr || 0.01, temperature: config.temperature || 1.0, seed: config.seed || 42,
+          onStep: function (step, loss) { if (step % 10 === 0) onStatus("Step " + step + " loss=" + (typeof loss === "number" ? loss.toExponential(3) : "?")); },
         };
 
-        // for reconstruct: pass real data through full model
+        // reconstruct: pass real data through full model
         if (method === "reconstruct") {
-          genConfig.fullModel = built.model; // use full encoder-decoder, not just decoder
-          genConfig.model = built.model;
-          var rds = trainer.datasetId ? store.getDataset(trainer.datasetId) : null;
-          if (rds && rds.data) {
-            var rDsData = rds.data;
-            var rIsBundle = rDsData.kind === "dataset_bundle" && rDsData.datasets;
-            var rActiveDs = rIsBundle ? rDsData.datasets[rDsData.activeVariantId || Object.keys(rDsData.datasets)[0]] : rDsData;
-            var testX = (rActiveDs.records && rActiveDs.records.test && rActiveDs.records.test.x) || (rActiveDs.xTest || []);
-            if (!testX.length) testX = (rActiveDs.records && rActiveDs.records.train && rActiveDs.records.train.x) || (rActiveDs.xTrain || []);
-            genConfig.originals = testX;
-          }
+          genConfig.fullModel = built.model; genConfig.model = built.model;
+          var rActiveDs = _getActiveDs(dsData);
+          var testX = (rActiveDs.records && rActiveDs.records.test && rActiveDs.records.test.x) || (rActiveDs.xTest || []);
+          if (!testX.length) testX = (rActiveDs.records && rActiveDs.records.train && rActiveDs.records.train.x) || (rActiveDs.xTrain || []);
+          genConfig.originals = testX;
         }
 
-        // for inverse: need a target
+        // inverse: need target
         if (method === "inverse") {
-          var ids = trainer.datasetId ? store.getDataset(trainer.datasetId) : null;
-          if (ids && ids.data) {
-            var iDsData = ids.data;
-            var iIsBundle = iDsData.kind === "dataset_bundle" && iDsData.datasets;
-            var iActiveDs = iIsBundle ? iDsData.datasets[iDsData.activeVariantId || Object.keys(iDsData.datasets)[0]] : iDsData;
-            var testY = (iActiveDs.records && iActiveDs.records.test && iActiveDs.records.test.y) || (iActiveDs.yTest || []);
-            if (testY.length) {
-              var nTarget = Math.min(config.numSamples || 1, testY.length);
-              var targets = [];
-              for (var ti = 0; ti < nTarget; ti++) {
-                targets.push(Array.isArray(testY[ti]) ? testY[ti] : [testY[ti]]);
-              }
-              genConfig.target = targets;
-            }
+          var iActiveDs = _getActiveDs(dsData);
+          var testY = (iActiveDs.records && iActiveDs.records.test && iActiveDs.records.test.y) || (iActiveDs.yTest || []);
+          if (testY.length) {
+            var nTarget = Math.min(config.numSamples || 1, testY.length);
+            var targets = [];
+            for (var ti = 0; ti < nTarget; ti++) targets.push(Array.isArray(testY[ti]) ? testY[ti] : [testY[ti]]);
+            genConfig.target = targets;
           }
         }
 
@@ -422,35 +432,63 @@
           _isGenerating = false;
           if (currentMountId !== _mountId) return;
           result.status = "done";
-          _pushResult(result);
+          if (!g.runs) g.runs = [];
+          g.runs.push(result);
+          g.status = "done";
+          _saveGen(g);
           onStatus("Generation done: " + result.numSamples + " samples (" + result.method + ")");
-          _renderMainPanel();
+          _renderLeftPanel(); _renderMainPanel(); _renderRightPanel();
           if (genModel !== built.model) try { genModel.dispose(); } catch (_) {}
           built.model.dispose();
         }).catch(function (err) {
           _isGenerating = false;
           if (currentMountId !== _mountId) return;
-          _pushResult({ method: method, status: "error", error: err.message, samples: [], lossHistory: [], numSamples: 0 });
+          if (!g.runs) g.runs = [];
+          g.runs.push({ method: method, status: "error", error: err.message, samples: [], lossHistory: [], numSamples: 0 });
+          g.status = "done";
+          _saveGen(g);
           onStatus("Generation error: " + err.message);
-          _renderMainPanel();
+          _renderLeftPanel(); _renderMainPanel(); _renderRightPanel();
           if (genModel !== built.model) try { genModel.dispose(); } catch (_) {}
           built.model.dispose();
         });
 
       } catch (e) {
         _isGenerating = false;
+        g.status = "draft"; _saveGen(g);
         onStatus("Generation setup error: " + e.message);
+        _renderLeftPanel(); _renderRightPanel();
       }
     }
 
-    // Render generated samples — delegates to dataset module or uses core renderers
+    function _getActiveDs(dsData) {
+      var isBundle = dsData.kind === "dataset_bundle" && dsData.datasets;
+      return isBundle ? dsData.datasets[dsData.activeVariantId || Object.keys(dsData.datasets)[0]] : dsData;
+    }
+
+    function _loadWeights(tf, model, artifacts) {
+      var fw;
+      if (artifacts.weightValues && Array.isArray(artifacts.weightValues)) fw = new Float32Array(artifacts.weightValues);
+      else if (artifacts.weightData && artifacts.weightData.byteLength) fw = new Float32Array(artifacts.weightData);
+      if (!fw) return;
+      var mw = model.getWeights();
+      var nw = []; var off = 0;
+      for (var i = 0; i < mw.length; i++) {
+        var sz = mw[i].shape.reduce(function (a, b) { return a * b; }, 1);
+        if (off + sz > fw.length) break;
+        nw.push(tf.tensor(fw.subarray(off, off + sz), mw[i].shape));
+        off += sz;
+      }
+      if (nw.length === mw.length) model.setWeights(nw);
+    }
+
+    // ─── Render generated samples — delegates to dataset module or core ───
     function _renderGeneratedSamples(mountEl, samples, trainer, Plotly, originals, method) {
       if (!samples || !samples.length) return;
       var schemaId = trainer ? trainer.schemaId : "";
       var dataset = trainer && trainer.datasetId ? store.getDataset(trainer.datasetId) : null;
       var dsData = dataset && dataset.data ? dataset.data : {};
 
-      // 1. Try dataset module's renderGeneratedSamples if available
       var W = typeof window !== "undefined" ? window : {};
       var datasetModules = W.OSCDatasetModules;
       if (datasetModules && typeof datasetModules.getModuleForSchema === "function") {
@@ -467,7 +505,7 @@
         }
       }
 
-      // 2. Image datasets: use core image renderer
+      // image fallback
       var dsSchema = schemaRegistry ? schemaRegistry.getDatasetSchema(schemaId) : null;
       var sampleType = (dsSchema && dsSchema.sampleType) || "";
       var coreRenderer = W.OSCImageRenderCore || null;
@@ -486,7 +524,7 @@
         return;
       }
 
-      // 3. Generic: Plotly line chart (features as x-axis)
+      // generic Plotly
       if (Plotly && samples[0] && samples[0].length >= 2) {
         var lineDiv = el("div", { style: "height:250px;" });
         mountEl.appendChild(lineDiv);
@@ -506,7 +544,7 @@
         return;
       }
 
-      // 4. Text fallback
+      // text fallback
       var text = samples.slice(0, 5).map(function (s, i) {
         return "Sample " + (i + 1) + ": [" + (Array.isArray(s) ? s.slice(0, 10).map(function (v) { return Number(v).toFixed(3); }).join(", ") + (s.length > 10 ? "..." : "") : s) + "]";
       }).join("\n");
