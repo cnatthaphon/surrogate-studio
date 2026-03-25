@@ -156,9 +156,11 @@
           card.appendChild(el("div", { style: "font-size:12px;color:" + statusColor + ";font-weight:600;" },
             "#" + (idx + 1) + " " + result.method + " | " + result.numSamples + " samples | " + result.status));
 
+          // visualizations
+          var Plotly = (typeof window !== "undefined" && window.Plotly) ? window.Plotly : null;
+
           // loss chart
           if (result.lossHistory && result.lossHistory.length > 1) {
-            var Plotly = (typeof window !== "undefined" && window.Plotly) ? window.Plotly : null;
             if (Plotly) {
               var chartDiv = el("div", { style: "height:200px;margin-top:8px;" });
               card.appendChild(chartDiv);
@@ -167,7 +169,7 @@
               Plotly.newPlot(chartDiv, [
                 { x: steps, y: losses, mode: "lines", name: "Loss", line: { color: "#22d3ee" } },
               ], {
-                paper_bgcolor: "#0b1220", plot_bgcolor: "#0b1220", font: { color: "#e2e8f0", size: 10 },
+                paper_bgcolor: "#0f1320", plot_bgcolor: "#0f1320", font: { color: "#cbd5e1", size: 10 },
                 title: { text: "Optimization Progress", font: { size: 11 } },
                 xaxis: { title: "Step", gridcolor: "#1e293b" }, yaxis: { title: "Loss", gridcolor: "#1e293b" },
                 margin: { t: 30, b: 40, l: 50, r: 10 },
@@ -214,7 +216,7 @@
                 traces.push({ x: xVals, y: vals, mode: "lines", name: "Sample " + (gi + 1), line: { color: colors[gi % colors.length], width: 1.5 } });
               }
               Plotly.newPlot(traceDiv, traces, {
-                paper_bgcolor: "#0b1220", plot_bgcolor: "#0b1220", font: { color: "#e2e8f0", size: 10 },
+                paper_bgcolor: "#0f1320", plot_bgcolor: "#0f1320", font: { color: "#cbd5e1", size: 10 },
                 title: { text: "Generated Samples (" + maxTraces + "/" + result.samples.length + ")", font: { size: 11 } },
                 xaxis: { title: "Feature", gridcolor: "#1e293b" }, yaxis: { title: "Value", gridcolor: "#1e293b" },
                 legend: { font: { size: 8 } }, margin: { t: 30, b: 40, l: 50, r: 10 },
