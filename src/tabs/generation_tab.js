@@ -40,7 +40,23 @@
 
     function _getSchemaId() { return stateApi ? stateApi.getActiveSchema() : ""; }
     function _getResults() { return _selectedTrainerId ? (_resultsByTrainer[_selectedTrainerId] || []) : []; }
-    function _pushResult(r) { if (!_selectedTrainerId) return; if (!_resultsByTrainer[_selectedTrainerId]) _resultsByTrainer[_selectedTrainerId] = []; _resultsByTrainer[_selectedTrainerId].push(r); }
+    function _pushResult(r) {
+      if (!_selectedTrainerId) return;
+      if (!_resultsByTrainer[_selectedTrainerId]) _resultsByTrainer[_selectedTrainerId] = [];
+      _resultsByTrainer[_selectedTrainerId].push(r);
+      // persist to store for evaluation tab access
+      if (store && typeof store.initTables === "function") {
+        store.initTables({ tables: ["generationRuns"] });
+        var runId = "gen-" + _selectedTrainerId + "-" + Date.now();
+        store.save({ table: "generationRuns", values: [{
+          id: runId, trainerId: _selectedTrainerId, method: r.method || "unknown",
+          status: r.status || "done", numSamples: r.numSamples || 0,
+          samples: r.samples || [], originals: r.originals || null,
+          avgMse: r.avgMse != null ? r.avgMse : null,
+          metrics: r.metrics || null, createdAt: Date.now(),
+        }] });
+      }
+    }
 
     // list trained models that have generative capability (VAE/diffusion) AND saved weights
     function _listTrainedGenerativeModels() {

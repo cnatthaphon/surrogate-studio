@@ -428,6 +428,106 @@
     }), { responsive: true });
   }
 
+  // ─── Evaluation contract ───
+  function getEvaluators() {
+    return [
+      {
+        id: "per_ant_mae",
+        name: "Per-Ant MAE",
+        mode: "test",
+        compute: function (deps) {
+          var preds = deps.predictions || [];
+          var truth = deps.truth || [];
+          var dsData = deps.datasetData || {};
+          var numAnts = dsData.numAnts || 20;
+          var n = Math.min(preds.length, truth.length);
+          if (!n) return { value: null };
+          // compute MAE per ant, return worst-ant MAE
+          var antErrors = new Array(numAnts).fill(0);
+          for (var i = 0; i < n; i++) {
+            for (var a = 0; a < numAnts; a++) {
+              var ex = Math.abs((preds[i][a * 2] || 0) - (truth[i][a * 2] || 0));
+              var ey = Math.abs((preds[i][a * 2 + 1] || 0) - (truth[i][a * 2 + 1] || 0));
+              antErrors[a] += (ex + ey) / 2;
+            }
+          }
+          var worst = 0;
+          for (var a = 0; a < numAnts; a++) {
+            antErrors[a] /= n;
+            if (antErrors[a] > worst) worst = antErrors[a];
+          }
+          return { value: worst, formatted: worst.toExponential(3), details: { antErrors: antErrors } };
+        },
+      },
+      {
+        id: "mean_displacement",
+        name: "Mean Displacement Error",
+        mode: "test",
+        compute: function (deps) {
+          var preds = deps.predictions || [];
+          var truth = deps.truth || [];
+          var dsData = deps.datasetData || {};
+          var numAnts = dsData.numAnts || 20;
+          var n = Math.min(preds.length, truth.length);
+          if (!n) return { value: null };
+          var totalDisp = 0;
+          for (var i = 0; i < n; i++) {
+            for (var a = 0; a < numAnts; a++) {
+              var dx = (preds[i][a * 2] || 0) - (truth[i][a * 2] || 0);
+              var dy = (preds[i][a * 2 + 1] || 0) - (truth[i][a * 2 + 1] || 0);
+              totalDisp += Math.sqrt(dx * dx + dy * dy);
+            }
+          }
+          var mde = totalDisp / (n * numAnts);
+          return { value: mde, formatted: mde.toExponential(3) };
+        },
+      },
+    ];
+  }
+
+  function renderEvaluationResults(mountEl, deps) {
+    if (!mountEl) return;
+    var results = (deps && deps.results) || [];
+    var Plotly = (deps && deps.Plotly) || (typeof window !== "undefined" && window.Plotly) || null;
+    var elF = (deps && deps.el) || function (tag, attrs, text) {
+      var e = document.createElement(tag);
+      if (attrs) Object.keys(attrs).forEach(function (k) {
+        if (k === "style") e.style.cssText = attrs[k]; else e.setAttribute(k, attrs[k]);
+      });
+      if (text) e.textContent = text;
+      return e;
+    };
+    if (!Plotly || !results.length) return;
+
+    var doneResults = results.filter(function (r) { return r.status === "done"; });
+    if (!doneResults.length) return;
+
+    // Per-ant MAE comparison across models (if available)
+    var hasPerAnt = doneResults.some(function (r) { return r.metrics && r.metrics.per_ant_mae != null; });
+    if (!hasPerAnt) return;
+
+    mountEl.appendChild(elF("div", { style: "font-size:11px;color:#67e8f9;margin-bottom:6px;font-weight:600;" }, "Ant Trajectory — Domain-Specific Metrics"));
+
+    // MDE bar chart
+    var mdeDiv = document.createElement("div");
+    mdeDiv.style.cssText = "height:200px;";
+    mountEl.appendChild(mdeDiv);
+
+    var names = doneResults.map(function (r) { return r.trainerName || r.modelName || "?"; });
+    var mdeVals = doneResults.map(function (r) { return r.metrics && r.metrics.mean_displacement || 0; });
+    var worstAnt = doneResults.map(function (r) { return r.metrics && r.metrics.per_ant_mae || 0; });
+
+    Plotly.newPlot(mdeDiv, [
+      { x: names, y: mdeVals, type: "bar", name: "Mean Disp. Error", marker: { color: "#22d3ee" } },
+      { x: names, y: worstAnt, type: "bar", name: "Worst-Ant MAE", marker: { color: "#f43f5e" } },
+    ], {
+      paper_bgcolor: "#0b1220", plot_bgcolor: "#0b1220", font: { color: "#e2e8f0", size: 10 },
+      barmode: "group", margin: { t: 10, b: 40, l: 50, r: 10 },
+      yaxis: { title: "Error", gridcolor: "#1e293b" }, xaxis: { gridcolor: "#1e293b" },
+      legend: { orientation: "h", y: -0.25, font: { size: 9 } },
+    }, { responsive: true });
+  }
+
   return {
     id: "ant_trajectory",
     schemaId: "ant_trajectory",
@@ -440,7 +540,13 @@
       dataset: { seed: 42, totalCount: 1000, splitDefaults: { mode: "random", train: 0.8, val: 0.1, test: 0.1 } },
     },
     build: build,
-    playgroundApi: { renderPlayground: renderPlayground, renderDataset: renderPlayground, renderGeneratedSamples: renderGeneratedSamples },
+    playgroundApi: {
+      renderPlayground: renderPlayground,
+      renderDataset: renderPlayground,
+      renderGeneratedSamples: renderGeneratedSamples,
+      getEvaluators: getEvaluators,
+      renderEvaluationResults: renderEvaluationResults,
+    },
     uiApi: null,
   };
 });
