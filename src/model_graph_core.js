@@ -16,7 +16,7 @@
       var html =
         "<div><div style='font-weight:700'>Input</div><div style='display:grid;gap:4px'>" +
         "<select df-mode style='width:120px'><option value='auto'>auto</option><option value='flat'>flat</option><option value='sequence'>sequence</option></select>" +
-        "<div style='font-size:11px'>auto: infer from layers</div><div class='node-summary' style='font-size:11px;color:#334155;'>mode=auto</div></div></div>";
+        "<div style='font-size:11px'>auto: infer from layers</div><div class='node-summary' style='font-size:11px;color:#94a3b8;'>mode=auto</div></div></div>";
       return editor.addNode("input_layer", 1, 1, x, y, "input_layer", { mode: "auto" }, html);
     }
 
@@ -28,7 +28,7 @@
         "<input type='number' df-units value='" + units + "' min='1' style='width:80px'>" +
         "<select df-activation style='width:120px'>" +
         "<option value='relu'>relu</option><option value='tanh'>tanh</option><option value='sigmoid'>sigmoid</option><option value='linear'>linear</option>" +
-        "</select><div class='node-summary' style='font-size:11px;color:#334155;'>u=" + units + ", act=" + activation + "</div></div></div>";
+        "</select><div class='node-summary' style='font-size:11px;color:#94a3b8;'>u=" + units + ", act=" + activation + "</div></div></div>";
       return editor.addNode("dense_layer", 1, 1, x, y, "dense_layer", { units: units, activation: activation }, html);
     }
 
@@ -37,7 +37,7 @@
       var html =
         "<div><div style='font-weight:700'>Dropout</div>" +
         "<input type='number' step='0.05' min='0' max='0.9' df-rate value='" + rate.toFixed(2) + "' style='width:80px'>" +
-        "<div class='node-summary' style='font-size:11px;color:#334155;'>rate=" + rate.toFixed(2) + "</div></div>";
+        "<div class='node-summary' style='font-size:11px;color:#94a3b8;'>rate=" + rate.toFixed(2) + "</div></div>";
       return editor.addNode("dropout_layer", 1, 1, x, y, "dropout_layer", { rate: rate }, html);
     }
 
@@ -46,7 +46,7 @@
       var epsilon = Math.max(1e-6, Number((cfg && cfg.epsilon) || 1e-3));
       var html =
         "<div><div style='font-weight:700'>BatchNorm</div>" +
-        "<div class='node-summary' style='font-size:11px;color:#334155;'>m=" + momentum.toFixed(3) + ", ε=" + epsilon.toExponential(1) + "</div></div>";
+        "<div class='node-summary' style='font-size:11px;color:#94a3b8;'>m=" + momentum.toFixed(3) + ", ε=" + epsilon.toExponential(1) + "</div></div>";
       return editor.addNode("batchnorm_layer", 1, 1, x, y, "batchnorm_layer", { momentum: momentum, epsilon: epsilon }, html);
     }
 
@@ -54,7 +54,7 @@
       var epsilon = Math.max(1e-6, Number((cfg && cfg.epsilon) || 1e-3));
       var html =
         "<div><div style='font-weight:700'>LayerNorm</div>" +
-        "<div class='node-summary' style='font-size:11px;color:#334155;'>ε=" + epsilon.toExponential(1) + "</div></div>";
+        "<div class='node-summary' style='font-size:11px;color:#94a3b8;'>ε=" + epsilon.toExponential(1) + "</div></div>";
       return editor.addNode("layernorm_layer", 1, 1, x, y, "layernorm_layer", { epsilon: epsilon }, html);
     }
 
@@ -64,7 +64,7 @@
       var matchWeight = Math.max(0, Number((cfg && cfg.matchWeight) || 1));
       var html =
         "<div><div style='font-weight:700'>Latent Z</div>" +
-        "<div class='node-summary' style='font-size:11px;color:#334155;'>u=" + units + ", g=" + group + ", w=" + matchWeight.toFixed(2) + "</div></div>";
+        "<div class='node-summary' style='font-size:11px;color:#94a3b8;'>u=" + units + ", g=" + group + ", w=" + matchWeight.toFixed(2) + "</div></div>";
       return editor.addNode("latent_layer", 1, 1, x, y, "latent_layer", { units: units, group: group, matchWeight: matchWeight }, html);
     }
 
@@ -74,7 +74,7 @@
       var matchWeight = Math.max(0, Number((cfg && cfg.matchWeight) || 1));
       var html =
         "<div><div style='font-weight:700'>Latent μ</div>" +
-        "<div class='node-summary' style='font-size:11px;color:#334155;'>u=" + units + ", g=" + group + ", w=" + matchWeight.toFixed(2) + "</div></div>";
+        "<div class='node-summary' style='font-size:11px;color:#94a3b8;'>u=" + units + ", g=" + group + ", w=" + matchWeight.toFixed(2) + "</div></div>";
       return editor.addNode("latent_mu_layer", 1, 1, x, y, "latent_mu_layer", { units: units, group: group, matchWeight: matchWeight }, html);
     }
 
@@ -84,7 +84,7 @@
       var matchWeight = Math.max(0, Number((cfg && cfg.matchWeight) || 1));
       var html =
         "<div><div style='font-weight:700'>Latent logσ²</div>" +
-        "<div class='node-summary' style='font-size:11px;color:#334155;'>u=" + units + ", g=" + group + ", w=" + matchWeight.toFixed(2) + "</div></div>";
+        "<div class='node-summary' style='font-size:11px;color:#94a3b8;'>u=" + units + ", g=" + group + ", w=" + matchWeight.toFixed(2) + "</div></div>";
       return editor.addNode("latent_logvar_layer", 1, 1, x, y, "latent_logvar_layer", { units: units, group: group, matchWeight: matchWeight }, html);
     }
 
@@ -94,7 +94,7 @@
       var matchWeight = Math.max(0, Number((cfg && cfg.matchWeight) || 1));
       var html =
         "<div><div style='font-weight:700'>Reparam z</div>" +
-        "<div class='node-summary' style='font-size:11px;color:#334155;'>g=" + group + ", β=" + beta.toExponential(1) + ", w=" + matchWeight.toFixed(2) + "</div></div>";
+        "<div class='node-summary' style='font-size:11px;color:#94a3b8;'>g=" + group + ", β=" + beta.toExponential(1) + ", w=" + matchWeight.toFixed(2) + "</div></div>";
       return editor.addNode("reparam_layer", 2, 1, x, y, "reparam_layer", { group: group, beta: beta, matchWeight: matchWeight }, html);
     }
 
@@ -114,7 +114,7 @@
       var paramsSelect = Array.isArray(paramsSelectRaw) ? paramsSelectRaw.join(",") : String(paramsSelectRaw || "");
       var html =
         "<div><div style='font-weight:700'>Output</div>" +
-        "<div class='node-summary' style='font-size:11px;color:#334155;'>" + api.outputTargetsSummaryText(targets, schemaId) + ", loss=" + loss + "</div></div>";
+        "<div class='node-summary' style='font-size:11px;color:#94a3b8;'>" + api.outputTargetsSummaryText(targets, schemaId) + ", loss=" + loss + "</div></div>";
       return editor.addNode("output_layer", 1, 0, x, y, "output_layer", {
         targets: targets.slice(),
         targetsCsv: targets.join(","),
@@ -131,7 +131,7 @@
     function addHistNode(editor, x, y, cfg) {
       var schemaId = api.resolveSchemaId((cfg && cfg.schemaId) || api.getCurrentSchemaId() || "oscillator");
       var featureKey = api.normalizeHistorySeriesKey((cfg && cfg.featureKey) || "x", schemaId);
-      var html = "<div><div style='font-weight:700'>History</div><div class='node-summary' style='font-size:11px;color:#334155;'>feature=" + api.historySeriesLabel(featureKey, schemaId) + "</div></div>";
+      var html = "<div><div style='font-weight:700'>History</div><div class='node-summary' style='font-size:11px;color:#94a3b8;'>feature=" + api.historySeriesLabel(featureKey, schemaId) + "</div></div>";
       return editor.addNode("hist_block", 0, 1, x, y, "hist_block", { featureKey: featureKey }, html);
     }
 
@@ -141,7 +141,7 @@
       var featureSize = Math.max(1, Number((cfg && cfg.featureSize) || srcSpec.featureSize || 1));
       var html =
         "<div><div style='font-weight:700'>ImageSource</div>" +
-        "<div class='node-summary' style='font-size:11px;color:#334155;'>feature=" + srcSpec.label + ", shape=" + srcSpec.width + "x" + srcSpec.height + "x" + srcSpec.channels + ", n=" + String(Math.round(featureSize)) + "</div></div>";
+        "<div class='node-summary' style='font-size:11px;color:#94a3b8;'>feature=" + srcSpec.label + ", shape=" + srcSpec.width + "x" + srcSpec.height + "x" + srcSpec.channels + ", n=" + String(Math.round(featureSize)) + "</div></div>";
       return editor.addNode("image_source_block", 0, 1, x, y, "image_source_block", {
         sourceKey: srcSpec.sourceKey,
         featureSize: Math.round(featureSize),
@@ -162,7 +162,7 @@
       var padMode = String((cfg && cfg.padMode) || "none");
       var html =
         "<div><div style='font-weight:700'>WindowHistory</div>" +
-        "<div class='node-summary' style='font-size:11px;color:#334155;'>feature=" + api.historySeriesLabel(featureKey, schemaId) + ", w=" + windowSize + ", s=" + stride + ", " + lagMode + ", " + padMode + "</div></div>";
+        "<div class='node-summary' style='font-size:11px;color:#94a3b8;'>feature=" + api.historySeriesLabel(featureKey, schemaId) + ", w=" + windowSize + ", s=" + stride + ", " + lagMode + ", " + padMode + "</div></div>";
       return editor.addNode("window_hist_block", 0, 1, x, y, "window_hist_block", { featureKey: featureKey, windowSize: windowSize, stride: stride, lagMode: lagMode, lagCsv: lagCsv, padMode: padMode }, html);
     }
 
@@ -170,39 +170,39 @@
       var pm = api.normalizeParamMask(cfg && cfg.paramMask ? cfg.paramMask : api.defaultParamMask());
       var html =
         "<div><div style='font-weight:700'>Features</div>" +
-        "<div class='node-summary' style='font-size:11px;color:#334155;'>m,c,k,e,x0,v0,gm,gk,gc,+ratios(opt)</div></div>";
+        "<div class='node-summary' style='font-size:11px;color:#94a3b8;'>m,c,k,e,x0,v0,gm,gk,gc,+ratios(opt)</div></div>";
       return editor.addNode("params_block", 0, 1, x, y, "params_block", { paramMask: pm }, html);
     }
 
     function addScenarioNode(editor, x, y, cfg) {
       var schemaId = api.resolveSchemaId((cfg && cfg.schemaId) || api.getCurrentSchemaId() || "oscillator");
       var oneHotKey = api.normalizeOneHotKey((cfg && cfg.oneHotKey) || "scenario", schemaId);
-      var html = "<div><div style='font-weight:700'>OneHot</div><div class='node-summary' style='font-size:11px;color:#334155;'>field=" + api.oneHotLabel(oneHotKey, schemaId) + "</div></div>";
+      var html = "<div><div style='font-weight:700'>OneHot</div><div class='node-summary' style='font-size:11px;color:#94a3b8;'>field=" + api.oneHotLabel(oneHotKey, schemaId) + "</div></div>";
       return editor.addNode("scenario_block", 0, 1, x, y, "scenario_block", { oneHotKey: oneHotKey }, html);
     }
 
     function addTimeSecNode(editor, x, y) {
-      var html = "<div><div style='font-weight:700'>TimeSec</div><div class='node-summary' style='font-size:11px;color:#334155;'>t (seconds)</div></div>";
+      var html = "<div><div style='font-weight:700'>TimeSec</div><div class='node-summary' style='font-size:11px;color:#94a3b8;'>t (seconds)</div></div>";
       return editor.addNode("time_sec_block", 0, 1, x, y, "time_sec_block", {}, html);
     }
 
     function addTimeNormNode(editor, x, y) {
-      var html = "<div><div style='font-weight:700'>TimeNorm</div><div class='node-summary' style='font-size:11px;color:#334155;'>t/T</div></div>";
+      var html = "<div><div style='font-weight:700'>TimeNorm</div><div class='node-summary' style='font-size:11px;color:#94a3b8;'>t/T</div></div>";
       return editor.addNode("time_norm_block", 0, 1, x, y, "time_norm_block", {}, html);
     }
 
     function addSinNormNode(editor, x, y) {
-      var html = "<div><div style='font-weight:700'>SinNorm</div><div class='node-summary' style='font-size:11px;color:#334155;'>sin(2π·t/T)</div></div>";
+      var html = "<div><div style='font-weight:700'>SinNorm</div><div class='node-summary' style='font-size:11px;color:#94a3b8;'>sin(2π·t/T)</div></div>";
       return editor.addNode("sin_norm_block", 0, 1, x, y, "sin_norm_block", {}, html);
     }
 
     function addCosNormNode(editor, x, y) {
-      var html = "<div><div style='font-weight:700'>CosNorm</div><div class='node-summary' style='font-size:11px;color:#334155;'>cos(2π·t/T)</div></div>";
+      var html = "<div><div style='font-weight:700'>CosNorm</div><div class='node-summary' style='font-size:11px;color:#94a3b8;'>cos(2π·t/T)</div></div>";
       return editor.addNode("cos_norm_block", 0, 1, x, y, "cos_norm_block", {}, html);
     }
 
     function addNoiseScheduleNode(editor, x, y) {
-      var html = "<div><div style='font-weight:700'>NoiseSchedule</div><div class='node-summary' style='font-size:11px;color:#334155;'>β(t), ᾱ(t), σ(t)</div></div>";
+      var html = "<div><div style='font-weight:700'>NoiseSchedule</div><div class='node-summary' style='font-size:11px;color:#94a3b8;'>β(t), ᾱ(t), σ(t)</div></div>";
       return editor.addNode("noise_schedule_block", 0, 1, x, y, "noise_schedule_block", {}, html);
     }
 
@@ -217,13 +217,13 @@
         "<input type='number' df-kernelSize value='" + kernelSize + "' min='1' style='width:80px'>" +
         "<input type='number' df-stride value='" + stride + "' min='1' style='width:80px'>" +
         "<select df-activation style='width:120px'><option value='relu'>relu</option><option value='tanh'>tanh</option><option value='sigmoid'>sigmoid</option><option value='linear'>linear</option></select>" +
-        "<div class='node-summary' style='font-size:11px;color:#334155;'>f=" + filters + ", k=" + kernelSize + ", s=" + stride + ", act=" + activation + "</div></div></div>";
+        "<div class='node-summary' style='font-size:11px;color:#94a3b8;'>f=" + filters + ", k=" + kernelSize + ", s=" + stride + ", act=" + activation + "</div></div></div>";
       return editor.addNode("conv1d_layer", 1, 1, x, y, "conv1d_layer", { filters: filters, kernelSize: kernelSize, stride: stride, activation: activation }, html);
     }
 
     function addConcatNode(editor, x, y, cfg) {
       var numInputs = api.clamp(Math.round(Number((cfg && cfg.numInputs) || 5)), 1, 24);
-      var html = "<div><div style='font-weight:700'>Concat</div><div class='node-summary' style='font-size:11px;color:#334155;'>merge selected features</div></div>";
+      var html = "<div><div style='font-weight:700'>Concat</div><div class='node-summary' style='font-size:11px;color:#94a3b8;'>merge selected features</div></div>";
       return editor.addNode("concat_block", numInputs, 1, x, y, "concat_block", { numInputs: numInputs }, html);
     }
 
@@ -236,7 +236,7 @@
         "<input type='number' df-units value='" + units + "' min='1' style='width:80px'>" +
         "<input type='number' df-dropout value='" + dropout.toFixed(2) + "' min='0' max='0.8' step='0.05' style='width:80px'>" +
         "<select df-returnseq style='width:120px'><option value='auto'>returnSeq:auto</option><option value='false'>returnSeq:false</option><option value='true'>returnSeq:true</option></select>" +
-        "<div class='node-summary' style='font-size:11px;color:#334155;'>u=" + units + ", d=" + dropout.toFixed(2) + ", rs=" + returnseq + "</div>" +
+        "<div class='node-summary' style='font-size:11px;color:#94a3b8;'>u=" + units + ", d=" + dropout.toFixed(2) + ", rs=" + returnseq + "</div>" +
         "</div></div>";
       return editor.addNode("rnn_layer", 1, 1, x, y, "rnn_layer", { units: units, dropout: dropout, returnseq: returnseq }, html);
     }
@@ -250,7 +250,7 @@
         "<input type='number' df-units value='" + units + "' min='1' style='width:80px'>" +
         "<input type='number' df-dropout value='" + dropout.toFixed(2) + "' min='0' max='0.8' step='0.05' style='width:80px'>" +
         "<select df-returnseq style='width:120px'><option value='auto'>returnSeq:auto</option><option value='false'>returnSeq:false</option><option value='true'>returnSeq:true</option></select>" +
-        "<div class='node-summary' style='font-size:11px;color:#334155;'>u=" + units + ", d=" + dropout.toFixed(2) + ", rs=" + returnseq + "</div>" +
+        "<div class='node-summary' style='font-size:11px;color:#94a3b8;'>u=" + units + ", d=" + dropout.toFixed(2) + ", rs=" + returnseq + "</div>" +
         "</div></div>";
       return editor.addNode("gru_layer", 1, 1, x, y, "gru_layer", { units: units, dropout: dropout, returnseq: returnseq }, html);
     }
@@ -264,7 +264,7 @@
         "<input type='number' df-units value='" + units + "' min='1' style='width:80px'>" +
         "<input type='number' df-dropout value='" + dropout.toFixed(2) + "' min='0' max='0.8' step='0.05' style='width:80px'>" +
         "<select df-returnseq style='width:120px'><option value='auto'>returnSeq:auto</option><option value='false'>returnSeq:false</option><option value='true'>returnSeq:true</option></select>" +
-        "<div class='node-summary' style='font-size:11px;color:#334155;'>u=" + units + ", d=" + dropout.toFixed(2) + ", rs=" + returnseq + "</div>" +
+        "<div class='node-summary' style='font-size:11px;color:#94a3b8;'>u=" + units + ", d=" + dropout.toFixed(2) + ", rs=" + returnseq + "</div>" +
         "</div></div>";
       return editor.addNode("lstm_layer", 1, 1, x, y, "lstm_layer", { units: units, dropout: dropout, returnseq: returnseq }, html);
     }

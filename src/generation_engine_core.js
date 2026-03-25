@@ -70,6 +70,9 @@
     if (method === "ddpm") {
       return _generateDDPM(tf, cfg, numSamples, latentDim, steps, onStep);
     }
+    if (method === "reconstruct") {
+      return _generateReconstruct(tf, cfg, numSamples);
+    }
 
     return Promise.reject(new Error("Unknown generation method: " + method));
   }
@@ -320,6 +323,50 @@
     });
   }
 
+  // === RECONSTRUCT: pass real inputs through full model, compare input vs output ===
+  function _generateReconstruct(tf, cfg, numSamples) {
+    return new Promise(function (resolve) {
+      var model = cfg.fullModel || cfg.model;
+      if (!model) throw new Error("generation: model required for reconstruct");
+      var originals = cfg.originals;
+      if (!originals || !originals.length) throw new Error("generation: originals (real data) required for reconstruct");
+
+      var n = Math.min(numSamples, originals.length);
+      var inputArr = originals.slice(0, n);
+      var inputTensor = tf.tensor2d(inputArr);
+      var output = model.predict(inputTensor);
+      var reconstructed = (Array.isArray(output) ? output[0] : output).arraySync();
+
+      // per-sample MSE
+      var metrics = [];
+      for (var i = 0; i < n; i++) {
+        var mse = 0;
+        for (var j = 0; j < inputArr[i].length; j++) {
+          var d = inputArr[i][j] - reconstructed[i][j];
+          mse += d * d;
+        }
+        mse /= inputArr[i].length;
+        metrics.push({ idx: i, mse: mse });
+      }
+      var avgMse = metrics.reduce(function (s, m) { return s + m.mse; }, 0) / n;
+
+      inputTensor.dispose();
+      if (Array.isArray(output)) output.forEach(function (t) { t.dispose(); }); else output.dispose();
+
+      resolve({
+        method: "reconstruct",
+        samples: reconstructed,
+        originals: inputArr,
+        latents: [],
+        lossHistory: [],
+        numSamples: n,
+        latentDim: inputArr[0].length,
+        metrics: metrics,
+        avgMse: avgMse,
+      });
+    });
+  }
+
   // === Preset objective functions ===
   var objectives = {
     // reconstruction: ||decode(z) - target||²
@@ -378,14 +425,16 @@
     var family = String(modelFamily || "supervised").toLowerCase();
     var caps = {
       family: family,
+      canReconstruct: family === "vae" || family === "supervised",
       canRandomSample: family === "vae",
       canLangevin: family === "diffusion" || family === "vae",
       canOptimize: family === "vae",
       canInverse: true, // always possible with any differentiable model
       canDDPM: family === "diffusion",
-      defaultMethod: family === "vae" ? "random" : family === "diffusion" ? "ddpm" : "inverse",
+      defaultMethod: family === "vae" ? "reconstruct" : family === "diffusion" ? "ddpm" : "inverse",
       availableMethods: [],
     };
+    if (caps.canReconstruct) caps.availableMethods.push({ id: "reconstruct", label: "Reconstruct (input → model → output)" });
     if (caps.canRandomSample) caps.availableMethods.push({ id: "random", label: "Random Sampling (z ~ N(0,1))" });
     if (caps.canOptimize) caps.availableMethods.push({ id: "optimize", label: "Latent Optimization" });
     if (caps.canLangevin) caps.availableMethods.push({ id: "langevin", label: "Langevin Dynamics" });

@@ -179,6 +179,255 @@
     }, { responsive: true });
   }
 
+  /**
+   * Generation tab renderer — trajectory visualization matching the paper.
+   *
+   * Paper figure style (Li et al. 2021):
+   * - Reconstruct mode: original vs reconstructed ant paths (x vs y), side by side
+   * - Random mode: generated ant paths as trajectories (treating samples as time sequence)
+   * - Per-ant time series: x(t) and y(t) for selected ants, original vs output overlay
+   * - Feature error heatmap: per-sample, per-feature reconstruction error
+   *
+   * deps: { samples, originals?, method?, el, Plotly, datasetData, schemaId }
+   */
+  function renderGeneratedSamples(mountEl, deps) {
+    if (!mountEl) return;
+    var samples = (deps && deps.samples) || [];
+    var originals = (deps && deps.originals) || null;
+    var method = (deps && deps.method) || "random";
+    var elF = (deps && deps.el) || function (tag, attrs, text) {
+      var e = document.createElement(tag);
+      if (attrs) Object.keys(attrs).forEach(function (k) {
+        if (k === "style") e.style.cssText = attrs[k]; else e.setAttribute(k, attrs[k]);
+      });
+      if (text) e.textContent = text;
+      return e;
+    };
+    var Plotly = (deps && deps.Plotly) || (typeof window !== "undefined" && window.Plotly) || null;
+    var dsData = (deps && deps.datasetData) || {};
+    var numAnts = dsData.numAnts || 20;
+
+    if (!samples.length) {
+      mountEl.appendChild(elF("div", { style: "color:#94a3b8;font-size:11px;" }, "No samples generated."));
+      return;
+    }
+
+    var colors = ["#22d3ee","#f59e0b","#4ade80","#f43f5e","#a78bfa","#fb923c","#2dd4bf","#e879f9","#fbbf24","#38bdf8",
+                  "#818cf8","#34d399","#fb7185","#c084fc","#fcd34d","#6ee7b7","#f472b6","#93c5fd","#fdba74","#86efac"];
+    var darkBg = { paper_bgcolor: "#0b1220", plot_bgcolor: "#0b1220", font: { color: "#e2e8f0", size: 10 } };
+    var gridColor = "#1e293b";
+
+    if (!Plotly) {
+      var text = samples.slice(0, 3).map(function (s, i) {
+        return "Sample " + (i + 1) + ": [" + s.slice(0, 8).map(function (v) { return v.toFixed(3); }).join(", ") + "...]";
+      }).join("\n");
+      mountEl.appendChild(elF("pre", { style: "font-size:10px;color:#94a3b8;background:#171d30;padding:6px;border-radius:4px;" }, text));
+      return;
+    }
+
+    // ─── RECONSTRUCT mode: original vs reconstructed (paper Figure 3 style) ───
+    if (method === "reconstruct" && originals && originals.length) {
+      mountEl.appendChild(elF("div", { style: "font-size:12px;color:#67e8f9;margin-bottom:8px;font-weight:600;" },
+        "Reconstruction: " + samples.length + " test samples, " + numAnts + " ants"));
+
+      // 1. Side-by-side ant paths: Original (left subplot) vs Reconstructed (right subplot)
+      //    Each sample is a timestep — plot ant x,y positions across all timesteps
+      var pathDiv = document.createElement("div");
+      pathDiv.style.cssText = "height:360px;";
+      mountEl.appendChild(pathDiv);
+
+      var nT = Math.min(samples.length, originals.length);
+      var origTraces = [];
+      var reconTraces = [];
+      for (var ant = 0; ant < numAnts; ant++) {
+        var ox = [], oy = [], rx = [], ry = [];
+        for (var t = 0; t < nT; t++) {
+          ox.push(originals[t][ant * 2] || 0); oy.push(originals[t][ant * 2 + 1] || 0);
+          rx.push(samples[t][ant * 2] || 0);    ry.push(samples[t][ant * 2 + 1] || 0);
+        }
+        origTraces.push({
+          x: ox, y: oy, mode: "lines+markers", name: "Ant " + ant,
+          xaxis: "x", yaxis: "y",
+          line: { color: colors[ant % 20], width: 1.5 },
+          marker: { size: 2 }, showlegend: ant < 5,
+        });
+        reconTraces.push({
+          x: rx, y: ry, mode: "lines+markers", name: "Ant " + ant,
+          xaxis: "x2", yaxis: "y2",
+          line: { color: colors[ant % 20], width: 1.5 },
+          marker: { size: 2 }, showlegend: false,
+        });
+      }
+      Plotly.newPlot(pathDiv, origTraces.concat(reconTraces), Object.assign({}, darkBg, {
+        grid: { rows: 1, columns: 2, pattern: "independent", xgap: 0.08 },
+        xaxis: { title: "x", gridcolor: gridColor, domain: [0, 0.47] },
+        yaxis: { title: "y", gridcolor: gridColor, scaleanchor: "x" },
+        xaxis2: { title: "x", gridcolor: gridColor, domain: [0.53, 1] },
+        yaxis2: { title: "y", gridcolor: gridColor, scaleanchor: "x2" },
+        annotations: [
+          { text: "Original", xref: "paper", yref: "paper", x: 0.23, y: 1.06, showarrow: false, font: { size: 12, color: "#94a3b8" } },
+          { text: "Reconstructed", xref: "paper", yref: "paper", x: 0.77, y: 1.06, showarrow: false, font: { size: 12, color: "#67e8f9" } },
+        ],
+        legend: { font: { size: 8 }, bgcolor: "rgba(0,0,0,0)", x: 0, y: -0.15, orientation: "h" },
+        margin: { t: 35, b: 60, l: 50, r: 10 },
+      }), { responsive: true });
+
+      // 2. Per-ant time series: overlay original (solid) vs reconstructed (dashed)
+      //    Show first 4 ants, x and y coordinates over time
+      var tsDiv = document.createElement("div");
+      tsDiv.style.cssText = "height:280px;margin-top:12px;";
+      mountEl.appendChild(tsDiv);
+
+      var showAnts = Math.min(4, numAnts);
+      var timeIdx = []; for (var ti = 0; ti < nT; ti++) timeIdx.push(ti);
+      var tsTraces = [];
+      for (var a = 0; a < showAnts; a++) {
+        var origX = [], origY = [], reconX = [], reconY = [];
+        for (var t = 0; t < nT; t++) {
+          origX.push(originals[t][a * 2]); origY.push(originals[t][a * 2 + 1]);
+          reconX.push(samples[t][a * 2]);  reconY.push(samples[t][a * 2 + 1]);
+        }
+        tsTraces.push({ x: timeIdx, y: origX, mode: "lines", name: "Ant" + a + " x (orig)", line: { color: colors[a * 2], width: 1.5 }, legendgroup: "ant" + a });
+        tsTraces.push({ x: timeIdx, y: reconX, mode: "lines", name: "Ant" + a + " x (recon)", line: { color: colors[a * 2], width: 1.5, dash: "dash" }, legendgroup: "ant" + a });
+        tsTraces.push({ x: timeIdx, y: origY, mode: "lines", name: "Ant" + a + " y (orig)", line: { color: colors[a * 2 + 1], width: 1 }, legendgroup: "ant" + a, showlegend: false });
+        tsTraces.push({ x: timeIdx, y: reconY, mode: "lines", name: "Ant" + a + " y (recon)", line: { color: colors[a * 2 + 1], width: 1, dash: "dash" }, legendgroup: "ant" + a, showlegend: false });
+      }
+      Plotly.newPlot(tsDiv, tsTraces, Object.assign({}, darkBg, {
+        title: { text: "Time Series: Original (solid) vs Reconstructed (dashed)", font: { size: 11 } },
+        xaxis: { title: "Timestep", gridcolor: gridColor },
+        yaxis: { title: "Position", gridcolor: gridColor },
+        legend: { font: { size: 8 }, bgcolor: "rgba(0,0,0,0)" },
+        margin: { t: 30, b: 40, l: 50, r: 10 },
+      }), { responsive: true });
+
+      // 3. Reconstruction error heatmap: rows=timesteps, cols=features
+      var errDiv = document.createElement("div");
+      errDiv.style.cssText = "height:260px;margin-top:12px;";
+      mountEl.appendChild(errDiv);
+
+      var errMaxT = Math.min(nT, 100);
+      var errMatrix = [];
+      var featureLabels = [];
+      for (var f = 0; f < numAnts; f++) { featureLabels.push("A" + f + ".x"); featureLabels.push("A" + f + ".y"); }
+      for (var t = 0; t < errMaxT; t++) {
+        var row = [];
+        for (var f = 0; f < samples[t].length; f++) {
+          row.push(Math.abs(originals[t][f] - samples[t][f]));
+        }
+        errMatrix.push(row);
+      }
+      Plotly.newPlot(errDiv, [{
+        z: errMatrix, type: "heatmap",
+        x: featureLabels, colorscale: [[0, "#0b1220"], [0.25, "#164e63"], [0.5, "#0ea5e9"], [0.75, "#fbbf24"], [1, "#ef4444"]],
+        colorbar: { title: { text: "|err|", font: { size: 10 } }, thickness: 12, len: 0.8 },
+      }], Object.assign({}, darkBg, {
+        title: { text: "Per-Feature Reconstruction Error (|original - reconstructed|)", font: { size: 11 } },
+        xaxis: { title: "Feature", tickangle: -45, tickfont: { size: 7 }, gridcolor: gridColor },
+        yaxis: { title: "Sample", gridcolor: gridColor },
+        margin: { t: 30, b: 60, l: 50, r: 10 },
+      }), { responsive: true });
+
+      return;
+    }
+
+    // ─── RANDOM / OTHER mode: treat generated samples as a synthetic trajectory ───
+    mountEl.appendChild(elF("div", { style: "font-size:12px;color:#67e8f9;margin-bottom:8px;font-weight:600;" },
+      "Generated Trajectory: " + samples.length + " timesteps, " + numAnts + " ants (decoded from latent space)"));
+
+    // 1. Ant paths from generated data
+    var genPathDiv = document.createElement("div");
+    genPathDiv.style.cssText = "height:340px;";
+    mountEl.appendChild(genPathDiv);
+
+    var genTraces = [];
+    var nT = samples.length;
+    for (var ant = 0; ant < numAnts; ant++) {
+      var gx = [], gy = [];
+      for (var t = 0; t < nT; t++) {
+        gx.push(samples[t][ant * 2] || 0);
+        gy.push(samples[t][ant * 2 + 1] || 0);
+      }
+      genTraces.push({
+        x: gx, y: gy, mode: "lines+markers", name: "Ant " + ant,
+        line: { color: colors[ant % 20], width: 1.5 },
+        marker: { size: 2 }, opacity: 0.8,
+      });
+    }
+    Plotly.newPlot(genPathDiv, genTraces, Object.assign({}, darkBg, {
+      title: { text: "Generated Ant Paths (x vs y, " + nT + " timesteps)", font: { size: 12 } },
+      xaxis: { title: "x", gridcolor: gridColor },
+      yaxis: { title: "y", gridcolor: gridColor, scaleanchor: "x" },
+      legend: { font: { size: 8 }, bgcolor: "rgba(0,0,0,0)" },
+      margin: { t: 30, b: 45, l: 50, r: 10 },
+    }), { responsive: true });
+
+    // 2. Compare with real data distribution if available
+    var realSamples = dsData.xTrain || dsData.xTest || [];
+    if (realSamples.length > 0) {
+      // Per-feature mean ± std comparison (bar chart)
+      var statsDiv = document.createElement("div");
+      statsDiv.style.cssText = "height:260px;margin-top:12px;";
+      mountEl.appendChild(statsDiv);
+
+      var dim = samples[0].length;
+      var featureLabels = [];
+      for (var f = 0; f < numAnts; f++) { featureLabels.push("A" + f + ".x"); featureLabels.push("A" + f + ".y"); }
+
+      function computeStats(arr) {
+        var n = arr.length;
+        var means = new Array(dim).fill(0);
+        for (var i = 0; i < n; i++) for (var j = 0; j < dim; j++) means[j] += arr[i][j];
+        for (var j = 0; j < dim; j++) means[j] /= n;
+        var stds = new Array(dim).fill(0);
+        for (var i = 0; i < n; i++) for (var j = 0; j < dim; j++) { var d = arr[i][j] - means[j]; stds[j] += d * d; }
+        for (var j = 0; j < dim; j++) stds[j] = Math.sqrt(stds[j] / n);
+        return { means: means, stds: stds };
+      }
+      var realStats = computeStats(realSamples.slice(0, 200));
+      var genStats = computeStats(samples);
+
+      Plotly.newPlot(statsDiv, [
+        { x: featureLabels, y: realStats.means, type: "bar", name: "Real mean", marker: { color: "#475569" },
+          error_y: { type: "data", array: realStats.stds, visible: true, color: "#64748b" } },
+        { x: featureLabels, y: genStats.means, type: "bar", name: "Generated mean", marker: { color: "#38bdf8" },
+          error_y: { type: "data", array: genStats.stds, visible: true, color: "#7dd3fc" } },
+      ], Object.assign({}, darkBg, {
+        title: { text: "Feature Distribution: Real vs Generated (mean ± std)", font: { size: 11 } },
+        xaxis: { tickangle: -45, tickfont: { size: 7 }, gridcolor: gridColor },
+        yaxis: { title: "Value", gridcolor: gridColor },
+        barmode: "group", bargap: 0.15, bargroupgap: 0.05,
+        legend: { font: { size: 9 } },
+        margin: { t: 30, b: 60, l: 50, r: 10 },
+      }), { responsive: true });
+    }
+
+    // 3. Time series of first 3 ants
+    var tsDiv = document.createElement("div");
+    tsDiv.style.cssText = "height:220px;margin-top:12px;";
+    mountEl.appendChild(tsDiv);
+
+    var showAnts = Math.min(3, numAnts);
+    var timeIdx = []; for (var ti = 0; ti < nT; ti++) timeIdx.push(ti);
+    var tsTraces = [];
+    for (var a = 0; a < showAnts; a++) {
+      tsTraces.push({
+        x: timeIdx, y: timeIdx.map(function (t) { return samples[t][a * 2]; }),
+        mode: "lines", name: "Ant" + a + " x", line: { color: colors[a * 2], width: 1.5 },
+      });
+      tsTraces.push({
+        x: timeIdx, y: timeIdx.map(function (t) { return samples[t][a * 2 + 1]; }),
+        mode: "lines", name: "Ant" + a + " y", line: { color: colors[a * 2 + 1], width: 1, dash: "dot" },
+      });
+    }
+    Plotly.newPlot(tsDiv, tsTraces, Object.assign({}, darkBg, {
+      title: { text: "Generated Time Series (first " + showAnts + " ants)", font: { size: 11 } },
+      xaxis: { title: "Timestep", gridcolor: gridColor },
+      yaxis: { title: "Position", gridcolor: gridColor },
+      legend: { font: { size: 8 } },
+      margin: { t: 25, b: 40, l: 50, r: 10 },
+    }), { responsive: true });
+  }
+
   return {
     id: "ant_trajectory",
     schemaId: "ant_trajectory",
@@ -191,7 +440,7 @@
       dataset: { seed: 42, totalCount: 1000, splitDefaults: { mode: "random", train: 0.8, val: 0.1, test: 0.1 } },
     },
     build: build,
-    playgroundApi: { renderPlayground: renderPlayground, renderDataset: renderPlayground },
+    playgroundApi: { renderPlayground: renderPlayground, renderDataset: renderPlayground, renderGeneratedSamples: renderGeneratedSamples },
     uiApi: null,
   };
 });
