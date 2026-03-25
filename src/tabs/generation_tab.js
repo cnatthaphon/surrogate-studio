@@ -34,11 +34,13 @@
     var getGenerationEngine = function () { var W = typeof window !== "undefined" ? window : {}; return W.OSCGenerationEngineCore || null; };
 
     var _selectedTrainerId = null;
-    var _generationResults = [];
+    var _resultsByTrainer = {}; // keyed by trainerId → array of results
     var _isGenerating = false;
     var _mountId = 0;
 
     function _getSchemaId() { return stateApi ? stateApi.getActiveSchema() : ""; }
+    function _getResults() { return _selectedTrainerId ? (_resultsByTrainer[_selectedTrainerId] || []) : []; }
+    function _pushResult(r) { if (!_selectedTrainerId) return; if (!_resultsByTrainer[_selectedTrainerId]) _resultsByTrainer[_selectedTrainerId] = []; _resultsByTrainer[_selectedTrainerId].push(r); }
 
     // list trained models that have generative capability (VAE/diffusion) AND saved weights
     function _listTrainedGenerativeModels() {
@@ -96,7 +98,6 @@
         div.appendChild(el("span", { style: "font-size:9px;padding:1px 5px;border-radius:3px;background:" + badgeColor + ";color:#fff;margin-left:4px;" }, item.family));
         div.addEventListener("click", function () {
           _selectedTrainerId = item.trainerId;
-          _generationResults = []; // clear results when switching models
           _renderLeftPanel();
           _renderMainPanel();
           _renderRightPanel();
@@ -149,8 +150,9 @@
       mainEl.appendChild(header);
 
       // generation results
-      if (_generationResults.length) {
-        _generationResults.forEach(function (result, idx) {
+      var _currentResults = _getResults();
+      if (_currentResults.length) {
+        _currentResults.forEach(function (result, idx) {
           var card = el("div", { className: "osc-card", style: "margin-top:8px;" });
           var statusColor = result.status === "done" ? "#4ade80" : result.status === "error" ? "#f43f5e" : "#fbbf24";
           card.appendChild(el("div", { style: "font-size:12px;color:" + statusColor + ";font-weight:600;" },
@@ -257,7 +259,7 @@
 
       var clearBtn = el("button", { style: "margin-top:4px;width:100%;padding:6px;font-size:11px;border-radius:6px;border:1px solid #475569;background:#1f2937;color:#cbd5e1;cursor:pointer;" }, "Clear Results");
       clearBtn.addEventListener("click", function () {
-        _generationResults = [];
+        if (_selectedTrainerId) _resultsByTrainer[_selectedTrainerId] = [];
         _renderMainPanel();
       });
       rightEl.appendChild(clearBtn);
@@ -404,7 +406,7 @@
           _isGenerating = false;
           if (currentMountId !== _mountId) return;
           result.status = "done";
-          _generationResults.push(result);
+          _pushResult(result);
           onStatus("Generation done: " + result.numSamples + " samples (" + result.method + ")");
           _renderMainPanel();
           if (genModel !== built.model) try { genModel.dispose(); } catch (_) {}
@@ -412,7 +414,7 @@
         }).catch(function (err) {
           _isGenerating = false;
           if (currentMountId !== _mountId) return;
-          _generationResults.push({ method: method, status: "error", error: err.message, samples: [], lossHistory: [], numSamples: 0 });
+          _pushResult({ method: method, status: "error", error: err.message, samples: [], lossHistory: [], numSamples: 0 });
           onStatus("Generation error: " + err.message);
           _renderMainPanel();
           if (genModel !== built.model) try { genModel.dispose(); } catch (_) {}
