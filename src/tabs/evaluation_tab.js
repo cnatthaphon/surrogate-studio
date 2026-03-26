@@ -567,9 +567,23 @@
       var isBundle = dsData.kind === "dataset_bundle" && dsData.datasets;
       var activeDs = isBundle ? dsData.datasets[dsData.activeVariantId || Object.keys(dsData.datasets)[0]] : dsData;
       var nCls = activeDs.classCount || activeDs.numClasses || 10;
-      var testX = (activeDs.xTest || (activeDs.records && activeDs.records.test && activeDs.records.test.x) || []);
-      var testY = (activeDs.yTest || (activeDs.records && activeDs.records.test && activeDs.records.test.y) || []);
-      var featureSize = Number(activeDs.featureSize || (testX[0] && testX[0].length) || 1);
+
+      // resolve test data via source registry or legacy
+      var W = typeof window !== "undefined" ? window : {};
+      var srcReg = W.OSCDatasetSourceRegistry || null;
+      var testSplit;
+      if (srcReg && typeof srcReg.resolveDatasetSplit === "function") {
+        testSplit = srcReg.resolveDatasetSplit(activeDs, "test");
+      } else {
+        var testXLegacy = activeDs.xTest || (activeDs.records && activeDs.records.test && activeDs.records.test.x) || [];
+        var testYLegacy = activeDs.yTest || (activeDs.records && activeDs.records.test && activeDs.records.test.y) || [];
+        testSplit = { x: testXLegacy, y: testYLegacy, length: testXLegacy.length };
+      }
+      var testX = testSplit.x;
+      var testY = testSplit.y;
+      var featureSize = (srcReg && typeof srcReg.getFeatureSize === "function") ? srcReg.getFeatureSize(activeDs) : 0;
+      if (!featureSize && testX.length) featureSize = testX[0].length;
+      if (!featureSize) featureSize = 1;
 
       if (isClassification && testY.length && typeof testY[0] === "number") {
         testY = testY.map(function (l) { var a = new Array(nCls).fill(0); a[l] = 1; return a; });

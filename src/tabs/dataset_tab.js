@@ -206,9 +206,6 @@
       if (mod && mod.playgroundApi && typeof mod.playgroundApi.renderDataset === "function") {
         // module has dedicated dataset renderer
         mod.playgroundApi.renderDataset(previewMount, previewDeps);
-      } else if (d && d.records && d.classNames && (typeof window !== "undefined") && window.OSCImageRenderCore) {
-        // standard image classification format → use core renderer with splits
-        window.OSCImageRenderCore.renderDatasetResult(previewMount, d, { el: el, showSplits: true, label: ds.name || d.schemaId });
       } else if (mod && mod.playgroundApi && typeof mod.playgroundApi.renderPlayground === "function") {
         // fallback to playground renderer with dataset data
         mod.playgroundApi.renderPlayground(previewMount, previewDeps);

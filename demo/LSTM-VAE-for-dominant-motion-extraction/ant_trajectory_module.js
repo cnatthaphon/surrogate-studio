@@ -52,6 +52,20 @@
     var totalCount = Math.min(Number(config.totalCount || allSamples.length), allSamples.length);
     var rng = createRng(seed);
 
+    // register source in registry (zero-copy)
+    var sourceId = "ant_trajectory_source";
+    var W = typeof window !== "undefined" ? window : root;
+    var srcReg = W.OSCDatasetSourceRegistry || null;
+    if (srcReg && typeof srcReg.createFromArrays === "function" && !srcReg.has(sourceId)) {
+      srcReg.createFromArrays({
+        id: sourceId,
+        rows: allSamples,
+        labels: allSamples, // reconstruction: y = x
+        featureSize: numFeatures,
+        meta: { numAnts: numAnts, numFeatures: numFeatures },
+      });
+    }
+
     var indices = [];
     for (var i = 0; i < allSamples.length; i++) indices.push(i);
     if (splitMode !== "original") fisherYates(indices, rng);
@@ -61,19 +75,9 @@
     var valN = Math.max(1, Math.round(totalCount * valFrac));
     var testN = Math.max(1, totalCount - trainN - valN);
 
-    function extractSplit(idx) {
-      var x = [], y = [];
-      for (var i = 0; i < idx.length; i++) {
-        x.push(allSamples[idx[i]]);
-        y.push(allSamples[idx[i]]); // reconstruction target = input
-      }
-      return { x: x, y: y };
-    }
-
     var trainIdx = indices.slice(0, trainN);
     var valIdx = indices.slice(trainN, trainN + valN);
     var testIdx = indices.slice(trainN + valN);
-    var records = { train: extractSplit(trainIdx), val: extractSplit(valIdx), test: extractSplit(testIdx) };
 
     return Promise.resolve({
       schemaId: "ant_trajectory",
@@ -86,14 +90,12 @@
       imageShape: null,
       classCount: 0,
       classNames: [],
+      sourceId: sourceId,
+      splitIndices: { train: trainIdx, val: valIdx, test: testIdx },
       splitConfig: { mode: splitMode, train: trainFrac, val: valFrac, test: 1 - trainFrac - valFrac },
       splitCounts: { train: trainIdx.length, val: valIdx.length, test: testIdx.length },
       trainCount: trainIdx.length, valCount: valIdx.length, testCount: testIdx.length,
-      xTrain: records.train.x, yTrain: records.train.y,
-      xVal: records.val.x, yVal: records.val.y,
-      xTest: records.test.x, yTest: records.test.y,
       targetMode: "xv",
-      records: records,
       seed: seed,
     });
   }
@@ -126,11 +128,25 @@
     });
   }
 
+  function _resolveAllSamples(ds) {
+    // new format: resolve from source registry
+    var W = typeof window !== "undefined" ? window : root;
+    var srcReg = W.OSCDatasetSourceRegistry || null;
+    if (srcReg && typeof srcReg.resolveDatasetSplit === "function" && ds.sourceId) {
+      var train = srcReg.resolveDatasetSplit(ds, "train");
+      var val = srcReg.resolveDatasetSplit(ds, "val");
+      var test = srcReg.resolveDatasetSplit(ds, "test");
+      return [].concat(train.x, val.x, test.x);
+    }
+    // legacy format
+    return [].concat(ds.xTrain || [], ds.xVal || [], ds.xTest || []);
+  }
+
   function _renderTrajectories(mountEl, elF, ds, Plotly) {
     mountEl.innerHTML = "";
     var numAnts = ds.numAnts || 20;
     var numFeatures = ds.numFeatures || 40;
-    var allX = [].concat(ds.xTrain || [], ds.xVal || [], ds.xTest || []);
+    var allX = _resolveAllSamples(ds);
     var total = allX.length;
 
     mountEl.appendChild(elF("div", { style: "font-size:12px;color:#94a3b8;margin-bottom:4px;" },

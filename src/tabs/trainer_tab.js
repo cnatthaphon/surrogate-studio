@@ -350,16 +350,27 @@
         var nCls = activeDs.classCount || 10;
         var imgShape = Array.isArray(activeDs.imageShape) ? activeDs.imageShape : [28, 28, 1];
 
-        // normalize MNIST format for inference
-        if (!activeDs.xTest && activeDs.records) {
+        // resolve test data via source registry or legacy records
+        if (!activeDs.xTest) {
+          var W2 = typeof window !== "undefined" ? window : {};
+          var srcReg2 = W2.OSCDatasetSourceRegistry || null;
           var oh = function (l, n) { var a = new Array(n).fill(0); a[l] = 1; return a; };
+          var isReconstruction2 = defaultTarget === "xv" || defaultTarget === "x";
+          var testSplit;
+          if (srcReg2 && typeof srcReg2.resolveDatasetSplit === "function") {
+            testSplit = srcReg2.resolveDatasetSplit(activeDs, "test");
+          } else {
+            var rec = activeDs.records && activeDs.records.test;
+            testSplit = rec ? { x: rec.x || [], y: rec.y || [], length: (rec.x || []).length } : { x: [], y: [], length: 0 };
+          }
+          var resolvedFS = (srcReg2 && typeof srcReg2.getFeatureSize === "function") ? srcReg2.getFeatureSize(activeDs) : 0;
+          if (!resolvedFS && testSplit.x.length) resolvedFS = testSplit.x[0].length;
           activeDs = {
-            xTest: (activeDs.records.test && activeDs.records.test.x) || [],
-            yTest: isClassification
-              ? ((activeDs.records.test && activeDs.records.test.y) || []).map(function (l) { return oh(l, nCls); })
-              : ((activeDs.records.test && activeDs.records.test.y) || []),
-            yTestRaw: (activeDs.records.test && activeDs.records.test.y) || [],
-            featureSize: (activeDs.records.test && activeDs.records.test.x && activeDs.records.test.x[0]) ? activeDs.records.test.x[0].length : 1,
+            xTest: testSplit.x,
+            yTest: isClassification ? testSplit.y.map(function (l) { return typeof l === "number" ? oh(l, nCls) : l; })
+              : isReconstruction2 ? testSplit.x : testSplit.y,
+            yTestRaw: testSplit.y,
+            featureSize: resolvedFS || 1,
             numClasses: nCls,
           };
         }
