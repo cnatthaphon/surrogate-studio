@@ -60,13 +60,6 @@
         try { if (typeof tf.setBackend === "function") { backends.push({ value: "webgl", label: "WebGL (GPU)" }); } } catch (e) {}
         try { backends.push({ value: "wasm", label: "WASM" }); } catch (e) {}
       }
-      var sra = getServerAdapter();
-      if (sra) {
-        var label = "PyTorch Server";
-        if (_serverAvailable === true) label += " \u2713";
-        else if (_serverAvailable === false) label += " \u2717";
-        backends.push({ value: "pytorch_server", label: label });
-      }
       return backends;
     }
 
@@ -936,11 +929,17 @@
 
       var sra = getServerAdapter();
       var defaultServerUrl = sra ? sra.DEFAULT_SERVER : "http://localhost:3777";
+      var hasServerAdapter = !!sra;
       var formSchema = [
         { key: "datasetId", label: "Dataset (" + schemaId + ")", type: "select", options: datasets.map(function (d) { return { value: d.id, label: (d.name || d.id) + (d.status === "ready" ? " \u2713" : " (draft)") }; }), disabled: isLocked },
         { key: "modelId", label: "Model (" + schemaId + ")", type: "select", options: models.map(function (m) { return { value: m.id, label: m.name || m.id }; }), disabled: isLocked },
         { key: "runtimeBackend", label: "Backend", type: "select", options: backends },
-        { key: "serverUrl", label: "Server URL", type: "text", placeholder: defaultServerUrl },
+      ];
+      if (hasServerAdapter) {
+        formSchema.push({ key: "useServer", label: "Use PyTorch Server", type: "checkbox" });
+        formSchema.push({ key: "serverUrl", label: "Server URL", type: "text", placeholder: defaultServerUrl });
+      }
+      formSchema = formSchema.concat([
         { key: "epochs", label: "Epochs", type: "number", min: 1, max: 1000 },
         { key: "batchSize", label: "Batch size", type: "number", min: 1 },
         { key: "learningRate", label: "Learning rate", type: "number", min: 0.0000001, step: 0.0001 },
@@ -953,10 +952,10 @@
         { key: "minLr", label: "Min LR", type: "number", min: 0.0000001, step: 0.0000001 },
         { key: "gradClipNorm", label: "Grad clip norm (0=off)", type: "number", min: 0, step: 0.1 },
         { key: "gradClipValue", label: "Grad clip value (0=off)", type: "number", min: 0, step: 0.1 },
-      ];
+      ]);
       var formValue = {
         datasetId: t.datasetId || "", modelId: t.modelId || "",
-        runtimeBackend: "auto", serverUrl: defaultServerUrl, epochs: 20, batchSize: 32, learningRate: 0.001,
+        runtimeBackend: "auto", useServer: false, serverUrl: defaultServerUrl, epochs: 20, batchSize: 32, learningRate: 0.001,
         optimizerType: "adam", lrSchedulerType: "plateau", earlyStoppingPatience: 5,
         restoreBestWeights: true, lrPatience: 3, lrFactor: 0.5, minLr: 0.000001,
         gradClipNorm: 0, gradClipValue: 0,
@@ -987,26 +986,23 @@
           mountEl: formMount, schema: formSchema, value: formValue,
           fieldNamePrefix: "train", rowClassName: "osc-form-row",
           onChange: function (cfg, ctx) {
-            // auto-check server when backend changes to pytorch_server
-            if (ctx && ctx.key === "runtimeBackend" && sraForPanel && serverStatusEl) {
-              var val = String(ctx.value || "");
-              if (val === "pytorch_server" || val === "server") {
-                var urlInput = rightEl.querySelector("input[data-config-key='serverUrl']");
-                var url = urlInput ? urlInput.value : "";
-                _serverUrl = url;
-                serverStatusEl.style.color = "#fbbf24";
-                serverStatusEl.textContent = "Checking server...";
-                _checkServerConnection(url, function (ok, info) {
-                  if (ok) {
-                    serverStatusEl.style.color = "#4ade80";
-                    serverStatusEl.textContent = "\u2713 Connected: " + (info && info.backend || "pytorch");
-                    if (info && info.python) serverStatusEl.textContent += " (" + info.python + ")";
-                  } else {
-                    serverStatusEl.style.color = "#f43f5e";
-                    serverStatusEl.textContent = "\u2717 Cannot reach server";
-                  }
-                });
-              }
+            // auto-check server when "Use PyTorch Server" is toggled on
+            if (ctx && ctx.key === "useServer" && ctx.value && sraForPanel && serverStatusEl) {
+              var urlInput = rightEl.querySelector("input[data-config-key='serverUrl']");
+              var url = urlInput ? urlInput.value : "";
+              _serverUrl = url;
+              serverStatusEl.style.color = "#fbbf24";
+              serverStatusEl.textContent = "Checking server...";
+              _checkServerConnection(url, function (ok, info) {
+                if (ok) {
+                  serverStatusEl.style.color = "#4ade80";
+                  serverStatusEl.textContent = "\u2713 Connected: " + (info && info.backend || "pytorch");
+                  if (info && info.python) serverStatusEl.textContent += " (" + info.python + ")";
+                } else {
+                  serverStatusEl.style.color = "#f43f5e";
+                  serverStatusEl.textContent = "\u2717 Cannot reach server \u2014 will fallback to client";
+                }
+              });
             }
           },
         });
@@ -1165,20 +1161,19 @@
 
       var W = typeof window !== "undefined" ? window : {};
       var backend = String(config.runtimeBackend || "auto");
+      var useServer = Boolean(config.useServer);
       var serverAdapter = getServerAdapter();
       var serverUrl = String(config.serverUrl || (serverAdapter && serverAdapter.DEFAULT_SERVER) || "");
 
-      // PyTorch Server: only when EXPLICITLY selected — verify before use
-      if (backend === "pytorch_server" && serverAdapter) {
+      // PyTorch Server: when useServer is checked — try server first, fallback to client
+      if (useServer && serverAdapter) {
         onStatus("Connecting to PyTorch Server...");
         serverAdapter.checkServer(serverUrl).then(function (ok) {
           _serverAvailable = ok;
           if (!ok) {
-            onStatus("Server not reachable at " + serverUrl);
-            _isTraining = false;
-            tCard.status = "draft";
-            if (store) store.upsertTrainerCard(tCard);
-            _renderLeftPanel(); _renderMainPanel(); _renderRightPanel();
+            onStatus("Server not reachable \u2014 falling back to client (" + backend + ")");
+            // fallback to client-side training
+            _trainOnClient(tf, tCard, activeId, buildResult, config, activeDs, schemaId, graphMode, featureSize, allowedOutputKeys, defaultTarget, currentMountId);
             return;
           }
           // server OK — proceed with server training
@@ -1220,6 +1215,10 @@
           tCard.metrics = result;
           if (!tCard.metrics.paramCount) tCard.metrics.paramCount = buildResult.model.countParams();
           tCard.backend = result.resolvedBackend || result.backend || "pytorch";
+          tCard.trainedOnServer = true;
+          if (!tCard.config) tCard.config = {};
+          tCard.config.useServer = true;
+          tCard.config.serverUrl = serverUrl;
           if (result.modelArtifacts) {
             if (result.modelArtifacts.weightData && !result.modelArtifacts.weightValues) {
               result.modelArtifacts.weightValues = result.modelArtifacts.weightData;

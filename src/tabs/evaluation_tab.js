@@ -580,7 +580,7 @@
 
       // route to server if model was server-trained
       var trainerBackend = (trainer.config && trainer.config.runtimeBackend) || "auto";
-      if (trainerBackend === "pytorch_server" || trainerBackend === "server") {
+      if (trainer.trainedOnServer || (trainer.config && trainer.config.useServer)) {
         var serverAdapter = _getServerAdapter();
         if (serverAdapter) {
           var serverUrl = (trainer.config && trainer.config.serverUrl) || "";

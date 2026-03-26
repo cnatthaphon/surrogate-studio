@@ -372,7 +372,7 @@
       var trainerBackend = (trainer.config && trainer.config.runtimeBackend) || "auto";
 
       // route to server if model was server-trained
-      if (trainerBackend === "pytorch_server" || trainerBackend === "server") {
+      if (trainer.trainedOnServer || (trainer.config && trainer.config.useServer)) {
         var serverAdapter = _getServerAdapter();
         if (serverAdapter) {
           _isGenerating = true; g.status = "generating"; _saveGen(g);
