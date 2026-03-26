@@ -1167,15 +1167,16 @@
 
       // PyTorch Server: when useServer is checked — try server first, fallback to client
       if (useServer && serverAdapter) {
-        onStatus("Connecting to PyTorch Server...");
+        onStatus("Checking PyTorch Server...");
         serverAdapter.checkServer(serverUrl).then(function (ok) {
           _serverAvailable = ok;
+          _renderRightPanel(); // update server status display
           if (!ok) {
-            onStatus("Server not reachable \u2014 falling back to client (" + backend + ")");
-            // fallback to client-side training
-            _trainOnClient(tf, tCard, activeId, buildResult, config, activeDs, schemaId, graphMode, featureSize, allowedOutputKeys, defaultTarget, currentMountId);
+            onStatus("Server not reachable \u2014 training on client (" + backend + ")");
+            _runClientTraining();
             return;
           }
+          onStatus("Server connected \u2014 training on PyTorch...");
           // server OK — proceed with server training
           serverAdapter.runTrainingOnServer({
           runId: activeId,
@@ -1240,8 +1241,12 @@
         });
         }); // close checkServer.then
         return; // don't fall through to Worker path
-      } // close if (pytorch_server)
+      } // close if (useServer)
 
+      _runClientTraining();
+      return;
+
+      function _runClientTraining() {
       // === WORKER PATH (non-blocking) ===
       var W = typeof window !== "undefined" ? window : {};
       var workerBridge = W.OSCTrainingWorkerBridge;
@@ -1413,6 +1418,7 @@
           buildResult.model.dispose();
         });
       }
+      } // end _runClientTraining
     }
 
     function _handleExport() {
