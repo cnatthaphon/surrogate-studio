@@ -364,24 +364,9 @@
 
       var configCard = el("div", { className: "osc-card" });
 
-      // schema selector
-      var schemas = schemaRegistry && typeof schemaRegistry.listSchemas === "function" ? schemaRegistry.listSchemas() : [];
-      var schemaRow = el("div", { className: "osc-form-row" });
-      schemaRow.appendChild(el("label", {}, "Schema"));
-      var schemaSel = el("select", { style: "width:100%;padding:4px;background:#1e293b;color:#e2e8f0;border:1px solid #334155;border-radius:4px;font-size:11px;" });
-      schemas.forEach(function (s) {
-        var opt = el("option", { value: s.id || s }, s.label || s.id || s);
-        if ((s.id || s) === ev.schemaId) opt.selected = true;
-        schemaSel.appendChild(opt);
-      });
-      schemaSel.addEventListener("change", function () {
-        ev.schemaId = schemaSel.value;
-        ev.trainerIds = []; ev.datasetId = "";
-        _saveEval(ev);
-        _renderRightPanel(); _renderLeftPanel();
-      });
-      schemaRow.appendChild(schemaSel);
-      configCard.appendChild(schemaRow);
+      // schema — locked at creation, read-only label
+      configCard.appendChild(el("div", { style: "font-size:11px;color:#94a3b8;margin-bottom:6px;" },
+        "Schema: " + escapeHtml(ev.schemaId || "none")));
 
       // dataset selector (filtered by schema)
       var datasets = _listDatasetsForSchema(ev.schemaId);

@@ -240,23 +240,9 @@
 
       var configCard = el("div", { className: "osc-card" });
 
-      // schema selector
-      var schemas = schemaRegistry && typeof schemaRegistry.listSchemas === "function" ? schemaRegistry.listSchemas() : [];
-      var schemaRow = el("div", { className: "osc-form-row" });
-      schemaRow.appendChild(el("label", {}, "Schema"));
-      var schemaSel = el("select", { style: "width:100%;padding:4px;background:#1e293b;color:#e2e8f0;border:1px solid #334155;border-radius:4px;font-size:11px;" });
-      schemas.forEach(function (s) {
-        var sid = s.id || s;
-        var opt = el("option", { value: sid }, s.label || sid);
-        if (sid === g.schemaId) opt.selected = true;
-        schemaSel.appendChild(opt);
-      });
-      schemaSel.addEventListener("change", function () {
-        g.schemaId = schemaSel.value; g.trainerId = ""; g.family = "";
-        _saveGen(g); _renderRightPanel(); _renderLeftPanel();
-      });
-      schemaRow.appendChild(schemaSel);
-      configCard.appendChild(schemaRow);
+      // schema — locked at creation, read-only label
+      configCard.appendChild(el("div", { style: "font-size:11px;color:#94a3b8;margin-bottom:6px;" },
+        "Schema: " + escapeHtml(g.schemaId || "none")));
 
       // trainer/model selector (filtered by schema, shows status)
       var trainers = _listTrainersForSchema(g.schemaId);

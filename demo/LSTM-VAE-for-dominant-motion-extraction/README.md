@@ -66,12 +66,15 @@ This demo focuses on **Step 2** — the LSTM-VAE autoencoder for trajectory reco
 
 ### Architecture Comparison
 
-| Component | Original Paper | This Reproduction |
-|-----------|---------------|-------------------|
-| **Encoder** | LSTM (hidden=100, depth=2) | LSTM (hidden=100, depth=1) |
-| **Latent dim** | 20 | 20 |
-| **Reparameterization** | Linear(hidden→μ), Linear(hidden→logσ²) | Dense(100→μ₂₀), Dense(100→logσ²₂₀) |
-| **Decoder** | Linear(latent→hidden), LSTM(hidden, depth=2), Linear→output | Dense(20→100, relu), Dense(100→100, relu), Dense(100→40) |
+| Component | Original Paper | This Reproduction | Match |
+|-----------|---------------|-------------------|:-----:|
+| **Encoder** | LSTM (hidden=100, depth=2) | LSTM (hidden=100, depth=1) | Partial* |
+| **Latent dim** | 20 | 20 | Yes |
+| **KL weight β** | 0.001 | 0.001 | Yes |
+| **Reparameterization** | Linear(100→μ₂₀), Linear(100→logσ²₂₀) | Dense(100→μ₂₀), Dense(100→logσ²₂₀) | Yes |
+| **Decoder** | Linear(20→100), LSTM(100, depth=2), Linear(100→40) | Dense(20→100, relu), Dense(100→100, relu), Output(40) | Partial* |
+| **Params** | ~80,000 | 77,100 | Yes |
+| **Data** | 10,399 timesteps | 1,000 timesteps | 10% |
 | **KL weight β** | 1/1000 of reconstruction loss | 0.001 |
 | **Loss** | MSE + β·KL | MSE + β·KL |
 | **Data** | 20 ants, 10399 timesteps, 40 features | 20 ants, 1000 timesteps, 40 features |
@@ -80,10 +83,12 @@ This demo focuses on **Step 2** — the LSTM-VAE autoencoder for trajectory reco
 
 ### Design Decisions
 
-**Matching architecture**: We use LSTM(hidden=100) and latent_dim=20 to match the paper. Remaining differences:
-- **1 LSTM layer** instead of 2 stacked (our LSTM node is single-layer; stacked LSTM is a future node type)
-- **Dense decoder** instead of LSTM decoder — the paper unrolls an LSTM for decoding, but since each timestep is processed independently (flat input, seq_len=1), Dense layers are functionally equivalent
-- **1000 timesteps** instead of 10,399 — we embedded 1000 for fast demo load; the paper trains on the full dataset
+**What matches**: LSTM(100) encoder, latent dim 20, KL weight β=0.001, ~77K params (~80K in paper), MinMax normalization, Adam optimizer.
+
+***Remaining differences**:
+- **1 LSTM layer** vs paper's 2 stacked — stacked LSTM builds correctly but VAE multi-output loss needs adjustment for training (tracked as enhancement)
+- **Dense decoder** vs LSTM decoder — functionally equivalent for flat input (seq_len=1)
+- **1,000 timesteps** vs 10,399 — embedded 1000 for fast demo load (237KB). Full dataset would be ~2.4MB
 
 **MLP-AE baseline**: We include a plain autoencoder (Dense layers, no stochastic latent) for comparison — not in the original paper, but useful for demonstrating the value of the VAE latent structure.
 

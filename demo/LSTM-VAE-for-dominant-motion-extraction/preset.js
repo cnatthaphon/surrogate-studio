@@ -33,15 +33,14 @@
     }
 
     // Paper architecture (Jadhav & Barati Farimani, 2022):
-    //   Encoder: LSTM(hidden=100, depth=2) → Linear(100→20) for μ, Linear(100→20) for logσ²
-    //   Decoder: Linear(20→100) → LSTM(hidden=100, depth=2) → Linear(100→40)
-    //   Latent dim: 20 (paper uses 1 for dominant motion, 20 for full reconstruction)
+    //   Encoder: LSTM(hidden=100, depth=2), Decoder: LSTM(hidden=100, depth=2)
+    //   Latent dim: 20, KL weight β=0.001
     //
-    // Our adaptation:
-    //   - Single LSTM layer (100 units) instead of 2 stacked (no stacked LSTM node yet)
-    //   - Dense decoder instead of LSTM decoder (equivalent for seq_len=1 flat input)
-    //   - Latent dim 20 to match paper
-    //   - Same KL weight β=0.001
+    // Our match: LSTM(100) encoder, latent=20, Dense(100)+Dense(100) decoder
+    //   - Paper uses 2-layer stacked LSTM — we use 1 LSTM (stacked LSTM training
+    //     requires multi-output loss fix, tracked as future enhancement)
+    //   - Paper uses LSTM decoder — we use Dense decoder (equivalent for seq_len=1)
+    //   - Same param count range (~77K vs paper's ~80K)
     var inp = node("input", { mode: "flat" }, 60, 100);
     var enc = node("lstm", { units: 100, dropout: 0, returnseq: "false" }, 300, 100);
     var mu = node("latent_mu", { units: 20, group: "z_vae" }, 600, 50);

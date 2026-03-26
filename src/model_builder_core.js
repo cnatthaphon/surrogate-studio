@@ -509,15 +509,20 @@
         return tf.layers.layerNormalization({ axis: -1, epsilon: eps }).apply(inTensor);
       }
       if (node.name === "rnn_layer" || node.name === "gru_layer" || node.name === "lstm_layer") {
-        if (!isSequence && !needsReshapeForRecurrent) throw new Error("RNN/GRU/LSTM layers require sequence input mode.");
         var rnnUnits = Math.max(1, Number(node.data.units || 64));
         var dropout = clamp(Number(node.data.dropout || 0), 0, 0.8);
         var rsSetting = String(node.data.returnseq || "auto");
         var returnSeq = rsSetting === "true" ? true : (rsSetting === "false" ? false : laterHasRecurrent);
         var rnnCfg = { units: rnnUnits, returnSequences: returnSeq, dropout: dropout, recurrentInitializer: "glorotUniform" };
-        if (node.name === "rnn_layer") return tf.layers.simpleRNN(rnnCfg).apply(inTensor);
-        if (node.name === "gru_layer") return tf.layers.gru(rnnCfg).apply(inTensor);
-        return tf.layers.lstm(rnnCfg).apply(inTensor);
+        // auto-reshape 2D → 3D if needed (e.g., Dense output → LSTM in decoder)
+        var rnnIn = inTensor;
+        if (inTensor.shape.length === 2) {
+          var reshDim = inTensor.shape[inTensor.shape.length - 1];
+          rnnIn = tf.layers.reshape({ targetShape: [1, reshDim] }).apply(inTensor);
+        }
+        if (node.name === "rnn_layer") return tf.layers.simpleRNN(rnnCfg).apply(rnnIn);
+        if (node.name === "gru_layer") return tf.layers.gru(rnnCfg).apply(rnnIn);
+        return tf.layers.lstm(rnnCfg).apply(rnnIn);
       }
       if (node.name === "concat_block") return inTensor;
       throw new Error("Unsupported node type: " + node.name);
