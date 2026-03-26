@@ -281,10 +281,16 @@
         return;
       }
 
-      // --- determine task type ---
+      // --- determine task type from model graph (not schema) ---
       var schemaId = t.schemaId;
       var allowedOutputKeys = schemaRegistry ? schemaRegistry.getOutputKeys(schemaId) : ["x"];
       var defaultTarget = (allowedOutputKeys[0] && (allowedOutputKeys[0].key || allowedOutputKeys[0])) || "x";
+      // read actual target from model's output node — overrides schema default
+      var model = t.modelId ? (store ? store.getModel(t.modelId) : null) : null;
+      if (model && model.graph && modelBuilder) {
+        var heads = modelBuilder.inferOutputHeads(model.graph, allowedOutputKeys, defaultTarget);
+        if (heads && heads.length) defaultTarget = heads[0].target || defaultTarget;
+      }
       var isClassification = defaultTarget === "label" || defaultTarget === "logits";
 
       // --- check if server returned raw predictions (full charts) ---
@@ -1110,11 +1116,14 @@
       var schemaId = tCard.schemaId;
       var allowedOutputKeys = schemaRegistry ? schemaRegistry.getOutputKeys(schemaId) : ["x"];
       var defaultTarget = allowedOutputKeys[0] || "x";
+      // read actual target from model graph
+      if (model && model.graph && modelBuilder) {
+        var _heads = modelBuilder.inferOutputHeads(model.graph, allowedOutputKeys, defaultTarget);
+        if (_heads && _heads.length) defaultTarget = _heads[0].target || defaultTarget;
+      }
       var dsData = dataset.data;
-      // handle bundle format
       var isBundle = dsData.kind === "dataset_bundle" && dsData.datasets;
       var activeDs = isBundle ? dsData.datasets[dsData.activeVariantId || Object.keys(dsData.datasets)[0]] : dsData;
-      // normalize dataset format: MNIST uses records.{train,val,test}.{x,y}, oscillator uses xTrain/yTrain
       if (!activeDs.xTrain && activeDs.records) {
         var nClasses = activeDs.classCount || 10;
         function oneHot(label, n) { var arr = new Array(n).fill(0); arr[label] = 1; return arr; }
