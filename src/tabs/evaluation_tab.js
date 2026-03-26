@@ -585,8 +585,7 @@
           var serverUrl = (trainer.config && trainer.config.serverUrl) || "";
           return serverAdapter.checkServer(serverUrl).then(function (ok) {
             if (!ok) {
-              // fallback to client
-              _evalOnClient();
+              r.status = "error"; r.error = "Server not reachable \u2014 retrain on client or restart server";
               return;
             }
             return serverAdapter.predictOnServer({
@@ -596,9 +595,8 @@
             }, serverUrl).then(function (result) {
               var allPreds = result.predictions || [];
               _computeMetrics(pc, r, ev, allPreds, testX, testY, testN, nCls, isClassification, activeDs, schemaId);
-            }).catch(function () {
-              // server error — fallback to client
-              _evalOnClient();
+            }).catch(function (err) {
+              r.status = "error"; r.error = "Server error: " + err.message + " \u2014 retrain on client or restart server";
             });
           });
         }

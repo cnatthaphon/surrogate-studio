@@ -380,8 +380,9 @@
           onStatus("Checking server for generation...");
           serverAdapter.checkServer(serverUrl).then(function (ok) {
             if (!ok) {
-              onStatus("Server not reachable \u2014 generating on client");
-              _generateOnClient();
+              _isGenerating = false; g.status = "draft"; _saveGen(g);
+              onStatus("Server not reachable. This model was trained on server \u2014 retrain on client or start the server.");
+              _renderLeftPanel(); _renderRightPanel();
               return;
             }
             onStatus("Generating on server (" + method + ")...");
@@ -406,9 +407,9 @@
               onStatus("Generation done (server): " + (result.numSamples || 0) + " samples");
               _renderLeftPanel(); _renderMainPanel(); _renderRightPanel();
             }).catch(function (err) {
-              // server error during generation — fallback to client
-              onStatus("Server error \u2014 falling back to client: " + err.message);
-              _generateOnClient();
+              _isGenerating = false; g.status = "draft"; _saveGen(g);
+              onStatus("Server error: " + err.message + " \u2014 retrain on client or restart server.");
+              _renderLeftPanel(); _renderRightPanel();
             });
           });
           return;

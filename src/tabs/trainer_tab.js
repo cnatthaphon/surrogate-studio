@@ -1171,6 +1171,14 @@
         _checkServerConnection(serverUrl, function (ok) {
           _renderRightPanel(); // update server status display with full info
           if (!ok) {
+            // first training → fallback to client. Continue training of server model → need server.
+            if (tCard.trainedOnServer) {
+              onStatus("Server not reachable. This model was trained on server \u2014 restart server to continue, or create new trainer for client.");
+              _isTraining = false; tCard.status = tCard.status === "training" ? "done" : tCard.status;
+              if (store) store.upsertTrainerCard(tCard);
+              _renderLeftPanel(); _renderMainPanel(); _renderRightPanel();
+              return;
+            }
             onStatus("Server not reachable \u2014 training on client (" + backend + ")");
             _runClientTraining();
             return;
