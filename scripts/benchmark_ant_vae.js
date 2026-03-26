@@ -30,7 +30,7 @@ async function main() {
 
   // Build dataset
   console.log("\n=== Building dataset ===");
-  const ds = await AntModule.build({ totalCount: 1000, seed: 42, splitMode: "random", trainFrac: 0.8, valFrac: 0.1 });
+  const ds = await AntModule.build({ totalCount: 10399, seed: 42, splitMode: "random", trainFrac: 0.8, valFrac: 0.1 });
   console.log(`Train: ${ds.trainCount}, Val: ${ds.valCount}, Test: ${ds.testCount}, Features: ${ds.featureSize}`);
 
   // Load preset graphs (Drawflow format — same as the demo)

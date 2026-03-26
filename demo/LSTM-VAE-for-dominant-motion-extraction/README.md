@@ -85,10 +85,9 @@ This demo focuses on **Step 2** — the LSTM-VAE autoencoder for trajectory reco
 
 **What matches**: LSTM(100) encoder, latent dim 20, KL weight β=0.001, ~77K params (~80K in paper), MinMax normalization, Adam optimizer.
 
-***Remaining differences**:
-- **1 LSTM layer** vs paper's 2 stacked — stacked LSTM builds correctly but VAE multi-output loss needs adjustment for training (tracked as enhancement)
-- **Dense decoder** vs LSTM decoder — functionally equivalent for flat input (seq_len=1)
-- **1,000 timesteps** vs 10,399 — embedded 1000 for fast demo load (237KB). Full dataset would be ~2.4MB
+***Remaining difference**: 1 LSTM layer vs paper's 2 stacked (stacked LSTM training with VAE multi-output loss tracked as enhancement). Dense decoder is functionally equivalent to LSTM decoder for seq_len=1 flat input.
+
+Full 10,399 timesteps from the paper's `ant_dataset_gt.mat` are embedded (2.4MB JS file).
 
 **MLP-AE baseline**: We include a plain autoencoder (Dense layers, no stochastic latent) for comparison — not in the original paper, but useful for demonstrating the value of the VAE latent structure.
 
@@ -101,19 +100,19 @@ Headless benchmark: 50 epochs, batch=32, lr=5e-4, Adam, plateau scheduler, seed=
 | **Parameters** | 77,100 | 19,312 | ~80,000 |
 | **LSTM layers** | 1 | — | 2 |
 | **Latent dim** | 20 | 8 (bottleneck) | 20 |
-| **Data** | 1,000 timesteps | 1,000 timesteps | 10,399 timesteps |
-| **Val Loss (MSE)** | 6.08e-4 | 1.11e-3 | — |
-| **Test R²** | **0.9932** | 0.9875 | — (qualitative) |
-| **Test RMSE** | 0.0235 | 0.0319 | — |
-| **Test Bias** | -2.01e-3 | 3.95e-4 | — |
+| **Data** | **10,399 timesteps** | 10,399 timesteps | 10,399 timesteps |
+| **Val Loss (MSE)** | 2.68e-4 | 1.10e-3 | — |
+| **Test R²** | **0.9970** | 0.9882 | — (qualitative) |
+| **Test RMSE** | 0.0164 | 0.0325 | — |
+| **Test Bias** | -1.54e-3 | 2.78e-4 | — |
 
 **Key findings:**
 
-- **R²=0.993** — the VAE reconstructs ant trajectories with <0.7% unexplained variance, consistent with the paper's qualitative figures showing close original-vs-reconstructed overlap
-- **LSTM-VAE outperforms MLP-AE** on R² (0.993 vs 0.988) and RMSE (0.024 vs 0.032) — the recurrent encoder captures temporal structure better
-- **77K params matches the paper** (~80K). Remaining differences: 1 vs 2 LSTM layers, Dense vs LSTM decoder
-- Strong reconstruction with only **10% of the data** (1000 vs 10,399 timesteps)
-- The paper does not report explicit R²/MSE — their evaluation is visual (trajectory overlays) and downstream (SINDy equation discovery)
+- **R²=0.997** — the VAE reconstructs ant trajectories with <0.3% unexplained variance, consistent with the paper's qualitative figures showing near-perfect original-vs-reconstructed overlap
+- **LSTM-VAE significantly outperforms MLP-AE** on R² (0.997 vs 0.988) and RMSE (0.016 vs 0.033) — the recurrent encoder captures temporal structure that Dense layers miss
+- **Same dataset** as the paper — full 10,399 timesteps from `ant_dataset_gt.mat` (80/10/10 split: 8319 train, 1040 val, 1040 test)
+- **77K params matches the paper** (~80K). Remaining difference: 1 vs 2 LSTM layers (Dense decoder equivalent for seq_len=1)
+- The paper does not report explicit R²/MSE — their evaluation is visual (trajectory overlays) and downstream (SINDy equation discovery from latent space)
 - The VAE's real value over the AE is the **structured latent space** for SINDy, not just reconstruction accuracy
 
 ---
@@ -123,10 +122,10 @@ Headless benchmark: 50 epochs, batch=32, lr=5e-4, Adam, plateau scheduler, seed=
 **Ant trajectory data** — 20 ants tracked in a confined colony, each with 2D position (x, y).
 
 - **Source**: `ant_dataset_gt.mat` from the [original repo](https://github.com/BaratiLab/LSTM-VAE-for-dominant-motion-extraction/tree/main/data)
-- **Format**: 1000 timesteps × 40 features (20 ants × 2 coordinates)
-- **Normalization**: MinMax scaled to [0, 1]
-- **Split**: 80% train / 10% validation / 10% test (random, seed=42)
-- **Embedded**: Data is included as `ant_data.js` (237KB) — no network fetch needed, works on `file://`
+- **Format**: 10,399 timesteps × 40 features (20 ants × 2 coordinates)
+- **Normalization**: MinMax scaled to [0, 1] (same as paper)
+- **Split**: 80% train / 10% validation / 10% test (8319 / 1040 / 1040, random, seed=42)
+- **Embedded**: Full dataset included as `ant_data.js` (2.4MB) — no network fetch needed, works on `file://`
 
 ---
 
@@ -185,7 +184,7 @@ Novel trajectory generation from the learned latent space:
 | File | Size | Description |
 |------|------|-------------|
 | `index.html` | 4KB | Demo page — loads Surrogate Studio core + demo modules |
-| `ant_data.js` | 237KB | Embedded ant trajectory data (1000×40, JS variable) |
+| `ant_data.js` | 2.4MB | Full ant trajectory data (10399×40, JS variable) |
 | `ant_trajectories.json` | 1.6MB | Full trajectory data (JSON format) |
 | `ant_trajectory_schema.js` | 6KB | Registers `ant_trajectory` schema at runtime |
 | `ant_trajectory_module.js` | 21KB | Dataset module — data loading, playground, generation renderer |

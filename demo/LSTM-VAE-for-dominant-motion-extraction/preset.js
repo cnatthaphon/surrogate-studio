@@ -100,7 +100,7 @@
     var raw = (typeof window !== "undefined" ? window : {}).ANT_DATA;
     if (!raw || !raw.s) return null;
     var allSamples = raw.s;
-    var totalCount = Math.min(1000, allSamples.length);
+    var totalCount = allSamples.length;
     var seed = 42;
     var rng = function () { seed = (1664525 * seed + 1013904223) >>> 0; return seed / 4294967296; };
 
@@ -158,7 +158,7 @@
   window.LSTM_VAE_DEMO_PRESET = {
     dataset: {
       id: "demo-ant-ds",
-      name: "Ant Trajectories (1000)",
+      name: "Ant Trajectories (10399)",
       schemaId: "ant_trajectory",
       status: prebuiltData ? "ready" : "draft",
       config: {
@@ -167,7 +167,7 @@
         trainFrac: 0.8,
         valFrac: 0.1,
         testFrac: 0.1,
-        totalCount: 1000, // ant_data.js has 1000 timesteps (paper has 10399)
+        totalCount: 10399, // full dataset from paper (ant_dataset_gt.mat)
       },
       data: prebuiltData,
       generatedAt: prebuiltData ? Date.now() : null,
