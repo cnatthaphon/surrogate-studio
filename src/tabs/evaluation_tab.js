@@ -48,6 +48,7 @@
     };
     var getTf = function () { var W = typeof window !== "undefined" ? window : {}; return W.tf || null; };
     var getUiEngine = function () { var W = typeof window !== "undefined" ? window : {}; return W.OSCUiSharedEngine || null; };
+    var modal = deps.modal;
 
     var _activeEvalId = null;
     var _isRunning = false;
@@ -177,26 +178,39 @@
       }
 
       // + New Evaluation button
-      var newBtn = el("button", { className: "osc-btn", style: "width:100%;margin-top:8px;" }, "+ New Evaluation");
-      newBtn.addEventListener("click", function () {
-        var defaultSchema = stateApi ? stateApi.getActiveSchema() : "";
-        var evalId = "eval-" + Date.now();
-        var rec = {
-          id: evalId,
-          name: "Evaluation " + (_listEvals().length + 1),
-          schemaId: defaultSchema,
-          datasetId: "",
-          trainerIds: [],
-          evaluatorIds: ["mae", "rmse", "r2"],
-          status: "draft",
-          runs: [],
-          createdAt: Date.now(),
-        };
-        _saveEval(rec);
-        _activeEvalId = evalId;
-        _renderLeftPanel(); _renderMainPanel(); _renderRightPanel();
-      });
+      var newBtn = el("button", { className: "osc-btn", style: "margin-top:8px;width:100%;" }, "+ New Evaluation");
+      newBtn.addEventListener("click", function () { _openNewModal(); });
       leftEl.appendChild(newBtn);
+    }
+
+    function _openNewModal() {
+      if (!modal) return;
+      var _nameInput, _schemaSelect;
+      modal.open({
+        title: "New Evaluation",
+        renderForm: function (mount) {
+          var schemas = schemaRegistry ? schemaRegistry.listSchemas() : [];
+          mount.appendChild(el("label", { style: "font-size:12px;color:#94a3b8;display:block;margin-bottom:2px;" }, "Name"));
+          _nameInput = el("input", { type: "text", placeholder: "benchmark_1", style: "width:100%;padding:6px 8px;margin-bottom:8px;border-radius:6px;border:1px solid #334155;background:#0b1220;color:#e2e8f0;" });
+          mount.appendChild(_nameInput);
+          mount.appendChild(el("label", { style: "font-size:12px;color:#94a3b8;display:block;margin-bottom:2px;" }, "Schema"));
+          _schemaSelect = el("select", { style: "width:100%;padding:6px 8px;border-radius:6px;border:1px solid #334155;background:#0b1220;color:#e2e8f0;" });
+          schemas.forEach(function (s) { var o = el("option", { value: s.id }); o.textContent = s.label || s.id; if (s.id === (stateApi ? stateApi.getActiveSchema() : "")) o.selected = true; _schemaSelect.appendChild(o); });
+          mount.appendChild(_schemaSelect);
+          setTimeout(function () { _nameInput.focus(); }, 50);
+        },
+        onCreate: function () {
+          var name = (_nameInput && _nameInput.value.trim()) || "";
+          var sid = _schemaSelect ? _schemaSelect.value : "";
+          if (!name) { onStatus("Enter a name"); return; }
+          var id = "eval_" + Date.now() + "_" + Math.floor(Math.random() * 10000);
+          var rec = { id: id, name: name, schemaId: sid, datasetId: "", trainerIds: [], evaluatorIds: ["mae", "rmse", "r2"], status: "draft", runs: [], createdAt: Date.now() };
+          _saveEval(rec);
+          _activeEvalId = id;
+          onStatus("Created: " + name);
+          _renderLeftPanel(); _renderMainPanel(); _renderRightPanel();
+        },
+      });
     }
 
     // ─── MAIN PANEL ───
