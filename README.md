@@ -69,6 +69,14 @@ Reproduces the LSTM-VAE from Jadhav & Barati Farimani (2022) for ant trajectory 
 
 See [full demo README](demo/LSTM-VAE-for-dominant-motion-extraction/README.md) for architecture comparison, design decisions, and citation.
 
+### [Fashion-MNIST VAE](demo/Fashion-MNIST-VAE/)
+
+Train a VAE, autoencoder, and classifier on the full 60,000-image Fashion-MNIST dataset. Compare reconstruction quality and classification accuracy across three architectures.
+
+- VAE (784→32→784, ~670K params), MLP-AE baseline, MLP Classifier
+- Data fetched from CDN (~30MB, one-time download)
+- Proves the plugin architecture works for image schemas — only 2 files added (preset + index.html)
+
 ---
 
 ## Quick Start
