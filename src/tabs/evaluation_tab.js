@@ -578,24 +578,36 @@
       var testN = testX.length;
       if (!testN) { r.status = "error"; r.error = "No test data"; return Promise.resolve(); }
 
-      // route to server if model was server-trained
-      var trainerBackend = (trainer.config && trainer.config.runtimeBackend) || "auto";
+      // try server if model was server-trained, fallback to client if unreachable
       if (trainer.trainedOnServer || (trainer.config && trainer.config.useServer)) {
         var serverAdapter = _getServerAdapter();
         if (serverAdapter) {
           var serverUrl = (trainer.config && trainer.config.serverUrl) || "";
-          return serverAdapter.predictOnServer({
-            graph: modelRec.graph, weightValues: trainer.modelArtifacts.weightValues,
-            featureSize: featureSize, targetSize: featureSize, numClasses: nCls,
-            xInput: testX,
-          }, serverUrl).then(function (result) {
-            var allPreds = result.predictions || [];
-            _computeMetrics(pc, r, ev, allPreds, testX, testY, testN, nCls, isClassification, activeDs, schemaId);
-          }).catch(function (err) {
-            r.status = "error"; r.error = "Server: " + err.message;
+          return serverAdapter.checkServer(serverUrl).then(function (ok) {
+            if (!ok) {
+              // fallback to client
+              _evalOnClient();
+              return;
+            }
+            return serverAdapter.predictOnServer({
+              graph: modelRec.graph, weightValues: trainer.modelArtifacts.weightValues,
+              featureSize: featureSize, targetSize: featureSize, numClasses: nCls,
+              xInput: testX,
+            }, serverUrl).then(function (result) {
+              var allPreds = result.predictions || [];
+              _computeMetrics(pc, r, ev, allPreds, testX, testY, testN, nCls, isClassification, activeDs, schemaId);
+            }).catch(function () {
+              // server error — fallback to client
+              _evalOnClient();
+            });
           });
         }
       }
+
+      _evalOnClient();
+      return Promise.resolve();
+
+      function _evalOnClient() {
 
       // client-side TF.js inference
       var graphMode = modelBuilder.inferGraphMode(modelRec.graph, "direct");
@@ -619,6 +631,7 @@
       _computeMetrics(pc, r, ev, allPreds, testX, testY, testN, nCls, isClassification, activeDs, schemaId);
       r.status = "done";
       built.model.dispose();
+      } // end _evalOnClient
       return Promise.resolve();
     }
 

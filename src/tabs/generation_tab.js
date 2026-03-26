@@ -371,44 +371,54 @@
       var method = config.method || "random";
       var trainerBackend = (trainer.config && trainer.config.runtimeBackend) || "auto";
 
-      // route to server if model was server-trained
+      // try server if model was server-trained, fallback to client if unreachable
       if (trainer.trainedOnServer || (trainer.config && trainer.config.useServer)) {
         var serverAdapter = _getServerAdapter();
         if (serverAdapter) {
-          _isGenerating = true; g.status = "generating"; _saveGen(g);
-          onStatus("Generating on server (" + method + ")...");
-          var dataset = trainer.datasetId ? store.getDataset(trainer.datasetId) : null;
-          var dsData = dataset && dataset.data ? dataset.data : {};
-          var activeDs = dsData.kind === "dataset_bundle" && dsData.datasets ? dsData.datasets[dsData.activeVariantId || Object.keys(dsData.datasets)[0]] : dsData;
-          var testX = (activeDs.records && activeDs.records.test && activeDs.records.test.x) || (activeDs.xTest || []);
-          var serverConfig = {
-            graph: modelRec.graph, weightValues: trainer.modelArtifacts.weightValues,
-            featureSize: Number(dsData.featureSize || (testX[0] && testX[0].length) || 40),
-            targetSize: Number(dsData.featureSize || 40), numClasses: dsData.numClasses || dsData.classCount || 0,
-            method: method, numSamples: config.numSamples || 16,
-            latentDim: modelBuilder.extractLatentInfo ? (modelBuilder.extractLatentInfo(modelRec.graph).latentDim || 20) : 20,
-            temperature: config.temperature || 1.0, seed: config.seed || 42,
-            originals: method === "reconstruct" ? testX.slice(0, config.numSamples || 16) : undefined,
-          };
           var serverUrl = (trainer.config && trainer.config.serverUrl) || "";
-          serverAdapter.generateOnServer(serverConfig, serverUrl).then(function (result) {
-            _isGenerating = false;
-            result.status = "done";
-            if (!g.runs) g.runs = [];
-            g.runs.push(result); g.status = "done"; _saveGen(g);
-            onStatus("Generation done (server): " + (result.numSamples || 0) + " samples");
-            _renderLeftPanel(); _renderMainPanel(); _renderRightPanel();
-          }).catch(function (err) {
-            _isGenerating = false;
-            if (!g.runs) g.runs = [];
-            g.runs.push({ method: method, status: "error", error: err.message, samples: [], lossHistory: [], numSamples: 0 });
-            g.status = "done"; _saveGen(g);
-            onStatus("Server generation error: " + err.message);
-            _renderLeftPanel(); _renderMainPanel(); _renderRightPanel();
+          _isGenerating = true; g.status = "generating"; _saveGen(g);
+          onStatus("Checking server for generation...");
+          serverAdapter.checkServer(serverUrl).then(function (ok) {
+            if (!ok) {
+              onStatus("Server not reachable \u2014 generating on client");
+              _generateOnClient();
+              return;
+            }
+            onStatus("Generating on server (" + method + ")...");
+            var dataset = trainer.datasetId ? store.getDataset(trainer.datasetId) : null;
+            var dsData = dataset && dataset.data ? dataset.data : {};
+            var activeDs = dsData.kind === "dataset_bundle" && dsData.datasets ? dsData.datasets[dsData.activeVariantId || Object.keys(dsData.datasets)[0]] : dsData;
+            var testX = (activeDs.records && activeDs.records.test && activeDs.records.test.x) || (activeDs.xTest || []);
+            var serverConfig = {
+              graph: modelRec.graph, weightValues: trainer.modelArtifacts.weightValues,
+              featureSize: Number(dsData.featureSize || (testX[0] && testX[0].length) || 40),
+              targetSize: Number(dsData.featureSize || 40), numClasses: dsData.numClasses || dsData.classCount || 0,
+              method: method, numSamples: config.numSamples || 16,
+              latentDim: modelBuilder.extractLatentInfo ? (modelBuilder.extractLatentInfo(modelRec.graph).latentDim || 20) : 20,
+              temperature: config.temperature || 1.0, seed: config.seed || 42,
+              originals: method === "reconstruct" ? testX.slice(0, config.numSamples || 16) : undefined,
+            };
+            serverAdapter.generateOnServer(serverConfig, serverUrl).then(function (result) {
+              _isGenerating = false;
+              result.status = "done";
+              if (!g.runs) g.runs = [];
+              g.runs.push(result); g.status = "done"; _saveGen(g);
+              onStatus("Generation done (server): " + (result.numSamples || 0) + " samples");
+              _renderLeftPanel(); _renderMainPanel(); _renderRightPanel();
+            }).catch(function (err) {
+              // server error during generation — fallback to client
+              onStatus("Server error \u2014 falling back to client: " + err.message);
+              _generateOnClient();
+            });
           });
           return;
         }
       }
+
+      _generateOnClient();
+      return;
+
+      function _generateOnClient() {
 
       var tf = getTf();
       var engine = getGenerationEngine();
@@ -510,6 +520,7 @@
         onStatus("Generation setup error: " + e.message);
         _renderLeftPanel(); _renderRightPanel();
       }
+      } // end _generateOnClient
     }
 
     function _getActiveDs(dsData) {

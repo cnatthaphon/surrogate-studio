@@ -1168,9 +1168,8 @@
       // PyTorch Server: when useServer is checked — try server first, fallback to client
       if (useServer && serverAdapter) {
         onStatus("Checking PyTorch Server...");
-        serverAdapter.checkServer(serverUrl).then(function (ok) {
-          _serverAvailable = ok;
-          _renderRightPanel(); // update server status display
+        _checkServerConnection(serverUrl, function (ok) {
+          _renderRightPanel(); // update server status display with full info
           if (!ok) {
             onStatus("Server not reachable \u2014 training on client (" + backend + ")");
             _runClientTraining();
