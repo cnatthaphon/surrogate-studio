@@ -288,7 +288,38 @@
             modValue[key] = savedCfg[key] !== undefined ? savedCfg[key] : (defaults[key] !== undefined ? defaults[key] : (f.value || ""));
           });
           var modMount = el("div", {});
-          uiEngine.renderConfigForm({ mountEl: modMount, schema: modSchema, value: modValue, fieldNamePrefix: "dsmod", rowClassName: "osc-form-row" });
+          uiEngine.renderConfigForm({
+            mountEl: modMount, schema: modSchema, value: modValue,
+            fieldNamePrefix: "dsmod", rowClassName: "osc-form-row",
+            onChange: function (cfg, ctx) {
+              if (!ctx || !ctx.key) return;
+              // when useFullSource or totalCount changes, recompute auto counts
+              if (ctx.key === "useFullSource" || ctx.key === "totalCount" || ctx.key === "forceEqualClass") {
+                // collect current form values
+                var formCfg = {};
+                var allInps = modMount.querySelectorAll("[data-config-key]");
+                allInps.forEach(function (inp) {
+                  var k = inp.getAttribute("data-config-key");
+                  formCfg[k] = inp.type === "checkbox" ? inp.checked : (inp.type === "number" ? Number(inp.value) : inp.value);
+                });
+                // also get global config
+                var gInps = rightEl.querySelectorAll("[data-config-key]");
+                gInps.forEach(function (inp) {
+                  var k = inp.getAttribute("data-config-key");
+                  if (!formCfg.hasOwnProperty(k)) formCfg[k] = inp.type === "checkbox" ? inp.checked : (inp.type === "number" ? Number(inp.value) : inp.value);
+                });
+                // recompute counts
+                if (mod.uiApi && typeof mod.uiApi.handleDatasetConfigChange === "function") {
+                  mod.uiApi.handleDatasetConfigChange(formCfg, { key: ctx.key, value: ctx.value }, {
+                    refreshDatasetConfigPanel: function () { _renderRightPanel(); },
+                  });
+                } else {
+                  // simple fallback: just re-render
+                  _renderRightPanel();
+                }
+              }
+            },
+          });
           rightEl.appendChild(modMount);
         });
       }
