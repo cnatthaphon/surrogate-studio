@@ -355,15 +355,13 @@
       }
     }
 
+    function _getServerAdapter() { var W = typeof window !== "undefined" ? window : {}; return W.OSCServerRuntimeAdapter || null; }
+
     // ─── GENERATE ───
     function _handleGenerate() {
       if (_isGenerating) { onStatus("Already generating..."); return; }
       var g = _getGen(_activeGenId);
       if (!g || !g.trainerId) { onStatus("Select a model first"); return; }
-
-      var tf = getTf();
-      var engine = getGenerationEngine();
-      if (!tf || !engine) { onStatus("TF.js or generation engine not available"); return; }
 
       var trainer = store.getTrainerCard(g.trainerId);
       var modelRec = store.getModel(trainer.modelId);
@@ -371,6 +369,50 @@
 
       var config = g.config || {};
       var method = config.method || "random";
+      var trainerBackend = (trainer.config && trainer.config.runtimeBackend) || "auto";
+
+      // route to server if model was server-trained
+      if (trainerBackend === "pytorch_server" || trainerBackend === "server") {
+        var serverAdapter = _getServerAdapter();
+        if (serverAdapter) {
+          _isGenerating = true; g.status = "generating"; _saveGen(g);
+          onStatus("Generating on server (" + method + ")...");
+          var dataset = trainer.datasetId ? store.getDataset(trainer.datasetId) : null;
+          var dsData = dataset && dataset.data ? dataset.data : {};
+          var activeDs = dsData.kind === "dataset_bundle" && dsData.datasets ? dsData.datasets[dsData.activeVariantId || Object.keys(dsData.datasets)[0]] : dsData;
+          var testX = (activeDs.records && activeDs.records.test && activeDs.records.test.x) || (activeDs.xTest || []);
+          var serverConfig = {
+            graph: modelRec.graph, weightValues: trainer.modelArtifacts.weightValues,
+            featureSize: Number(dsData.featureSize || (testX[0] && testX[0].length) || 40),
+            targetSize: Number(dsData.featureSize || 40), numClasses: dsData.numClasses || dsData.classCount || 0,
+            method: method, numSamples: config.numSamples || 16,
+            latentDim: modelBuilder.extractLatentInfo ? (modelBuilder.extractLatentInfo(modelRec.graph).latentDim || 20) : 20,
+            temperature: config.temperature || 1.0, seed: config.seed || 42,
+            originals: method === "reconstruct" ? testX.slice(0, config.numSamples || 16) : undefined,
+          };
+          var serverUrl = (trainer.config && trainer.config.serverUrl) || "";
+          serverAdapter.generateOnServer(serverConfig, serverUrl).then(function (result) {
+            _isGenerating = false;
+            result.status = "done";
+            if (!g.runs) g.runs = [];
+            g.runs.push(result); g.status = "done"; _saveGen(g);
+            onStatus("Generation done (server): " + (result.numSamples || 0) + " samples");
+            _renderLeftPanel(); _renderMainPanel(); _renderRightPanel();
+          }).catch(function (err) {
+            _isGenerating = false;
+            if (!g.runs) g.runs = [];
+            g.runs.push({ method: method, status: "error", error: err.message, samples: [], lossHistory: [], numSamples: 0 });
+            g.status = "done"; _saveGen(g);
+            onStatus("Server generation error: " + err.message);
+            _renderLeftPanel(); _renderMainPanel(); _renderRightPanel();
+          });
+          return;
+        }
+      }
+
+      var tf = getTf();
+      var engine = getGenerationEngine();
+      if (!tf || !engine) { onStatus("TF.js or generation engine not available"); return; }
 
       _isGenerating = true;
       g.status = "generating";

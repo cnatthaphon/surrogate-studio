@@ -531,33 +531,31 @@
         _saveEval(ev);
         _renderMainPanel();
 
-        try {
-          _evaluateOneModel(tf, pc, ev, r, tid);
-        } catch (e) {
-          r.status = "error"; r.error = e.message;
-        }
-
-        _saveEval(ev);
-        _renderMainPanel();
-        onStatus("Evaluated " + (idx + 1) + "/" + ev.trainerIds.length + ": " + r.trainerName);
-        idx++;
-        setTimeout(evalNext, 50);
+        _evaluateOneModel(tf, pc, ev, r, tid).then(function () {
+          _saveEval(ev);
+          _renderMainPanel();
+          onStatus("Evaluated " + (idx + 1) + "/" + ev.trainerIds.length + ": " + r.trainerName);
+          idx++;
+          setTimeout(evalNext, 50);
+        });
       }
       evalNext();
     }
 
+    function _getServerAdapter() { var W = typeof window !== "undefined" ? window : {}; return W.OSCServerRuntimeAdapter || null; }
+
     function _evaluateOneModel(tf, pc, ev, r, tid) {
       var trainer = store.getTrainerCard(tid);
-      if (!trainer) { r.status = "error"; r.error = "Trainer not found"; return; }
+      if (!trainer) { r.status = "error"; r.error = "Trainer not found"; return Promise.resolve(); }
       var modelRec = store.getModel(trainer.modelId);
       var dataset = store.getDataset(ev.datasetId);
       r.modelName = modelRec ? modelRec.name : trainer.modelId;
 
       if (trainer.status !== "done" || !trainer.modelArtifacts) {
-        r.status = "skipped"; r.error = "Not trained"; return;
+        r.status = "skipped"; r.error = "Not trained"; return Promise.resolve();
       }
       if (!modelRec || !modelRec.graph || !dataset || !dataset.data) {
-        r.status = "error"; r.error = "Missing model or dataset"; return;
+        r.status = "error"; r.error = "Missing model or dataset"; return Promise.resolve();
       }
 
       var schemaId = ev.schemaId;
@@ -565,7 +563,6 @@
       var defaultTarget = (allowedOutputKeys[0] && (allowedOutputKeys[0].key || allowedOutputKeys[0])) || "x";
       var isClassification = defaultTarget === "label" || defaultTarget === "logits";
 
-      // get test data
       var dsData = dataset.data;
       var isBundle = dsData.kind === "dataset_bundle" && dsData.datasets;
       var activeDs = isBundle ? dsData.datasets[dsData.activeVariantId || Object.keys(dsData.datasets)[0]] : dsData;
@@ -579,18 +576,35 @@
       }
 
       var testN = testX.length;
-      if (!testN) { r.status = "error"; r.error = "No test data"; return; }
+      if (!testN) { r.status = "error"; r.error = "No test data"; return Promise.resolve(); }
 
-      // build model + load weights
+      // route to server if model was server-trained
+      var trainerBackend = (trainer.config && trainer.config.runtimeBackend) || "auto";
+      if (trainerBackend === "pytorch_server" || trainerBackend === "server") {
+        var serverAdapter = _getServerAdapter();
+        if (serverAdapter) {
+          var serverUrl = (trainer.config && trainer.config.serverUrl) || "";
+          return serverAdapter.predictOnServer({
+            graph: modelRec.graph, weightValues: trainer.modelArtifacts.weightValues,
+            featureSize: featureSize, targetSize: featureSize, numClasses: nCls,
+            xInput: testX,
+          }, serverUrl).then(function (result) {
+            var allPreds = result.predictions || [];
+            _computeMetrics(pc, r, ev, allPreds, testX, testY, testN, nCls, isClassification, activeDs, schemaId);
+          }).catch(function (err) {
+            r.status = "error"; r.error = "Server: " + err.message;
+          });
+        }
+      }
+
+      // client-side TF.js inference
       var graphMode = modelBuilder.inferGraphMode(modelRec.graph, "direct");
       var built = modelBuilder.buildModelFromGraph(tf, modelRec.graph, {
         mode: graphMode, featureSize: featureSize, windowSize: 1, seqFeatureSize: featureSize,
         allowedOutputKeys: allowedOutputKeys, defaultTarget: defaultTarget, numClasses: nCls,
       });
-
       _loadWeights(tf, built.model, trainer.modelArtifacts);
 
-      // batch inference
       var allPreds = [];
       var batchSize = 256;
       for (var bi = 0; bi < testN; bi += batchSize) {
@@ -602,9 +616,14 @@
         if (Array.isArray(br)) br.forEach(function (t) { t.dispose(); }); else br.dispose();
       }
 
-      r.testN = testN;
+      _computeMetrics(pc, r, ev, allPreds, testX, testY, testN, nCls, isClassification, activeDs, schemaId);
+      r.status = "done";
+      built.model.dispose();
+      return Promise.resolve();
+    }
 
-      // compute selected metrics
+    function _computeMetrics(pc, r, ev, allPreds, testX, testY, testN, nCls, isClassification, activeDs, schemaId) {
+      r.testN = testN;
       var selectedIds = ev.evaluatorIds || [];
 
       if (isClassification && pc) {
@@ -613,7 +632,7 @@
         var correct = 0;
         for (var ci = 0; ci < testN; ci++) if (predLabels[ci] === trueLabels[ci]) correct++;
         if (selectedIds.indexOf("accuracy") >= 0) r.metrics.accuracy = correct / testN;
-        if (selectedIds.indexOf("macro_f1") >= 0) {
+        if (selectedIds.indexOf("macro_f1") >= 0 && pc.confusionMatrix) {
           var cm = pc.confusionMatrix(trueLabels, predLabels, nCls);
           var prf = pc.precisionRecallF1(cm);
           r.metrics.macro_f1 = prf.reduce(function (s, p) { return s + p.f1; }, 0) / nCls;
@@ -636,36 +655,26 @@
         if (selectedIds.indexOf("r2") >= 0) r.metrics.r2 = pc.r2Score(truthFlat, predFlat);
       }
 
-      // generation metrics (from stored generation runs)
+      // generation metrics from stored runs
+      var tid = r.trainerId;
       var genRuns = _listGenerationRuns(tid);
       if (genRuns.length) {
         var latestGen = genRuns[genRuns.length - 1];
-        if (selectedIds.indexOf("recon_mse") >= 0 && latestGen.avgMse != null) {
-          r.metrics.recon_mse = latestGen.avgMse;
-        }
-        if (selectedIds.indexOf("diversity") >= 0 && latestGen.samples && latestGen.samples.length > 1) {
-          r.metrics.diversity = _computeDiversity(latestGen.samples);
-        }
+        if (selectedIds.indexOf("recon_mse") >= 0 && latestGen.avgMse != null) r.metrics.recon_mse = latestGen.avgMse;
+        if (selectedIds.indexOf("diversity") >= 0 && latestGen.samples && latestGen.samples.length > 1) r.metrics.diversity = _computeDiversity(latestGen.samples);
       }
 
       // module custom evaluators
       var moduleEvals = _getModuleEvaluators(schemaId);
       moduleEvals.forEach(function (mev) {
-        if (selectedIds.indexOf(mev.id) < 0) return;
-        if (typeof mev.compute !== "function") return;
+        if (selectedIds.indexOf(mev.id) < 0 || typeof mev.compute !== "function") return;
         try {
-          var result = mev.compute({
-            predictions: allPreds, truth: testY,
-            samples: genRuns.length ? genRuns[genRuns.length - 1].samples : null,
-            originals: genRuns.length ? genRuns[genRuns.length - 1].originals : null,
-            datasetData: activeDs,
-          });
+          var result = mev.compute({ predictions: allPreds, truth: testY, samples: genRuns.length ? genRuns[genRuns.length - 1].samples : null, originals: genRuns.length ? genRuns[genRuns.length - 1].originals : null, datasetData: activeDs });
           if (result && result.value != null) r.metrics[mev.id] = result.value;
-        } catch (e) { /* skip failed custom evaluator */ }
+        } catch (e) { /* skip */ }
       });
 
       r.status = "done";
-      built.model.dispose();
     }
 
     function _loadWeights(tf, model, artifacts) {

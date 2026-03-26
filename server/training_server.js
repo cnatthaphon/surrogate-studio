@@ -158,6 +158,46 @@ function startTraining(jobId) {
 }
 
 // --- HTTP server ---
+// shared sync subprocess runner (used by /api/test, /api/predict, /api/generate)
+function _runSyncSubprocess(req, res, scriptName, label) {
+  var body = "";
+  req.on("data", function (chunk) { body += chunk; });
+  req.on("end", function () {
+    try {
+      var config = JSON.parse(body);
+      var configPath = path.join(__dirname, ".tmp", label + "-" + Date.now() + ".json");
+      if (!fs.existsSync(path.join(__dirname, ".tmp"))) fs.mkdirSync(path.join(__dirname, ".tmp"), { recursive: true });
+      fs.writeFileSync(configPath, JSON.stringify(config));
+
+      var proc = spawn(PYTHON, [path.join(__dirname, scriptName), configPath], {
+        stdio: ["ignore", "pipe", "pipe"],
+        cwd: path.resolve(__dirname, ".."),
+      });
+
+      var output = "";
+      proc.stdout.on("data", function (c) { output += c.toString(); });
+      proc.stderr.on("data", function () {});
+      proc.on("exit", function () {
+        try { fs.unlinkSync(configPath); } catch (e) {}
+        var result = null;
+        output.trim().split("\n").forEach(function (line) {
+          try { var m = JSON.parse(line); if (m.kind === "result") result = m.result; } catch (e) {}
+        });
+        if (result) {
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(JSON.stringify(result));
+        } else {
+          res.writeHead(500, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: label + " failed", output: output.slice(0, 500) }));
+        }
+      });
+    } catch (e) {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: e.message }));
+    }
+  });
+}
+
 var server = http.createServer(function (req, res) {
   // CORS headers
   res.setHeader("Access-Control-Allow-Origin", "*");
@@ -243,6 +283,18 @@ var server = http.createServer(function (req, res) {
         res.end(JSON.stringify({ error: e.message }));
       }
     });
+    return;
+  }
+
+  // POST /api/predict — batch prediction on server
+  if (req.method === "POST" && pathname === "/api/predict") {
+    _runSyncSubprocess(req, res, "predict_subprocess.py", "predict");
+    return;
+  }
+
+  // POST /api/generate — generation on server (reconstruct/random)
+  if (req.method === "POST" && pathname === "/api/generate") {
+    _runSyncSubprocess(req, res, "generate_subprocess.py", "generate");
     return;
   }
 

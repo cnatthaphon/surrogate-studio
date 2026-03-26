@@ -163,9 +163,37 @@
     });
   }
 
+  // Run batch prediction on server
+  function predictOnServer(config, serverUrl) {
+    var url = String(serverUrl || DEFAULT_SERVER).replace(/\/$/, "");
+    return fetch(url + "/api/predict", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(config),
+    }).then(function (res) {
+      if (!res.ok) throw new Error("Server predict returned " + res.status);
+      return res.json();
+    });
+  }
+
+  // Run generation on server (reconstruct/random)
+  function generateOnServer(config, serverUrl) {
+    var url = String(serverUrl || DEFAULT_SERVER).replace(/\/$/, "");
+    return fetch(url + "/api/generate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(config),
+    }).then(function (res) {
+      if (!res.ok) throw new Error("Server generate returned " + res.status);
+      return res.json();
+    });
+  }
+
   return {
     runTrainingOnServer: runTrainingOnServer,
     runTestOnServer: runTestOnServer,
+    predictOnServer: predictOnServer,
+    generateOnServer: generateOnServer,
     checkServer: checkServer,
     DEFAULT_SERVER: DEFAULT_SERVER,
   };
