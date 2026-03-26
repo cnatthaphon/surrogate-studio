@@ -263,7 +263,7 @@
         schemaId: "ant_trajectory",
         datasetId: "demo-ant-ds",
         trainerIds: ["demo-vae-trainer", "demo-ae-trainer"],
-        evaluatorIds: ["mae", "rmse", "r2", "bias", "per_ant_mae", "mean_displacement"],
+        evaluatorIds: ["mae", "rmse", "r2", "bias", "worst_ant_mae", "mde"],
         status: "draft",
         runs: [],
         createdAt: Date.now(),

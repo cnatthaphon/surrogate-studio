@@ -177,8 +177,8 @@
         pathTraces.push({
           x: xc, y: yc, mode: "lines", name: "Ant " + ant,
           line: { color: colors[ant % colors.length], width: selectedAnt === ant ? 2.5 : 1 },
-          opacity: show ? (selectedAnt === -1 ? 0.6 : 1) : 0.08,
-          visible: true,
+          opacity: show ? (selectedAnt === -1 ? 0.7 : 1) : 0,
+          visible: show,
         });
       }
       Plotly.react(chartDiv, pathTraces, Object.assign({}, darkBg, {
@@ -464,11 +464,13 @@
   }
 
   // ─── Evaluation contract ───
+  // All metrics are in normalized [0,1] space (MinMax scaled).
+  // A value of 0.01 = 1% of the full position range.
   function getEvaluators() {
     return [
       {
-        id: "per_ant_mae",
-        name: "Per-Ant MAE",
+        id: "worst_ant_mae",
+        name: "Worst-Ant MAE (norm)",
         mode: "test",
         compute: function (deps) {
           var preds = deps.predictions || [];
@@ -477,26 +479,21 @@
           var numAnts = dsData.numAnts || 20;
           var n = Math.min(preds.length, truth.length);
           if (!n) return { value: null };
-          // compute MAE per ant, return worst-ant MAE
           var antErrors = new Array(numAnts).fill(0);
           for (var i = 0; i < n; i++) {
             for (var a = 0; a < numAnts; a++) {
-              var ex = Math.abs((preds[i][a * 2] || 0) - (truth[i][a * 2] || 0));
-              var ey = Math.abs((preds[i][a * 2 + 1] || 0) - (truth[i][a * 2 + 1] || 0));
-              antErrors[a] += (ex + ey) / 2;
+              antErrors[a] += (Math.abs((preds[i][a * 2] || 0) - (truth[i][a * 2] || 0)) +
+                               Math.abs((preds[i][a * 2 + 1] || 0) - (truth[i][a * 2 + 1] || 0))) / 2;
             }
           }
           var worst = 0;
-          for (var a = 0; a < numAnts; a++) {
-            antErrors[a] /= n;
-            if (antErrors[a] > worst) worst = antErrors[a];
-          }
-          return { value: worst, formatted: worst.toExponential(3), details: { antErrors: antErrors } };
+          for (var a = 0; a < numAnts; a++) { antErrors[a] /= n; if (antErrors[a] > worst) worst = antErrors[a]; }
+          return { value: worst, formatted: (worst * 100).toFixed(2) + "%", details: { antErrors: antErrors } };
         },
       },
       {
-        id: "mean_displacement",
-        name: "Mean Displacement Error",
+        id: "mde",
+        name: "Mean Displacement (norm)",
         mode: "test",
         compute: function (deps) {
           var preds = deps.predictions || [];
@@ -514,7 +511,7 @@
             }
           }
           var mde = totalDisp / (n * numAnts);
-          return { value: mde, formatted: mde.toExponential(3) };
+          return { value: mde, formatted: (mde * 100).toFixed(2) + "%" };
         },
       },
     ];
@@ -537,29 +534,32 @@
     var doneResults = results.filter(function (r) { return r.status === "done"; });
     if (!doneResults.length) return;
 
-    // Per-ant MAE comparison across models (if available)
-    var hasPerAnt = doneResults.some(function (r) { return r.metrics && r.metrics.per_ant_mae != null; });
-    if (!hasPerAnt) return;
+    var hasMde = doneResults.some(function (r) { return r.metrics && (r.metrics.mde != null || r.metrics.worst_ant_mae != null); });
+    if (!hasMde) return;
 
-    mountEl.appendChild(elF("div", { style: "font-size:11px;color:#67e8f9;margin-bottom:6px;font-weight:600;" }, "Ant Trajectory — Domain-Specific Metrics"));
+    mountEl.appendChild(elF("div", { style: "font-size:11px;color:#67e8f9;margin-bottom:4px;font-weight:600;" },
+      "Trajectory-Specific Metrics (normalized [0,1] space — 1% = 0.01)"));
 
-    // MDE bar chart
-    var mdeDiv = document.createElement("div");
-    mdeDiv.style.cssText = "height:200px;";
-    mountEl.appendChild(mdeDiv);
+    var chartDiv = document.createElement("div");
+    chartDiv.style.cssText = "height:220px;";
+    mountEl.appendChild(chartDiv);
 
     var names = doneResults.map(function (r) { return r.trainerName || r.modelName || "?"; });
-    var mdeVals = doneResults.map(function (r) { return r.metrics && r.metrics.mean_displacement || 0; });
-    var worstAnt = doneResults.map(function (r) { return r.metrics && r.metrics.per_ant_mae || 0; });
+    var mdeVals = doneResults.map(function (r) { return (r.metrics && r.metrics.mde || 0) * 100; });
+    var worstVals = doneResults.map(function (r) { return (r.metrics && r.metrics.worst_ant_mae || 0) * 100; });
 
-    Plotly.newPlot(mdeDiv, [
-      { x: names, y: mdeVals, type: "bar", name: "Mean Disp. Error", marker: { color: "#22d3ee" } },
-      { x: names, y: worstAnt, type: "bar", name: "Worst-Ant MAE", marker: { color: "#f43f5e" } },
+    Plotly.newPlot(chartDiv, [
+      { x: names, y: mdeVals, type: "bar", name: "Mean Displacement (%)", marker: { color: "#22d3ee" },
+        text: mdeVals.map(function (v) { return v.toFixed(2) + "%"; }), textposition: "outside", textfont: { size: 10, color: "#94a3b8" } },
+      { x: names, y: worstVals, type: "bar", name: "Worst-Ant MAE (%)", marker: { color: "#f43f5e" },
+        text: worstVals.map(function (v) { return v.toFixed(2) + "%"; }), textposition: "outside", textfont: { size: 10, color: "#94a3b8" } },
     ], {
       paper_bgcolor: "#0b1220", plot_bgcolor: "#0b1220", font: { color: "#e2e8f0", size: 10 },
-      barmode: "group", margin: { t: 10, b: 40, l: 50, r: 10 },
-      yaxis: { title: "Error", gridcolor: "#1e293b" }, xaxis: { gridcolor: "#1e293b" },
-      legend: { orientation: "h", y: -0.25, font: { size: 9 } },
+      barmode: "group", bargap: 0.3,
+      yaxis: { title: "Error (% of normalized range)", gridcolor: "#1e293b", ticksuffix: "%" },
+      xaxis: { gridcolor: "#1e293b" },
+      legend: { orientation: "h", y: -0.2, font: { size: 9 } },
+      margin: { t: 10, b: 50, l: 55, r: 10 },
     }, { responsive: true });
   }
 
