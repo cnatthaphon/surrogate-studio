@@ -49,7 +49,7 @@
     var splitMode = String(config.splitMode || "random");
     var trainFrac = Number(config.trainFrac || 0.8);
     var valFrac = Number(config.valFrac || 0.1);
-    var totalCount = Math.min(Number(config.totalCount || 1000), allSamples.length);
+    var totalCount = Math.min(Number(config.totalCount || allSamples.length), allSamples.length);
     var rng = createRng(seed);
 
     var indices = [];
@@ -117,7 +117,7 @@
 
     mountEl.innerHTML = "";
     mountEl.appendChild(elF("div", { style: "color:#67e8f9;font-size:13px;" }, "Building ant trajectory data..."));
-    build({ totalCount: 1000, seed: 42 }).then(function (ds) {
+    build({ totalCount: 10399, seed: 42 }).then(function (ds) {
       if (!isCurrent()) return;
       _renderTrajectories(mountEl, elF, ds, Plotly);
     }).catch(function (err) {
@@ -129,54 +129,89 @@
   function _renderTrajectories(mountEl, elF, ds, Plotly) {
     mountEl.innerHTML = "";
     var numAnts = ds.numAnts || 20;
+    var numFeatures = ds.numFeatures || 40;
     var allX = [].concat(ds.xTrain || [], ds.xVal || [], ds.xTest || []);
     var total = allX.length;
 
     mountEl.appendChild(elF("div", { style: "font-size:12px;color:#94a3b8;margin-bottom:4px;" },
-      "Ant Trajectories | " + numAnts + " ants | " + total + " timesteps | " + (ds.numFeatures || 40) + " features"));
-    mountEl.appendChild(elF("div", { style: "font-size:11px;color:#64748b;margin-bottom:8px;" },
+      "Ant Trajectories | " + numAnts + " ants | " + total + " timesteps | " + numFeatures + " features"));
+    mountEl.appendChild(elF("div", { style: "font-size:11px;color:#64748b;margin-bottom:4px;" },
       "Train: " + (ds.trainCount || 0) + " | Val: " + (ds.valCount || 0) + " | Test: " + (ds.testCount || 0)));
 
     if (!Plotly || !allX.length) return;
 
-    // Ant paths (x vs y)
-    var chartDiv = document.createElement("div");
-    chartDiv.style.cssText = "height:380px;";
-    mountEl.appendChild(chartDiv);
-
     var colors = ["#22d3ee","#f59e0b","#4ade80","#f43f5e","#a78bfa","#fb923c","#2dd4bf","#e879f9","#fbbf24","#38bdf8",
                   "#818cf8","#34d399","#fb7185","#c084fc","#fcd34d","#6ee7b7","#f472b6","#93c5fd","#fdba74","#86efac"];
-    var traces = [];
-    for (var ant = 0; ant < numAnts; ant++) {
-      var xc = [], yc = [];
-      for (var t = 0; t < allX.length; t++) { xc.push(allX[t][ant * 2]); yc.push(allX[t][ant * 2 + 1]); }
-      traces.push({ x: xc, y: yc, mode: "lines", name: "Ant " + ant, line: { color: colors[ant % 20], width: 1 }, opacity: 0.7 });
-    }
-    Plotly.newPlot(chartDiv, traces, {
-      paper_bgcolor: "#0b1220", plot_bgcolor: "#0b1220", font: { color: "#e2e8f0", size: 10 },
-      title: { text: numAnts + " Ant Paths (x vs y)", font: { size: 12 } },
-      xaxis: { title: "x", gridcolor: "#1e293b" }, yaxis: { title: "y", gridcolor: "#1e293b", scaleanchor: "x" },
-      legend: { font: { size: 8 }, bgcolor: "rgba(0,0,0,0)" },
-      margin: { t: 30, b: 45, l: 50, r: 10 },
-    }, { responsive: true });
+    var darkBg = { paper_bgcolor: "#0b1220", plot_bgcolor: "#0b1220", font: { color: "#e2e8f0", size: 10 } };
+    var gridColor = "#1e293b";
 
-    // Time series for first 3 ants
+    // ant selector buttons — "All" + one per ant
+    var selectedAnt = -1; // -1 = show all
+    var btnRow = document.createElement("div");
+    btnRow.style.cssText = "display:flex;flex-wrap:wrap;gap:3px;margin-bottom:6px;";
+    var chartDiv = document.createElement("div");
+    chartDiv.style.cssText = "height:380px;";
     var tsDiv = document.createElement("div");
     tsDiv.style.cssText = "height:220px;margin-top:8px;";
-    mountEl.appendChild(tsDiv);
-    var maxT = Math.min(allX.length, 500);
-    var tsT = []; for (var si = 0; si < maxT; si++) tsT.push(si);
-    var tsTraces = [];
-    for (var a = 0; a < Math.min(3, numAnts); a++) {
-      tsTraces.push({ x: tsT, y: tsT.map(function (t) { return allX[t][a * 2]; }), mode: "lines", name: "Ant" + a + " x", line: { color: colors[a * 2], width: 1 } });
-      tsTraces.push({ x: tsT, y: tsT.map(function (t) { return allX[t][a * 2 + 1]; }), mode: "lines", name: "Ant" + a + " y", line: { color: colors[a * 2 + 1], width: 1, dash: "dot" } });
+
+    function makeBtn(label, idx, color) {
+      var btn = document.createElement("button");
+      btn.textContent = label;
+      btn.style.cssText = "font-size:9px;padding:2px 6px;border-radius:3px;border:1px solid " + (color || "#334155") + ";background:" + (idx === selectedAnt ? (color || "#334155") : "#111827") + ";color:" + (idx === selectedAnt ? "#fff" : (color || "#94a3b8")) + ";cursor:pointer;";
+      btn.addEventListener("click", function () { selectedAnt = idx; renderCharts(); });
+      return btn;
     }
-    Plotly.newPlot(tsDiv, tsTraces, {
-      paper_bgcolor: "#0b1220", plot_bgcolor: "#0b1220", font: { color: "#e2e8f0", size: 10 },
-      title: { text: "Time Series (first 3 ants, " + maxT + " steps)", font: { size: 11 } },
-      xaxis: { title: "Timestep", gridcolor: "#1e293b" }, yaxis: { title: "Position", gridcolor: "#1e293b" },
-      legend: { font: { size: 8 } }, margin: { t: 25, b: 40, l: 50, r: 10 },
-    }, { responsive: true });
+
+    function renderCharts() {
+      // rebuild buttons
+      btnRow.innerHTML = "";
+      btnRow.appendChild(makeBtn("All", -1, "#64748b"));
+      for (var i = 0; i < numAnts; i++) btnRow.appendChild(makeBtn("" + i, i, colors[i % colors.length]));
+
+      // path chart
+      var pathTraces = [];
+      for (var ant = 0; ant < numAnts; ant++) {
+        var show = selectedAnt === -1 || selectedAnt === ant;
+        var xc = [], yc = [];
+        for (var t = 0; t < total; t++) { xc.push(allX[t][ant * 2]); yc.push(allX[t][ant * 2 + 1]); }
+        pathTraces.push({
+          x: xc, y: yc, mode: "lines", name: "Ant " + ant,
+          line: { color: colors[ant % colors.length], width: selectedAnt === ant ? 2.5 : 1 },
+          opacity: show ? (selectedAnt === -1 ? 0.6 : 1) : 0.08,
+          visible: true,
+        });
+      }
+      Plotly.react(chartDiv, pathTraces, Object.assign({}, darkBg, {
+        title: { text: (selectedAnt >= 0 ? "Ant " + selectedAnt + " Path" : numAnts + " Ant Paths") + " (x vs y)", font: { size: 12 } },
+        xaxis: { title: "x", gridcolor: gridColor }, yaxis: { title: "y", gridcolor: gridColor, scaleanchor: "x" },
+        legend: { font: { size: 8 }, bgcolor: "rgba(0,0,0,0)" },
+        margin: { t: 30, b: 45, l: 50, r: 10 },
+      }), { responsive: true });
+
+      // time series — show selected ant(s)
+      var maxT = Math.min(total, 2000);
+      var tsT = []; for (var si = 0; si < maxT; si++) tsT.push(si);
+      var tsTraces = [];
+      var antsToShow = selectedAnt >= 0 ? [selectedAnt] : [];
+      // if all, show first few to avoid clutter
+      if (selectedAnt === -1) { for (var a = 0; a < Math.min(numAnts, 5); a++) antsToShow.push(a); }
+      for (var ai = 0; ai < antsToShow.length; ai++) {
+        var a = antsToShow[ai];
+        tsTraces.push({ x: tsT, y: tsT.map(function (t) { return allX[t][a * 2]; }), mode: "lines", name: "Ant" + a + " x", line: { color: colors[a % colors.length], width: 1.5 } });
+        tsTraces.push({ x: tsT, y: tsT.map(function (t) { return allX[t][a * 2 + 1]; }), mode: "lines", name: "Ant" + a + " y", line: { color: colors[a % colors.length], width: 1, dash: "dot" } });
+      }
+      var tsTitle = selectedAnt >= 0 ? "Ant " + selectedAnt + " Time Series" : "Time Series (first " + antsToShow.length + " ants)";
+      Plotly.react(tsDiv, tsTraces, Object.assign({}, darkBg, {
+        title: { text: tsTitle + " (" + maxT + " steps)", font: { size: 11 } },
+        xaxis: { title: "Timestep", gridcolor: gridColor }, yaxis: { title: "Position", gridcolor: gridColor },
+        legend: { font: { size: 8 } }, margin: { t: 25, b: 40, l: 50, r: 10 },
+      }), { responsive: true });
+    }
+
+    mountEl.appendChild(btnRow);
+    mountEl.appendChild(chartDiv);
+    mountEl.appendChild(tsDiv);
+    renderCharts();
   }
 
   /**
@@ -537,7 +572,7 @@
     kind: "panel_builder",
     playground: { mode: "trajectory" },
     preconfig: {
-      dataset: { seed: 42, totalCount: 1000, splitDefaults: { mode: "random", train: 0.8, val: 0.1, test: 0.1 } },
+      dataset: { seed: 42, totalCount: 10399, splitDefaults: { mode: "random", train: 0.8, val: 0.1, test: 0.1 } },
     },
     build: build,
     playgroundApi: {
