@@ -471,11 +471,9 @@
     if (NODE_MODE) {
       return fetchAndDecodeNodeVariant(variant);
     }
-    if (
-      (!root.document || !root.document.createElement || typeof root.Image !== "function") &&
-      typeof root.fetch === "function" &&
-      typeof DecompressionStream === "function"
-    ) {
+    // prefer binary IDX format when DecompressionStream is available (all modern browsers)
+    // avoids sprite image decoding which fails for large datasets (>64K pixels tall)
+    if (typeof root.fetch === "function" && typeof DecompressionStream === "function") {
       return fetchAndDecodeBrowserWorkerVariant(variant);
     }
     assertBrowserDecodeSupport();
