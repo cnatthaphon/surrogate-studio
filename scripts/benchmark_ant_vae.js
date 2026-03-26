@@ -68,9 +68,9 @@ async function main() {
   console.log("  (Paper does not report explicit MSE/R² — shows qualitative reconstruction in figures)");
 
   console.log("\nOur reproduction:");
-  console.log("  Architecture: LSTM(hidden=32, depth=1), latent=8, 1000 timesteps");
+  console.log("  Architecture: LSTM(hidden=100, depth=1), latent=20, 1000 timesteps");
   console.log("  Framework: TF.js (CPU)");
-  console.log("  Smaller model (19K vs ~80K params) trained on 10% of the data");
+  console.log("  Differences: 1 LSTM layer (paper: 2), Dense decoder (paper: LSTM), 1000 timesteps (paper: 10399)");
   console.log("");
 }
 

@@ -60,8 +60,8 @@ Reproduces the LSTM-VAE from Jadhav & Barati Farimani (2022) for ant trajectory 
 
 | Model | Params | Test R² | Test RMSE |
 |-------|:------:|:-------:|:---------:|
-| LSTM-VAE | 19,616 | **0.9887** | 0.0304 |
-| MLP-AE (baseline) | 19,312 | 0.9863 | 0.0335 |
+| LSTM-VAE | 77,100 | **0.9932** | 0.0235 |
+| MLP-AE (baseline) | 19,312 | 0.9875 | 0.0319 |
 
 > Paper: *"Dominant motion identification of multi-particle system using deep learning from video"*
 > — Jadhav & Barati Farimani, Neural Computing and Applications, 2022

@@ -32,19 +32,23 @@
       to.inputs[inPort || "input_1"].connections.push({ node: fromId, output: outPort || "output_1" });
     }
 
-    // Paper uses LSTM with seq_len=1, which is equivalent to Dense.
-    // For browser training we use Dense (avoids sequence reshape complexity).
-    // Paper: LSTM(40→32, 2 layers) → μ(8) → z(8) → Dense(32) → Dense(128) → Output(40)
-    // LSTM with flat input auto-reshapes to [batch, 1, features]
+    // Paper architecture (Jadhav & Barati Farimani, 2022):
+    //   Encoder: LSTM(hidden=100, depth=2) → Linear(100→20) for μ, Linear(100→20) for logσ²
+    //   Decoder: Linear(20→100) → LSTM(hidden=100, depth=2) → Linear(100→40)
+    //   Latent dim: 20 (paper uses 1 for dominant motion, 20 for full reconstruction)
+    //
+    // Our adaptation:
+    //   - Single LSTM layer (100 units) instead of 2 stacked (no stacked LSTM node yet)
+    //   - Dense decoder instead of LSTM decoder (equivalent for seq_len=1 flat input)
+    //   - Latent dim 20 to match paper
+    //   - Same KL weight β=0.001
     var inp = node("input", { mode: "flat" }, 60, 100);
-    var enc = node("lstm", { units: 32, dropout: 0, returnseq: "false" }, 300, 100);
-    // Paper uses latent_length=1 for dominant motion extraction.
-    // For better reconstruction, use latent_length=8.
-    var mu = node("latent_mu", { units: 8, group: "z_vae" }, 600, 50);
-    var logvar = node("latent_logvar", { units: 8, group: "z_vae" }, 600, 170);
+    var enc = node("lstm", { units: 100, dropout: 0, returnseq: "false" }, 300, 100);
+    var mu = node("latent_mu", { units: 20, group: "z_vae" }, 600, 50);
+    var logvar = node("latent_logvar", { units: 20, group: "z_vae" }, 600, 170);
     var reparam = node("reparam", { group: "z_vae", beta: 0.001 }, 780, 100);
-    var dec1 = node("dense", { units: 32, activation: "relu" }, 920, 100);
-    var dec2 = node("dense", { units: 128, activation: "relu" }, 1060, 100);
+    var dec1 = node("dense", { units: 100, activation: "relu" }, 920, 100);
+    var dec2 = node("dense", { units: 100, activation: "relu" }, 1060, 100);
     var out = node("output", { target: "xv", targetType: "xv", loss: "mse", matchWeight: 1 }, 1200, 100);
 
     conn(inp, enc);
@@ -164,7 +168,7 @@
         trainFrac: 0.8,
         valFrac: 0.1,
         testFrac: 0.1,
-        totalCount: 1000,
+        totalCount: 1000, // ant_data.js has 1000 timesteps (paper has 10399)
       },
       data: prebuiltData,
       generatedAt: prebuiltData ? Date.now() : null,

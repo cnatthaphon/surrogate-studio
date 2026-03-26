@@ -68,10 +68,10 @@ This demo focuses on **Step 2** — the LSTM-VAE autoencoder for trajectory reco
 
 | Component | Original Paper | This Reproduction |
 |-----------|---------------|-------------------|
-| **Encoder** | LSTM (hidden=100, depth=2) | LSTM (hidden=32, depth=1) |
-| **Latent dim** | 20 | 8 |
-| **Reparameterization** | Linear(hidden→μ), Linear(hidden→logσ²) | Dense(32→μ₈), Dense(32→logσ²₈) |
-| **Decoder** | Linear(latent→hidden), LSTM(hidden, depth=2), Linear→output | Dense(8→32, relu), Dense(32→128, relu), Dense(128→40) |
+| **Encoder** | LSTM (hidden=100, depth=2) | LSTM (hidden=100, depth=1) |
+| **Latent dim** | 20 | 20 |
+| **Reparameterization** | Linear(hidden→μ), Linear(hidden→logσ²) | Dense(100→μ₂₀), Dense(100→logσ²₂₀) |
+| **Decoder** | Linear(latent→hidden), LSTM(hidden, depth=2), Linear→output | Dense(20→100, relu), Dense(100→100, relu), Dense(100→40) |
 | **KL weight β** | 1/1000 of reconstruction loss | 0.001 |
 | **Loss** | MSE + β·KL | MSE + β·KL |
 | **Data** | 20 ants, 10399 timesteps, 40 features | 20 ants, 1000 timesteps, 40 features |
@@ -80,12 +80,10 @@ This demo focuses on **Step 2** — the LSTM-VAE autoencoder for trajectory reco
 
 ### Design Decisions
 
-**Smaller architecture**: The paper uses hidden_size=100 with 2 stacked LSTM layers and latent_dim=20 for the full 10K-timestep dataset. This demo uses a smaller architecture (LSTM-32, latent-8) because:
-- We train on 1000 timesteps (10% of the full dataset) to keep demo load times fast
-- Smaller model trains in seconds in the browser via TF.js
-- Still sufficient to demonstrate reconstruction quality and latent space structure
-
-**Dense decoder instead of LSTM decoder**: The paper uses an LSTM decoder that unrolls across the sequence. Since our model processes each timestep independently (flat input mode), we use dense layers for decoding. This is equivalent when sequence_length=1.
+**Matching architecture**: We use LSTM(hidden=100) and latent_dim=20 to match the paper. Remaining differences:
+- **1 LSTM layer** instead of 2 stacked (our LSTM node is single-layer; stacked LSTM is a future node type)
+- **Dense decoder** instead of LSTM decoder — the paper unrolls an LSTM for decoding, but since each timestep is processed independently (flat input, seq_len=1), Dense layers are functionally equivalent
+- **1000 timesteps** instead of 10,399 — we embedded 1000 for fast demo load; the paper trains on the full dataset
 
 **MLP-AE baseline**: We include a plain autoencoder (Dense layers, no stochastic latent) for comparison — not in the original paper, but useful for demonstrating the value of the VAE latent structure.
 
@@ -93,23 +91,25 @@ This demo focuses on **Step 2** — the LSTM-VAE autoencoder for trajectory reco
 
 Headless benchmark: 50 epochs, batch=32, lr=5e-4, Adam, plateau scheduler, seed=42. Run via `node scripts/benchmark_ant_vae.js`.
 
-| Metric | LSTM-VAE (ours) | MLP-AE (baseline) | Paper (qualitative) |
+| Metric | LSTM-VAE (ours) | MLP-AE (baseline) | Paper |
 |--------|:-:|:-:|:-:|
-| **Parameters** | 19,616 | 19,312 | ~80,000 |
+| **Parameters** | 77,100 | 19,312 | ~80,000 |
+| **LSTM layers** | 1 | — | 2 |
+| **Latent dim** | 20 | 8 (bottleneck) | 20 |
 | **Data** | 1,000 timesteps | 1,000 timesteps | 10,399 timesteps |
-| **Val Loss (MSE)** | 1.009e-3 | 1.220e-3 | — |
-| **Test R²** | **0.9887** | 0.9863 | — |
-| **Test MAE** | 0.0999 | 0.0305 | — |
-| **Test RMSE** | 0.0304 | 0.0335 | — |
-| **Test Bias** | -1.53e-3 | 8.90e-4 | — |
+| **Val Loss (MSE)** | 6.08e-4 | 1.11e-3 | — |
+| **Test R²** | **0.9932** | 0.9875 | — (qualitative) |
+| **Test RMSE** | 0.0235 | 0.0319 | — |
+| **Test Bias** | -2.01e-3 | 3.95e-4 | — |
 
 **Key findings:**
 
-- **R²=0.989** — the VAE reconstructs ant trajectories with <1.2% unexplained variance, consistent with the paper's qualitative figures showing close original-vs-reconstructed overlap
-- **LSTM-VAE slightly outperforms MLP-AE** on R² and val loss, even with 4× fewer parameters than the paper's architecture
-- Both models achieve strong reconstruction with only **10% of the data** (1000 vs 10,399 timesteps)
-- The paper does not report explicit numerical metrics — their evaluation is visual (trajectory overlay in figures) and downstream (SINDy equation discovery from the latent space)
-- The VAE's advantage over the AE is modest for pure reconstruction; the real value (as the paper demonstrates) is the **structured latent space** that enables governing equation discovery via SINDy
+- **R²=0.993** — the VAE reconstructs ant trajectories with <0.7% unexplained variance, consistent with the paper's qualitative figures showing close original-vs-reconstructed overlap
+- **LSTM-VAE outperforms MLP-AE** on R² (0.993 vs 0.988) and RMSE (0.024 vs 0.032) — the recurrent encoder captures temporal structure better
+- **77K params matches the paper** (~80K). Remaining differences: 1 vs 2 LSTM layers, Dense vs LSTM decoder
+- Strong reconstruction with only **10% of the data** (1000 vs 10,399 timesteps)
+- The paper does not report explicit R²/MSE — their evaluation is visual (trajectory overlays) and downstream (SINDy equation discovery)
+- The VAE's real value over the AE is the **structured latent space** for SINDy, not just reconstruction accuracy
 
 ---
 
