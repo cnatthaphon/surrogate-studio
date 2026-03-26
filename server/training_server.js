@@ -75,11 +75,16 @@ function startTraining(jobId) {
   job.status = "running";
   broadcast(jobId, "status", "Starting PyTorch training...");
 
-  // write config to temp file
-  var tmpDir = path.join(__dirname, ".tmp");
-  if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir, { recursive: true });
-  var configPath = path.join(tmpDir, jobId + ".json");
-  fs.writeFileSync(configPath, JSON.stringify(job.config, null, 2));
+  // use existing config file if streamed, otherwise write new one
+  var configPath;
+  if (job.config && job.config._configPath && fs.existsSync(job.config._configPath)) {
+    configPath = job.config._configPath;
+  } else {
+    var tmpDir = path.join(__dirname, ".tmp");
+    if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir, { recursive: true });
+    configPath = path.join(tmpDir, jobId + ".json");
+    fs.writeFileSync(configPath, JSON.stringify(job.config, null, 2));
+  }
 
   // spawn python
   var proc = spawn(PYTHON, [SUBPROCESS_SCRIPT, configPath], {
@@ -239,10 +244,13 @@ var server = http.createServer(function (req, res) {
     req.pipe(trainWs);
     trainWs.on("finish", function () {
       try {
-        var config = JSON.parse(fs.readFileSync(trainTmpPath, "utf8"));
-        try { fs.unlinkSync(trainTmpPath); } catch (_) {}
-        var jobId = config.runId || ("job-" + Date.now().toString(36));
-        createJob(jobId, config);
+        // extract runId from first 200 bytes without loading entire file
+        var head = "";
+        try { var fd = fs.openSync(trainTmpPath, "r"); var buf = Buffer.alloc(200); fs.readSync(fd, buf, 0, 200, 0); fs.closeSync(fd); head = buf.toString("utf8"); } catch (_) {}
+        var runIdMatch = head.match(/"runId"\s*:\s*"([^"]+)"/);
+        var jobId = (runIdMatch && runIdMatch[1]) || ("job-" + Date.now().toString(36));
+        // pass file directly to Python — no JSON.parse in Node
+        createJob(jobId, { _configPath: trainTmpPath });
         startTraining(jobId);
         res.writeHead(200, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ jobId: jobId, status: "queued" }));

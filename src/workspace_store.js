@@ -58,7 +58,9 @@
     function flush() {
       doc.updatedAt = nowMs();
       if (typeof onWrite === "function") {
-        onWrite(cloneJson(doc));
+        // pass doc directly — onWrite is responsible for persistence
+        // cloning 60K-image datasets here causes multi-second freezes
+        onWrite(doc);
       }
     }
 
@@ -142,15 +144,15 @@
       },
       getDataset: function (id) {
         var did = safeString(id);
-        return did && doc.datasetsById[did] ? cloneJson(doc.datasetsById[did]) : null;
+        return did && doc.datasetsById[did] ? doc.datasetsById[did] : null;
       },
       getModel: function (id) {
         var mid = safeString(id);
-        return mid && doc.modelsById[mid] ? cloneJson(doc.modelsById[mid]) : null;
+        return mid && doc.modelsById[mid] ? doc.modelsById[mid] : null;
       },
       getTrainerCard: function (id) {
         var tid = safeString(id);
-        return tid && doc.trainerCardsById[tid] ? cloneJson(doc.trainerCardsById[tid]) : null;
+        return tid && doc.trainerCardsById[tid] ? doc.trainerCardsById[tid] : null;
       },
       getTrainerEpochs: function (sessionId) {
         var sid = safeString(sessionId);
@@ -163,17 +165,17 @@
       listDatasets: function (filter) {
         var rows = Object.keys(doc.datasetsById).map(function (k) { return doc.datasetsById[k]; });
         if (filter && filter.schemaId) rows = rows.filter(function (r) { return r.schemaId === filter.schemaId; });
-        return rows.map(cloneJson);
+        return rows;
       },
       listModels: function (filter) {
         var rows = Object.keys(doc.modelsById).map(function (k) { return doc.modelsById[k]; });
         if (filter && filter.schemaId) rows = rows.filter(function (r) { return r.schemaId === filter.schemaId; });
-        return rows.map(cloneJson);
+        return rows;
       },
       listTrainerCards: function (filter) {
         var rows = Object.keys(doc.trainerCardsById).map(function (k) { return doc.trainerCardsById[k]; });
         if (filter && filter.schemaId) rows = rows.filter(function (r) { return r.schemaId === filter.schemaId; });
-        return rows.map(cloneJson);
+        return rows;
       },
       query: function (type) {
         if (type === "dataset") return Object.keys(doc.datasetsById).map(function (k) { return cloneJson(doc.datasetsById[k]); });
