@@ -142,7 +142,6 @@
     function _renderMainPanel() {
       var mainEl = layout.mainEl;
       mainEl.innerHTML = "";
-      var currentMountId = ++_mountId;
 
       if (!_activeGenId) {
         mainEl.appendChild(el("div", { className: "osc-card" }, [

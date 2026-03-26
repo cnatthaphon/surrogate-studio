@@ -203,7 +203,6 @@
     function _renderMainPanel() {
       var mainEl = layout.mainEl;
       mainEl.innerHTML = "";
-      var currentMountId = ++_mountId;
 
       if (!_activeEvalId) {
         mainEl.appendChild(el("div", { className: "osc-card" }, [
@@ -289,10 +288,10 @@
         runCard.appendChild(table);
 
         // bar chart
-        _renderBarChart(runCard, results, metricKeys, currentMountId);
+        _renderBarChart(runCard, results, metricKeys);
 
         // module custom visualization
-        _renderModuleViz(runCard, ev, run, currentMountId);
+        _renderModuleViz(runCard, ev, run);
 
         mainEl.appendChild(runCard);
       }
