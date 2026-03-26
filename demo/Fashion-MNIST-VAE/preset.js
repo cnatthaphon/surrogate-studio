@@ -127,6 +127,7 @@
         valFrac: 0.1,
         testFrac: 0.1,
         totalCount: 60000,
+        useFullSource: true,
       },
       data: null,
       createdAt: Date.now(),
