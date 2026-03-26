@@ -359,7 +359,7 @@
               ? ((activeDs.records.test && activeDs.records.test.y) || []).map(function (l) { return oh(l, nCls); })
               : ((activeDs.records.test && activeDs.records.test.y) || []),
             yTestRaw: (activeDs.records.test && activeDs.records.test.y) || [],
-            featureSize: (activeDs.records.test && activeDs.records.test.x && activeDs.records.test.x[0]) ? activeDs.records.test.x[0].length : 784,
+            featureSize: (activeDs.records.test && activeDs.records.test.x && activeDs.records.test.x[0]) ? activeDs.records.test.x[0].length : 1,
             numClasses: nCls,
           };
         }
@@ -1160,7 +1160,7 @@
           yVal: getY("val"),
           xTest: (activeDs.records.test && activeDs.records.test.x) || [],
           yTest: getY("test"),
-          featureSize: activeDs.xTrain ? undefined : ((activeDs.records.train && activeDs.records.train.x && activeDs.records.train.x[0]) ? activeDs.records.train.x[0].length : 784),
+          featureSize: activeDs.xTrain ? undefined : ((activeDs.records.train && activeDs.records.train.x && activeDs.records.train.x[0]) ? activeDs.records.train.x[0].length : 1),
           numClasses: nClasses,
           targetMode: isClassification ? "logits" : (activeDs.targetMode || defaultTarget),
         };

@@ -159,15 +159,15 @@ function startTraining(jobId) {
 
 // --- HTTP server ---
 // shared sync subprocess runner (used by /api/test, /api/predict, /api/generate)
+// streams request body directly to temp file to handle large datasets (60K images)
 function _runSyncSubprocess(req, res, scriptName, label) {
-  var body = "";
-  req.on("data", function (chunk) { body += chunk; });
-  req.on("end", function () {
+  var tmpDir = path.join(__dirname, ".tmp");
+  if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir, { recursive: true });
+  var configPath = path.join(tmpDir, label + "-" + Date.now() + ".json");
+  var writeStream = fs.createWriteStream(configPath);
+  req.pipe(writeStream);
+  writeStream.on("finish", function () {
     try {
-      var config = JSON.parse(body);
-      var configPath = path.join(__dirname, ".tmp", label + "-" + Date.now() + ".json");
-      if (!fs.existsSync(path.join(__dirname, ".tmp"))) fs.mkdirSync(path.join(__dirname, ".tmp"), { recursive: true });
-      fs.writeFileSync(configPath, JSON.stringify(config));
 
       var proc = spawn(PYTHON, [path.join(__dirname, scriptName), configPath], {
         stdio: ["ignore", "pipe", "pipe"],
@@ -192,9 +192,14 @@ function _runSyncSubprocess(req, res, scriptName, label) {
         }
       });
     } catch (e) {
+      try { fs.unlinkSync(configPath); } catch (_) {}
       res.writeHead(400, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: e.message }));
     }
+  });
+  writeStream.on("error", function (err) {
+    res.writeHead(500, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: "Failed to write config: " + err.message }));
   });
 }
 
@@ -227,11 +232,15 @@ var server = http.createServer(function (req, res) {
 
   // POST /api/train
   if (req.method === "POST" && pathname === "/api/train") {
-    var body = "";
-    req.on("data", function (chunk) { body += chunk; });
-    req.on("end", function () {
+    var tmpDir = path.join(__dirname, ".tmp");
+    if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir, { recursive: true });
+    var trainTmpPath = path.join(tmpDir, "train-body-" + Date.now() + ".json");
+    var trainWs = fs.createWriteStream(trainTmpPath);
+    req.pipe(trainWs);
+    trainWs.on("finish", function () {
       try {
-        var config = JSON.parse(body);
+        var config = JSON.parse(fs.readFileSync(trainTmpPath, "utf8"));
+        try { fs.unlinkSync(trainTmpPath); } catch (_) {}
         var jobId = config.runId || ("job-" + Date.now().toString(36));
         createJob(jobId, config);
         startTraining(jobId);
@@ -247,42 +256,7 @@ var server = http.createServer(function (req, res) {
 
   // POST /api/test — run test evaluation on server (same runtime as training)
   if (req.method === "POST" && pathname === "/api/test") {
-    var body = "";
-    req.on("data", function (chunk) { body += chunk; });
-    req.on("end", function () {
-      try {
-        var config = JSON.parse(body);
-        var configPath = path.join(__dirname, ".tmp", "test-" + Date.now() + ".json");
-        if (!fs.existsSync(path.join(__dirname, ".tmp"))) fs.mkdirSync(path.join(__dirname, ".tmp"), { recursive: true });
-        fs.writeFileSync(configPath, JSON.stringify(config));
-
-        var proc = spawn(PYTHON, [path.join(__dirname, "test_subprocess.py"), configPath], {
-          stdio: ["ignore", "pipe", "pipe"],
-          cwd: path.resolve(__dirname, ".."),
-        });
-
-        var output = "";
-        proc.stdout.on("data", function (c) { output += c.toString(); });
-        proc.stderr.on("data", function (c) { /* ignore stderr */ });
-        proc.on("exit", function () {
-          try { fs.unlinkSync(configPath); } catch (e) {}
-          var result = null;
-          output.trim().split("\n").forEach(function (line) {
-            try { var m = JSON.parse(line); if (m.kind === "result") result = m.result; } catch (e) {}
-          });
-          if (result) {
-            res.writeHead(200, { "Content-Type": "application/json" });
-            res.end(JSON.stringify(result));
-          } else {
-            res.writeHead(500, { "Content-Type": "application/json" });
-            res.end(JSON.stringify({ error: "Test evaluation failed", output: output.slice(0, 500) }));
-          }
-        });
-      } catch (e) {
-        res.writeHead(400, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ error: e.message }));
-      }
-    });
+    _runSyncSubprocess(req, res, "test_subprocess.py", "test");
     return;
   }
 
