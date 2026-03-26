@@ -955,7 +955,7 @@
       ]);
       var formValue = {
         datasetId: t.datasetId || "", modelId: t.modelId || "",
-        runtimeBackend: "auto", useServer: false, serverUrl: defaultServerUrl, epochs: 20, batchSize: 32, learningRate: 0.001,
+        runtimeBackend: "auto", useServer: true, serverUrl: defaultServerUrl, epochs: 20, batchSize: 32, learningRate: 0.001,
         optimizerType: "adam", lrSchedulerType: "plateau", earlyStoppingPatience: 5,
         restoreBestWeights: true, lrPatience: 3, lrFactor: 0.5, minLr: 0.000001,
         gradClipNorm: 0, gradClipValue: 0,
