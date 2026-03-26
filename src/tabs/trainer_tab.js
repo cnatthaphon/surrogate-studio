@@ -285,11 +285,20 @@
       var schemaId = t.schemaId;
       var allowedOutputKeys = schemaRegistry ? schemaRegistry.getOutputKeys(schemaId) : ["x"];
       var defaultTarget = (allowedOutputKeys[0] && (allowedOutputKeys[0].key || allowedOutputKeys[0])) || "x";
-      // read actual target from model's output node — overrides schema default
+      // read actual target from model's output node data (raw, not filtered by schema)
       var model = t.modelId ? (store ? store.getModel(t.modelId) : null) : null;
-      if (model && model.graph && modelBuilder) {
-        var heads = modelBuilder.inferOutputHeads(model.graph, allowedOutputKeys, defaultTarget);
-        if (heads && heads.length) defaultTarget = heads[0].target || defaultTarget;
+      if (model && model.graph) {
+        var gd = modelBuilder ? modelBuilder.extractGraphData(model.graph) : null;
+        if (gd) {
+          var gids = Object.keys(gd);
+          for (var gi = 0; gi < gids.length; gi++) {
+            var gn = gd[gids[gi]];
+            if (gn && gn.name === "output_layer" && gn.data && gn.data.target) {
+              defaultTarget = String(gn.data.target);
+              break;
+            }
+          }
+        }
       }
       var isClassification = defaultTarget === "label" || defaultTarget === "logits";
 
@@ -914,7 +923,8 @@
       var t = store ? store.getTrainerCard(activeId) : null;
       if (!t) return;
 
-      var hasTrained = t.status === "done" || t.status === "error" || (store.getTrainerEpochs(activeId) || []).length > 0;
+      var hasEpochs = (store.getTrainerEpochs(activeId) || []).length > 0;
+      var hasTrained = (t.status === "done" && t.modelArtifacts) || hasEpochs;
       var isLocked = hasTrained && t.datasetId && t.modelId;
 
       rightEl.appendChild(el("h3", {}, hasTrained ? "Continue Training" : "Training Config"));
@@ -1116,10 +1126,18 @@
       var schemaId = tCard.schemaId;
       var allowedOutputKeys = schemaRegistry ? schemaRegistry.getOutputKeys(schemaId) : ["x"];
       var defaultTarget = allowedOutputKeys[0] || "x";
-      // read actual target from model graph
+      // read actual target from model's output node (raw, not filtered)
       if (model && model.graph && modelBuilder) {
-        var _heads = modelBuilder.inferOutputHeads(model.graph, allowedOutputKeys, defaultTarget);
-        if (_heads && _heads.length) defaultTarget = _heads[0].target || defaultTarget;
+        var _gd = modelBuilder.extractGraphData(model.graph);
+        if (_gd) {
+          var _gids = Object.keys(_gd);
+          for (var _gi = 0; _gi < _gids.length; _gi++) {
+            var _gn = _gd[_gids[_gi]];
+            if (_gn && _gn.name === "output_layer" && _gn.data && _gn.data.target) {
+              defaultTarget = String(_gn.data.target); break;
+            }
+          }
+        }
       }
       var dsData = dataset.data;
       var isBundle = dsData.kind === "dataset_bundle" && dsData.datasets;
@@ -1128,13 +1146,20 @@
         var nClasses = activeDs.classCount || 10;
         function oneHot(label, n) { var arr = new Array(n).fill(0); arr[label] = 1; return arr; }
         var isClassification = defaultTarget === "label" || defaultTarget === "logits";
+        var isReconstruction = defaultTarget === "xv" || defaultTarget === "x";
+        function getY(split) {
+          var raw = (activeDs.records[split] && activeDs.records[split].y) || [];
+          if (isClassification) return raw.map(function (l) { return oneHot(l, nClasses); });
+          if (isReconstruction) return (activeDs.records[split] && activeDs.records[split].x) || []; // y = x for reconstruction
+          return raw;
+        }
         activeDs = {
           xTrain: (activeDs.records.train && activeDs.records.train.x) || [],
-          yTrain: isClassification ? ((activeDs.records.train && activeDs.records.train.y) || []).map(function (l) { return oneHot(l, nClasses); }) : ((activeDs.records.train && activeDs.records.train.y) || []),
+          yTrain: getY("train"),
           xVal: (activeDs.records.val && activeDs.records.val.x) || [],
-          yVal: isClassification ? ((activeDs.records.val && activeDs.records.val.y) || []).map(function (l) { return oneHot(l, nClasses); }) : ((activeDs.records.val && activeDs.records.val.y) || []),
+          yVal: getY("val"),
           xTest: (activeDs.records.test && activeDs.records.test.x) || [],
-          yTest: isClassification ? ((activeDs.records.test && activeDs.records.test.y) || []).map(function (l) { return oneHot(l, nClasses); }) : ((activeDs.records.test && activeDs.records.test.y) || []),
+          yTest: getY("test"),
           featureSize: activeDs.xTrain ? undefined : ((activeDs.records.train && activeDs.records.train.x && activeDs.records.train.x[0]) ? activeDs.records.train.x[0].length : 784),
           numClasses: nClasses,
           targetMode: isClassification ? "logits" : (activeDs.targetMode || defaultTarget),
