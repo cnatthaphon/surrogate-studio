@@ -41,7 +41,8 @@
     var reparam = node("reparam", { group: "z_vae", beta: 1.0 }, 800, 100);
     var d1 = node("dense", { units: 256, activation: "relu" }, 960, 100);
     var d2 = node("dense", { units: 512, activation: "relu" }, 1120, 100);
-    var out = node("output", { target: "label", targetType: "label", loss: "bce", matchWeight: 1 }, 1280, 100);
+    // reconstruction output — target matches input (784 pixels), not class labels
+    var out = node("output", { target: "xv", targetType: "xv", loss: "mse", matchWeight: 1 }, 1280, 100);
 
     conn(img, e1); conn(e1, e2);
     conn(e2, mu); conn(e2, logvar);
@@ -78,7 +79,7 @@
     var bn = node("dense", { units: 32, activation: "relu" }, 480, 100);
     var d1 = node("dense", { units: 256, activation: "relu" }, 620, 100);
     var d2 = node("dense", { units: 512, activation: "relu" }, 760, 100);
-    var out = node("output", { target: "label", targetType: "label", loss: "mse", matchWeight: 1 }, 900, 100);
+    var out = node("output", { target: "xv", targetType: "xv", loss: "mse", matchWeight: 1 }, 900, 100);
     conn(img, e1); conn(e1, e2); conn(e2, bn); conn(bn, d1); conn(d1, d2); conn(d2, out);
 
     return { drawflow: { Home: { data: d } } };

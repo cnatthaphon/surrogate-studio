@@ -31,7 +31,7 @@
 
   function getUpstreamFeatureNodeNamesFromData(graphData) {
     var names = {};
-    var inputNode = getNodeByName(graphData, "input_layer");
+    var inputNode = getNodeByName(graphData, "input_layer") || getNodeByName(graphData, "image_source_block") || getNodeByName(graphData, "image_source_layer");
     if (!inputNode) return names;
     var startIds = [];
     Object.keys(inputNode.inputs || {}).forEach(function (k) {
@@ -57,7 +57,7 @@
 
   function getUpstreamFeatureNodesFromData(graphData) {
     var nodesByName = {};
-    var inputNode = getNodeByName(graphData, "input_layer");
+    var inputNode = getNodeByName(graphData, "input_layer") || getNodeByName(graphData, "image_source_block") || getNodeByName(graphData, "image_source_layer");
     if (!inputNode) return nodesByName;
     var startIds = [];
     Object.keys(inputNode.inputs || {}).forEach(function (k) {
@@ -211,7 +211,7 @@
     var data = extractGraphData(graphData);
     var fallback = String(fallbackTarget || "x");
     var ids = Object.keys(data || {});
-    var inputIds = ids.filter(function (id) { return data[id] && data[id].name === "input_layer"; });
+    var inputIds = ids.filter(function (id) { var n = data[id] && data[id].name; return n === "input_layer" || n === "image_source_block" || n === "image_source_layer"; });
     if (!inputIds.length) return [{ id: "fallback", target: fallback, loss: "mse", wx: 1, wv: 1 }];
     var reachable = {};
     var q = [String(inputIds[0])];
@@ -323,8 +323,11 @@
     var ids = Object.keys(moduleData || {});
     if (!ids.length) throw new Error("Graph is empty.");
 
-    var inputIds = ids.filter(function (id) { return moduleData[id] && moduleData[id].name === "input_layer"; });
-    if (inputIds.length !== 1) throw new Error("Graph must contain exactly one Input node.");
+    var inputIds = ids.filter(function (id) {
+      var n = moduleData[id] && moduleData[id].name;
+      return n === "input_layer" || n === "image_source_block" || n === "image_source_layer";
+    });
+    if (inputIds.length !== 1) throw new Error("Graph must contain exactly one Input node (found " + inputIds.length + ").");
     var inputId = String(inputIds[0]);
 
     var allowedOutputKeys = Array.isArray(datasetMeta.allowedOutputKeys) ? datasetMeta.allowedOutputKeys : ["x"];
