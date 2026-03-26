@@ -1142,25 +1142,34 @@
       var dsData = dataset.data;
       var isBundle = dsData.kind === "dataset_bundle" && dsData.datasets;
       var activeDs = isBundle ? dsData.datasets[dsData.activeVariantId || Object.keys(dsData.datasets)[0]] : dsData;
-      if (!activeDs.xTrain && activeDs.records) {
-        var nClasses = activeDs.classCount || 10;
-        function oneHot(label, n) { var arr = new Array(n).fill(0); arr[label] = 1; return arr; }
+      // resolve data via source registry (zero-copy) or legacy records
+      var W = typeof window !== "undefined" ? window : {};
+      var srcReg = W.OSCDatasetSourceRegistry || null;
+      if (!activeDs.xTrain) {
+        var nClasses = activeDs.classCount || activeDs.numClasses || 10;
         var isClassification = defaultTarget === "label" || defaultTarget === "logits";
         var isReconstruction = defaultTarget === "xv" || defaultTarget === "x";
-        function getY(split) {
-          var raw = (activeDs.records[split] && activeDs.records[split].y) || [];
-          if (isClassification) return raw.map(function (l) { return oneHot(l, nClasses); });
-          if (isReconstruction) return (activeDs.records[split] && activeDs.records[split].x) || []; // y = x for reconstruction
-          return raw;
+        function oneHot(label, n) { var arr = new Array(n).fill(0); arr[label] = 1; return arr; }
+        function resolveSplit(ds, split) {
+          if (srcReg && typeof srcReg.resolveDatasetSplit === "function") return srcReg.resolveDatasetSplit(ds, split);
+          var rec = ds.records && ds.records[split];
+          return rec ? { x: rec.x || [], y: rec.y || [], length: (rec.x || []).length } : { x: [], y: [], length: 0 };
         }
+        var train = resolveSplit(activeDs, "train");
+        var val = resolveSplit(activeDs, "val");
+        var test = resolveSplit(activeDs, "test");
+        function mapY(splitData) {
+          if (isClassification) return splitData.y.map(function (l) { return typeof l === "number" ? oneHot(l, nClasses) : l; });
+          if (isReconstruction) return splitData.x; // y = x
+          return splitData.y;
+        }
+        var resolvedFeatureSize = (srcReg && typeof srcReg.getFeatureSize === "function") ? srcReg.getFeatureSize(activeDs) : 0;
+        if (!resolvedFeatureSize && train.x.length) resolvedFeatureSize = train.x[0].length;
         activeDs = {
-          xTrain: (activeDs.records.train && activeDs.records.train.x) || [],
-          yTrain: getY("train"),
-          xVal: (activeDs.records.val && activeDs.records.val.x) || [],
-          yVal: getY("val"),
-          xTest: (activeDs.records.test && activeDs.records.test.x) || [],
-          yTest: getY("test"),
-          featureSize: activeDs.xTrain ? undefined : ((activeDs.records.train && activeDs.records.train.x && activeDs.records.train.x[0]) ? activeDs.records.train.x[0].length : 1),
+          xTrain: train.x, yTrain: mapY(train),
+          xVal: val.x, yVal: mapY(val),
+          xTest: test.x, yTest: mapY(test),
+          featureSize: resolvedFeatureSize || activeDs.featureSize || 1,
           numClasses: nClasses,
           targetMode: isClassification ? "logits" : (activeDs.targetMode || defaultTarget),
         };

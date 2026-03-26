@@ -652,22 +652,23 @@
       var valIdx = trainPool.slice(finalTrainN, finalTrainN + valFromTrain);
       var testIdx = testPool.slice(0, testPoolSize);
 
-      var train = makeSplitFromIndices(trainIdx, source);
-      var val = makeSplitFromIndices(valIdx, source);
-      var test = makeSplitFromIndices(testIdx, source);
-      var labels = train.y.concat(val.y, test.y);
+      var trainLabels = trainIdx.map(function (i) { return source.labelsUint8 ? source.labelsUint8[i] : 0; });
+      var allLabels = trainIdx.concat(valIdx, testIdx).map(function (i) { return source.labelsUint8 ? source.labelsUint8[i] : 0; });
+      var sourceId = String(source.variant || source.schemaId || "mnist") + "_source";
       return {
         schemaId: String(source.schemaId || source.variant || cfg.schemaId || "mnist").trim().toLowerCase(),
         datasetModuleId: String(source.variant || "mnist"),
         source: String(source.source || "tfjs_mnist_sprite"), sourceUrls: source.urls || null,
         mode: "classification", imageShape: source.imageShape || [28, 28, 1],
+        featureSize: source.imageSize || IMAGE_SIZE,
         classCount: source.classCount || CLASS_COUNT, classNames: source.classNames.slice(),
-        splitConfig: { mode: "original", train: 0, val: 0, test: 0, stratifyKey: "", trainCount: train.x.length, valCount: val.x.length, testCount: test.x.length },
-        splitCounts: { train: train.x.length, val: val.x.length, test: test.x.length },
-        trainCount: train.x.length, valCount: val.x.length, testCount: test.x.length,
-        labelsHistogram: labelHistogram(labels, source.classNames),
-        records: { train: train, val: val, test: test },
-        preview: { firstLabels: train.y.slice(0, 24), sampleCount: train.x.length + val.x.length + test.x.length },
+        sourceId: sourceId,
+        splitIndices: { train: trainIdx, val: valIdx, test: testIdx },
+        splitConfig: { mode: "original", train: 0, val: 0, test: 0, stratifyKey: "", trainCount: trainIdx.length, valCount: valIdx.length, testCount: testIdx.length },
+        splitCounts: { train: trainIdx.length, val: valIdx.length, test: testIdx.length },
+        trainCount: trainIdx.length, valCount: valIdx.length, testCount: testIdx.length,
+        labelsHistogram: labelHistogram(allLabels, source.classNames),
+        preview: { firstLabels: trainLabels.slice(0, 24), sampleCount: trainIdx.length + valIdx.length + testIdx.length },
         seed: seed,
       };
     }
@@ -705,47 +706,30 @@
         : sampleIndicesRandom(counts.total, totalAvailable, rng);
     }
     var splitIdx = splitSampledIndices(sampled, source.labelsUint8, splitMode, fr, counts, rng);
-    var train = makeSplitFromIndices(splitIdx.train, source);
-    var val = makeSplitFromIndices(splitIdx.val, source);
-    var test = makeSplitFromIndices(splitIdx.test, source);
-    var labels = train.y.concat(val.y, test.y);
+    var allLabels = splitIdx.train.concat(splitIdx.val, splitIdx.test).map(function (i) { return source.labelsUint8 ? source.labelsUint8[i] : 0; });
+    var trainLabels = splitIdx.train.map(function (i) { return source.labelsUint8 ? source.labelsUint8[i] : 0; });
+    var sourceId = String(source.variant || source.schemaId || "mnist") + "_source";
     return {
       schemaId: String(source.schemaId || source.variant || cfg.schemaId || "mnist").trim().toLowerCase(),
       datasetModuleId: String(source.variant || "mnist"),
       source: String(source.source || "tfjs_mnist_sprite"),
       sourceUrls: source.urls || null,
       mode: "classification",
-      imageShape: [28, 28, 1],
-      classCount: CLASS_COUNT,
+      imageShape: source.imageShape || [28, 28, 1],
+      featureSize: source.imageSize || IMAGE_SIZE,
+      classCount: source.classCount || CLASS_COUNT,
       classNames: source.classNames.slice(),
+      sourceId: sourceId,
+      splitIndices: { train: splitIdx.train, val: splitIdx.val, test: splitIdx.test },
       splitConfig: {
-        mode: splitMode,
-        train: fr.train,
-        val: fr.val,
-        test: fr.test,
+        mode: splitMode, train: fr.train, val: fr.val, test: fr.test,
         stratifyKey: splitMode === "stratified_label" ? "label" : "",
-        trainCount: train.x.length,
-        valCount: val.x.length,
-        testCount: test.x.length,
+        trainCount: splitIdx.train.length, valCount: splitIdx.val.length, testCount: splitIdx.test.length,
       },
-      splitCounts: {
-        train: train.x.length,
-        val: val.x.length,
-        test: test.x.length,
-      },
-      trainCount: train.x.length,
-      valCount: val.x.length,
-      testCount: test.x.length,
-      labelsHistogram: labelHistogram(labels, source.classNames),
-      records: {
-        train: train,
-        val: val,
-        test: test,
-      },
-      preview: {
-        firstLabels: train.y.slice(0, 24),
-        sampleCount: train.x.length + val.x.length + test.x.length,
-      },
+      splitCounts: { train: splitIdx.train.length, val: splitIdx.val.length, test: splitIdx.test.length },
+      trainCount: splitIdx.train.length, valCount: splitIdx.val.length, testCount: splitIdx.test.length,
+      labelsHistogram: labelHistogram(allLabels, source.classNames),
+      preview: { firstLabels: trainLabels.slice(0, 24), sampleCount: splitIdx.train.length + splitIdx.val.length + splitIdx.test.length },
       seed: seed,
     };
   }

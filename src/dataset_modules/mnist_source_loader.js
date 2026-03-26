@@ -513,7 +513,22 @@
     var variant = resolveVariant(rawVariant);
     var opts = options || {};
     if (!opts.forceReload && CACHE[variant]) return CACHE[variant];
-    var p = fetchAndDecodeVariant(variant).catch(function (err) {
+    var p = fetchAndDecodeVariant(variant).then(function (source) {
+      // register in source registry (zero-copy architecture)
+      var reg = (typeof root !== "undefined" && root.OSCDatasetSourceRegistry) || null;
+      if (reg && typeof reg.createFromUint8 === "function" && source.pixelsUint8) {
+        reg.createFromUint8({
+          id: variant + "_source",
+          pixelsUint8: source.pixelsUint8,
+          labelsUint8: source.labelsUint8,
+          numExamples: source.numExamples,
+          imageSize: source.imageSize || IMAGE_SIZE,
+          classCount: source.classCount || NUM_CLASSES,
+          imageShape: source.imageShape || [IMAGE_H, IMAGE_W, 1],
+        });
+      }
+      return source;
+    }).catch(function (err) {
       delete CACHE[variant];
       throw err;
     });
