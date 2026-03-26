@@ -206,8 +206,8 @@
         id: "demo-fmnist-vae-gen",
         name: "VAE Generation",
         schemaId: "fashion_mnist",
-        trainerId: "demo-fmnist-vae-trainer",
-        family: "vae",
+        trainerId: "",  // user selects after training
+        family: "",
         config: { method: "reconstruct", numSamples: 16, steps: 100, lr: 0.01, temperature: 1.0, seed: 42 },
         status: "draft", runs: [], createdAt: Date.now(),
       },
