@@ -215,6 +215,33 @@
       }
     }
 
+    // Recompute train/val/test auto-count fields from current form values
+    function _updateAutoCountFields(panelEl) {
+      var allInps = panelEl.querySelectorAll("[data-config-key]");
+      var cfg = {};
+      allInps.forEach(function (inp) {
+        var k = inp.getAttribute("data-config-key");
+        cfg[k] = inp.type === "checkbox" ? inp.checked : (inp.type === "number" ? Number(inp.value) : inp.value);
+      });
+      var useFullSource = Boolean(cfg.useFullSource);
+      var totalCount = useFullSource ? 60000 : (Number(cfg.totalCount) || 1400);
+      var trainFrac = Number(cfg.trainFrac) || 0.8;
+      var valFrac = Number(cfg.valFrac) || 0.1;
+      var trainN = Math.round(totalCount * trainFrac);
+      var valN = Math.round(totalCount * valFrac);
+      var testN = Math.max(0, totalCount - trainN - valN);
+      // update totalCount display if useFullSource changed
+      var tcInp = panelEl.querySelector("[data-config-key='totalCount']");
+      if (tcInp && useFullSource) tcInp.value = String(totalCount);
+      // update auto count fields
+      var trInp = panelEl.querySelector("[data-config-key='trainCount']");
+      var vaInp = panelEl.querySelector("[data-config-key='valCount']");
+      var teInp = panelEl.querySelector("[data-config-key='testCount']");
+      if (trInp) trInp.value = String(trainN);
+      if (vaInp) vaInp.value = String(valN);
+      if (teInp) teInp.value = String(testN);
+    }
+
     // === RIGHT: global config from schema + module-specific config ===
     function _renderRightPanel() {
       var rightEl = layout.rightEl;
@@ -262,6 +289,11 @@
         _configFormApi = uiEngine.renderConfigForm({
           mountEl: globalMount, schema: globalSchema, value: globalValue,
           fieldNamePrefix: "ds", rowClassName: "osc-form-row",
+          onChange: function (cfg, ctx) {
+            if (ctx && (ctx.key === "trainFrac" || ctx.key === "valFrac")) {
+              _updateAutoCountFields(rightEl);
+            }
+          },
         });
         rightEl.appendChild(globalMount);
       }
@@ -293,36 +325,18 @@
             fieldNamePrefix: "dsmod", rowClassName: "osc-form-row",
             onChange: function (cfg, ctx) {
               if (!ctx || !ctx.key) return;
-              // when useFullSource or totalCount changes, recompute auto counts
-              if (ctx.key === "useFullSource" || ctx.key === "totalCount" || ctx.key === "forceEqualClass") {
-                // collect current form values
-                var formCfg = {};
-                var allInps = modMount.querySelectorAll("[data-config-key]");
-                allInps.forEach(function (inp) {
-                  var k = inp.getAttribute("data-config-key");
-                  formCfg[k] = inp.type === "checkbox" ? inp.checked : (inp.type === "number" ? Number(inp.value) : inp.value);
-                });
-                // also get global config
-                var gInps = rightEl.querySelectorAll("[data-config-key]");
-                gInps.forEach(function (inp) {
-                  var k = inp.getAttribute("data-config-key");
-                  if (!formCfg.hasOwnProperty(k)) formCfg[k] = inp.type === "checkbox" ? inp.checked : (inp.type === "number" ? Number(inp.value) : inp.value);
-                });
-                // recompute counts
-                if (mod.uiApi && typeof mod.uiApi.handleDatasetConfigChange === "function") {
-                  mod.uiApi.handleDatasetConfigChange(formCfg, { key: ctx.key, value: ctx.value }, {
-                    refreshDatasetConfigPanel: function () { _renderRightPanel(); },
-                  });
-                } else {
-                  // simple fallback: just re-render
-                  _renderRightPanel();
-                }
+              // recompute auto counts when relevant fields change
+              if (ctx.key === "useFullSource" || ctx.key === "totalCount" || ctx.key === "forceEqualClass" || ctx.key === "trainFrac" || ctx.key === "valFrac") {
+                _updateAutoCountFields(rightEl);
               }
             },
           });
           rightEl.appendChild(modMount);
         });
       }
+
+      // initial count update
+      _updateAutoCountFields(rightEl);
 
       // Generate button
       var genBtn = el("button", { className: "osc-btn", style: "width:100%;margin-top:8px;" }, "Generate Dataset");
