@@ -962,17 +962,13 @@
         gradClipNorm: 0, gradClipValue: 0,
       };
 
-      if (uiEngine && typeof uiEngine.renderConfigForm === "function") {
-        var formMount = el("div", {});
-        _configFormApi = uiEngine.renderConfigForm({ mountEl: formMount, schema: formSchema, value: formValue, fieldNamePrefix: "train", rowClassName: "osc-form-row" });
-        rightEl.appendChild(formMount);
-      }
-
-      // server connection panel
+      // server status element (created before form so onChange can update it)
       var sraForPanel = getServerAdapter();
+      var serverPanel = null;
+      var serverStatusEl = null;
       if (sraForPanel) {
-        var serverPanel = el("div", { style: "margin-top:8px;padding:6px 8px;border:1px solid #1e293b;border-radius:6px;background:#0f172a;" });
-        var serverStatusEl = el("span", { style: "font-size:11px;" });
+        serverPanel = el("div", { style: "margin-top:8px;padding:6px 8px;border:1px solid #1e293b;border-radius:6px;background:#0f172a;" });
+        serverStatusEl = el("span", { style: "font-size:11px;" });
         if (_serverAvailable === true && _serverInfo) {
           serverStatusEl.style.color = "#4ade80";
           serverStatusEl.textContent = "\u2713 Connected: " + (_serverInfo.backend || "pytorch") + " (" + (_serverInfo.python || "python") + ")";
@@ -983,6 +979,42 @@
           serverStatusEl.style.color = "#94a3b8";
           serverStatusEl.textContent = "Server: not checked";
         }
+      }
+
+      if (uiEngine && typeof uiEngine.renderConfigForm === "function") {
+        var formMount = el("div", {});
+        _configFormApi = uiEngine.renderConfigForm({
+          mountEl: formMount, schema: formSchema, value: formValue,
+          fieldNamePrefix: "train", rowClassName: "osc-form-row",
+          onChange: function (cfg, ctx) {
+            // auto-check server when backend changes to pytorch_server
+            if (ctx && ctx.key === "runtimeBackend" && sraForPanel && serverStatusEl) {
+              var val = String(ctx.value || "");
+              if (val === "pytorch_server" || val === "server") {
+                var urlInput = rightEl.querySelector("input[data-config-key='serverUrl']");
+                var url = urlInput ? urlInput.value : "";
+                _serverUrl = url;
+                serverStatusEl.style.color = "#fbbf24";
+                serverStatusEl.textContent = "Checking server...";
+                _checkServerConnection(url, function (ok, info) {
+                  if (ok) {
+                    serverStatusEl.style.color = "#4ade80";
+                    serverStatusEl.textContent = "\u2713 Connected: " + (info && info.backend || "pytorch");
+                    if (info && info.python) serverStatusEl.textContent += " (" + info.python + ")";
+                  } else {
+                    serverStatusEl.style.color = "#f43f5e";
+                    serverStatusEl.textContent = "\u2717 Cannot reach server";
+                  }
+                });
+              }
+            }
+          },
+        });
+        rightEl.appendChild(formMount);
+      }
+
+      // server connection panel
+      if (serverPanel && serverStatusEl) {
         var testBtn = el("button", { style: "margin-left:8px;padding:2px 8px;font-size:10px;border-radius:4px;border:1px solid #475569;background:#1f2937;color:#cbd5e1;cursor:pointer;" }, "Test Connection");
         testBtn.addEventListener("click", function () {
           var urlInput = rightEl.querySelector("input[data-config-key='serverUrl']");
@@ -999,8 +1031,6 @@
               serverStatusEl.style.color = "#f43f5e";
               serverStatusEl.textContent = "\u2717 Cannot reach server";
             }
-            // refresh backend dropdown to show check/cross
-            _renderRightPanel();
           });
         });
         serverPanel.appendChild(serverStatusEl);
