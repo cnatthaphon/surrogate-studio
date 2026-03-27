@@ -163,14 +163,24 @@ function startTraining(jobId) {
 }
 
 // --- HTTP server ---
+var zlib = require("zlib");
+
+// get the request body stream — decompress if gzip-encoded
+function _getBodyStream(req) {
+  var encoding = String(req.headers["content-encoding"] || "").toLowerCase();
+  if (encoding === "gzip") return req.pipe(zlib.createGunzip());
+  if (encoding === "deflate") return req.pipe(zlib.createInflate());
+  return req;
+}
+
 // shared sync subprocess runner (used by /api/test, /api/predict, /api/generate)
-// streams request body directly to temp file to handle large datasets (60K images)
+// streams request body to temp file, decompresses gzip if needed
 function _runSyncSubprocess(req, res, scriptName, label) {
   var tmpDir = path.join(__dirname, ".tmp");
   if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir, { recursive: true });
   var configPath = path.join(tmpDir, label + "-" + Date.now() + ".json");
   var writeStream = fs.createWriteStream(configPath);
-  req.pipe(writeStream);
+  _getBodyStream(req).pipe(writeStream);
   writeStream.on("finish", function () {
     try {
 
@@ -241,7 +251,7 @@ var server = http.createServer(function (req, res) {
     if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir, { recursive: true });
     var trainTmpPath = path.join(tmpDir, "train-body-" + Date.now() + ".json");
     var trainWs = fs.createWriteStream(trainTmpPath);
-    req.pipe(trainWs);
+    _getBodyStream(req).pipe(trainWs);
     trainWs.on("finish", function () {
       try {
         // extract runId from first 200 bytes without loading entire file

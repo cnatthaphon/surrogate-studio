@@ -26,6 +26,70 @@
 
   var DEFAULT_SERVER = "http://localhost:3777";
 
+  /**
+   * POST JSON to server — gzip compressed if payload is large.
+   * Uses CompressionStream (native browser API) to avoid V8 string limit.
+   */
+  function _postJson(url, payload) {
+    // try direct JSON.stringify first (fast for small payloads)
+    var jsonStr;
+    try { jsonStr = JSON.stringify(payload); } catch (_) { jsonStr = null; }
+
+    if (jsonStr && jsonStr.length < 50000000) {
+      // small payload — send directly
+      return fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: jsonStr,
+      }).then(function (res) {
+        if (!res.ok) throw new Error("Server returned " + res.status);
+        return res.json();
+      });
+    }
+
+    // large payload — gzip compress then send
+    if (typeof CompressionStream !== "function") {
+      return Promise.reject(new Error("Dataset too large and CompressionStream not available. Use a modern browser."));
+    }
+
+    // build JSON as TextEncoder stream to avoid single huge string
+    var parts = [];
+    var meta = Object.assign({}, payload, { dataset: Object.assign({}, payload.dataset) });
+    var ds = meta.dataset;
+    var arrays = {};
+    ["xTrain", "yTrain", "xVal", "yVal", "xTest", "yTest"].forEach(function (k) {
+      if (ds[k] && ds[k].length) { arrays[k] = ds[k]; ds[k] = []; }
+    });
+    var metaJson = JSON.stringify(meta);
+    // insert arrays back into the JSON string
+    var arrayEntries = Object.keys(arrays);
+    if (arrayEntries.length) {
+      arrayEntries.forEach(function (k) {
+        var placeholder = '"' + k + '":[]';
+        var chunks = [];
+        for (var i = 0; i < arrays[k].length; i++) {
+          chunks.push(JSON.stringify(arrays[k][i]));
+        }
+        metaJson = metaJson.replace(placeholder, '"' + k + '":[' + chunks.join(",") + "]");
+      });
+    }
+
+    var blob = new Blob([metaJson], { type: "application/json" });
+    var cs = new CompressionStream("gzip");
+    var compressedStream = blob.stream().pipeThrough(cs);
+
+    return new Response(compressedStream).blob().then(function (gzBlob) {
+      return fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Content-Encoding": "gzip" },
+        body: gzBlob,
+      });
+    }).then(function (res) {
+      if (!res.ok) throw new Error("Server returned " + res.status);
+      return res.json();
+    });
+  }
+
   function runTrainingOnServer(rawSpec, rawDeps) {
     var spec = rawSpec && typeof rawSpec === "object" ? rawSpec : {};
     var deps = rawDeps && typeof rawDeps === "object" ? rawDeps : {};
@@ -60,12 +124,8 @@
     };
 
     return new Promise(function (resolve, reject) {
-      // POST training request
-      fetch(serverUrl + "/api/train", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      }).then(function (res) {
+      // POST with gzip compression for large payloads
+      _postJson(serverUrl + "/api/train", payload).then(function (startResult) {
         if (!res.ok) throw new Error("Server returned " + res.status);
         return res.json();
       }).then(function (startResult) {
