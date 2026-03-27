@@ -97,24 +97,29 @@ def main():
 
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=3, factor=0.5, min_lr=1e-6)
 
-    # --- DataLoaders ---
-    train_ds = TensorDataset(torch.tensor(x_train), torch.tensor(y_train))
-    train_dl = DataLoader(train_ds, batch_size=batch_size, shuffle=True)
-    val_ds = TensorDataset(torch.tensor(x_val), torch.tensor(y_val))
-    val_dl = DataLoader(val_ds, batch_size=batch_size, shuffle=False)
-
-    # --- Determine loss ---
+    # --- Determine loss + prepare labels ---
     head_configs = config.get("headConfigs", [])
     target_mode = ds.get("targetMode", "xv")
     is_classification = target_mode in ("label", "logits") or (ds.get("numClasses", 0) > 0 and target_mode not in ("xv", "traj", "x", "v"))
     if is_classification:
         loss_fn = nn.CrossEntropyLoss()
-        # CrossEntropyLoss expects integer labels, not one-hot
+        # CrossEntropyLoss expects integer labels, not one-hot float
         if y_train.ndim > 1 and y_train.shape[1] > 1:
             y_train = y_train.argmax(axis=1).astype(np.int64)
-            y_val = y_val.argmax(axis=1).astype(np.int64) if y_val.ndim > 1 and y_val.shape[1] > 1 else y_val.astype(np.int64)
+        else:
+            y_train = y_train.flatten().astype(np.int64)
+        if y_val.ndim > 1 and y_val.shape[1] > 1:
+            y_val = y_val.argmax(axis=1).astype(np.int64)
+        else:
+            y_val = y_val.flatten().astype(np.int64)
     else:
         loss_fn = nn.MSELoss()
+
+    # --- DataLoaders (after label conversion) ---
+    train_ds = TensorDataset(torch.tensor(x_train), torch.tensor(y_train))
+    train_dl = DataLoader(train_ds, batch_size=batch_size, shuffle=True)
+    val_ds = TensorDataset(torch.tensor(x_val), torch.tensor(y_val))
+    val_dl = DataLoader(val_ds, batch_size=batch_size, shuffle=False)
 
     # --- Train ---
     best_val_loss = float("inf")
