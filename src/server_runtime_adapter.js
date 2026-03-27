@@ -47,43 +47,58 @@
       });
     }
 
-    // large payload — gzip compress then send
-    if (typeof CompressionStream !== "function") {
-      return Promise.reject(new Error("Dataset too large and CompressionStream not available. Use a modern browser."));
+    // large payload — stream JSON in chunks, gzip compress, send
+    if (typeof ReadableStream !== "function") {
+      return Promise.reject(new Error("Dataset too large. Use a modern browser with ReadableStream support."));
     }
 
-    // build JSON as TextEncoder stream to avoid single huge string
-    var parts = [];
+    // separate large arrays from metadata
     var meta = Object.assign({}, payload, { dataset: Object.assign({}, payload.dataset) });
     var ds = meta.dataset;
-    var arrays = {};
+    var largeKeys = [];
     ["xTrain", "yTrain", "xVal", "yVal", "xTest", "yTest"].forEach(function (k) {
-      if (ds[k] && ds[k].length) { arrays[k] = ds[k]; ds[k] = []; }
+      if (ds[k] && ds[k].length > 100) { largeKeys.push({ key: k, data: ds[k] }); ds[k] = "__STREAM__"; }
     });
-    var metaJson = JSON.stringify(meta);
-    // insert arrays back into the JSON string
-    var arrayEntries = Object.keys(arrays);
-    if (arrayEntries.length) {
-      arrayEntries.forEach(function (k) {
-        var placeholder = '"' + k + '":[]';
-        var chunks = [];
-        for (var i = 0; i < arrays[k].length; i++) {
-          chunks.push(JSON.stringify(arrays[k][i]));
+    var metaStr = JSON.stringify(meta);
+
+    // create a ReadableStream that yields JSON chunks without building one huge string
+    var encoder = new TextEncoder();
+    var streamDone = false;
+    var stream = new ReadableStream({
+      start: function (ctrl) {
+        // replace __STREAM__ placeholders with streamed array data
+        var remaining = metaStr;
+        for (var li = 0; li < largeKeys.length; li++) {
+          var lk = largeKeys[li];
+          var placeholder = '"' + lk.key + '":"__STREAM__"';
+          var idx = remaining.indexOf(placeholder);
+          if (idx < 0) continue;
+          // push everything before the placeholder
+          ctrl.enqueue(encoder.encode(remaining.substring(0, idx) + '"' + lk.key + '":['));
+          // push each row individually
+          for (var ri = 0; ri < lk.data.length; ri++) {
+            if (ri > 0) ctrl.enqueue(encoder.encode(","));
+            ctrl.enqueue(encoder.encode(JSON.stringify(lk.data[ri])));
+          }
+          ctrl.enqueue(encoder.encode("]"));
+          remaining = remaining.substring(idx + placeholder.length);
         }
-        metaJson = metaJson.replace(placeholder, '"' + k + '":[' + chunks.join(",") + "]");
-      });
+        // push the rest
+        if (remaining) ctrl.enqueue(encoder.encode(remaining));
+        ctrl.close();
+      }
+    });
+
+    // gzip if available
+    var bodyStream = stream;
+    var headers = { "Content-Type": "application/json" };
+    if (typeof CompressionStream === "function") {
+      bodyStream = stream.pipeThrough(new CompressionStream("gzip"));
+      headers["Content-Encoding"] = "gzip";
     }
 
-    var blob = new Blob([metaJson], { type: "application/json" });
-    var cs = new CompressionStream("gzip");
-    var compressedStream = blob.stream().pipeThrough(cs);
-
-    return new Response(compressedStream).blob().then(function (gzBlob) {
-      return fetch(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "Content-Encoding": "gzip" },
-        body: gzBlob,
-      });
+    return new Response(bodyStream).blob().then(function (blob) {
+      return fetch(url, { method: "POST", headers: headers, body: blob });
     }).then(function (res) {
       if (!res.ok) throw new Error("Server returned " + res.status);
       return res.json();
