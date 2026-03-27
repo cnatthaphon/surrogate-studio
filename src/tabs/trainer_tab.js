@@ -30,6 +30,7 @@
     var _mountId = 0;
     var _configFormApi = null;
     var _isTraining = false;
+    var _activeTrainingId = ""; // which trainer is currently being trained
     var _lossChartDiv = null;
     var _epochTableBody = null;
     var _subTab = "train"; // "train" | "test"
@@ -1061,9 +1062,9 @@
         rightEl.appendChild(serverPanel);
       }
 
-      // buttons — show Stop when training, Start/Continue otherwise
+      // buttons — show Stop only for the actively training trainer
       var btnRow = el("div", { style: "display:flex;gap:4px;margin-top:8px;" });
-      if (_isTraining) {
+      if (_isTraining && _activeTrainingId === activeId) {
         var stopBtn = el("button", { className: "osc-btn", style: "flex:1;background:linear-gradient(135deg,#dc2626,#991b1b);border-color:#ef4444;" }, "Stop Training");
         stopBtn.addEventListener("click", function () {
           _isTraining = false;
@@ -1227,6 +1228,7 @@
       tCard.config = config;
       if (store) { store.upsertTrainerCard(tCard); store.replaceTrainerEpochs(activeId, []); }
       _isTraining = true;
+      _activeTrainingId = activeId;
       _subTab = "train";
       onStatus("Training... (serializing model)");
       _renderLeftPanel(); _renderMainPanel(); _renderRightPanel();
@@ -1282,9 +1284,12 @@
             if (currentMountId !== _mountId) return;
             var logEntry = { epoch: payload.epoch, loss: payload.loss, val_loss: payload.val_loss, current_lr: payload.current_lr, improved: payload.improved };
             if (store) store.appendTrainerEpoch(activeId, logEntry);
-            var epochs = store.getTrainerEpochs(activeId);
-            if (_lossChartDiv) _plotLossChart(epochs);
-            _appendEpochRow(logEntry);
+            // only update UI if this trainer is currently displayed
+            if (stateApi && stateApi.getActiveTrainer() === activeId) {
+              var epochs = store.getTrainerEpochs(activeId);
+              if (_lossChartDiv) _plotLossChart(epochs);
+              _appendEpochRow(logEntry);
+            }
           },
           onStatus: function (msg) { onStatus(msg); },
           onReady: function (msg) { onStatus("Server ready: " + (msg.backend || "pytorch")); },
@@ -1395,9 +1400,11 @@
               if (currentMountId !== _mountId) return;
               var logEntry = { epoch: payload.epoch, loss: payload.loss, val_loss: payload.val_loss, current_lr: payload.current_lr, improved: payload.improved };
               if (store) store.appendTrainerEpoch(activeId, logEntry);
-              var epochs = store.getTrainerEpochs(activeId);
-              if (_lossChartDiv) _plotLossChart(epochs);
-              _appendEpochRow(logEntry);
+              if (stateApi && stateApi.getActiveTrainer() === activeId) {
+                var epochs = store.getTrainerEpochs(activeId);
+                if (_lossChartDiv) _plotLossChart(epochs);
+                _appendEpochRow(logEntry);
+              }
             },
             onStatus: function (msg) { onStatus(msg); },
           }, {
@@ -1461,9 +1468,11 @@
             if (currentMountId !== _mountId) return;
             var logEntry = { epoch: epoch + 1, loss: logs.loss, val_loss: logs.val_loss, current_lr: logs.current_lr, improved: logs.improved };
             if (store) store.appendTrainerEpoch(activeId, logEntry);
-            var epochs = store.getTrainerEpochs(activeId);
-            if (_lossChartDiv) _plotLossChart(epochs);
-            _appendEpochRow(logEntry);
+            if (stateApi && stateApi.getActiveTrainer() === activeId) {
+              var epochs = store.getTrainerEpochs(activeId);
+              if (_lossChartDiv) _plotLossChart(epochs);
+              _appendEpochRow(logEntry);
+            }
           },
         }).then(function (result) {
           _isTraining = false;
