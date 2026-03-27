@@ -519,11 +519,17 @@
         var target = String(d.targetType || d.target || "x");
         var rawLoss = String(d.loss || "mse");
         var loss = rawLoss === "use_global" ? "mse" : rawLoss;
-        // target options from schema — not hardcoded
+        // target options: schema-provided + common reconstruction/classification targets
         var outputKeys = (typeof api.getOutputKeys === "function") ? api.getOutputKeys(sid) : [];
-        var targetOptions = outputKeys.length
-          ? outputKeys.map(function (k) { return { value: k.key || k, label: k.label || k.key || k }; })
-          : [{ value: "x", label: "x" }];
+        var seen = {};
+        var targetOptions = [];
+        // add schema outputs first
+        outputKeys.forEach(function (k) { var v = k.key || k; if (!seen[v]) { seen[v] = true; targetOptions.push({ value: v, label: k.label || v }); } });
+        // add common targets if not already in schema
+        ["xv", "x", "v", "label", "logits", "traj", "params"].forEach(function (v) {
+          if (!seen[v]) { seen[v] = true; targetOptions.push({ value: v, label: v }); }
+        });
+        if (!targetOptions.length) targetOptions.push({ value: "x", label: "x" });
         addField({
           kind: "select",
           key: "targetType",
@@ -537,10 +543,12 @@
           label: "Loss",
           value: loss,
           options: [
-            { value: "mse", label: "mse" },
-            { value: "mae", label: "mae" },
-            { value: "huber", label: "huber" },
-            { value: "cross_entropy", label: "cross_entropy" }
+            { value: "mse", label: "MSE" },
+            { value: "mae", label: "MAE" },
+            { value: "huber", label: "Huber" },
+            { value: "bce", label: "Binary Cross-Entropy" },
+            { value: "categoricalCrossentropy", label: "Categorical Cross-Entropy" },
+            { value: "sparseCategoricalCrossentropy", label: "Sparse Cat. CE" }
           ]
         });
         if (target === "xv") {
@@ -748,7 +756,8 @@
           .replace(/^,|,$/g, "");
       } else if (k === "loss") {
         var vLoss = String(rawValue || "mse");
-        data.loss = (vLoss === "mse" || vLoss === "mae" || vLoss === "huber" || vLoss === "cross_entropy") ? vLoss : "mse";
+        var validLosses = ["mse", "mae", "huber", "bce", "categoricalCrossentropy", "sparseCategoricalCrossentropy", "cross_entropy"];
+        data.loss = validLosses.indexOf(vLoss) >= 0 ? vLoss : "mse";
       } else if (k === "wx") {
         data.wx = Math.max(0, Number(rawValue) || 1);
       } else if (k === "wv") {
