@@ -283,25 +283,12 @@
         return;
       }
 
-      // --- determine task type from model graph (not schema) ---
+      // read task type from model graph output nodes
       var schemaId = t.schemaId;
       var allowedOutputKeys = schemaRegistry ? schemaRegistry.getOutputKeys(schemaId) : ["x"];
-      var defaultTarget = (allowedOutputKeys[0] && (allowedOutputKeys[0].key || allowedOutputKeys[0])) || "x";
-      // read actual target from model's output node data (raw, not filtered by schema)
       var model = t.modelId ? (store ? store.getModel(t.modelId) : null) : null;
-      if (model && model.graph) {
-        var gd = modelBuilder ? modelBuilder.extractGraphData(model.graph) : null;
-        if (gd) {
-          var gids = Object.keys(gd);
-          for (var gi = 0; gi < gids.length; gi++) {
-            var gn = gd[gids[gi]];
-            if (gn && gn.name === "output_layer" && gn.data && gn.data.target) {
-              defaultTarget = String(gn.data.target);
-              break;
-            }
-          }
-        }
-      }
+      var heads = (model && model.graph && modelBuilder) ? modelBuilder.inferOutputHeads(model.graph, allowedOutputKeys, "x") : [];
+      var defaultTarget = (heads.length && heads[0].target) ? heads[0].target : ((allowedOutputKeys[0] && (allowedOutputKeys[0].key || allowedOutputKeys[0])) || "x");
       var isClassification = defaultTarget === "label" || defaultTarget === "logits";
 
       // --- check if server returned raw predictions (full charts) ---
@@ -357,7 +344,7 @@
           var W2 = typeof window !== "undefined" ? window : {};
           var srcReg2 = W2.OSCDatasetSourceRegistry || null;
           var oh = function (l, n) { var a = new Array(n).fill(0); a[l] = 1; return a; };
-          var isReconstruction2 = defaultTarget === "xv" || defaultTarget === "x";
+          var isReconstruction2 = !isClassification && defaultTarget !== "label" && defaultTarget !== "logits";
           var testSplit;
           if (srcReg2 && typeof srcReg2.resolveDatasetSplit === "function") {
             testSplit = srcReg2.resolveDatasetSplit(activeDs, "test");
@@ -380,10 +367,9 @@
         // rebuild model
         var graphMode = modelBuilder.inferGraphMode(modelRec.graph, "direct");
         var featureSize = Number(activeDs.featureSize || (activeDs.xTest && activeDs.xTest[0] && activeDs.xTest[0].length) || 1);
-        var testBuildKeys = (defaultTarget === "xv" || defaultTarget === "x") ? [defaultTarget] : allowedOutputKeys;
         var rebuiltModel = modelBuilder.buildModelFromGraph(tf, modelRec.graph, {
           mode: graphMode, featureSize: featureSize, windowSize: 1, seqFeatureSize: featureSize,
-          allowedOutputKeys: testBuildKeys, defaultTarget: defaultTarget, numClasses: activeDs.numClasses || nCls,
+          allowedOutputKeys: allowedOutputKeys, defaultTarget: defaultTarget, numClasses: activeDs.numClasses || nCls,
         });
 
         // load saved weights
@@ -1177,20 +1163,9 @@
 
       var schemaId = tCard.schemaId;
       var allowedOutputKeys = schemaRegistry ? schemaRegistry.getOutputKeys(schemaId) : ["x"];
-      var defaultTarget = allowedOutputKeys[0] || "x";
-      // read actual target from model's output node (raw, not filtered)
-      if (model && model.graph && modelBuilder) {
-        var _gd = modelBuilder.extractGraphData(model.graph);
-        if (_gd) {
-          var _gids = Object.keys(_gd);
-          for (var _gi = 0; _gi < _gids.length; _gi++) {
-            var _gn = _gd[_gids[_gi]];
-            if (_gn && _gn.name === "output_layer" && _gn.data && _gn.data.target) {
-              defaultTarget = String(_gn.data.target); break;
-            }
-          }
-        }
-      }
+      // read target from model graph (not schema)
+      var _heads = modelBuilder ? modelBuilder.inferOutputHeads(model.graph, allowedOutputKeys, "x") : [];
+      var defaultTarget = (_heads.length && _heads[0].target) ? _heads[0].target : (allowedOutputKeys[0] || "x");
       var dsData = dataset.data;
       var isBundle = dsData.kind === "dataset_bundle" && dsData.datasets;
       var activeDs = isBundle ? dsData.datasets[dsData.activeVariantId || Object.keys(dsData.datasets)[0]] : dsData;
@@ -1200,7 +1175,7 @@
       if (!activeDs.xTrain) {
         var nClasses = activeDs.classCount || activeDs.numClasses || 10;
         var isClassification = defaultTarget === "label" || defaultTarget === "logits";
-        var isReconstruction = defaultTarget === "xv" || defaultTarget === "x";
+        var isReconstruction = !isClassification && defaultTarget !== "label" && defaultTarget !== "logits";
         function oneHot(label, n) { var arr = new Array(n).fill(0); arr[label] = 1; return arr; }
         function resolveSplit(ds, split) {
           if (srcReg && typeof srcReg.resolveDatasetSplit === "function") return srcReg.resolveDatasetSplit(ds, split);
@@ -1231,14 +1206,12 @@
       var featureSize = Number(activeDs.featureSize || (activeDs.xTrain && activeDs.xTrain[0] && activeDs.xTrain[0].length) || 1);
 
       var buildResult;
-      // for reconstruction models, override allowedOutputKeys to match model target
-      var buildOutputKeys = (defaultTarget === "xv" || defaultTarget === "x") ? [defaultTarget] : allowedOutputKeys;
       try {
         buildResult = modelBuilder.buildModelFromGraph(tf, model.graph, {
           mode: graphMode, featureSize: featureSize,
           seqFeatureSize: Number(activeDs.seqFeatureSize || featureSize),
           windowSize: Number(activeDs.windowSize || 1),
-          allowedOutputKeys: buildOutputKeys, defaultTarget: defaultTarget,
+          allowedOutputKeys: allowedOutputKeys, defaultTarget: defaultTarget,
           paramNames: activeDs.paramNames, paramSize: activeDs.paramSize, numClasses: activeDs.numClasses || activeDs.classCount || 10,
         });
       } catch (err) { onStatus("Build error: " + err.message); return; }

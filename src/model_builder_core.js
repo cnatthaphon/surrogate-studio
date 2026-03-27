@@ -101,23 +101,22 @@
   // --- output target helpers ---
 
   function normalizeOutputTargetsList(raw, fallbackTargets, allowedKeys) {
-    var allowed = Array.isArray(allowedKeys) ? allowedKeys : ["x"];
-    var defaultTarget = allowed.indexOf("x") >= 0
-      ? "x"
-      : (allowed.indexOf("logits") >= 0 ? "logits" : String(allowed[0] || "x"));
+    var allowed = Array.isArray(allowedKeys) ? allowedKeys : [];
+    var defaultTarget = allowed.length ? String(allowed[0] || "x") : "x";
     var list = [];
     if (Array.isArray(raw)) {
-      list = raw.map(function (x) { return String(x || "").trim().toLowerCase(); });
+      list = raw.map(function (x) { return String(x || "").trim().toLowerCase(); }).filter(Boolean);
     } else if (typeof raw === "string") {
-      list = raw.split(",").map(function (x) { return String(x || "").trim().toLowerCase(); });
+      list = raw.split(",").map(function (x) { return String(x || "").trim().toLowerCase(); }).filter(Boolean);
     } else if (raw != null) {
-      list = [String(raw || "").trim().toLowerCase()];
+      var s = String(raw || "").trim().toLowerCase();
+      if (s) list = [s];
     }
-    list = list.filter(function (x) { return x && allowed.indexOf(x) >= 0; });
+    // use what the node specifies — don't filter through allowedKeys
+    // allowedKeys is only a fallback when the node doesn't specify
     if (!list.length) {
       var fb = Array.isArray(fallbackTargets) ? fallbackTargets : [String(fallbackTargets || defaultTarget)];
-      list = fb.map(function (x) { return String(x || "").trim().toLowerCase(); })
-        .filter(function (x) { return x && allowed.indexOf(x) >= 0; });
+      list = fb.map(function (x) { return String(x || "").trim().toLowerCase(); }).filter(Boolean);
     }
     if (!list.length) list = [defaultTarget];
     var uniq = [];
