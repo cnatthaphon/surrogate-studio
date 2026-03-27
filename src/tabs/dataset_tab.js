@@ -196,6 +196,25 @@
       var mod = _getModuleForSchema(ds.schemaId);
       var previewMount = el("div", { style: "margin-top:8px;" });
       mainEl.appendChild(previewMount);
+
+      // ensure source is loaded before rendering (source-backed datasets)
+      var W = typeof window !== "undefined" ? window : {};
+      var srcReg = W.OSCDatasetSourceRegistry || null;
+      if (d.sourceId && srcReg && !srcReg.has(d.sourceId)) {
+        // source not loaded yet — trigger load via module build (which fetches + registers)
+        previewMount.appendChild(el("div", { style: "color:#fbbf24;font-size:12px;" }, "Loading source data..."));
+        if (mod && typeof mod.build === "function") {
+          mod.build({ seed: 42, totalCount: 1, variant: d.datasetModuleId || ds.schemaId }).then(function () {
+            if (currentMountId !== _mountId) return;
+            _renderMainPanel(); // re-render now that source is loaded
+          }).catch(function (err) {
+            previewMount.innerHTML = "";
+            previewMount.appendChild(el("div", { style: "color:#f43f5e;font-size:11px;" }, "Source load error: " + err.message));
+          });
+        }
+        return;
+      }
+
       var previewDeps = {
         el: el, escapeHtml: escapeHtml,
         Plotly: (typeof window !== "undefined" && window.Plotly) ? window.Plotly : null,
@@ -204,7 +223,6 @@
       };
 
       if (mod && mod.playgroundApi && typeof mod.playgroundApi.renderDataset === "function") {
-        // module has dedicated dataset renderer
         mod.playgroundApi.renderDataset(previewMount, previewDeps);
       } else if (mod && mod.playgroundApi && typeof mod.playgroundApi.renderPlayground === "function") {
         // fallback to playground renderer with dataset data

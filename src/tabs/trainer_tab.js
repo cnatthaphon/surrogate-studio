@@ -1123,6 +1123,24 @@
       if (!model || !model.graph) { onStatus("Model has no graph — save from Model tab first"); return; }
       if (dataset.schemaId !== model.schemaId) { onStatus("Schema mismatch: " + dataset.schemaId + " vs " + model.schemaId); return; }
 
+      // ensure source is loaded for source-backed datasets
+      var _W = typeof window !== "undefined" ? window : {};
+      var _srcReg = _W.OSCDatasetSourceRegistry || null;
+      if (dataset.data.sourceId && _srcReg && !_srcReg.has(dataset.data.sourceId)) {
+        onStatus("Loading source data...");
+        var _dm = _W.OSCDatasetModules;
+        var _mods = (_dm && typeof _dm.getModuleForSchema === "function") ? _dm.getModuleForSchema(dataset.schemaId) : [];
+        var _dsMod = _mods.length ? _dm.getModule(_mods[0].id) : null;
+        if (_dsMod && typeof _dsMod.build === "function") {
+          _dsMod.build({ seed: 42, totalCount: 1, variant: dataset.data.datasetModuleId || dataset.schemaId }).then(function () {
+            _handleTrain(); // retry after source loaded
+          }).catch(function (err) {
+            onStatus("Source load error: " + err.message);
+          });
+          return;
+        }
+      }
+
       var tf = getTf();
       if (!tf) { onStatus("TF.js not loaded"); return; }
       if (!modelBuilder) { onStatus("Model builder not available"); return; }

@@ -131,7 +131,8 @@
     var source = sourceId ? get(sourceId) : null;
     var indices = (ds.splitIndices && ds.splitIndices[split]) || [];
     if (!source || !indices.length) {
-      return { x: [], y: [], length: 0 };
+      // source not loaded yet (page refresh) or no indices
+      return { x: [], y: [], length: 0, sourceNotLoaded: !!sourceId && !source };
     }
 
     var x = new Array(indices.length);
