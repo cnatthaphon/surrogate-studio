@@ -798,10 +798,23 @@
       scatterCard.appendChild(scatterDiv);
       container.appendChild(scatterCard);
 
-      var minVal = Math.min.apply(null, truthFlat.concat(predFlat));
-      var maxVal = Math.max.apply(null, truthFlat.concat(predFlat));
+      // subsample for scatter plot if too many points (>50K)
+      var plotTruth = truthFlat, plotPred = predFlat;
+      var maxPlotPoints = 50000;
+      if (truthFlat.length > maxPlotPoints) {
+        var step = Math.ceil(truthFlat.length / maxPlotPoints);
+        plotTruth = []; plotPred = [];
+        for (var si = 0; si < truthFlat.length; si += step) { plotTruth.push(truthFlat[si]); plotPred.push(predFlat[si]); }
+      }
+      var minVal = Infinity, maxVal = -Infinity;
+      for (var mi = 0; mi < plotTruth.length; mi++) {
+        if (plotTruth[mi] < minVal) minVal = plotTruth[mi];
+        if (plotTruth[mi] > maxVal) maxVal = plotTruth[mi];
+        if (plotPred[mi] < minVal) minVal = plotPred[mi];
+        if (plotPred[mi] > maxVal) maxVal = plotPred[mi];
+      }
       Plotly.newPlot(scatterDiv, [
-        { x: truthFlat, y: predFlat, mode: "markers", name: "Predictions", marker: { size: 4, color: "#22d3ee", opacity: 0.7 } },
+        { x: plotTruth, y: plotPred, mode: "markers", name: "Predictions" + (truthFlat.length > maxPlotPoints ? " (" + plotTruth.length + "/" + truthFlat.length + ")" : ""), marker: { size: 3, color: "#22d3ee", opacity: 0.5 } },
         { x: [minVal, maxVal], y: [minVal, maxVal], mode: "lines", name: "Identity", line: { color: "#4ade80", dash: "dash", width: 1.5 } },
       ], Object.assign({}, darkLayout, {
         title: { text: "Pred vs Truth (R\u00B2=" + r2.toFixed(4) + ")", font: { size: 12 } },
@@ -817,8 +830,15 @@
       residCard.appendChild(residDiv);
       container.appendChild(residCard);
 
+      // subsample residuals too
+      var plotResidPred = plotPred, plotResid = residuals;
+      if (residuals.length > maxPlotPoints) {
+        var rstep = Math.ceil(residuals.length / maxPlotPoints);
+        plotResidPred = []; plotResid = [];
+        for (var ri = 0; ri < residuals.length; ri += rstep) { plotResidPred.push(predFlat[ri]); plotResid.push(residuals[ri]); }
+      }
       Plotly.newPlot(residDiv, [
-        { x: predFlat, y: residuals, mode: "markers", name: "Residuals", marker: { size: 4, color: "#f59e0b", opacity: 0.6 } },
+        { x: plotResidPred, y: plotResid, mode: "markers", name: "Residuals", marker: { size: 3, color: "#f59e0b", opacity: 0.4 } },
         { x: [minVal, maxVal], y: [0, 0], mode: "lines", name: "Zero", line: { color: "#475569", dash: "dash", width: 1 }, showlegend: false },
       ], Object.assign({}, darkLayout, {
         title: { text: "Residuals vs Predicted", font: { size: 12 } },
