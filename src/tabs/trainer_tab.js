@@ -1068,8 +1068,9 @@
         var stopBtn = el("button", { className: "osc-btn", style: "flex:1;background:linear-gradient(135deg,#dc2626,#991b1b);border-color:#ef4444;" }, "Stop Training");
         stopBtn.addEventListener("click", function () {
           _isTraining = false;
-          tCard.status = "stopped";
-          if (store) store.upsertTrainerCard(tCard);
+          _activeTrainingId = "";
+          var tc = store ? store.getTrainerCard(activeId) : null;
+          if (tc) { tc.status = "stopped"; store.upsertTrainerCard(tc); }
           onStatus("Training stopped");
           _renderLeftPanel(); _renderMainPanel(); _renderRightPanel();
         });
