@@ -107,6 +107,7 @@
           mountEl: listMount, items: items, emptyText: "No trainers.",
           onOpen: function (id) {
             if (stateApi) stateApi.setActiveTrainer(id);
+            if (!_isTraining) _subTab = "train"; // reset to train tab when switching items (unless actively training)
             _renderLeftPanel(); _renderMainPanel(); _renderRightPanel();
           },
           onAction: function (id, act) {
@@ -1133,7 +1134,7 @@
         var _dsMod = _mods.length ? _dm.getModule(_mods[0].id) : null;
         if (_dsMod && typeof _dsMod.build === "function") {
           _dsMod.build({ seed: 42, totalCount: 1, variant: dataset.data.datasetModuleId || dataset.schemaId }).then(function () {
-            _handleTrain(); // retry after source loaded
+            onStatus("Source loaded. Click Start Training again.");
           }).catch(function (err) {
             onStatus("Source load error: " + err.message);
           });
@@ -1582,10 +1583,8 @@
     function mount() {
       _mountId++; _subTab = "train";
       _renderLeftPanel(); _renderMainPanel(); _renderRightPanel();
-      // auto-check server on mount
-      if (_serverAvailable === null) {
-        _checkServerConnection("", function () { _renderRightPanel(); });
-      }
+      // always recheck server on mount (heartbeat)
+      _checkServerConnection("", function () { _renderRightPanel(); });
     }
     function unmount() { _mountId++; if (_configFormApi && typeof _configFormApi.destroy === "function") _configFormApi.destroy(); _configFormApi = null; layout.leftEl.innerHTML = ""; layout.mainEl.innerHTML = ""; layout.rightEl.innerHTML = ""; }
     function refresh() { mount(); }
