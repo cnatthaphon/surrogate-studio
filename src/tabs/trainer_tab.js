@@ -1311,15 +1311,22 @@
           _renderLeftPanel(); _renderMainPanel(); _renderRightPanel();
           buildResult.model.dispose();
         }).catch(function (err) {
+          var msg = String(err.message || "");
+          // dataset too large for server → fallback to client training
+          if (msg.indexOf("too large") >= 0 || msg.indexOf("transfer") >= 0) {
+            onStatus("Server: " + msg + " \u2014 training on client");
+            _runClientTraining();
+            return;
+          }
           _isTraining = false;
-          tCard.status = "error"; tCard.error = err.message;
+          tCard.status = "error"; tCard.error = msg;
           if (store) store.upsertTrainerCard(tCard);
-          onStatus("Server error: " + err.message);
+          onStatus("Server error: " + msg);
           _renderLeftPanel(); _renderMainPanel(); _renderRightPanel();
           buildResult.model.dispose();
         });
         }); // close checkServer.then
-        return; // don't fall through to Worker path
+        return; // don't fall through to client path
       } // close if (useServer)
 
       _runClientTraining();

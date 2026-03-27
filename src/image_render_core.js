@@ -85,32 +85,51 @@
       label + " | Classes: " + classCount + " | Shape: " + imgW + "x" + imgH + "x" + (imageShape[2] || 1) +
       " | " + totalSamples + " samples" + (data.source ? " (" + data.source + ")" : "")));
 
-    // resolve splits via source registry or legacy records
+    // resolve splits — only materialize samples needed for display
+    // For source-backed datasets: resolve per-sample on demand via getRow()
     var W = typeof root !== "undefined" ? root : {};
     var srcReg = W.OSCDatasetSourceRegistry || null;
 
-    function _resolveSplit(d, splitName) {
-      if (srcReg && typeof srcReg.resolveDatasetSplit === "function" && d.sourceId) {
-        return srcReg.resolveDatasetSplit(d, splitName);
+    function _resolveSplitForDisplay(d, splitName) {
+      // source-backed: resolve lazily, only materialize what we need
+      if (srcReg && d.sourceId && srcReg.has(d.sourceId)) {
+        var source = srcReg.get(d.sourceId);
+        var indices = (d.splitIndices && d.splitIndices[splitName]) || [];
+        var totalCount = indices.length;
+        // for display we use a sampled subset per class + full label list for distribution
+        var maxDisplay = Math.min(indices.length, 500); // enough for per-class sampling
+        var x = new Array(maxDisplay);
+        var y = new Array(indices.length); // full labels for distribution chart
+        for (var i = 0; i < indices.length; i++) {
+          y[i] = source.getLabel(indices[i]);
+          if (i < maxDisplay) x[i] = source.getRow(indices[i]);
+        }
+        return { x: x, y: y, length: totalCount, fullLength: totalCount };
       }
+      // legacy records
       var rec = d.records && d.records[splitName];
-      return rec ? { x: rec.x || [], y: rec.y || [], length: (rec.x || []).length } : { x: [], y: [], length: 0 };
+      if (rec) return { x: rec.x || [], y: rec.y || [], length: (rec.x || []).length };
+      // legacy flat arrays
+      var upper = splitName.charAt(0).toUpperCase() + splitName.slice(1);
+      if (d["x" + upper]) return { x: d["x" + upper], y: d["y" + upper] || [], length: d["x" + upper].length };
+      return { x: [], y: [], length: 0 };
     }
 
     var splits;
     if (showSplits) {
       splits = [];
-      var train = _resolveSplit(data, "train");
-      var val = _resolveSplit(data, "val");
-      var test = _resolveSplit(data, "test");
-      if (train.length) splits.push({ name: "Train", x: train.x, y: train.y, color: "#22d3ee" });
-      if (val.length) splits.push({ name: "Val", x: val.x, y: val.y, color: "#fbbf24" });
-      if (test.length) splits.push({ name: "Test", x: test.x, y: test.y, color: "#a78bfa" });
+      var train = _resolveSplitForDisplay(data, "train");
+      var val = _resolveSplitForDisplay(data, "val");
+      var test = _resolveSplitForDisplay(data, "test");
+      if (train.length) splits.push({ name: "Train", x: train.x, y: train.y, totalCount: train.fullLength || train.length, color: "#22d3ee" });
+      if (val.length) splits.push({ name: "Val", x: val.x, y: val.y, totalCount: val.fullLength || val.length, color: "#fbbf24" });
+      if (test.length) splits.push({ name: "Test", x: test.x, y: test.y, totalCount: test.fullLength || test.length, color: "#a78bfa" });
     } else {
-      var all = _resolveSplit(data, "train");
-      var valA = _resolveSplit(data, "val");
-      var testA = _resolveSplit(data, "test");
-      splits = [{ name: "Samples", x: [].concat(all.x, valA.x, testA.x), y: [].concat(all.y, valA.y, testA.y), color: "#22d3ee" }];
+      var all = _resolveSplitForDisplay(data, "train");
+      var valA = _resolveSplitForDisplay(data, "val");
+      var testA = _resolveSplitForDisplay(data, "test");
+      var totalCount = (all.fullLength || all.length) + (valA.fullLength || valA.length) + (testA.fullLength || testA.length);
+      splits = [{ name: "Samples", x: [].concat(all.x, valA.x, testA.x), y: [].concat(all.y, valA.y, testA.y), totalCount: totalCount, color: "#22d3ee" }];
     }
 
     var allCanvases = [];
@@ -121,7 +140,7 @@
 
       // split header
       splitDiv.appendChild(el("div", { style: "font-size:11px;color:" + split.color + ";font-weight:600;margin-bottom:4px;" },
-        split.name + " (" + split.x.length + " samples)"));
+        split.name + " (" + (split.totalCount || split.x.length) + " samples)"));
 
       // group by class
       var byClass = {};
