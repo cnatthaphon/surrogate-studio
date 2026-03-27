@@ -1039,26 +1039,25 @@
 
       // server connection panel
       if (serverPanel && serverStatusEl) {
-        var testBtn = el("button", { style: "margin-left:8px;padding:2px 8px;font-size:10px;border-radius:4px;border:1px solid #475569;background:#1f2937;color:#cbd5e1;cursor:pointer;" }, "Test Connection");
-        testBtn.addEventListener("click", function () {
+        var refreshBtn = el("button", { style: "margin-left:6px;padding:1px 6px;font-size:12px;border-radius:4px;border:1px solid #475569;background:#1f2937;color:#cbd5e1;cursor:pointer;", title: "Refresh connection" }, "\u21bb");
+        refreshBtn.addEventListener("click", function () {
           var urlInput = rightEl.querySelector("input[data-config-key='serverUrl']");
           var url = urlInput ? urlInput.value : "";
           _serverUrl = url;
           serverStatusEl.style.color = "#fbbf24";
-          serverStatusEl.textContent = "Testing...";
+          serverStatusEl.textContent = "\u21bb Checking...";
           _checkServerConnection(url, function (ok, info) {
             if (ok) {
               serverStatusEl.style.color = "#4ade80";
-              serverStatusEl.textContent = "\u2713 Connected: " + (info && info.backend || "pytorch");
-              if (info && info.python) serverStatusEl.textContent += " (" + info.python + ")";
+              serverStatusEl.textContent = "\u2713 " + (info && info.backend || "pytorch");
             } else {
               serverStatusEl.style.color = "#f43f5e";
-              serverStatusEl.textContent = "\u2717 Cannot reach server";
+              serverStatusEl.textContent = "\u2717 Offline";
             }
           });
         });
         serverPanel.appendChild(serverStatusEl);
-        serverPanel.appendChild(testBtn);
+        serverPanel.appendChild(refreshBtn);
         rightEl.appendChild(serverPanel);
       }
 
@@ -1341,13 +1340,23 @@
       var workerBridge = W.OSCTrainingWorkerBridge;
       var useWorker = workerBridge && typeof workerBridge.runTrainingInWorker === "function";
       if (useWorker) {
-        try { var _tw = new Worker("./src/training_worker.js"); _tw.terminate(); } catch (e) { useWorker = false; console.warn("[trainer] Worker not available:", e.message); }
+        // resolve worker path from script tags (handles subdirectory demos)
+        var _workerUrl = "./src/training_worker.js";
+        try {
+          var _scripts = document.querySelectorAll("script[src*='training_worker']");
+          if (_scripts.length) _workerUrl = _scripts[0].src;
+          else {
+            var _anySrc = document.querySelector("script[src*='training_engine_core']");
+            if (_anySrc) _workerUrl = _anySrc.src.replace("training_engine_core", "training_worker");
+          }
+        } catch (_) {}
+        try { var _tw = new Worker(_workerUrl); _tw.terminate(); } catch (e) { useWorker = false; console.warn("[trainer] Worker not available:", e.message); }
       }
 
       if (useWorker) {
         // === WORKER PATH (non-blocking) ===
         buildResult.model.save(tf.io.withSaveHandler(function (artifacts) {
-          onStatus("Training via Worker...");
+          onStatus("Training via TF.js Worker (" + (config.runtimeBackend || "auto") + ")...");
 
           workerBridge.runTrainingInWorker({
             runId: activeId,
@@ -1392,14 +1401,7 @@
             },
             onStatus: function (msg) { onStatus(msg); },
           }, {
-            workerPath: (function () {
-              // resolve worker path relative to current script
-              try {
-                var scripts = document.querySelectorAll("script[src*='training_worker']");
-                if (scripts.length) return scripts[0].src;
-              } catch (e) {}
-              return "./src/training_worker.js";
-            })(),
+            workerPath: _workerUrl,
           }).then(function (result) {
             _isTraining = false;
             if (currentMountId !== _mountId) return;
@@ -1433,7 +1435,7 @@
 
       } else {
         // === FALLBACK: main thread (will freeze UI) ===
-        onStatus("\u26a0 Training on main thread (UI will freeze). Use http:// server for smooth Worker training.");
+        onStatus("Training on TF.js (main thread, " + (tf.getBackend ? tf.getBackend() : "cpu") + ")...");
         trainingEngine.trainModel(tf, {
           model: buildResult.model, isSequence: buildResult.isSequence, headConfigs: buildResult.headConfigs,
           dataset: {
