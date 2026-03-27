@@ -142,9 +142,11 @@
       splitDiv.appendChild(el("div", { style: "font-size:11px;color:" + split.color + ";font-weight:600;margin-bottom:4px;" },
         split.name + " (" + (split.totalCount || split.x.length) + " samples)"));
 
-      // group by class
+      // group by class — only indices that have pixel data in x
       var byClass = {};
+      var xLen = split.x.length;
       for (var i = 0; i < split.y.length; i++) {
+        if (i >= xLen) break; // no pixel data beyond materialized range
         var cls = Number(split.y[i]);
         if (!byClass[cls]) byClass[cls] = [];
         byClass[cls].push(i);

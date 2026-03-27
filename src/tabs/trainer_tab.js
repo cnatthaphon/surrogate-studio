@@ -1208,12 +1208,14 @@
       var featureSize = Number(activeDs.featureSize || (activeDs.xTrain && activeDs.xTrain[0] && activeDs.xTrain[0].length) || 1);
 
       var buildResult;
+      // for reconstruction models, override allowedOutputKeys to match model target
+      var buildOutputKeys = (defaultTarget === "xv" || defaultTarget === "x") ? [defaultTarget] : allowedOutputKeys;
       try {
         buildResult = modelBuilder.buildModelFromGraph(tf, model.graph, {
           mode: graphMode, featureSize: featureSize,
           seqFeatureSize: Number(activeDs.seqFeatureSize || featureSize),
           windowSize: Number(activeDs.windowSize || 1),
-          allowedOutputKeys: allowedOutputKeys, defaultTarget: defaultTarget,
+          allowedOutputKeys: buildOutputKeys, defaultTarget: defaultTarget,
           paramNames: activeDs.paramNames, paramSize: activeDs.paramSize, numClasses: activeDs.numClasses || activeDs.classCount || 10,
         });
       } catch (err) { onStatus("Build error: " + err.message); return; }
