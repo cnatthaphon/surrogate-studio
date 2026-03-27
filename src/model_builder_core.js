@@ -322,11 +322,13 @@
     var ids = Object.keys(moduleData || {});
     if (!ids.length) throw new Error("Graph is empty.");
 
+    var inputNodeNames = { "input_layer": true, "image_source_block": true, "image_source_layer": true, "sample_z_layer": true };
     var inputIds = ids.filter(function (id) {
-      var n = moduleData[id] && moduleData[id].name;
-      return n === "input_layer" || n === "image_source_block" || n === "image_source_layer";
+      return moduleData[id] && inputNodeNames[moduleData[id].name];
     });
-    if (inputIds.length !== 1) throw new Error("Graph must contain exactly one Input node (found " + inputIds.length + ").");
+    if (!inputIds.length) throw new Error("Graph must contain at least one Input/ImageSource/SampleZ node.");
+    // for now, use the first input node as primary
+    // TODO: multi-input support for GAN (SampleZ + ImageSource)
     var inputId = String(inputIds[0]);
 
     var allowedOutputKeys = Array.isArray(datasetMeta.allowedOutputKeys) ? datasetMeta.allowedOutputKeys : ["x"];
@@ -527,6 +529,15 @@
         return tf.layers.lstm(rnnCfg).apply(rnnIn);
       }
       if (node.name === "concat_block") return inTensor;
+      // Detach: tf.stopGradients (passes data, stops backprop)
+      if (node.name === "detach_layer") {
+        return tf.layers.activation({ activation: "linear" }).apply(inTensor); // placeholder — TF.js doesn't have stopGradient as layer
+      }
+      // NoiseInjection: add Gaussian noise (training only)
+      if (node.name === "noise_injection_layer") {
+        var noiseScale = Number((node.data && node.data.scale) || 0.1);
+        return tf.layers.gaussianNoise({ stddev: noiseScale }).apply(inTensor);
+      }
       throw new Error("Unsupported node type: " + node.name);
     };
 

@@ -52,6 +52,10 @@
       _paletteItem("addCosNormBtn", "cos_norm", "CosNorm", "Utils", {}),
       _paletteItem("addNoiseScheduleBtn", "noise_schedule", "NoiseSchedule", "Utils", {}),
       _paletteItem("addConcatBtn", "concat", "Concat", "Utils", { numInputs: 2 }),
+      _paletteItem("addDetachBtn", "detach", "Detach", "Gradient", {}),
+      _paletteItem("addSampleZBtn", "sample_z", "SampleZ", "Gradient", { dim: 128, distribution: "normal" }),
+      _paletteItem("addNoiseInjBtn", "noise_injection", "AddNoise", "Gradient", { scale: 0.1, schedule: "constant" }),
+      _paletteItem("addTimeEmbBtn", "time_embed", "TimeEmbed", "Gradient", { dim: 64 }),
       _paletteItem("addOutputMultiBtn", "output", "Output", "Output", { target: "x", targetType: "x", loss: "mse" }),
     ];
   }

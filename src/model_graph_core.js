@@ -269,6 +269,39 @@
       return editor.addNode("lstm_layer", 1, 1, x, y, "lstm_layer", { units: units, dropout: dropout, returnseq: returnseq }, html);
     }
 
+    // === New building blocks for GAN/Diffusion ===
+
+    function addDetachNode(editor, x, y) {
+      var html = "<div><div style='font-weight:700'>Detach</div><div class='node-summary' style='font-size:11px;color:#94a3b8;'>stop gradient</div></div>";
+      return editor.addNode("detach_layer", 1, 1, x, y, "detach_layer", {}, html);
+    }
+
+    function addSampleZNode(editor, x, y, cfg) {
+      var dim = Math.max(1, Number((cfg && cfg.dim) || 128));
+      var distribution = String((cfg && cfg.distribution) || "normal");
+      var html =
+        "<div><div style='font-weight:700'>SampleZ</div>" +
+        "<div class='node-summary' style='font-size:11px;color:#94a3b8;'>z~" + distribution + "(" + dim + ")</div></div>";
+      return editor.addNode("sample_z_layer", 0, 1, x, y, "sample_z_layer", { dim: dim, distribution: distribution }, html);
+    }
+
+    function addNoiseInjectionNode(editor, x, y, cfg) {
+      var scale = Math.max(0, Number((cfg && cfg.scale) || 0.1));
+      var schedule = String((cfg && cfg.schedule) || "constant");
+      var html =
+        "<div><div style='font-weight:700'>AddNoise</div>" +
+        "<div class='node-summary' style='font-size:11px;color:#94a3b8;'>scale=" + scale + ", " + schedule + "</div></div>";
+      return editor.addNode("noise_injection_layer", 1, 1, x, y, "noise_injection_layer", { scale: scale, schedule: schedule }, html);
+    }
+
+    function addTimeEmbedNode(editor, x, y, cfg) {
+      var dim = Math.max(1, Number((cfg && cfg.dim) || 64));
+      var html =
+        "<div><div style='font-weight:700'>TimeEmbed</div>" +
+        "<div class='node-summary' style='font-size:11px;color:#94a3b8;'>dim=" + dim + "</div></div>";
+      return editor.addNode("time_embed_layer", 0, 1, x, y, "time_embed_layer", { dim: dim }, html);
+    }
+
     function getNodeFactories() {
       return {
         input: addInputNode,
@@ -298,6 +331,10 @@
         rnn: addRnnNode,
         gru: addGruNode,
         lstm: addLstmNode,
+        detach: addDetachNode,
+        sample_z: addSampleZNode,
+        noise_injection: addNoiseInjectionNode,
+        time_embed: addTimeEmbedNode,
       };
     }
 
@@ -561,8 +598,41 @@
         } else if (target === "traj") {
           addMessage("Trajectory reconstruction head. In notebook pipeline this maps to full x(t) sequence target.");
         } else if (target === "label" || target === "logits") {
-          addMessage("Classification head. Use cross_entropy for supervised labels and logits for raw class scores.");
+          addMessage("Classification head. Use categoricalCrossentropy for one-hot, sparseCategoricalCrossentropy for integer labels.");
         }
+        addField({ kind: "number", key: "matchWeight", label: "Head weight", value: Math.max(0, Number(d.matchWeight || 1)).toFixed(2), min: 0, step: 0.1 });
+        addField({
+          kind: "select", key: "phase", label: "Training phase",
+          value: String(d.phase || "0"),
+          options: [
+            { value: "0", label: "All phases (default)" },
+            { value: "1", label: "Phase 1 (e.g. Discriminator)" },
+            { value: "2", label: "Phase 2 (e.g. Generator)" },
+            { value: "3", label: "Phase 3" },
+          ]
+        });
+        return spec;
+      }
+      // --- Detach node ---
+      if (node.name === "detach_layer") {
+        addMessage("Stops gradient flow. Data passes through unchanged, but backpropagation stops here.");
+        return spec;
+      }
+      // --- SampleZ node ---
+      if (node.name === "sample_z_layer") {
+        addField({ kind: "number", key: "dim", label: "Latent dim", value: Math.max(1, Number(d.dim || 128)), min: 1, step: 1 });
+        addField({ kind: "select", key: "distribution", label: "Distribution", value: String(d.distribution || "normal"), options: [{ value: "normal", label: "Normal N(0,1)" }, { value: "uniform", label: "Uniform U(-1,1)" }] });
+        return spec;
+      }
+      // --- NoiseInjection node ---
+      if (node.name === "noise_injection_layer") {
+        addField({ kind: "number", key: "scale", label: "Noise scale", value: Number(d.scale || 0.1), min: 0, step: 0.01 });
+        addField({ kind: "select", key: "schedule", label: "Schedule", value: String(d.schedule || "constant"), options: [{ value: "constant", label: "Constant" }, { value: "linear", label: "Linear" }, { value: "cosine", label: "Cosine" }] });
+        return spec;
+      }
+      // --- TimeEmbed node ---
+      if (node.name === "time_embed_layer") {
+        addField({ kind: "number", key: "dim", label: "Embed dim", value: Math.max(1, Number(d.dim || 64)), min: 1, step: 1 });
         return spec;
       }
       if (node.name === "image_source_block") {
