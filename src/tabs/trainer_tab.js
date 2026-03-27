@@ -380,9 +380,10 @@
         // rebuild model
         var graphMode = modelBuilder.inferGraphMode(modelRec.graph, "direct");
         var featureSize = Number(activeDs.featureSize || (activeDs.xTest && activeDs.xTest[0] && activeDs.xTest[0].length) || 1);
+        var testBuildKeys = (defaultTarget === "xv" || defaultTarget === "x") ? [defaultTarget] : allowedOutputKeys;
         var rebuiltModel = modelBuilder.buildModelFromGraph(tf, modelRec.graph, {
           mode: graphMode, featureSize: featureSize, windowSize: 1, seqFeatureSize: featureSize,
-          allowedOutputKeys: allowedOutputKeys, defaultTarget: defaultTarget, numClasses: activeDs.numClasses || nCls,
+          allowedOutputKeys: testBuildKeys, defaultTarget: defaultTarget, numClasses: activeDs.numClasses || nCls,
         });
 
         // load saved weights

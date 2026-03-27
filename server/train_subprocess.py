@@ -107,7 +107,14 @@ def main():
     head_configs = config.get("headConfigs", [])
     target_mode = ds.get("targetMode", "xv")
     is_classification = target_mode in ("label", "logits") or (ds.get("numClasses", 0) > 0 and target_mode not in ("xv", "traj", "x", "v"))
-    loss_fn = nn.CrossEntropyLoss() if is_classification else nn.MSELoss()
+    if is_classification:
+        loss_fn = nn.CrossEntropyLoss()
+        # CrossEntropyLoss expects integer labels, not one-hot
+        if y_train.ndim > 1 and y_train.shape[1] > 1:
+            y_train = y_train.argmax(axis=1).astype(np.int64)
+            y_val = y_val.argmax(axis=1).astype(np.int64) if y_val.ndim > 1 and y_val.shape[1] > 1 else y_val.astype(np.int64)
+    else:
+        loss_fn = nn.MSELoss()
 
     # --- Train ---
     best_val_loss = float("inf")
