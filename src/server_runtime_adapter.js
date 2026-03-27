@@ -61,32 +61,40 @@
     });
     var metaStr = JSON.stringify(meta);
 
-    // create a ReadableStream that yields JSON chunks without building one huge string
+    // build emit queue: interleave text + array segments
+    var emitQueue = [];
+    var remaining = metaStr;
+    for (var si = 0; si < largeKeys.length; si++) {
+      var seg = largeKeys[si];
+      var ph = '"' + seg.key + '":"__STREAM__"';
+      var phIdx = remaining.indexOf(ph);
+      if (phIdx < 0) continue;
+      if (phIdx > 0) emitQueue.push({ t: "s", v: remaining.substring(0, phIdx) });
+      emitQueue.push({ t: "a", k: seg.key, d: seg.data });
+      remaining = remaining.substring(phIdx + ph.length);
+    }
+    if (remaining) emitQueue.push({ t: "s", v: remaining });
+
+    // pull-based ReadableStream — yields rows one at a time, non-blocking
     var encoder = new TextEncoder();
-    var streamDone = false;
+    var qIdx = 0, rowIdx = 0, inArray = false;
     var stream = new ReadableStream({
-      start: function (ctrl) {
-        // replace __STREAM__ placeholders with streamed array data
-        var remaining = metaStr;
-        for (var li = 0; li < largeKeys.length; li++) {
-          var lk = largeKeys[li];
-          var placeholder = '"' + lk.key + '":"__STREAM__"';
-          var idx = remaining.indexOf(placeholder);
-          if (idx < 0) continue;
-          // push everything before the placeholder
-          ctrl.enqueue(encoder.encode(remaining.substring(0, idx) + '"' + lk.key + '":['));
-          // push each row individually
-          for (var ri = 0; ri < lk.data.length; ri++) {
-            if (ri > 0) ctrl.enqueue(encoder.encode(","));
-            ctrl.enqueue(encoder.encode(JSON.stringify(lk.data[ri])));
+      pull: function (ctrl) {
+        var batchLimit = 200; // rows per pull to stay responsive
+        var emitted = 0;
+        while (qIdx < emitQueue.length) {
+          var item = emitQueue[qIdx];
+          if (item.t === "s") { ctrl.enqueue(encoder.encode(item.v)); qIdx++; continue; }
+          if (!inArray) { ctrl.enqueue(encoder.encode('"' + item.k + '":[')); inArray = true; rowIdx = 0; }
+          while (rowIdx < item.d.length && emitted < batchLimit) {
+            ctrl.enqueue(encoder.encode((rowIdx > 0 ? "," : "") + JSON.stringify(item.d[rowIdx])));
+            rowIdx++; emitted++;
           }
-          ctrl.enqueue(encoder.encode("]"));
-          remaining = remaining.substring(idx + placeholder.length);
+          if (rowIdx >= item.d.length) { ctrl.enqueue(encoder.encode("]")); inArray = false; qIdx++; }
+          if (emitted >= batchLimit) return; // yield to event loop
         }
-        // push the rest
-        if (remaining) ctrl.enqueue(encoder.encode(remaining));
         ctrl.close();
-      }
+      },
     });
 
     // gzip if available
@@ -141,9 +149,6 @@
     return new Promise(function (resolve, reject) {
       // POST with gzip compression for large payloads
       _postJson(serverUrl + "/api/train", payload).then(function (startResult) {
-        if (!res.ok) throw new Error("Server returned " + res.status);
-        return res.json();
-      }).then(function (startResult) {
         var jobId = startResult.jobId || payload.runId;
         if (typeof spec.onReady === "function") {
           spec.onReady({ backend: startResult.backend || "pytorch" });
