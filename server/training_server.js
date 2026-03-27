@@ -112,7 +112,11 @@ function startTraining(jobId) {
         } else if (msg.kind === "complete") {
           job.result = msg.result;
           job.status = "done";
-          broadcast(jobId, "complete", msg.result);
+          // send only metrics via SSE (not weights — too large)
+          var lightResult = Object.assign({}, msg.result);
+          delete lightResult.modelArtifacts; // remove weights from SSE
+          lightResult.hasArtifacts = !!(msg.result.modelArtifacts);
+          broadcast(jobId, "complete", lightResult);
           // close all SSE connections
           job.clients.forEach(function (res) { try { res.end(); } catch (e) {} });
           job.clients = [];
@@ -275,6 +279,27 @@ var server = http.createServer(function (req, res) {
   // POST /api/test — run test evaluation on server (same runtime as training)
   if (req.method === "POST" && pathname === "/api/test") {
     _runSyncSubprocess(req, res, "test_subprocess.py", "test");
+    return;
+  }
+
+  // GET /api/train/:id/result — fetch full result with weights
+  var resultMatch = pathname.match(/^\/api\/train\/([a-zA-Z0-9_-]+)\/result$/);
+  if (req.method === "GET" && resultMatch) {
+    var rJobId = resultMatch[1];
+    var rJob = jobs[rJobId];
+    if (!rJob || !rJob.result) {
+      res.writeHead(404, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Job not found or no result" }));
+      return;
+    }
+    // stream result as gzip to handle large weight arrays
+    var resultJson = JSON.stringify(rJob.result);
+    var zlib = require("zlib");
+    zlib.gzip(Buffer.from(resultJson), function (err, compressed) {
+      if (err) { res.writeHead(500); res.end(JSON.stringify({ error: err.message })); return; }
+      res.writeHead(200, { "Content-Type": "application/json", "Content-Encoding": "gzip" });
+      res.end(compressed);
+    });
     return;
   }
 

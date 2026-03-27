@@ -30,7 +30,7 @@
    * POST JSON to server — gzip compressed if payload is large.
    * Uses CompressionStream (native browser API) to avoid V8 string limit.
    */
-  function _postJson(url, payload) {
+  function _postJson(url, payload, onProgress) {
     // try direct JSON.stringify first (fast for small payloads)
     var jsonStr;
     try { jsonStr = JSON.stringify(payload); } catch (_) { jsonStr = null; }
@@ -89,6 +89,7 @@
           while (rowIdx < item.d.length && emitted < batchLimit) {
             ctrl.enqueue(encoder.encode((rowIdx > 0 ? "," : "") + JSON.stringify(item.d[rowIdx])));
             rowIdx++; emitted++;
+            if (onProgress && rowIdx % 5000 === 0) onProgress("Streaming " + item.k + ": " + rowIdx + "/" + item.d.length);
           }
           if (rowIdx >= item.d.length) { ctrl.enqueue(encoder.encode("]")); inArray = false; qIdx++; }
           if (emitted >= batchLimit) return; // yield to event loop
@@ -105,7 +106,9 @@
       headers["Content-Encoding"] = "gzip";
     }
 
+    if (onProgress) onProgress("Compressing...");
     return new Response(bodyStream).blob().then(function (blob) {
+      if (onProgress) onProgress("Sending " + (blob.size / 1024 / 1024).toFixed(0) + "MB to server...");
       return fetch(url, { method: "POST", headers: headers, body: blob });
     }).then(function (res) {
       if (!res.ok) throw new Error("Server returned " + res.status);
@@ -148,7 +151,9 @@
 
     return new Promise(function (resolve, reject) {
       // POST with gzip compression for large payloads
-      _postJson(serverUrl + "/api/train", payload).then(function (startResult) {
+      var statusCb = typeof spec.onStatus === "function" ? spec.onStatus : function () {};
+      statusCb("Compressing dataset for server transfer...");
+      _postJson(serverUrl + "/api/train", payload, statusCb).then(function (startResult) {
         var jobId = startResult.jobId || payload.runId;
         if (typeof spec.onReady === "function") {
           spec.onReady({ backend: startResult.backend || "pytorch" });
@@ -187,14 +192,25 @@
           settled = true;
           evtSource.close();
           try {
-            var result = JSON.parse(evt.data);
-            // convert weightValues to match client format
-            if (result.modelArtifacts && result.modelArtifacts.weightData) {
-              result.modelArtifacts.weightValues = result.modelArtifacts.weightData;
-              delete result.modelArtifacts.weightData;
+            var lightResult = JSON.parse(evt.data);
+            // if server has artifacts, fetch full result (weights) separately
+            if (lightResult.hasArtifacts) {
+              if (typeof spec.onStatus === "function") spec.onStatus("Training done — downloading weights...");
+              fetch(serverUrl + "/api/train/" + jobId + "/result").then(function (r) {
+                if (!r.ok) throw new Error("Failed to fetch weights: " + r.status);
+                return r.json();
+              }).then(function (fullResult) {
+                if (fullResult.modelArtifacts && fullResult.modelArtifacts.weightData) {
+                  fullResult.modelArtifacts.weightValues = fullResult.modelArtifacts.weightData;
+                  delete fullResult.modelArtifacts.weightData;
+                }
+                fullResult.resolvedBackend = fullResult.backend || "pytorch";
+                resolve(fullResult);
+              }).catch(function (e) { reject(new Error("Weight download failed: " + e.message)); });
+            } else {
+              lightResult.resolvedBackend = lightResult.backend || "pytorch";
+              resolve(lightResult);
             }
-            result.resolvedBackend = result.backend || "pytorch";
-            resolve(result);
           } catch (e) {
             reject(new Error("Failed to parse server result: " + e.message));
           }
@@ -215,6 +231,21 @@
           evtSource.close();
           reject(new Error("SSE connection to training server lost"));
         };
+
+        // timeout: if no activity for 5 min, assume server died
+        var sseTimeout;
+        function resetSseTimeout() {
+          clearTimeout(sseTimeout);
+          sseTimeout = setTimeout(function () {
+            if (settled) return;
+            settled = true;
+            evtSource.close();
+            reject(new Error("Server training timed out (no response for 5 minutes)"));
+          }, 300000);
+        }
+        resetSseTimeout();
+        evtSource.addEventListener("epoch", resetSseTimeout);
+        evtSource.addEventListener("status", resetSseTimeout);
 
       }).catch(function (err) {
         reject(new Error("Cannot reach training server at " + serverUrl + ": " + err.message));
