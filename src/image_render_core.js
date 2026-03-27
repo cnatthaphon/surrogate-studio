@@ -87,7 +87,7 @@
 
     // resolve splits — only materialize samples needed for display
     // For source-backed datasets: resolve per-sample on demand via getRow()
-    var W = typeof root !== "undefined" ? root : {};
+    var W = typeof globalThis !== "undefined" ? globalThis : (typeof window !== "undefined" ? window : {});
     var srcReg = W.OSCDatasetSourceRegistry || null;
 
     function _resolveSplitForDisplay(d, splitName) {
