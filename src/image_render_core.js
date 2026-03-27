@@ -85,25 +85,32 @@
       label + " | Classes: " + classCount + " | Shape: " + imgW + "x" + imgH + "x" + (imageShape[2] || 1) +
       " | " + totalSamples + " samples" + (data.source ? " (" + data.source + ")" : "")));
 
-    // build splits
+    // resolve splits via source registry or legacy records
+    var W = typeof root !== "undefined" ? root : {};
+    var srcReg = W.OSCDatasetSourceRegistry || null;
+
+    function _resolveSplit(d, splitName) {
+      if (srcReg && typeof srcReg.resolveDatasetSplit === "function" && d.sourceId) {
+        return srcReg.resolveDatasetSplit(d, splitName);
+      }
+      var rec = d.records && d.records[splitName];
+      return rec ? { x: rec.x || [], y: rec.y || [], length: (rec.x || []).length } : { x: [], y: [], length: 0 };
+    }
+
     var splits;
-    if (showSplits && data.records) {
+    if (showSplits) {
       splits = [];
-      if (data.records.train && data.records.train.x.length) splits.push({ name: "Train", x: data.records.train.x, y: data.records.train.y, color: "#22d3ee" });
-      if (data.records.val && data.records.val.x.length) splits.push({ name: "Val", x: data.records.val.x, y: data.records.val.y, color: "#fbbf24" });
-      if (data.records.test && data.records.test.x.length) splits.push({ name: "Test", x: data.records.test.x, y: data.records.test.y, color: "#a78bfa" });
+      var train = _resolveSplit(data, "train");
+      var val = _resolveSplit(data, "val");
+      var test = _resolveSplit(data, "test");
+      if (train.length) splits.push({ name: "Train", x: train.x, y: train.y, color: "#22d3ee" });
+      if (val.length) splits.push({ name: "Val", x: val.x, y: val.y, color: "#fbbf24" });
+      if (test.length) splits.push({ name: "Test", x: test.x, y: test.y, color: "#a78bfa" });
     } else {
-      var allX = [].concat(
-        (data.records && data.records.train && data.records.train.x) || [],
-        (data.records && data.records.val && data.records.val.x) || [],
-        (data.records && data.records.test && data.records.test.x) || []
-      );
-      var allY = [].concat(
-        (data.records && data.records.train && data.records.train.y) || [],
-        (data.records && data.records.val && data.records.val.y) || [],
-        (data.records && data.records.test && data.records.test.y) || []
-      );
-      splits = [{ name: "Samples", x: allX, y: allY, color: "#22d3ee" }];
+      var all = _resolveSplit(data, "train");
+      var valA = _resolveSplit(data, "val");
+      var testA = _resolveSplit(data, "test");
+      splits = [{ name: "Samples", x: [].concat(all.x, valA.x, testA.x), y: [].concat(all.y, valA.y, testA.y), color: "#22d3ee" }];
     }
 
     var allCanvases = [];

@@ -59,6 +59,14 @@
       gradClipNorm: Number(spec.gradClipNorm || 0),
     };
 
+    // estimate payload size — reject if too large for JSON transfer
+    var trainLen = (payload.dataset && payload.dataset.xTrain) ? payload.dataset.xTrain.length : 0;
+    var featureLen = (trainLen && payload.dataset.xTrain[0]) ? payload.dataset.xTrain[0].length : 0;
+    var estimatedMB = (trainLen * featureLen * 6) / (1024 * 1024); // ~6 bytes per float in JSON
+    if (estimatedMB > 100) {
+      return Promise.reject(new Error("Dataset too large for server transfer (" + estimatedMB.toFixed(0) + "MB). Training on client instead."));
+    }
+
     return new Promise(function (resolve, reject) {
       // POST training request
       fetch(serverUrl + "/api/train", {
