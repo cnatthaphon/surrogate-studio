@@ -99,32 +99,19 @@
     }
 
     function addOutputNode(editor, x, y, cfg) {
-      var schemaId = api.resolveSchemaId((cfg && cfg.schemaId) || api.getCurrentSchemaId() || "oscillator");
-      var targets = api.normalizeOutputTargetsList(
-        (cfg && (cfg.targets != null ? cfg.targets : (cfg.targetsCsv != null ? cfg.targetsCsv : (cfg.targetType || cfg.target)))),
-        ["x"],
-        schemaId
-      );
-      var target = targets[0];
+      var target = String((cfg && (cfg.target || cfg.targetType)) || "xv");
       var loss = String((cfg && cfg.loss) || "mse");
-      var wx = Math.max(0, Number((cfg && cfg.wx) || 1));
-      var wv = Math.max(0, Number((cfg && cfg.wv) || 1));
       var matchWeight = Math.max(0, Number((cfg && cfg.matchWeight) || 1));
-      var paramsSelectRaw = (cfg && cfg.paramsSelect != null) ? cfg.paramsSelect : "";
-      var paramsSelect = Array.isArray(paramsSelectRaw) ? paramsSelectRaw.join(",") : String(paramsSelectRaw || "");
+      var phase = Math.max(0, Number((cfg && cfg.phase) || 0));
       var html =
         "<div><div style='font-weight:700'>Output</div>" +
-        "<div class='node-summary' style='font-size:11px;color:#94a3b8;'>" + api.outputTargetsSummaryText(targets, schemaId) + ", loss=" + loss + "</div></div>";
+        "<div class='node-summary' style='font-size:11px;color:#94a3b8;'>target=" + target + ", loss=" + loss + (phase > 0 ? ", phase=" + phase : "") + "</div></div>";
       return editor.addNode("output_layer", 1, 0, x, y, "output_layer", {
-        targets: targets.slice(),
-        targetsCsv: targets.join(","),
         target: target,
         targetType: target,
-        paramsSelect: paramsSelect,
         loss: loss,
-        wx: wx,
-        wv: wv,
         matchWeight: matchWeight,
+        phase: phase,
       }, html);
     }
 
@@ -588,29 +575,14 @@
             { value: "sparseCategoricalCrossentropy", label: "Sparse Cat. CE" }
           ]
         });
-        if (target === "xv") {
-          addField({ kind: "number", key: "wx", label: "Weight x", value: Math.max(0, Number(d.wx || 1)).toFixed(2), min: 0, step: 0.1 });
-          addField({ kind: "number", key: "wv", label: "Weight v", value: Math.max(0, Number(d.wv || 1)).toFixed(2), min: 0, step: 0.1 });
-          addMessage("Weighted head loss: L = w_x·L_x + w_v·L_v (normalized by w_x+w_v).");
-        } else if (target === "params") {
-          addField({ kind: "text", key: "paramsSelect", label: "Params select", value: String(d.paramsSelect || ""), placeholder: "m,c,k,e,x0,v0,..." });
-          addMessage("Leave empty to use all params. Comma-separated keys.");
-        } else if (target === "traj") {
-          addMessage("Trajectory reconstruction head. In notebook pipeline this maps to full x(t) sequence target.");
-        } else if (target === "label" || target === "logits") {
+        // target-specific hints (no hardcoded fields — just informational)
+        if (target === "label" || target === "logits") {
           addMessage("Classification head. Use categoricalCrossentropy for one-hot, sparseCategoricalCrossentropy for integer labels.");
+        } else if (target === "xv" || target === "x" || target === "traj") {
+          addMessage("Reconstruction head. Target = input features (y = x).");
         }
         addField({ kind: "number", key: "matchWeight", label: "Head weight", value: Math.max(0, Number(d.matchWeight || 1)).toFixed(2), min: 0, step: 0.1 });
-        addField({
-          kind: "select", key: "phase", label: "Training phase",
-          value: String(d.phase || "0"),
-          options: [
-            { value: "0", label: "All phases (default)" },
-            { value: "1", label: "Phase 1 (e.g. Discriminator)" },
-            { value: "2", label: "Phase 2 (e.g. Generator)" },
-            { value: "3", label: "Phase 3" },
-          ]
-        });
+        addField({ kind: "number", key: "phase", label: "Training phase (0=all)", value: Math.max(0, Number(d.phase || 0)), min: 0, step: 1 });
         return spec;
       }
       // --- Detach node ---
@@ -828,6 +800,10 @@
         var vLoss = String(rawValue || "mse");
         var validLosses = ["mse", "mae", "huber", "bce", "categoricalCrossentropy", "sparseCategoricalCrossentropy", "cross_entropy"];
         data.loss = validLosses.indexOf(vLoss) >= 0 ? vLoss : "mse";
+      } else if (k === "phase") {
+        data.phase = Math.max(0, Math.floor(Number(rawValue) || 0));
+      } else if (k === "matchWeight") {
+        data.matchWeight = Math.max(0, Number(rawValue) || 1);
       } else if (k === "wx") {
         data.wx = Math.max(0, Number(rawValue) || 1);
       } else if (k === "wv") {

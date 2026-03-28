@@ -100,42 +100,37 @@
 
   // --- output target helpers ---
 
+  /**
+   * Get the single target for an output node.
+   * One output node = one target. If you want multiple targets, use multiple output nodes.
+   */
   function normalizeOutputTargetsList(raw, fallbackTargets, allowedKeys) {
-    var allowed = Array.isArray(allowedKeys) ? allowedKeys : [];
-    var defaultTarget = allowed.length ? String(allowed[0] || "x") : "x";
-    var list = [];
-    if (Array.isArray(raw)) {
-      list = raw.map(function (x) { return String(x || "").trim().toLowerCase(); }).filter(Boolean);
-    } else if (typeof raw === "string") {
-      list = raw.split(",").map(function (x) { return String(x || "").trim().toLowerCase(); }).filter(Boolean);
-    } else if (raw != null) {
-      var s = String(raw || "").trim().toLowerCase();
-      if (s) list = [s];
+    // extract single target from raw value
+    var target = "";
+    if (typeof raw === "string") target = raw.trim().toLowerCase();
+    else if (Array.isArray(raw) && raw.length) target = String(raw[0] || "").trim().toLowerCase();
+    else if (raw != null) target = String(raw || "").trim().toLowerCase();
+
+    // if comma-separated (legacy), take the first
+    if (target.indexOf(",") >= 0) target = target.split(",")[0].trim();
+
+    if (!target) {
+      // fallback: from provided fallbacks
+      if (Array.isArray(fallbackTargets) && fallbackTargets.length) target = String(fallbackTargets[0] || "x").trim().toLowerCase();
+      else if (typeof fallbackTargets === "string") target = fallbackTargets.trim().toLowerCase();
     }
-    // use what the node specifies — don't filter through allowedKeys
-    // allowedKeys is only a fallback when the node doesn't specify
-    if (!list.length) {
-      var fb = Array.isArray(fallbackTargets) ? fallbackTargets : [String(fallbackTargets || defaultTarget)];
-      list = fb.map(function (x) { return String(x || "").trim().toLowerCase(); }).filter(Boolean);
+    if (!target) {
+      var allowed = Array.isArray(allowedKeys) ? allowedKeys : [];
+      target = allowed.length ? String(allowed[0] || "x") : "x";
     }
-    if (!list.length) list = [defaultTarget];
-    var uniq = [];
-    list.forEach(function (x) { if (uniq.indexOf(x) < 0) uniq.push(x); });
-    if (uniq.indexOf("xv") >= 0) {
-      return uniq.filter(function (x) { return x !== "x" && x !== "v"; });
-    }
-    return uniq;
+    return [target];
   }
 
   function outputTargetsFromNodeData(data, allowedKeys, fallbackTarget) {
     var d = data || {};
-    var allowed = Array.isArray(allowedKeys) ? allowedKeys : ["x"];
-    var defaultTarget = allowed.indexOf("x") >= 0
-      ? "x"
-      : (allowed.indexOf("logits") >= 0 ? "logits" : String(allowed[0] || "x"));
-    var raw = (Array.isArray(d.targets) && d.targets.length) ? d.targets
-      : (typeof d.targetsCsv === "string" ? d.targetsCsv : (d.targetType || d.target || fallbackTarget || defaultTarget));
-    return normalizeOutputTargetsList(raw, [String(fallbackTarget || d.targetType || d.target || defaultTarget)], allowed);
+    // read single target from node — no multi-target, no CSV
+    var raw = d.target || d.targetType || fallbackTarget || "x";
+    return normalizeOutputTargetsList(raw, [String(fallbackTarget || "x")], allowedKeys);
   }
 
   // --- graph inference (pure, no DOM, no state) ---
@@ -210,11 +205,12 @@
     var data = extractGraphData(graphData);
     var fallback = String(fallbackTarget || "x");
     var ids = Object.keys(data || {});
-    var inputIds = ids.filter(function (id) { var n = data[id] && data[id].name; return n === "input_layer" || n === "image_source_block" || n === "image_source_layer"; });
+    var inputNodeNames = { "input_layer": true, "image_source_block": true, "image_source_layer": true, "sample_z_layer": true, "time_embed_layer": true };
+    var inputIds = ids.filter(function (id) { return data[id] && inputNodeNames[data[id].name]; });
     if (!inputIds.length) return [{ id: "fallback", target: fallback, loss: "mse", wx: 1, wv: 1 }];
     var reachable = {};
-    var q = [String(inputIds[0])];
-    reachable[String(inputIds[0])] = true;
+    var q = inputIds.map(String);
+    q.forEach(function (id) { reachable[id] = true; });
     while (q.length) {
       var id = q.shift();
       var n = data[id];
@@ -236,19 +232,15 @@
     outputNodes.forEach(function (x) {
       var d = x.node.data || {};
       var targets = outputTargetsFromNodeData(d, allowedOutputKeys, fallback);
-      var normalizedLoss = (function () {
-        var v = String(d.loss || "mse");
-        if (v === "use_global") return "mse";
-        return (v === "mse" || v === "mae" || v === "huber") ? v : "mse";
-      })();
+      var normalizedLoss = String(d.loss || "mse");
+      if (normalizedLoss === "use_global") normalizedLoss = "mse";
       targets.forEach(function (target, ti) {
         heads.push({
           id: x.id + ":" + String(target) + ":" + String(ti + 1),
           nodeId: x.id, target: target, targetType: target,
-          paramsSelect: String(d.paramsSelect || ""),
           loss: normalizedLoss,
-          wx: Math.max(0, Number(d.wx || 1)),
-          wv: Math.max(0, Number(d.wv || 1)),
+          matchWeight: Math.max(0, Number(d.matchWeight || 1)),
+          phase: Number(d.phase || 0),
         });
       });
     });
