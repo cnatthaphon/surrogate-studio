@@ -1444,39 +1444,68 @@
       ));
     }
 
-    // Cell 5: Train
+    // Cell 5: Train (with phase detection for GAN)
     cells.push(makeCodeCell(
       "optimizer = torch.optim.Adam(model.parameters(), lr=LR)\n" +
       "scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=3, factor=0.5)\n\n" +
-      "# determine loss from graph output nodes\n" +
+      "# determine loss + phases from graph output nodes\n" +
       "data = graph.get('drawflow', {}).get('Home', {}).get('data', graph)\n" +
       "out_nodes = [data[k] for k in data if data[k].get('name','').endswith('output_layer')]\n" +
       "loss_name = out_nodes[0].get('data',{}).get('loss','mse') if out_nodes else 'mse'\n" +
       "is_cls = any(n.get('data',{}).get('target','') in ('label','logits') for n in out_nodes)\n" +
-      "loss_fn = nn.CrossEntropyLoss() if is_cls else ({'mse': nn.MSELoss(), 'mae': nn.L1Loss(), 'bce': nn.BCELoss()}.get(loss_name, nn.MSELoss()))\n" +
-      "print(f'Loss: {loss_fn.__class__.__name__} (from graph: {loss_name})')\n\n" +
+      "phases = sorted(set(int(n.get('data',{}).get('phase', 0)) for n in out_nodes))\n" +
+      "is_phased = any(p > 0 for p in phases)\n" +
+      "print(f'Phases: {phases} (phased={is_phased})')\n\n" +
+      "# per-head loss\n" +
+      "head_losses = []\n" +
+      "for n in out_nodes:\n" +
+      "    nd = n.get('data', {})\n" +
+      "    ht = nd.get('target', 'xv')\n" +
+      "    hl = nd.get('loss', 'mse').lower()\n" +
+      "    hw = float(nd.get('matchWeight', 1))\n" +
+      "    hp = int(nd.get('phase', 0))\n" +
+      "    if ht in ('label', 'logits'): fn = nn.CrossEntropyLoss()\n" +
+      "    elif hl == 'bce': fn = nn.BCELoss()\n" +
+      "    elif hl == 'mae': fn = nn.L1Loss()\n" +
+      "    else: fn = nn.MSELoss()\n" +
+      "    head_losses.append({'fn': fn, 'weight': hw, 'phase': hp, 'cls': ht in ('label','logits')})\n" +
+      "    print(f'  Head: target={ht}, loss={hl}, phase={hp}, weight={hw}')\n\n" +
+      "if not head_losses:\n" +
+      "    loss_fn = nn.CrossEntropyLoss() if is_cls else nn.MSELoss()\n" +
+      "    head_losses = [{'fn': loss_fn, 'weight': 1.0, 'phase': 0, 'cls': is_cls}]\n\n" +
       "train_dl = DataLoader(TensorDataset(x_train, y_train), batch_size=BATCH_SIZE, shuffle=True)\n" +
       "val_dl = DataLoader(TensorDataset(x_val, y_val), batch_size=BATCH_SIZE)\n\n" +
+      "def compute_loss(pred, xb, yb, phase):\n" +
+      "    total = torch.tensor(0.0, device=device)\n" +
+      "    for hl in head_losses:\n" +
+      "        if hl['phase'] != phase and hl['phase'] != 0 and phase != 0: continue\n" +
+      "        t = yb\n" +
+      "        if hl['cls']: total = total + hl['weight'] * hl['fn'](pred, t.long().squeeze(-1))\n" +
+      "        else: total = total + hl['weight'] * hl['fn'](pred, t)\n" +
+      "    return total\n\n" +
       "history = {'train_loss': [], 'val_loss': []}\n" +
       "best_val = float('inf')\n" +
       "best_state = None\n\n" +
       "for ep in range(1, EPOCHS + 1):\n" +
-      "    model.train()\n" +
-      "    tl = 0; nb = 0\n" +
-      "    for xb, yb in train_dl:\n" +
-      "        xb, yb = xb.to(device), yb.to(device)\n" +
-      "        optimizer.zero_grad()\n" +
-      "        loss = loss_fn(model(xb), yb)\n" +
-      "        loss.backward()\n" +
-      "        optimizer.step()\n" +
-      "        tl += loss.item(); nb += 1\n" +
-      "    tl /= max(nb, 1)\n\n" +
+      "    phase_losses = {}\n" +
+      "    for phase in phases:\n" +
+      "        model.train()\n" +
+      "        tl = 0; nb = 0\n" +
+      "        for xb, yb in train_dl:\n" +
+      "            xb, yb = xb.to(device), yb.to(device)\n" +
+      "            optimizer.zero_grad()\n" +
+      "            loss = compute_loss(model(xb), xb, yb, phase)\n" +
+      "            loss.backward()\n" +
+      "            optimizer.step()\n" +
+      "            tl += loss.item(); nb += 1\n" +
+      "        phase_losses[phase] = tl / max(nb, 1)\n\n" +
+      "    tl = sum(phase_losses.values()) / max(len(phase_losses), 1)\n" +
       "    model.eval()\n" +
       "    vl = 0; nv = 0\n" +
       "    with torch.no_grad():\n" +
       "        for xb, yb in val_dl:\n" +
       "            xb, yb = xb.to(device), yb.to(device)\n" +
-      "            vl += loss_fn(model(xb), yb).item(); nv += 1\n" +
+      "            vl += compute_loss(model(xb), xb, yb, 0).item(); nv += 1\n" +
       "    vl /= max(nv, 1)\n" +
       "    scheduler.step(vl)\n\n" +
       "    improved = vl < best_val\n" +
@@ -1486,7 +1515,8 @@
       "    history['train_loss'].append(tl)\n" +
       "    history['val_loss'].append(vl)\n" +
       "    mark = ' *' if improved else ''\n" +
-      "    print(f'Epoch {ep:3d} | train={tl:.6f} | val={vl:.6f} | lr={optimizer.param_groups[0][\"lr\"]:.6f}{mark}')\n\n" +
+      "    phases_str = ' '.join(f'p{p}={phase_losses[p]:.4f}' for p in phase_losses) if is_phased else ''\n" +
+      "    print(f'Epoch {ep:3d} | train={tl:.6f} | val={vl:.6f} | lr={optimizer.param_groups[0][\"lr\"]:.6f} {phases_str}{mark}')\n\n" +
       "if best_state:\n" +
       "    model.load_state_dict(best_state)\n" +
       "print(f'Best val loss: {best_val:.6f}')\n"

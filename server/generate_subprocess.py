@@ -88,6 +88,38 @@ def main():
                 "latentDim": actual_latent_dim, "latents": z.cpu().numpy().tolist(), "lossHistory": [],
             }}))
 
+    elif method == "classifier_guided":
+        # optimize z so decoded output is classified as target class
+        target_class = int(config.get("targetClass", 0))
+        guidance_weight = float(config.get("guidanceWeight", 1.0))
+        steps = int(config.get("steps", 100))
+        lr_cg = float(config.get("lr", 0.01))
+        decoder, actual_dim = _extract_decoder(model, latent_dim)
+        dec = decoder if decoder else model
+        z = torch.randn(num_samples, actual_dim, device=device, requires_grad=True)
+        opt = torch.optim.Adam([z], lr=lr_cg)
+        loss_history = []
+        for step in range(steps):
+            opt.zero_grad()
+            generated = dec(z)
+            # use full model as classifier
+            cls_out = model(generated)
+            if cls_out.shape[-1] <= 1:
+                # model doesn't have classification output — use reconstruction loss
+                loss = generated.var() * guidance_weight
+            else:
+                # maximize probability of target class
+                log_prob = torch.log(cls_out[:, target_class].clamp(min=1e-8))
+                loss = -log_prob.mean() * guidance_weight
+            loss.backward()
+            opt.step()
+            loss_history.append({"step": step, "loss": float(loss.item())})
+        samples = dec(z).detach().cpu().numpy()
+        print(json.dumps({"kind": "result", "result": {
+            "method": "classifier_guided", "samples": samples.tolist(), "numSamples": num_samples,
+            "latentDim": actual_dim, "latents": z.detach().cpu().numpy().tolist(), "lossHistory": loss_history,
+        }}))
+
     elif method == "optimize":
         # optimize z to minimize reconstruction toward target
         originals = np.array(config.get("originals", []), dtype=np.float32)

@@ -121,6 +121,48 @@ def main():
     val_ds = TensorDataset(torch.tensor(x_val), torch.tensor(y_val))
     val_dl = DataLoader(val_ds, batch_size=batch_size, shuffle=False)
 
+    # --- Detect phases from headConfigs ---
+    phases = sorted(set(int(h.get("phase", 0)) for h in head_configs)) if head_configs else [0]
+    is_phased = any(p > 0 for p in phases)
+
+    # per-head loss functions (for multi-head/phased models)
+    head_losses = []
+    for hc in (head_configs or [{}]):
+        ht = str(hc.get("target", target_mode))
+        hl = str(hc.get("loss", "mse")).lower()
+        hw = float(hc.get("matchWeight", 1.0))
+        hp = int(hc.get("phase", 0))
+        if ht in ("label", "logits"):
+            head_losses.append({"fn": nn.CrossEntropyLoss(), "weight": hw, "phase": hp, "cls": True})
+        elif hl == "bce":
+            head_losses.append({"fn": nn.BCELoss(), "weight": hw, "phase": hp, "cls": False})
+        elif hl == "mae":
+            head_losses.append({"fn": nn.L1Loss(), "weight": hw, "phase": hp, "cls": False})
+        else:
+            head_losses.append({"fn": nn.MSELoss(), "weight": hw, "phase": hp, "cls": False})
+
+    if not head_losses:
+        head_losses = [{"fn": loss_fn, "weight": 1.0, "phase": 0, "cls": is_classification}]
+
+    # per-head y data (reconstruction heads use x, classification heads use labels)
+    labels_train = np.array(ds.get("labelsTrain", []), dtype=np.float32) if ds.get("labelsTrain") else None
+    labels_val = np.array(ds.get("labelsVal", []), dtype=np.float32) if ds.get("labelsVal") else None
+
+    def compute_loss(pred, xb, yb, active_phase):
+        """Compute weighted loss across heads for active phase."""
+        total = torch.tensor(0.0, device=device)
+        for i, hl in enumerate(head_losses):
+            if hl["phase"] != active_phase and hl["phase"] != 0 and active_phase != 0:
+                continue  # skip heads not in this phase
+            target = yb
+            if hl["cls"] and labels_train is not None:
+                target = yb  # labels already mapped
+            if hl["cls"]:
+                total = total + hl["weight"] * hl["fn"](pred, target.long().squeeze(-1))
+            else:
+                total = total + hl["weight"] * hl["fn"](pred, target)
+        return total
+
     # --- Train ---
     best_val_loss = float("inf")
     best_epoch = 0
@@ -128,25 +170,25 @@ def main():
     no_improve = 0
 
     for ep in range(1, epochs + 1):
-        model.train()
-        train_loss = 0.0
-        n_batches = 0
-        for xb, yb in train_dl:
-            xb, yb = xb.to(device), yb.to(device)
-            optimizer.zero_grad()
-            pred = model(xb)
-            if is_classification:
-                loss = loss_fn(pred, yb.long().squeeze(-1))
-            else:
-                loss = loss_fn(pred, yb)
-            loss.backward()
-            if grad_clip > 0:
-                torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
-            optimizer.step()
-            train_loss += loss.item()
-            n_batches += 1
+        phase_losses = {}
+        for phase in phases:
+            model.train()
+            train_loss = 0.0
+            n_batches = 0
+            for xb, yb in train_dl:
+                xb, yb = xb.to(device), yb.to(device)
+                optimizer.zero_grad()
+                pred = model(xb)
+                loss = compute_loss(pred, xb, yb, phase)
+                loss.backward()
+                if grad_clip > 0:
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
+                optimizer.step()
+                train_loss += loss.item()
+                n_batches += 1
+            phase_losses[phase] = train_loss / max(n_batches, 1)
 
-        train_loss /= max(n_batches, 1)
+        total_train_loss = sum(phase_losses.values()) / max(len(phase_losses), 1)
 
         # Validate
         model.eval()
@@ -156,10 +198,7 @@ def main():
             for xb, yb in val_dl:
                 xb, yb = xb.to(device), yb.to(device)
                 pred = model(xb)
-                if is_classification:
-                    loss = loss_fn(pred, yb.long().squeeze(-1))
-                else:
-                    loss = loss_fn(pred, yb)
+                loss = compute_loss(pred, xb, yb, 0)  # phase 0 = all
                 val_loss += loss.item()
                 n_val += 1
         val_loss /= max(n_val, 1)
@@ -176,7 +215,7 @@ def main():
         current_lr = optimizer.param_groups[0]["lr"]
         scheduler.step(val_loss)
 
-        epoch_log(ep, train_loss, val_loss, current_lr, improved)
+        epoch_log(ep, total_train_loss, val_loss, current_lr, improved)
 
         if patience > 0 and no_improve >= patience:
             status(f"Early stopping at epoch {ep} (patience={patience})")
