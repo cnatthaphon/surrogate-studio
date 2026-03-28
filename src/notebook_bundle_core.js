@@ -1516,6 +1516,21 @@
       "print(f'Test MAE:  {mae:.6f}')\n" +
       "print(f'Test MSE:  {mse:.6f}')\n" +
       "print(f'Test R²:   {r2:.6f}')\n\n" +
+      "# Classification metrics (if applicable)\n" +
+      "if is_cls:\n" +
+      "    from sklearn.metrics import confusion_matrix, classification_report\n" +
+      "    pred_labels = pred.argmax(axis=1)\n" +
+      "    true_labels = truth.argmax(axis=1) if truth.ndim > 1 and truth.shape[1] > 1 else truth.flatten().astype(int)\n" +
+      "    accuracy = (pred_labels == true_labels).mean()\n" +
+      "    print(f'\\nAccuracy: {accuracy:.4f}')\n" +
+      "    print('\\nClassification Report:')\n" +
+      "    print(classification_report(true_labels, pred_labels))\n" +
+      "    cm = confusion_matrix(true_labels, pred_labels)\n" +
+      "    plt.figure(figsize=(6, 5))\n" +
+      "    plt.imshow(cm, cmap='Blues')\n" +
+      "    plt.colorbar(); plt.xlabel('Predicted'); plt.ylabel('True')\n" +
+      "    plt.title(f'Confusion Matrix (Accuracy={accuracy:.2%})')\n" +
+      "    plt.tight_layout(); plt.show()\\n\n" +
       "# Pred vs Truth scatter (first target dimension)\n" +
       "plt.figure(figsize=(6, 6))\n" +
       "plt.scatter(truth[:, 0], pred[:, 0], alpha=0.5, s=10)\n" +
@@ -1645,6 +1660,56 @@
       "    for i in range(min(8, n_samples)):\n" +
       "        plt.plot(samples[i], alpha=0.7, label=f'Sample {i}')\n" +
       "    plt.title('Langevin Samples'); plt.legend(fontsize=8); plt.tight_layout(); plt.show()\n"
+    ));
+
+    // Cell 11: Latent optimization (optimize z for specific objective)
+    cells.push(makeMarkdownCell("## 11) Latent Optimization\n\nOptimize z in latent space to minimize a target objective."));
+    cells.push(makeCodeCell(
+      "# --- Latent Optimization ---\n" +
+      "# Find z that produces output closest to a target\n" +
+      "model.eval()\n\n" +
+      "try:\n" +
+      "    # target: first test sample\n" +
+      "    target = x_test[:1].to(device)\n" +
+      "    z = torch.randn(1, latent_dim, device=device, requires_grad=True)\n" +
+      "    opt_z = torch.optim.Adam([z], lr=0.01)\n\n" +
+      "    for step in range(100):\n" +
+      "        opt_z.zero_grad()\n" +
+      "        recon = decoder(z) if 'decoder' in dir() else model(z)\n" +
+      "        loss = nn.MSELoss()(recon, target)\n" +
+      "        loss.backward()\n" +
+      "        opt_z.step()\n" +
+      "        if step % 20 == 0:\n" +
+      "            print(f'Step {step}: loss={loss.item():.6f}')\n\n" +
+      "    optimized = recon.detach().cpu().numpy()[0]\n" +
+      "    original = target.cpu().numpy()[0]\n\n" +
+      "    if is_image:\n" +
+      "        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(4, 2))\n" +
+      "        ax1.imshow(original.reshape(img_h, img_w), cmap='gray'); ax1.set_title('Target'); ax1.axis('off')\n" +
+      "        ax2.imshow(optimized.reshape(img_h, img_w), cmap='gray'); ax2.set_title('Optimized'); ax2.axis('off')\n" +
+      "        plt.tight_layout(); plt.show()\n" +
+      "    else:\n" +
+      "        plt.plot(original, label='Target', alpha=0.8)\n" +
+      "        plt.plot(optimized, '--', label='Optimized', alpha=0.8)\n" +
+      "        plt.legend(); plt.title('Latent Optimization'); plt.show()\n" +
+      "except Exception as e:\n" +
+      "    print(f'Latent optimization skipped: {e}')\n"
+    ));
+
+    // Cell 12: Generation evaluation summary
+    cells.push(makeMarkdownCell("## 12) Generation Evaluation Summary"));
+    cells.push(makeCodeCell(
+      "# Compare reconstruction quality across methods\n" +
+      "print('=== Generation Summary ===')\n" +
+      "print(f'Reconstruction MSE: {recon_mse:.6f}')\n" +
+      "print(f'Test R²: {r2:.6f}')\n" +
+      "print(f'Test MAE: {mae:.6f}')\n" +
+      "if 'samples' in dir() and len(samples) > 0:\n" +
+      "    gen_mean = np.mean(samples, axis=0)\n" +
+      "    real_mean = np.mean(x_test.numpy(), axis=0)\n" +
+      "    dist_mae = np.mean(np.abs(gen_mean - real_mean))\n" +
+      "    print(f'Distribution MAE (gen vs real means): {dist_mae:.6f}')\n" +
+      "print('\\nNotebook complete.')\n"
     ));
 
     return {
