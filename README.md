@@ -77,6 +77,14 @@ Train a VAE, autoencoder, and classifier on the full 60,000-image Fashion-MNIST 
 - Data fetched from CDN (~30MB, one-time download)
 - Proves the plugin architecture works for image schemas — only 2 files added (preset + index.html)
 
+### [Fashion-MNIST GAN](demo/Fashion-MNIST-GAN/)
+
+Train a GAN with phased training (alternating Discriminator/Generator updates). Uses new building blocks: SampleZ, Detach, Phase on Output nodes.
+
+- Generator: z(128) → Dense(256) → Dense(512) → Dense(784, sigmoid)
+- Discriminator: ImageSource(784) → Dense(512) → Dense(256) → Dense(1, sigmoid)
+- Phase 1 = D loss, Phase 2 = G loss, alternated per epoch
+
 ---
 
 ## Quick Start
