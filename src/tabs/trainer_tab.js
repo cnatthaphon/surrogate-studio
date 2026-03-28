@@ -1192,6 +1192,8 @@
         }
         var resolvedFeatureSize = (srcReg && typeof srcReg.getFeatureSize === "function") ? srcReg.getFeatureSize(activeDs) : 0;
         if (!resolvedFeatureSize && train.x.length) resolvedFeatureSize = train.x[0].length;
+        // for multi-head models (VAE+Classifier): provide labels separately
+        var hasClsHead = _heads && _heads.some(function (h) { return h.target === "label" || h.target === "logits"; });
         activeDs = {
           xTrain: train.x, yTrain: mapY(train),
           xVal: val.x, yVal: mapY(val),
@@ -1200,6 +1202,12 @@
           numClasses: nClasses,
           targetMode: isClassification ? "logits" : (activeDs.targetMode || defaultTarget),
         };
+        // add raw labels for classification heads (before one-hot mapping)
+        if (hasClsHead && !isClassification) {
+          activeDs.labelsTrain = train.y.map(function (l) { return typeof l === "number" ? oneHot(l, nClasses) : l; });
+          activeDs.labelsVal = val.y.map(function (l) { return typeof l === "number" ? oneHot(l, nClasses) : l; });
+          activeDs.labelsTest = test.y.map(function (l) { return typeof l === "number" ? oneHot(l, nClasses) : l; });
+        }
       }
 
       var graphMode = modelBuilder.inferGraphMode(model.graph, "direct");
@@ -1449,6 +1457,7 @@
             pTrain: activeDs.pTrain, pVal: activeDs.pVal, pTest: activeDs.pTest,
             targetMode: activeDs.targetMode || defaultTarget,
             paramNames: activeDs.paramNames, paramSize: activeDs.paramSize, numClasses: activeDs.numClasses || activeDs.classCount,
+            labelsTrain: activeDs.labelsTrain, labelsVal: activeDs.labelsVal, labelsTest: activeDs.labelsTest,
           },
           epochs: Number(config.epochs || 20), batchSize: Number(config.batchSize || 32),
           learningRate: Number(config.learningRate || 0.001),

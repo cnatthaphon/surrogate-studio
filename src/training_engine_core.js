@@ -211,10 +211,19 @@
 
     headConfigs.forEach(function (head) {
       var target = String(head.target || "x");
-      var trainRows = extractHeadRows(dataset.yTrain, dataset.pTrain, targetMode, head, datasetMeta);
-      var valRows = extractHeadRows(dataset.yVal, dataset.pVal, targetMode, head, datasetMeta);
-      var testRows = (dataset.yTest && dataset.yTest.length)
-        ? extractHeadRows(dataset.yTest, dataset.pTest, targetMode, head, datasetMeta)
+      // for multi-head models: classification heads use labels, reconstruction heads use pixels
+      var headYTrain = dataset.yTrain;
+      var headYVal = dataset.yVal;
+      var headYTest = dataset.yTest;
+      if ((target === "label" || target === "logits") && dataset.labelsTrain) {
+        headYTrain = dataset.labelsTrain;
+        headYVal = dataset.labelsVal || headYVal;
+        headYTest = dataset.labelsTest || headYTest;
+      }
+      var trainRows = extractHeadRows(headYTrain, dataset.pTrain, targetMode, head, datasetMeta);
+      var valRows = extractHeadRows(headYVal, dataset.pVal, targetMode, head, datasetMeta);
+      var testRows = (headYTest && headYTest.length)
+        ? extractHeadRows(headYTest, dataset.pTest, targetMode, head, datasetMeta)
         : null;
       var inferredCols = trainRows[0] ? (Array.isArray(trainRows[0]) ? trainRows[0].length : 1) : 1;
       var cols = (target === "xv" || target === "traj") ? Math.max(1, inferredCols)
