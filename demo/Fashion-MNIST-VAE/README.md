@@ -1,5 +1,8 @@
 # Fashion-MNIST VAE — Surrogate Studio Demo
 
+![Demo Workflow](images/demo_workflow.gif)
+
+
 **Train a Variational Autoencoder on Fashion-MNIST entirely in the browser.**
 
 This demo trains three models on the full Fashion-MNIST dataset (60,000 images) and compares reconstruction quality, generation, and classification accuracy.

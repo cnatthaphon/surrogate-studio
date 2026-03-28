@@ -1,5 +1,8 @@
 # Fashion-MNIST GAN — Surrogate Studio Demo
 
+![Demo Workflow](images/demo_workflow.gif)
+
+
 **Train a Generative Adversarial Network on Fashion-MNIST in the browser.**
 
 Uses phased training: Phase 1 trains the Discriminator, Phase 2 trains the Generator. Both phases alternate each epoch.

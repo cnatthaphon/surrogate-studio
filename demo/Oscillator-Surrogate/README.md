@@ -1,5 +1,8 @@
 # Oscillator Surrogate — Full Platform Demo
 
+![Demo Workflow](images/demo_workflow.gif)
+
+
 **5 model architectures on physics-based trajectory data. Demonstrates every feature of Surrogate Studio.**
 
 ## Models

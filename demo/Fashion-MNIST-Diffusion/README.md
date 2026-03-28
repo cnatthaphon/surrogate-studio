@@ -1,5 +1,8 @@
 # Fashion-MNIST Diffusion — Surrogate Studio Demo
 
+![Demo Workflow](images/demo_workflow.gif)
+
+
 **Train a denoising model on Fashion-MNIST using diffusion-style noise injection.**
 
 Uses the AddNoise building block to inject Gaussian noise during training. The model learns to denoise — then generation uses iterative Langevin dynamics to sample from the learned distribution.
