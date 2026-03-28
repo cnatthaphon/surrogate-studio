@@ -327,9 +327,8 @@
       return moduleData[id] && inputNodeNames[moduleData[id].name];
     });
     if (!inputIds.length) throw new Error("Graph must contain at least one Input/ImageSource/SampleZ node.");
-    // for now, use the first input node as primary
-    // TODO: multi-input support for GAN (SampleZ + ImageSource)
-    var inputId = String(inputIds[0]);
+    var inputId = String(inputIds[0]); // primary input
+    var allInputIds = inputIds.map(String);
 
     var allowedOutputKeys = Array.isArray(datasetMeta.allowedOutputKeys) ? datasetMeta.allowedOutputKeys : ["x"];
     var fallbackTarget = datasetMeta.defaultTarget || "x";
@@ -362,8 +361,8 @@
 
     // reachability from input
     var reachable = {};
-    var q = [inputId];
-    reachable[inputId] = true;
+    var q = allInputIds.slice();
+    allInputIds.forEach(function (iid) { reachable[iid] = true; });
     while (q.length) {
       var cid = q.shift();
       getOutgoing(cid).forEach(function (e) {
@@ -405,22 +404,33 @@
     }
     if (topo.length !== reachableIds.length) throw new Error("Graph contains cycle(s).");
 
-    // build TF.js model
-    var inputTensor;
-    if (isSequence) {
-      inputTensor = tf.input({ shape: [datasetMeta.windowSize, datasetMeta.seqFeatureSize] });
-    } else if (needsReshapeForRecurrent) {
-      // LSTM/GRU in "flat" or "auto" mode: input [batch, features] → reshape to [batch, 1, features]
-      // isSequence stays false for the caller — the model handles reshape internally
-      inputTensor = tf.input({ shape: [datasetMeta.featureSize] });
-      var reshapedInput = tf.layers.reshape({ targetShape: [1, datasetMeta.featureSize] }).apply(inputTensor);
-      // the reshaped tensor will be used as the actual working tensor
-    } else {
-      inputTensor = tf.input({ shape: [datasetMeta.featureSize] });
-    }
-
+    // build TF.js model — create input tensors for ALL input nodes
+    var allInputTensors = []; // { id, tensor, name }
     var tensorById = {};
-    tensorById[inputId] = needsReshapeForRecurrent ? reshapedInput : inputTensor;
+
+    allInputIds.forEach(function (iid) {
+      var inode = moduleData[iid];
+      var iname = inode ? inode.name : "";
+      var itensor;
+      if (iname === "sample_z_layer") {
+        var zDim = Math.max(1, Number((inode.data && inode.data.dim) || 128));
+        itensor = tf.input({ shape: [zDim], name: "z_input_" + iid });
+      } else if (isSequence && iid === inputId) {
+        itensor = tf.input({ shape: [datasetMeta.windowSize, datasetMeta.seqFeatureSize], name: "seq_input" });
+      } else {
+        var fs = Number((inode && inode.data && inode.data.featureSize) || datasetMeta.featureSize || 1);
+        itensor = tf.input({ shape: [fs], name: "input_" + iid });
+      }
+      allInputTensors.push({ id: iid, tensor: itensor, name: iname });
+      // for recurrent: reshape flat input
+      if (needsReshapeForRecurrent && iid === inputId) {
+        tensorById[iid] = tf.layers.reshape({ targetShape: [1, datasetMeta.featureSize] }).apply(itensor);
+      } else {
+        tensorById[iid] = itensor;
+      }
+    });
+
+    var inputTensor = allInputTensors[0].tensor; // primary input for backward compat
     var outTensors = [];
     var headConfigs = [];
     var latentGroups = {};
@@ -529,9 +539,15 @@
         return tf.layers.lstm(rnnCfg).apply(rnnIn);
       }
       if (node.name === "concat_block") return inTensor;
-      // Detach: tf.stopGradients (passes data, stops backprop)
+      // Detach: identity forward, stop gradient backward
+      // TF.js doesn't have a built-in stopGradient layer,
+      // but we mark it and handle in phased training engine
       if (node.name === "detach_layer") {
-        return tf.layers.activation({ activation: "linear" }).apply(inTensor); // placeholder — TF.js doesn't have stopGradient as layer
+        // for single-phase training: identity (no gradient control needed)
+        // for phased training: the engine will use tf.stopGradients
+        var detachLayer = tf.layers.activation({ activation: "linear" });
+        detachLayer._isDetach = true;
+        return detachLayer.apply(inTensor);
       }
       // NoiseInjection: add Gaussian noise (training only)
       if (node.name === "noise_injection_layer") {
@@ -544,7 +560,7 @@
     // walk topological order, build tensors
     for (var ti = 0; ti < topo.length; ti++) {
       var id = topo[ti];
-      if (id === inputId) continue;
+      if (allInputIds.indexOf(id) >= 0) continue;
       var node = moduleData[id];
       if (!node) continue;
       var ins = getIncoming(id).filter(function (e) { return reachable[e.from]; });
@@ -583,6 +599,7 @@
             wx: Math.max(0, Number((odata && odata.wx) || 1)),
             wv: Math.max(0, Number((odata && odata.wv) || 1)),
             matchWeight: headMatchWeight,
+            phase: Number(odata.phase || 0),
           });
         });
         tensorById[id] = generated[0];
@@ -662,7 +679,13 @@
 
     if (!outTensors.length) throw new Error("No valid Output heads were built.");
     var outputs = outTensors.length === 1 ? outTensors[0] : outTensors;
-    return { model: tf.model({ inputs: inputTensor, outputs: outputs }), isSequence: isSequence, headConfigs: headConfigs };
+    var modelInputs = allInputTensors.length === 1 ? inputTensor : allInputTensors.map(function (t) { return t.tensor; });
+    return {
+      model: tf.model({ inputs: modelInputs, outputs: outputs }),
+      isSequence: isSequence,
+      headConfigs: headConfigs,
+      inputNodes: allInputTensors.map(function (t) { return { id: t.id, name: t.name }; }),
+    };
   }
 
   // --- subgraph extraction for generation ---

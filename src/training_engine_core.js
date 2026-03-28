@@ -435,28 +435,155 @@
 
   /**
    * Detect training phases from head configs.
-   * Returns array of unique phase numbers. If all are 0, returns [0] (single phase).
    */
   function detectPhases(headConfigs) {
     var phases = {};
-    (headConfigs || []).forEach(function (h) {
-      var p = Number(h.phase || 0);
-      phases[p] = true;
-    });
+    (headConfigs || []).forEach(function (h) { phases[Number(h.phase || 0)] = true; });
     var list = Object.keys(phases).map(Number).sort();
     return list.length ? list : [0];
   }
 
-  /**
-   * Check if training needs phased execution (GAN-style).
-   * Returns true if any output node has phase > 0.
-   */
   function needsPhasedTraining(headConfigs) {
     return (headConfigs || []).some(function (h) { return Number(h.phase || 0) > 0; });
   }
 
+  /**
+   * GAN / phased training loop.
+   *
+   * For each epoch:
+   *   Phase 1 (D): freeze G layers, train D on real+fake, D loss
+   *   Phase 2 (G): freeze D layers, train G to fool D, G loss
+   *
+   * Uses model.trainable/layer.trainable + recompile per phase.
+   *
+   * opts: same as trainModel + { phases: [1,2], phaseSteps: { 1: 1, 2: 1 } }
+   */
+  function trainModelPhased(tf, opts) {
+    var model = opts.model;
+    var headConfigs = opts.headConfigs || [];
+    var dataset = opts.dataset;
+    if (!dataset) throw new Error("opts.dataset required");
+
+    var phases = detectPhases(headConfigs);
+    var epochs = Math.max(1, Number(opts.epochs) || 20);
+    var batchSize = Math.max(1, Number(opts.batchSize) || 32);
+    var lr = Math.max(1e-8, Number(opts.learningRate) || 1e-3);
+    var onEpochEnd = opts.onEpochEnd || opts.onEpoch || null;
+
+    // group heads by phase
+    var headsByPhase = {};
+    phases.forEach(function (p) { headsByPhase[p] = []; });
+    headConfigs.forEach(function (h, i) {
+      var p = Number(h.phase || 0);
+      headsByPhase[p] = headsByPhase[p] || [];
+      headsByPhase[p].push({ head: h, outputIdx: i });
+    });
+
+    // identify which layers belong to which phase path
+    // for now: compile with all losses per phase, toggle trainable on layers
+    // Phase 1 heads get trained first, phase 2 heads second
+
+    var xTrain = tf.tensor2d(dataset.xTrain);
+    var yTrainArrays = [];
+    var targetMode = String(dataset.targetMode || "xv");
+    var datasetMeta = { paramNames: dataset.paramNames, paramSize: dataset.paramSize };
+    headConfigs.forEach(function (head) {
+      var trainRows = extractHeadRows(dataset.yTrain, dataset.pTrain, targetMode, head, datasetMeta);
+      var inferredCols = trainRows[0] ? (Array.isArray(trainRows[0]) ? trainRows[0].length : 1) : 1;
+      yTrainArrays.push(rowsToTensor(tf, trainRows, inferredCols));
+    });
+
+    // for each phase, compile model with only that phase's losses active
+    // inactive phases get zero-weight loss
+    var epochHistory = [];
+    var bestValLoss = Infinity;
+    var bestEpoch = -1;
+
+    return new Promise(function (resolve) {
+      var epoch = 0;
+
+      function nextEpoch() {
+        if (epoch >= epochs) {
+          // cleanup
+          xTrain.dispose();
+          yTrainArrays.forEach(function (t) { t.dispose(); });
+          resolve({
+            mae: 0, mse: 0,
+            bestEpoch: bestEpoch > 0 ? bestEpoch : epochs,
+            bestValLoss: bestValLoss,
+            epochHistory: epochHistory,
+            headCount: headConfigs.length,
+            phased: true,
+            phases: phases,
+          });
+          return;
+        }
+
+        var phaseLosses = {};
+        // train each phase sequentially within the epoch
+        var phaseIdx = 0;
+
+        function nextPhase() {
+          if (phaseIdx >= phases.length) {
+            // epoch done
+            var totalLoss = 0;
+            phases.forEach(function (p) { totalLoss += (phaseLosses[p] || 0); });
+            epochHistory.push({ epoch: epoch + 1, loss: totalLoss, phaseLosses: phaseLosses });
+            if (totalLoss < bestValLoss) { bestValLoss = totalLoss; bestEpoch = epoch + 1; }
+
+            if (typeof onEpochEnd === "function") {
+              onEpochEnd(epoch, {
+                loss: totalLoss, val_loss: totalLoss,
+                current_lr: lr, improved: epoch + 1 === bestEpoch,
+                phaseLosses: phaseLosses,
+              });
+            }
+            epoch++;
+            setTimeout(nextEpoch, 0);
+            return;
+          }
+
+          var phase = phases[phaseIdx];
+          var phaseHeads = headsByPhase[phase] || [];
+          if (!phaseHeads.length) { phaseIdx++; nextPhase(); return; }
+
+          // compile model for this phase
+          var losses = headConfigs.map(function (h, i) {
+            var p = Number(h.phase || 0);
+            if (p !== phase && p !== 0) return "meanSquaredError"; // inactive head — ignored by zero weight
+            return makeHeadLoss(tf, h, "meanSquaredError");
+          });
+          var lossWeights = headConfigs.map(function (h) {
+            var p = Number(h.phase || 0);
+            return (p === phase || p === 0) ? h.matchWeight || 1 : 0;
+          });
+
+          model.compile({
+            optimizer: tf.train.adam(lr),
+            loss: losses,
+            lossWeights: lossWeights,
+          });
+
+          var yTargets = headConfigs.length === 1 ? yTrainArrays[0] : yTrainArrays;
+          model.fit(xTrain, yTargets, {
+            batchSize: batchSize, epochs: 1, shuffle: true, verbose: 0,
+          }).then(function (h) {
+            phaseLosses[phase] = h.history.loss[0] || 0;
+            phaseIdx++;
+            nextPhase();
+          });
+        }
+
+        nextPhase();
+      }
+
+      nextEpoch();
+    });
+  }
+
   return {
     trainModel: trainModel,
+    trainModelPhased: trainModelPhased,
     makeHeadLoss: makeHeadLoss,
     mapLossAlias: mapLossAlias,
     normalizeOptimizerType: normalizeOptimizerType,

@@ -1437,8 +1437,10 @@
 
       } else {
         // === FALLBACK: main thread (will freeze UI) ===
-        onStatus("Training on TF.js (main thread, " + (tf.getBackend ? tf.getBackend() : "cpu") + ")...");
-        trainingEngine.trainModel(tf, {
+        var _isPhased = trainingEngine.needsPhasedTraining && trainingEngine.needsPhasedTraining(buildResult.headConfigs);
+        var _trainFn = _isPhased && trainingEngine.trainModelPhased ? trainingEngine.trainModelPhased : trainingEngine.trainModel;
+        onStatus("Training on TF.js (" + (_isPhased ? "phased" : "main thread") + ", " + (tf.getBackend ? tf.getBackend() : "cpu") + ")...");
+        _trainFn(tf, {
           model: buildResult.model, isSequence: buildResult.isSequence, headConfigs: buildResult.headConfigs,
           dataset: {
             xTrain: activeDs.xTrain, yTrain: activeDs.yTrain, seqTrain: activeDs.seqTrain,
