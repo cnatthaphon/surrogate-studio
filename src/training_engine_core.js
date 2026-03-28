@@ -433,6 +433,28 @@
     });
   }
 
+  /**
+   * Detect training phases from head configs.
+   * Returns array of unique phase numbers. If all are 0, returns [0] (single phase).
+   */
+  function detectPhases(headConfigs) {
+    var phases = {};
+    (headConfigs || []).forEach(function (h) {
+      var p = Number(h.phase || 0);
+      phases[p] = true;
+    });
+    var list = Object.keys(phases).map(Number).sort();
+    return list.length ? list : [0];
+  }
+
+  /**
+   * Check if training needs phased execution (GAN-style).
+   * Returns true if any output node has phase > 0.
+   */
+  function needsPhasedTraining(headConfigs) {
+    return (headConfigs || []).some(function (h) { return Number(h.phase || 0) > 0; });
+  }
+
   return {
     trainModel: trainModel,
     makeHeadLoss: makeHeadLoss,
@@ -441,6 +463,8 @@
     normalizeLrSchedulerType: normalizeLrSchedulerType,
     createOptimizerByType: createOptimizerByType,
     extractHeadRows: extractHeadRows,
+    detectPhases: detectPhases,
+    needsPhasedTraining: needsPhasedTraining,
     OPTIMIZER_TYPES: OPTIMIZER_TYPES,
     LR_SCHEDULER_TYPES: LR_SCHEDULER_TYPES,
   };
