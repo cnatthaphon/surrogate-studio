@@ -1447,8 +1447,14 @@
     // Cell 5: Train
     cells.push(makeCodeCell(
       "optimizer = torch.optim.Adam(model.parameters(), lr=LR)\n" +
-      "scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=3, factor=0.5)\n" +
-      "loss_fn = nn.MSELoss()\n\n" +
+      "scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=3, factor=0.5)\n\n" +
+      "# determine loss from graph output nodes\n" +
+      "data = graph.get('drawflow', {}).get('Home', {}).get('data', graph)\n" +
+      "out_nodes = [data[k] for k in data if data[k].get('name','').endswith('output_layer')]\n" +
+      "loss_name = out_nodes[0].get('data',{}).get('loss','mse') if out_nodes else 'mse'\n" +
+      "is_cls = any(n.get('data',{}).get('target','') in ('label','logits') for n in out_nodes)\n" +
+      "loss_fn = nn.CrossEntropyLoss() if is_cls else ({'mse': nn.MSELoss(), 'mae': nn.L1Loss(), 'bce': nn.BCELoss()}.get(loss_name, nn.MSELoss()))\n" +
+      "print(f'Loss: {loss_fn.__class__.__name__} (from graph: {loss_name})')\n\n" +
       "train_dl = DataLoader(TensorDataset(x_train, y_train), batch_size=BATCH_SIZE, shuffle=True)\n" +
       "val_dl = DataLoader(TensorDataset(x_val, y_val), batch_size=BATCH_SIZE)\n\n" +
       "history = {'train_loss': [], 'val_loss': []}\n" +
