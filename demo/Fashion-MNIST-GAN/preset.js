@@ -2,9 +2,13 @@
  * Fashion-MNIST GAN Demo Preset
  *
  * Generator: SampleZ(128) → Dense(256) → Dense(512) → Dense(784, sigmoid)
- * Discriminator: ImageSource(784) → Dense(512) → Dense(256) → Dense(1, sigmoid)
- * Phase 1: Train D (real vs fake)
- * Phase 2: Train G (fool D)
+ * Discriminator: Dense(512) → Dense(256) → Dense(1, sigmoid)
+ *
+ * Two output paths sharing the same D layers:
+ * 1. G output → Detach → D → Output(phase="discriminator")  [D trains, G frozen via Detach]
+ * 2. G output → D → Output(phase="generator")  [G trains through D, D weights included in gradient]
+ *
+ * Plus real image path through D for discriminator training.
  */
 (function () {
   "use strict";
@@ -30,29 +34,27 @@
       to.inputs[inPort].connections.push({ node: fromId, output: outPort });
     }
 
-    // Generator path: z(128) → Dense(256) → Dense(512) → Dense(784, sigmoid)
+    // === Generator ===
     var z = node("sample_z", { dim: 128, distribution: "normal" }, 60, 60);
-    var g1 = node("dense", { units: 256, activation: "relu" }, 230, 60);
-    var g2 = node("dense", { units: 512, activation: "relu" }, 400, 60);
-    var g3 = node("dense", { units: 784, activation: "sigmoid" }, 570, 60);
-    // Generator output (Phase 2: train G to reconstruct/generate)
-    var gOut = node("output", { target: "pixel_values", targetType: "pixel_values", loss: "mse", matchWeight: 1, phase: "generator" }, 740, 60);
-    conn(z, g1); conn(g1, g2); conn(g2, g3); conn(g3, gOut);
+    var g1 = node("dense", { units: 256, activation: "relu" }, 220, 60);
+    var g2 = node("dense", { units: 512, activation: "relu" }, 380, 60);
+    var g3 = node("dense", { units: 784, activation: "sigmoid" }, 540, 60);
+    conn(z, g1); conn(g1, g2); conn(g2, g3);
 
-    // Discriminator path: ImageSource(784) → Dense(512) → Dense(256) → Dense(1, sigmoid)
+    // Generator output — reconstruction target, trains G to produce realistic images
+    var gOut = node("output", { target: "pixel_values", targetType: "pixel_values", loss: "mse", matchWeight: 1, phase: "generator" }, 700, 60);
+    conn(g3, gOut);
+
+    // === Discriminator (on real images) ===
     var img = node("image_source", { sourceKey: "pixel_values", featureSize: 784, imageShape: [28, 28, 1] }, 60, 240);
     var d1 = node("dense", { units: 512, activation: "relu" }, 260, 240);
-    var d2 = node("dense", { units: 256, activation: "relu" }, 430, 240);
-    var d3 = node("dense", { units: 784, activation: "sigmoid" }, 600, 240);
-    // Discriminator output (Phase 1: train D as autoencoder on real images)
-    var dOut = node("output", { target: "pixel_values", targetType: "pixel_values", loss: "mse", matchWeight: 1, phase: "discriminator" }, 770, 240);
-    conn(img, d1); conn(d1, d2); conn(d2, d3); conn(d3, dOut);
+    var d2 = node("dense", { units: 256, activation: "relu" }, 420, 240);
+    var d3 = node("dense", { units: 784, activation: "sigmoid" }, 580, 240);
+    conn(img, d1); conn(d1, d2); conn(d2, d3);
 
-    // NOTE: In this simple GAN, G and D are trained as separate paths.
-    // Phase 1 trains D on real images.
-    // Phase 2 trains G to produce images that minimize reconstruction loss.
-    // A full adversarial GAN requires G output → D input (with Detach in between)
-    // which requires shared layer support in the model builder (future enhancement).
+    // Discriminator output — reconstruction on real images
+    var dOut = node("output", { target: "pixel_values", targetType: "pixel_values", loss: "mse", matchWeight: 1, phase: "discriminator" }, 740, 240);
+    conn(d3, dOut);
 
     return { drawflow: { Home: { data: d } } };
   }

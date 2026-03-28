@@ -457,8 +457,23 @@ def build_model_from_graph(graph, feature_size, target_size, num_classes=0):
                 elif t == "layernorm":
                     setattr(self, f"ln_{nid}", nn.LayerNorm(in_dim))
                     dim_map[nid] = in_dim
+                elif t == "noise_injection":
+                    # Gaussian noise (training only) — passthrough with same dim
+                    scale = float(c.get("scale", 0.1))
+                    setattr(self, f"noise_scale_{nid}", scale)
+                    dim_map[nid] = in_dim
+                elif t == "detach":
+                    # gradient stop — passthrough with same dim
+                    dim_map[nid] = in_dim
+                elif t == "sample_z":
+                    # random input — like another input node
+                    zdim = int(c.get("dim", 128))
+                    dim_map[nid] = zdim
+                elif t == "image_source":
+                    # image input — like input node
+                    dim_map[nid] = int(c.get("featureSize", feature_size))
                 elif t == "output":
-                    target = str(c.get("target", "xv"))
+                    target = str(c.get("target", ""))
                     odim = num_classes if (target in ("label", "logits") and num_classes > 0) else target_size
                     setattr(self, f"out_{nid}", nn.Linear(in_dim, odim))
                     dim_map[nid] = odim
@@ -506,6 +521,14 @@ def build_model_from_graph(graph, feature_size, target_size, num_classes=0):
                     tensors[nid] = getattr(self, f"bn_{nid}")(inp)
                 elif t == "layernorm":
                     tensors[nid] = getattr(self, f"ln_{nid}")(inp)
+                elif t == "noise_injection":
+                    scale = getattr(self, f"noise_scale_{nid}", 0.1)
+                    if self.training:
+                        tensors[nid] = inp + torch.randn_like(inp) * scale
+                    else:
+                        tensors[nid] = inp
+                elif t == "detach":
+                    tensors[nid] = inp.detach()
                 elif t == "output":
                     tensors[nid] = getattr(self, f"out_{nid}")(inp)
                 else:

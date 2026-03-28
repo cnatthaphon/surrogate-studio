@@ -1069,6 +1069,36 @@
         rightEl.appendChild(serverPanel);
       }
 
+      // phase configuration (detected from model graph)
+      if (t.modelId && modelBuilder) {
+        var phModel = store ? store.getModel(t.modelId) : null;
+        if (phModel && phModel.graph) {
+          var phHeads = modelBuilder.inferOutputHeads(phModel.graph, [], "x");
+          var phPhases = [];
+          var phSeen = {};
+          phHeads.forEach(function (h) {
+            var p = String(h.phase || "").trim();
+            if (p && !phSeen[p]) { phSeen[p] = true; phPhases.push(p); }
+          });
+          if (phPhases.length > 0) {
+            var phCard = el("div", { style: "margin-top:8px;padding:6px 8px;border:1px solid #1e293b;border-radius:6px;background:#0f172a;" });
+            phCard.appendChild(el("div", { style: "font-size:10px;color:#67e8f9;font-weight:600;margin-bottom:4px;" }, "Training Phases"));
+            phPhases.forEach(function (p, idx) {
+              var row = el("div", { style: "display:flex;align-items:center;gap:6px;margin-bottom:3px;" });
+              row.appendChild(el("span", { style: "font-size:10px;color:#e2e8f0;min-width:20px;" }, String(idx + 1) + "."));
+              row.appendChild(el("span", { style: "font-size:11px;color:#38bdf8;font-weight:600;" }, p));
+              // heads in this phase
+              var phHeadTargets = phHeads.filter(function (h) { return String(h.phase || "").trim() === p; }).map(function (h) { return h.target; });
+              row.appendChild(el("span", { style: "font-size:9px;color:#64748b;" }, "→ " + phHeadTargets.join(", ")));
+              phCard.appendChild(row);
+            });
+            phCard.appendChild(el("div", { style: "font-size:9px;color:#64748b;margin-top:4px;" },
+              "Phases train in order shown. Each phase runs for 1 epoch step before switching."));
+            rightEl.appendChild(phCard);
+          }
+        }
+      }
+
       // buttons — show Stop only for the actively training trainer
       var btnRow = el("div", { style: "display:flex;gap:4px;margin-top:8px;" });
       if (_isTraining && _activeTrainingId === activeId) {
