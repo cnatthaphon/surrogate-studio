@@ -69,9 +69,9 @@ def main():
         sys.exit(1)
 
     feature_size = x_train.shape[1] if x_train.ndim > 1 else 1
-    # determine target_size from output nodes (not y_train shape which changes after label conversion)
-    _out_nodes = [graph_data[k] for k in graph_data if graph_data[k].get("name", "").replace("_layer", "") == "output"]
-    _out_targets = [n.get("data", {}).get("target", "") for n in _out_nodes]
+    # determine target_size from graph output nodes (not y_train shape which changes after label conversion)
+    _gd = graph.get("drawflow", {}).get("Home", {}).get("data", graph)
+    _out_targets = [_gd[k].get("data", {}).get("target", "") for k in _gd if _gd[k].get("name", "").replace("_layer", "") == "output"]
     _is_all_cls = all(t in ("label", "logits") for t in _out_targets if t)
     target_size = 1 if _is_all_cls else feature_size
     status(f"Data: {x_train.shape[0]} train, {x_val.shape[0]} val, features={feature_size}, targets={target_size}")
