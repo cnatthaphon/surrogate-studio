@@ -252,6 +252,7 @@
       },
       normalizeHistorySeriesKey: normalizeHistorySeriesKey,
       historySeriesLabel: historySeriesLabel,
+      getFeatureNodesMeta: getFeatureNodesMeta,
       getImageSourceSpec: getImageSourceSpec,
       normalizeParamMask: normalizeParamMask,
       defaultParamMask: defaultParamMask,

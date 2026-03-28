@@ -605,8 +605,20 @@
         addField({ kind: "number", key: "dim", label: "Embed dim", value: Math.max(1, Number(d.dim || 64)), min: 1, step: 1 });
         return spec;
       }
-      if (node.name === "image_source_block") {
-        addField({ kind: "text", key: "sourceKey", label: "Source key", value: String(d.sourceKey || "pixel_values") });
+      if (node.name === "image_source_block" || node.name === "image_source_layer") {
+        // source key options from schema
+        var imgSrcSpec = (typeof api.getImageSourceSpec === "function") ? api.getImageSourceSpec("", sid) : null;
+        var featureNodesMeta = (typeof api.getFeatureNodesMeta === "function") ? api.getFeatureNodesMeta(sid) : {};
+        var imgSources = featureNodesMeta.imageSource || [];
+        if (imgSources.length > 0) {
+          addField({
+            kind: "select", key: "sourceKey", label: "Source",
+            value: String(d.sourceKey || (imgSources[0] && imgSources[0].key) || ""),
+            options: imgSources.map(function (s) { return { value: s.key, label: s.label || s.key }; }),
+          });
+        } else {
+          addField({ kind: "text", key: "sourceKey", label: "Source key", value: String(d.sourceKey || "") });
+        }
         addField({ kind: "number", key: "imageWidth", label: "Width", value: Math.max(1, Number(d.imageWidth || 28)), min: 1, step: 1 });
         addField({ kind: "number", key: "imageHeight", label: "Height", value: Math.max(1, Number(d.imageHeight || 28)), min: 1, step: 1 });
         addField({ kind: "number", key: "imageChannels", label: "Channels", value: Math.max(1, Number(d.imageChannels || 1)), min: 1, step: 1 });
@@ -864,7 +876,7 @@
         var rs = String(rawValue || "auto");
         data.returnseq = (rs === "true" || rs === "false") ? rs : "auto";
       } else if (k === "sourceKey") {
-        data.sourceKey = String(rawValue || "pixel_values");
+        data.sourceKey = String(rawValue || "");
       } else if (k === "oneHotKey") {
         data.oneHotKey = api.normalizeOneHotKey(rawValue, sid);
       } else if (k === "imageWidth") {
