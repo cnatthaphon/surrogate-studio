@@ -1614,6 +1614,39 @@
       "    print(f'Random sampling failed (model may not be VAE): {e}')\n"
     ));
 
+    // Cell 10: Langevin generation (denoising models)
+    cells.push(makeMarkdownCell("## 10) Langevin Generation\n\nIterative denoising from random noise using the trained model as a score function."));
+    cells.push(makeCodeCell(
+      "# --- Langevin Dynamics Generation ---\n" +
+      "# Start from random noise, iteratively denoise using model gradient\n" +
+      "import torch.autograd as autograd\n\n" +
+      "model.eval()\n" +
+      "n_samples = 16\n" +
+      "n_steps = 50\n" +
+      "step_size = 0.01\n" +
+      "temperature = 0.5\n\n" +
+      "x = torch.randn(n_samples, x_train.shape[1], device=device, requires_grad=True)\n\n" +
+      "for step in range(n_steps):\n" +
+      "    pred = model(x)\n" +
+      "    score = (pred - x).mean()  # score estimate: direction toward data\n" +
+      "    grad = autograd.grad(score, x, create_graph=False)[0]\n" +
+      "    noise = torch.randn_like(x) * (step_size ** 0.5) * temperature\n" +
+      "    x = (x + step_size * grad + noise).detach().requires_grad_(True)\n\n" +
+      "samples = x.detach().cpu().numpy()\n" +
+      "print(f'Generated {n_samples} samples via Langevin dynamics ({n_steps} steps)')\n\n" +
+      "if is_image:\n" +
+      "    fig, axes = plt.subplots(2, 8, figsize=(12, 3))\n" +
+      "    for i in range(min(16, n_samples)):\n" +
+      "        axes[i//8, i%8].imshow(np.clip(samples[i].reshape(img_h, img_w), 0, 1), cmap='gray')\n" +
+      "        axes[i//8, i%8].axis('off')\n" +
+      "    plt.suptitle('Langevin Samples'); plt.tight_layout(); plt.show()\n" +
+      "else:\n" +
+      "    plt.figure(figsize=(10, 4))\n" +
+      "    for i in range(min(8, n_samples)):\n" +
+      "        plt.plot(samples[i], alpha=0.7, label=f'Sample {i}')\n" +
+      "    plt.title('Langevin Samples'); plt.legend(fontsize=8); plt.tight_layout(); plt.show()\n"
+    ));
+
     return {
       nbformat: 4,
       nbformat_minor: 2,
