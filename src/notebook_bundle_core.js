@@ -1453,8 +1453,8 @@
       "out_nodes = [data[k] for k in data if data[k].get('name','').endswith('output_layer')]\n" +
       "loss_name = out_nodes[0].get('data',{}).get('loss','mse') if out_nodes else 'mse'\n" +
       "is_cls = any(n.get('data',{}).get('target','') in ('label','logits') for n in out_nodes)\n" +
-      "phases = sorted(set(int(n.get('data',{}).get('phase', 0)) for n in out_nodes))\n" +
-      "is_phased = any(p > 0 for p in phases)\n" +
+      "phases = sorted(set(str(n.get('data',{}).get('phase', '')).strip() for n in out_nodes))\n" +
+      "is_phased = any(p != '' for p in phases)\n" +
       "print(f'Phases: {phases} (phased={is_phased})')\n\n" +
       "# per-head loss\n" +
       "head_losses = []\n" +
@@ -1463,7 +1463,7 @@
       "    ht = nd.get('target', 'xv')\n" +
       "    hl = nd.get('loss', 'mse').lower()\n" +
       "    hw = float(nd.get('matchWeight', 1))\n" +
-      "    hp = int(nd.get('phase', 0))\n" +
+      "    hp = str(nd.get('phase', '')).strip()\n" +
       "    if ht in ('label', 'logits'): fn = nn.CrossEntropyLoss()\n" +
       "    elif hl == 'bce': fn = nn.BCELoss()\n" +
       "    elif hl == 'mae': fn = nn.L1Loss()\n" +
@@ -1472,13 +1472,13 @@
       "    print(f'  Head: target={ht}, loss={hl}, phase={hp}, weight={hw}')\n\n" +
       "if not head_losses:\n" +
       "    loss_fn = nn.CrossEntropyLoss() if is_cls else nn.MSELoss()\n" +
-      "    head_losses = [{'fn': loss_fn, 'weight': 1.0, 'phase': 0, 'cls': is_cls}]\n\n" +
+      "    head_losses = [{'fn': loss_fn, 'weight': 1.0, 'phase': '', 'cls': is_cls}]\n\n" +
       "train_dl = DataLoader(TensorDataset(x_train, y_train), batch_size=BATCH_SIZE, shuffle=True)\n" +
       "val_dl = DataLoader(TensorDataset(x_val, y_val), batch_size=BATCH_SIZE)\n\n" +
       "def compute_loss(pred, xb, yb, phase):\n" +
       "    total = torch.tensor(0.0, device=device)\n" +
       "    for hl in head_losses:\n" +
-      "        if hl['phase'] != phase and hl['phase'] != 0 and phase != 0: continue\n" +
+      "        if hl['phase'] != phase and hl['phase'] != '' and phase != '': continue\n" +
       "        t = yb\n" +
       "        if hl['cls']: total = total + hl['weight'] * hl['fn'](pred, t.long().squeeze(-1))\n" +
       "        else: total = total + hl['weight'] * hl['fn'](pred, t)\n" +

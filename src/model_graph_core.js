@@ -102,10 +102,10 @@
       var target = String((cfg && (cfg.target || cfg.targetType)) || "xv");
       var loss = String((cfg && cfg.loss) || "mse");
       var matchWeight = Math.max(0, Number((cfg && cfg.matchWeight) || 1));
-      var phase = Math.max(0, Number((cfg && cfg.phase) || 0));
+      var phase = String((cfg && cfg.phase) || "").trim();
       var html =
         "<div><div style='font-weight:700'>Output</div>" +
-        "<div class='node-summary' style='font-size:11px;color:#94a3b8;'>target=" + target + ", loss=" + loss + (phase > 0 ? ", phase=" + phase : "") + "</div></div>";
+        "<div class='node-summary' style='font-size:11px;color:#94a3b8;'>target=" + target + ", loss=" + loss + (phase ? ", phase=" + phase : "") + "</div></div>";
       return editor.addNode("output_layer", 1, 0, x, y, "output_layer", {
         target: target,
         targetType: target,
@@ -543,17 +543,15 @@
         var target = String(d.targetType || d.target || "x");
         var rawLoss = String(d.loss || "mse");
         var loss = rawLoss === "use_global" ? "mse" : rawLoss;
-        // target options: schema-provided + common reconstruction/classification targets
+        // target options from schema only — no hardcoded options
         var outputKeys = (typeof api.getOutputKeys === "function") ? api.getOutputKeys(sid) : [];
-        var seen = {};
         var targetOptions = [];
-        // add schema outputs first
-        outputKeys.forEach(function (k) { var v = k.key || k; if (!seen[v]) { seen[v] = true; targetOptions.push({ value: v, label: k.label || v }); } });
-        // add common targets if not already in schema
-        ["xv", "x", "v", "label", "logits", "traj", "params"].forEach(function (v) {
-          if (!seen[v]) { seen[v] = true; targetOptions.push({ value: v, label: v }); }
+        outputKeys.forEach(function (k) {
+          var v = k.key || k;
+          var l = k.label || v;
+          targetOptions.push({ value: v, label: l });
         });
-        if (!targetOptions.length) targetOptions.push({ value: "x", label: "x" });
+        if (!targetOptions.length) targetOptions.push({ value: "xv", label: "reconstruction (xv)" });
         addField({
           kind: "select",
           key: "targetType",
@@ -582,7 +580,7 @@
           addMessage("Reconstruction head. Target = input features (y = x).");
         }
         addField({ kind: "number", key: "matchWeight", label: "Head weight", value: Math.max(0, Number(d.matchWeight || 1)).toFixed(2), min: 0, step: 0.1 });
-        addField({ kind: "number", key: "phase", label: "Training phase (0=all)", value: Math.max(0, Number(d.phase || 0)), min: 0, step: 1 });
+        addField({ kind: "text", key: "phase", label: "Training phase (empty=default)", value: String(d.phase || ""), placeholder: "e.g. discriminator, generator" });
         return spec;
       }
       // --- Detach node ---
@@ -801,7 +799,7 @@
         var validLosses = ["mse", "mae", "huber", "bce", "categoricalCrossentropy", "sparseCategoricalCrossentropy", "cross_entropy"];
         data.loss = validLosses.indexOf(vLoss) >= 0 ? vLoss : "mse";
       } else if (k === "phase") {
-        data.phase = Math.max(0, Math.floor(Number(rawValue) || 0));
+        data.phase = String(rawValue || "").trim();
       } else if (k === "matchWeight") {
         data.matchWeight = Math.max(0, Number(rawValue) || 1);
       } else if (k === "wx") {

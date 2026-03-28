@@ -240,7 +240,7 @@
           nodeId: x.id, target: target, targetType: target,
           loss: normalizedLoss,
           matchWeight: Math.max(0, Number(d.matchWeight || 1)),
-          phase: Number(d.phase || 0),
+          phase: String(d.phase || ""),
         });
       });
     });
@@ -591,7 +591,7 @@
             wx: Math.max(0, Number((odata && odata.wx) || 1)),
             wv: Math.max(0, Number((odata && odata.wv) || 1)),
             matchWeight: headMatchWeight,
-            phase: Number(odata.phase || 0),
+            phase: String(odata.phase || ""),
           });
         });
         tensorById[id] = generated[0];

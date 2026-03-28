@@ -445,15 +445,27 @@
   /**
    * Detect training phases from head configs.
    */
+  /**
+   * Detect training phases from head configs.
+   * Returns array of unique phase labels. Empty string = default (all).
+   * If all heads have empty phase, returns [""] (single phase).
+   */
   function detectPhases(headConfigs) {
     var phases = {};
-    (headConfigs || []).forEach(function (h) { phases[Number(h.phase || 0)] = true; });
-    var list = Object.keys(phases).map(Number).sort();
-    return list.length ? list : [0];
+    (headConfigs || []).forEach(function (h) {
+      var p = String(h.phase || "").trim();
+      phases[p] = true;
+    });
+    var list = Object.keys(phases).sort();
+    return list.length ? list : [""];
   }
 
+  /**
+   * Check if training needs phased execution.
+   * Returns true if any output node has a non-empty phase label.
+   */
   function needsPhasedTraining(headConfigs) {
-    return (headConfigs || []).some(function (h) { return Number(h.phase || 0) > 0; });
+    return (headConfigs || []).some(function (h) { return String(h.phase || "").trim() !== ""; });
   }
 
   /**
@@ -483,7 +495,7 @@
     var headsByPhase = {};
     phases.forEach(function (p) { headsByPhase[p] = []; });
     headConfigs.forEach(function (h, i) {
-      var p = Number(h.phase || 0);
+      var p = String(h.phase || "").trim();
       headsByPhase[p] = headsByPhase[p] || [];
       headsByPhase[p].push({ head: h, outputIdx: i });
     });
@@ -581,13 +593,13 @@
 
           // compile model for this phase
           var losses = headConfigs.map(function (h, i) {
-            var p = Number(h.phase || 0);
-            if (p !== phase && p !== 0) return "meanSquaredError"; // inactive head — ignored by zero weight
+            var p = String(h.phase || "").trim();
+            if (p !== phase && p !== "") return "meanSquaredError";
             return makeHeadLoss(tf, h, "meanSquaredError");
           });
           var lossWeights = headConfigs.map(function (h) {
-            var p = Number(h.phase || 0);
-            return (p === phase || p === 0) ? h.matchWeight || 1 : 0;
+            var p = String(h.phase || "").trim();
+            return (p === phase || p === "") ? h.matchWeight || 1 : 0;
           });
 
           model.compile({

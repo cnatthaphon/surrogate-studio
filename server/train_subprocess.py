@@ -122,8 +122,8 @@ def main():
     val_dl = DataLoader(val_ds, batch_size=batch_size, shuffle=False)
 
     # --- Detect phases from headConfigs ---
-    phases = sorted(set(int(h.get("phase", 0)) for h in head_configs)) if head_configs else [0]
-    is_phased = any(p > 0 for p in phases)
+    phases = sorted(set(str(h.get("phase", "")).strip() for h in head_configs)) if head_configs else [""]
+    is_phased = any(p != "" for p in phases)
 
     # per-head loss functions (for multi-head/phased models)
     head_losses = []
@@ -131,7 +131,7 @@ def main():
         ht = str(hc.get("target", target_mode))
         hl = str(hc.get("loss", "mse")).lower()
         hw = float(hc.get("matchWeight", 1.0))
-        hp = int(hc.get("phase", 0))
+        hp = str(hc.get("phase", "")).strip()
         if ht in ("label", "logits"):
             head_losses.append({"fn": nn.CrossEntropyLoss(), "weight": hw, "phase": hp, "cls": True})
         elif hl == "bce":
@@ -142,7 +142,7 @@ def main():
             head_losses.append({"fn": nn.MSELoss(), "weight": hw, "phase": hp, "cls": False})
 
     if not head_losses:
-        head_losses = [{"fn": loss_fn, "weight": 1.0, "phase": 0, "cls": is_classification}]
+        head_losses = [{"fn": loss_fn, "weight": 1.0, "phase": "", "cls": is_classification}]
 
     # per-head y data (reconstruction heads use x, classification heads use labels)
     labels_train = np.array(ds.get("labelsTrain", []), dtype=np.float32) if ds.get("labelsTrain") else None
@@ -152,7 +152,7 @@ def main():
         """Compute weighted loss across heads for active phase."""
         total = torch.tensor(0.0, device=device)
         for i, hl in enumerate(head_losses):
-            if hl["phase"] != active_phase and hl["phase"] != 0 and active_phase != 0:
+            if hl["phase"] != active_phase and hl["phase"] != "" and active_phase != "":
                 continue  # skip heads not in this phase
             target = yb
             if hl["cls"] and labels_train is not None:
@@ -198,7 +198,7 @@ def main():
             for xb, yb in val_dl:
                 xb, yb = xb.to(device), yb.to(device)
                 pred = model(xb)
-                loss = compute_loss(pred, xb, yb, 0)  # phase 0 = all
+                loss = compute_loss(pred, xb, yb, "")  # empty = all phases
                 val_loss += loss.item()
                 n_val += 1
         val_loss /= max(n_val, 1)
