@@ -473,11 +473,8 @@
         }
         return Math.max(1, Number(datasetMeta.paramSize || 1));
       }
-      // reconstruction targets: xv=full feature, x/v=half, traj=full
-      if (target === "xv" || target === "traj") return Math.max(1, Number(datasetMeta.featureSize || 2));
-      if (target === "x") return 1;
-      if (target === "v") return 1;
-      return 1;
+      // anything not classification: reconstruction → output = input feature size
+      return Math.max(1, Number(datasetMeta.featureSize || 1));
     };
 
     var applyNodeOp = function (node, inTensor, laterHasRecurrent) {
