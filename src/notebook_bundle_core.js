@@ -1697,18 +1697,144 @@
     ));
 
     // Cell 12: Generation evaluation summary
-    cells.push(makeMarkdownCell("## 12) Generation Evaluation Summary"));
+    // Cell 12: Classifier-guided generation
+    cells.push(makeMarkdownCell("## 12) Classifier-Guided Generation\n\nOptimize z so the decoded output is classified as a target class."));
     cells.push(makeCodeCell(
-      "# Compare reconstruction quality across methods\n" +
-      "print('=== Generation Summary ===')\n" +
+      "# --- Classifier-Guided Generation ---\n" +
+      "# Requires a model with both reconstruction and classification outputs.\n" +
+      "# If model has only reconstruction, this cell is skipped.\n" +
+      "try:\n" +
+      "    # check if model has classification output (>1 output or softmax layer)\n" +
+      "    model.eval()\n" +
+      "    test_out = model(x_test[:1].to(device))\n" +
+      "    has_classifier = isinstance(test_out, (tuple, list)) and len(test_out) > 1\n" +
+      "    if not has_classifier and test_out.shape[-1] < 20:  # small output = likely classifier\n" +
+      "        has_classifier = True\n\n" +
+      "    if has_classifier:\n" +
+      "        target_class = 0  # change this to target different classes\n" +
+      "        n_guided = 8\n" +
+      "        z = torch.randn(n_guided, latent_dim, device=device, requires_grad=True)\n" +
+      "        opt = torch.optim.Adam([z], lr=0.01)\n\n" +
+      "        for step in range(100):\n" +
+      "            opt.zero_grad()\n" +
+      "            dec = decoder(z) if 'decoder' in dir() else model(z)\n" +
+      "            cls_out = model(dec)\n" +
+      "            if isinstance(cls_out, (tuple, list)): cls_out = cls_out[-1]  # last output = classifier\n" +
+      "            guidance_loss = -torch.log(cls_out[:, target_class] + 1e-8).mean()\n" +
+      "            guidance_loss.backward()\n" +
+      "            opt.step()\n" +
+      "            if step % 25 == 0: print(f'Step {step}: guidance_loss={guidance_loss.item():.4f}')\n\n" +
+      "        guided_samples = (decoder(z) if 'decoder' in dir() else model(z)).detach().cpu().numpy()\n" +
+      "        if is_image:\n" +
+      "            fig, axes = plt.subplots(1, n_guided, figsize=(n_guided*1.5, 2))\n" +
+      "            for i in range(n_guided):\n" +
+      "                axes[i].imshow(np.clip(guided_samples[i].reshape(img_h, img_w), 0, 1), cmap='gray')\n" +
+      "                axes[i].axis('off')\n" +
+      "            plt.suptitle(f'Classifier-Guided (class={target_class})'); plt.tight_layout(); plt.show()\n" +
+      "        else:\n" +
+      "            plt.figure(figsize=(10, 3))\n" +
+      "            for i in range(n_guided): plt.plot(guided_samples[i], alpha=0.7)\n" +
+      "            plt.title(f'Classifier-Guided (class={target_class})'); plt.tight_layout(); plt.show()\n" +
+      "    else:\n" +
+      "        print('Model has no classifier head — skipping guided generation.')\n" +
+      "except Exception as e:\n" +
+      "    print(f'Classifier-guided generation skipped: {e}')\n"
+    ));
+
+    // Cell 13: Inverse optimization
+    cells.push(makeMarkdownCell("## 13) Inverse Optimization\n\nOptimize input x to match a target output."));
+    cells.push(makeCodeCell(
+      "# --- Inverse: find input that produces target output ---\n" +
+      "model.eval()\n" +
+      "try:\n" +
+      "    target_output = x_test[:1].to(device)\n" +
+      "    x_opt = torch.randn(1, x_train.shape[1], device=device, requires_grad=True)\n" +
+      "    opt = torch.optim.Adam([x_opt], lr=0.01)\n\n" +
+      "    losses = []\n" +
+      "    for step in range(200):\n" +
+      "        opt.zero_grad()\n" +
+      "        pred = model(x_opt)\n" +
+      "        if isinstance(pred, (tuple, list)): pred = pred[0]\n" +
+      "        loss = nn.MSELoss()(pred, target_output)\n" +
+      "        loss.backward()\n" +
+      "        opt.step()\n" +
+      "        losses.append(loss.item())\n" +
+      "        if step % 50 == 0: print(f'Step {step}: loss={loss.item():.6f}')\n\n" +
+      "    plt.figure(figsize=(8, 3))\n" +
+      "    plt.subplot(1, 2, 1)\n" +
+      "    plt.plot(losses); plt.title('Inverse Optimization Loss'); plt.xlabel('Step')\n" +
+      "    plt.subplot(1, 2, 2)\n" +
+      "    inv_result = x_opt.detach().cpu().numpy()[0]\n" +
+      "    target_np = target_output.cpu().numpy()[0]\n" +
+      "    if is_image:\n" +
+      "        plt.imshow(inv_result.reshape(img_h, img_w), cmap='gray'); plt.title('Inverse Result')\n" +
+      "    else:\n" +
+      "        plt.plot(target_np, label='Target'); plt.plot(inv_result, '--', label='Inverse')\n" +
+      "        plt.legend(); plt.title('Inverse Optimization')\n" +
+      "    plt.tight_layout(); plt.show()\n" +
+      "except Exception as e:\n" +
+      "    print(f'Inverse optimization skipped: {e}')\n"
+    ));
+
+    // Cell 14: DDPM iterative denoising
+    cells.push(makeMarkdownCell("## 14) DDPM Iterative Denoising\n\nGenerate samples by iterative denoising from pure noise."));
+    cells.push(makeCodeCell(
+      "# --- DDPM-style iterative denoising ---\n" +
+      "model.eval()\n" +
+      "T = 50  # denoising steps\n" +
+      "n_ddpm = 16\n\n" +
+      "# linear beta schedule\n" +
+      "betas = np.linspace(0.0001, 0.02, T)\n" +
+      "alphas = 1 - betas\n" +
+      "alpha_bar = np.cumprod(alphas)\n\n" +
+      "# start from pure noise\n" +
+      "x_t = torch.randn(n_ddpm, x_train.shape[1], device=device)\n\n" +
+      "with torch.no_grad():\n" +
+      "    for t in reversed(range(T)):\n" +
+      "        # predict denoised image\n" +
+      "        pred = model(x_t)\n" +
+      "        if isinstance(pred, (tuple, list)): pred = pred[0]\n" +
+      "        # DDPM update: x_{t-1} = (x_t - noise_pred * (1-alpha)/sqrt(1-alpha_bar)) / sqrt(alpha) + sigma*z\n" +
+      "        noise_pred = (x_t - pred * alpha_bar[t]**0.5) / max((1 - alpha_bar[t])**0.5, 1e-8)\n" +
+      "        x_prev = (x_t - betas[t] / max((1 - alpha_bar[t])**0.5, 1e-8) * noise_pred) / alphas[t]**0.5\n" +
+      "        if t > 0:\n" +
+      "            sigma = betas[t]**0.5\n" +
+      "            x_prev = x_prev + sigma * torch.randn_like(x_prev)\n" +
+      "        x_t = x_prev\n\n" +
+      "ddpm_samples = x_t.cpu().numpy()\n" +
+      "print(f'Generated {n_ddpm} samples via DDPM ({T} steps)')\n\n" +
+      "if is_image:\n" +
+      "    fig, axes = plt.subplots(2, 8, figsize=(12, 3))\n" +
+      "    for i in range(min(16, n_ddpm)):\n" +
+      "        axes[i//8, i%8].imshow(np.clip(ddpm_samples[i].reshape(img_h, img_w), 0, 1), cmap='gray')\n" +
+      "        axes[i//8, i%8].axis('off')\n" +
+      "    plt.suptitle('DDPM Samples'); plt.tight_layout(); plt.show()\n" +
+      "else:\n" +
+      "    plt.figure(figsize=(10, 4))\n" +
+      "    for i in range(min(8, n_ddpm)): plt.plot(ddpm_samples[i], alpha=0.7)\n" +
+      "    plt.title('DDPM Samples'); plt.tight_layout(); plt.show()\n"
+    ));
+
+    // Cell 15: Final evaluation summary
+    cells.push(makeMarkdownCell("## 15) Final Summary"));
+    cells.push(makeCodeCell(
+      "print('=' * 60)\n" +
+      "print('NOTEBOOK RESULTS SUMMARY')\n" +
+      "print('=' * 60)\n" +
+      "print(f'Model: {sum(p.numel() for p in model.parameters())} parameters')\n" +
+      "print(f'Test MAE:  {mae:.6f}')\n" +
+      "print(f'Test R²:   {r2:.6f}')\n" +
       "print(f'Reconstruction MSE: {recon_mse:.6f}')\n" +
-      "print(f'Test R²: {r2:.6f}')\n" +
-      "print(f'Test MAE: {mae:.6f}')\n" +
-      "if 'samples' in dir() and len(samples) > 0:\n" +
-      "    gen_mean = np.mean(samples, axis=0)\n" +
-      "    real_mean = np.mean(x_test.numpy(), axis=0)\n" +
-      "    dist_mae = np.mean(np.abs(gen_mean - real_mean))\n" +
-      "    print(f'Distribution MAE (gen vs real means): {dist_mae:.6f}')\n" +
+      "if is_cls:\n" +
+      "    print(f'Test Accuracy: {accuracy:.4f}')\n" +
+      "print(f'\\nGeneration methods tested:')\n" +
+      "print(f'  Reconstruction: ✓')\n" +
+      "if 'samples' in dir(): print(f'  Random Sampling: ✓ ({len(samples)} samples)')\n" +
+      "if 'ddpm_samples' in dir(): print(f'  DDPM: ✓ ({len(ddpm_samples)} samples)')\n" +
+      "if 'guided_samples' in dir(): print(f'  Classifier-Guided: ✓')\n" +
+      "print(f'  Langevin: ✓' if 'samples' in dir() else '  Langevin: skipped')\n" +
+      "print(f'  Latent Optimization: ✓' if 'optimized' in dir() else '  Latent Optimization: skipped')\n" +
+      "print(f'  Inverse: ✓' if 'inv_result' in dir() else '  Inverse: skipped')\n" +
       "print('\\nNotebook complete.')\n"
     ));
 

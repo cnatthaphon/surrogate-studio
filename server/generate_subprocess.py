@@ -88,6 +88,94 @@ def main():
                 "latentDim": actual_latent_dim, "latents": z.cpu().numpy().tolist(), "lossHistory": [],
             }}))
 
+    elif method == "optimize":
+        # optimize z to minimize reconstruction toward target
+        originals = np.array(config.get("originals", []), dtype=np.float32)
+        decoder, actual_dim = _extract_decoder(model, latent_dim)
+        dec = decoder if decoder else model
+        z = torch.randn(num_samples, actual_dim, device=device, requires_grad=True)
+        opt = torch.optim.Adam([z], lr=float(config.get("lr", 0.01)))
+        target = torch.tensor(originals[:num_samples], dtype=torch.float32).to(device) if originals.size > 0 else None
+        loss_history = []
+        for step in range(int(config.get("steps", 100))):
+            opt.zero_grad()
+            out = dec(z)
+            if target is not None:
+                loss = torch.nn.MSELoss()(out, target)
+            else:
+                loss = out.var()  # minimize variance as fallback
+            loss.backward()
+            opt.step()
+            loss_history.append({"step": step, "loss": float(loss.item())})
+        samples = dec(z).detach().cpu().numpy()
+        print(json.dumps({"kind": "result", "result": {
+            "method": "optimize", "samples": samples.tolist(), "numSamples": num_samples,
+            "latentDim": actual_dim, "latents": z.detach().cpu().numpy().tolist(), "lossHistory": loss_history,
+        }}))
+
+    elif method == "langevin":
+        # Langevin dynamics: iterative denoising from noise
+        steps = int(config.get("steps", 50))
+        lr = float(config.get("lr", 0.01))
+        x = torch.randn(num_samples, feature_size, device=device, requires_grad=True)
+        loss_history = []
+        for step in range(steps):
+            pred = model(x)
+            score = (pred - x).mean()
+            grad = torch.autograd.grad(score, x, create_graph=False)[0]
+            noise = torch.randn_like(x) * (lr ** 0.5) * temperature
+            x = (x + lr * grad + noise).detach().requires_grad_(True)
+            loss_history.append({"step": step, "loss": float(score.item())})
+        samples = x.detach().cpu().numpy()
+        print(json.dumps({"kind": "result", "result": {
+            "method": "langevin", "samples": samples.tolist(), "numSamples": num_samples,
+            "latentDim": feature_size, "latents": [], "lossHistory": loss_history,
+        }}))
+
+    elif method == "inverse":
+        # optimize input x to match target output
+        target = np.array(config.get("target", config.get("originals", [])), dtype=np.float32)
+        if target.size == 0:
+            print(json.dumps({"kind": "error", "message": "inverse requires target"})); sys.exit(1)
+        n = min(num_samples, len(target))
+        target_t = torch.tensor(target[:n], dtype=torch.float32).to(device)
+        x_opt = torch.randn(n, feature_size, device=device, requires_grad=True)
+        opt = torch.optim.Adam([x_opt], lr=float(config.get("lr", 0.01)))
+        loss_history = []
+        for step in range(int(config.get("steps", 100))):
+            opt.zero_grad()
+            pred = model(x_opt)
+            loss = torch.nn.MSELoss()(pred, target_t)
+            loss.backward()
+            opt.step()
+            loss_history.append({"step": step, "loss": float(loss.item())})
+        samples = model(x_opt).detach().cpu().numpy()
+        print(json.dumps({"kind": "result", "result": {
+            "method": "inverse", "samples": samples.tolist(), "numSamples": n,
+            "latentDim": feature_size, "latents": x_opt.detach().cpu().numpy().tolist(), "lossHistory": loss_history,
+        }}))
+
+    elif method == "ddpm":
+        # DDPM iterative denoising
+        T = int(config.get("steps", 50))
+        betas = np.linspace(0.0001, 0.02, T)
+        alphas = 1 - betas
+        alpha_bar = np.cumprod(alphas)
+        x_t = torch.randn(num_samples, feature_size, device=device)
+        with torch.no_grad():
+            for t in reversed(range(T)):
+                pred = model(x_t)
+                noise_pred = (x_t - pred * alpha_bar[t]**0.5) / max((1 - alpha_bar[t])**0.5, 1e-8)
+                x_prev = (x_t - betas[t] / max((1 - alpha_bar[t])**0.5, 1e-8) * noise_pred) / alphas[t]**0.5
+                if t > 0:
+                    x_prev = x_prev + betas[t]**0.5 * torch.randn_like(x_prev)
+                x_t = x_prev
+        samples = x_t.cpu().numpy()
+        print(json.dumps({"kind": "result", "result": {
+            "method": "ddpm", "samples": samples.tolist(), "numSamples": num_samples,
+            "latentDim": feature_size, "latents": [], "lossHistory": [],
+        }}))
+
     else:
         print(json.dumps({"kind": "error", "message": f"Unsupported method: {method}"}))
         sys.exit(1)

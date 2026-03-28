@@ -131,6 +131,23 @@ def main():
         true_labels = truth.flatten().astype(int) if truth.ndim == 1 or truth.shape[1] == 1 else truth.argmax(axis=1)
         correct = int((pred_labels == true_labels).sum())
         result["accuracy"] = correct / len(x_test)
+        # confusion matrix + per-class metrics
+        cm = np.zeros((num_classes, num_classes), dtype=int)
+        for i in range(len(pred_labels)):
+            cm[int(true_labels[i])][int(pred_labels[i])] += 1
+        result["confusionMatrix"] = cm.tolist()
+        # per-class precision, recall, F1
+        per_class = []
+        for c in range(num_classes):
+            tp = int(cm[c][c])
+            fp = int(cm[:, c].sum() - tp)
+            fn = int(cm[c, :].sum() - tp)
+            prec = tp / (tp + fp) if (tp + fp) > 0 else 0
+            rec = tp / (tp + fn) if (tp + fn) > 0 else 0
+            f1 = 2 * prec * rec / (prec + rec) if (prec + rec) > 0 else 0
+            per_class.append({"class": c, "precision": prec, "recall": rec, "f1": f1, "support": int(cm[c, :].sum())})
+        result["perClassMetrics"] = per_class
+        result["macroF1"] = float(np.mean([p["f1"] for p in per_class]))
     else:
         # Flatten all dims for metrics
         t_flat = truth.flatten()
