@@ -593,7 +593,7 @@
       if (!testN) { r.status = "error"; r.error = "No test data"; return Promise.resolve(); }
 
       // try server if model was server-trained, fallback to client if unreachable
-      if (trainer.trainedOnServer || (trainer.config && trainer.config.useServer)) {
+      if (trainer.trainedOnServer && trainer.config && trainer.config.useServer) {
         var serverAdapter = _getServerAdapter();
         if (serverAdapter) {
           var serverUrl = (trainer.config && trainer.config.serverUrl) || "";

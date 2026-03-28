@@ -378,7 +378,8 @@
       var trainerBackend = (trainer.config && trainer.config.runtimeBackend) || "auto";
 
       // try server if model was server-trained, fallback to client if unreachable
-      if (trainer.trainedOnServer || (trainer.config && trainer.config.useServer)) {
+      // only route to server if model has server weights AND useServer is still checked
+      if (trainer.trainedOnServer && trainer.config && trainer.config.useServer) {
         var serverAdapter = _getServerAdapter();
         if (serverAdapter) {
           var serverUrl = (trainer.config && trainer.config.serverUrl) || "";

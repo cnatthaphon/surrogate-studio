@@ -483,7 +483,7 @@
       canOptimize: family === "vae",
       canInverse: true, // always possible with any differentiable model
       canDDPM: family === "diffusion",
-      defaultMethod: family === "vae" ? "reconstruct" : family === "diffusion" ? "ddpm" : "inverse",
+      defaultMethod: family === "vae" ? "reconstruct" : family === "diffusion" ? "ddpm" : "reconstruct",
       availableMethods: [],
     };
     if (caps.canReconstruct) caps.availableMethods.push({ id: "reconstruct", label: "Reconstruct (input → model → output)" });
