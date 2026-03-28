@@ -301,11 +301,12 @@
         if (m.id === (g.config.method || caps.defaultMethod)) opt.selected = true;
         methodSel.appendChild(opt);
       });
-      methodSel.addEventListener("change", function () { g.config.method = methodSel.value; _saveGen(g); });
+      methodSel.addEventListener("change", function () { g.config.method = methodSel.value; _saveGen(g); _renderRightPanel(); });
       methodRow.appendChild(methodSel);
       configCard.appendChild(methodRow);
 
-      // numeric params
+      // numeric params — show relevant fields based on method
+      var currentMethod = g.config.method || "";
       var fields = [
         { key: "numSamples", label: "Samples", value: g.config.numSamples || 16, min: 1, max: 1000, step: 1 },
         { key: "steps", label: "Opt. steps", value: g.config.steps || 100, min: 0, max: 10000, step: 10 },
@@ -313,6 +314,11 @@
         { key: "temperature", label: "Temperature", value: g.config.temperature || 1.0, min: 0.01, max: 5, step: 0.1 },
         { key: "seed", label: "Seed", value: g.config.seed || 42, min: 1, step: 1 },
       ];
+      // classifier guidance fields
+      if (currentMethod === "classifier_guided") {
+        fields.push({ key: "targetClass", label: "Target class", value: g.config.targetClass || 0, min: 0, max: 99, step: 1 });
+        fields.push({ key: "guidanceWeight", label: "Guidance weight", value: g.config.guidanceWeight || 1.0, min: 0.01, max: 10, step: 0.1 });
+      }
       fields.forEach(function (f) {
         var row = el("div", { className: "osc-form-row" });
         row.appendChild(el("label", { style: "font-size:11px;color:#94a3b8;" }, f.label));
@@ -468,6 +474,16 @@
           lr: config.lr || 0.01, temperature: config.temperature || 1.0, seed: config.seed || 42,
           onStep: function (step, loss) { if (step % 10 === 0) onStatus("Step " + step + " loss=" + (typeof loss === "number" ? loss.toExponential(3) : "?")); },
         };
+
+        // for classifier_guided: extract classifier from model's classification output
+        if (method === "classifier_guided") {
+          genConfig.steps = genConfig.steps || 100;
+          genConfig.targetClass = Number(config.targetClass || 0);
+          genConfig.guidanceWeight = Number(config.guidanceWeight || 1.0);
+          // the full model itself serves as classifier if it has classification outputs
+          // the generation engine will use the model to compute class probabilities
+          genConfig.classifierModel = built.model;
+        }
 
         // reconstruct: pass real data through full model
         if (method === "reconstruct") {
