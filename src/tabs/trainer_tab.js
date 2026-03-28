@@ -1279,7 +1279,7 @@
             if (currentMountId !== _mountId) return;
             var logEntry = { epoch: payload.epoch, loss: payload.loss, val_loss: payload.val_loss, current_lr: payload.current_lr, improved: payload.improved };
             if (store) store.appendTrainerEpoch(activeId, logEntry);
-            // only update UI if this trainer is currently displayed
+            onStatus("Epoch " + payload.epoch + " | loss=" + Number(payload.loss).toExponential(3) + " | val=" + Number(payload.val_loss).toExponential(3) + (payload.improved ? " *" : ""));
             if (stateApi && stateApi.getActiveTrainer() === activeId) {
               var epochs = store.getTrainerEpochs(activeId);
               if (_lossChartDiv) _plotLossChart(epochs);

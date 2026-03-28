@@ -112,9 +112,11 @@ function startTraining(jobId) {
         } else if (msg.kind === "complete") {
           job.result = msg.result;
           job.status = "done";
-          // send only metrics via SSE (not weights — too large)
+          // send only scalar metrics via SSE (not weights or raw predictions — too large)
           var lightResult = Object.assign({}, msg.result);
-          delete lightResult.modelArtifacts; // remove weights from SSE
+          delete lightResult.modelArtifacts;
+          delete lightResult.testPredictions;
+          delete lightResult.testTruth;
           lightResult.hasArtifacts = !!(msg.result.modelArtifacts);
           broadcast(jobId, "complete", lightResult);
           // close all SSE connections

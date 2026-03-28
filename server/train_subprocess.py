@@ -186,6 +186,7 @@ def main():
     if best_state:
         model.load_state_dict(best_state)
 
+    status("Training complete. Extracting weights...")
     # --- Extract weights in TF.js-compatible format ---
     # PyTorch Dense: [out, in] → TF.js: [in, out] (transpose)
     # PyTorch LSTM: weight_ih [4*hidden, input], weight_hh [4*hidden, hidden], bias_ih, bias_hh
@@ -247,6 +248,7 @@ def main():
         offset += len(data) * 4
         i += 1
 
+    status("Computing test metrics...")
     # --- Compute final metrics (val + test) ---
     model.eval()
     with torch.no_grad():
