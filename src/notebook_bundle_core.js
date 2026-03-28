@@ -1218,6 +1218,30 @@
       "display(REPORT_DF)\n"
     ));
 
+    cells.push(makeMarkdownCell("## 10) Generation\n\nReconstruct test samples and sample from latent space."));
+    cells.push(makeCodeCell(
+      "# Reconstruction from the best session\n" +
+      "best_sid = max(SESSION_RUNS, key=lambda s: -SESSION_RUNS[s]['result'].get('best_val_loss', float('inf')))\n" +
+      "best_pack = SESSION_RUNS[best_sid]\n" +
+      "best_model = best_pack['model']\n" +
+      "best_model.eval()\n\n" +
+      "test_split = ctx.dataset_splits.get('test') or ctx.dataset_splits.get('val')\n" +
+      "x_t = test_split['x'][:16].to(ctx.device)\n" +
+      "with torch.no_grad():\n" +
+      "    recon = best_model(x_t).cpu().numpy()\n" +
+      "    orig = x_t.cpu().numpy()\n\n" +
+      "recon_mse = np.mean((orig - recon) ** 2)\n" +
+      "print(f'Reconstruction MSE (16 samples): {recon_mse:.6f}')\n\n" +
+      "# Feature profile comparison\n" +
+      "fig, axes = plt.subplots(4, 1, figsize=(10, 8))\n" +
+      "for i in range(4):\n" +
+      "    axes[i].plot(orig[i], label='Original', alpha=0.8)\n" +
+      "    axes[i].plot(recon[i], '--', label='Reconstructed', alpha=0.8)\n" +
+      "    axes[i].legend(fontsize=8)\n" +
+      "plt.suptitle(f'Reconstruction (MSE={recon_mse:.4f})')\n" +
+      "plt.tight_layout(); plt.show()\n"
+    ));
+
     return {
       cells: cells,
       metadata: {
@@ -1494,6 +1518,94 @@
       "plt.xlabel('Truth'); plt.ylabel('Predicted')\n" +
       "plt.title(f'Pred vs Truth (dim 0) R²={r2:.4f}')\n" +
       "plt.grid(True); plt.tight_layout(); plt.show()\n"
+    ));
+
+    // Cell 8: Generation — reconstruction + random sampling (for VAE/AE)
+    cells.push(makeMarkdownCell(
+      "## 8) Generation\n\n" +
+      "Reconstruct test samples through the trained model, and sample from latent space if VAE."
+    ));
+    cells.push(makeCodeCell(
+      "# --- Reconstruction ---\n" +
+      "model.eval()\n" +
+      "n_show = min(16, len(x_test))\n" +
+      "with torch.no_grad():\n" +
+      "    x_in = x_test[:n_show].to(device)\n" +
+      "    x_recon = model(x_in).cpu().numpy()\n" +
+      "    x_orig = x_test[:n_show].numpy()\n\n" +
+      "# reconstruction MSE\n" +
+      "recon_mse = np.mean((x_orig - x_recon) ** 2)\n" +
+      "print(f'Reconstruction MSE ({n_show} samples): {recon_mse:.6f}')\n\n" +
+      "# --- Visualize ---\n" +
+      "dim = x_orig.shape[1]\n" +
+      "is_image = dim in (784, 1024, 3072)  # 28x28, 32x32, 32x32x3\n" +
+      "img_h = {784: 28, 1024: 32, 3072: 32}.get(dim, int(dim**0.5))\n" +
+      "img_w = dim // img_h if img_h > 0 else dim\n\n" +
+      "if is_image:\n" +
+      "    fig, axes = plt.subplots(2, n_show, figsize=(n_show * 1.5, 3))\n" +
+      "    for i in range(n_show):\n" +
+      "        axes[0, i].imshow(x_orig[i].reshape(img_h, img_w), cmap='gray', vmin=0, vmax=1)\n" +
+      "        axes[0, i].axis('off')\n" +
+      "        axes[1, i].imshow(x_recon[i].reshape(img_h, img_w), cmap='gray', vmin=0, vmax=1)\n" +
+      "        axes[1, i].axis('off')\n" +
+      "    axes[0, 0].set_ylabel('Original', fontsize=10)\n" +
+      "    axes[1, 0].set_ylabel('Reconstructed', fontsize=10)\n" +
+      "    plt.suptitle(f'Reconstruction (MSE={recon_mse:.4f})', fontsize=12)\n" +
+      "    plt.tight_layout(); plt.show()\n" +
+      "else:\n" +
+      "    # trajectory/feature plot\n" +
+      "    fig, axes = plt.subplots(min(4, n_show), 1, figsize=(10, min(4, n_show) * 2))\n" +
+      "    if min(4, n_show) == 1: axes = [axes]\n" +
+      "    for i in range(min(4, n_show)):\n" +
+      "        axes[i].plot(x_orig[i], label='Original', alpha=0.8)\n" +
+      "        axes[i].plot(x_recon[i], label='Reconstructed', alpha=0.8, linestyle='--')\n" +
+      "        axes[i].legend(fontsize=8); axes[i].set_ylabel(f'Sample {i}')\n" +
+      "    plt.suptitle(f'Reconstruction (MSE={recon_mse:.4f})', fontsize=12)\n" +
+      "    plt.tight_layout(); plt.show()\n"
+    ));
+
+    // Cell 9: Random sampling from latent (VAE)
+    cells.push(makeCodeCell(
+      "# --- Random Sampling from Latent Space (VAE) ---\n" +
+      "# This works if the model has a bottleneck / latent layer.\n" +
+      "# For VAE: sample z ~ N(0,1) and pass through decoder.\n" +
+      "# For AE/supervised: skip this cell.\n\n" +
+      "# Try to find the bottleneck dimension from the model\n" +
+      "min_dim = min(p.shape[0] for p in model.parameters() if p.dim() == 2)\n" +
+      "latent_dim = min(min_dim, 128)  # heuristic: smallest linear layer = bottleneck\n" +
+      "print(f'Estimated latent dim: {latent_dim}')\n\n" +
+      "try:\n" +
+      "    # extract decoder: layers after the bottleneck\n" +
+      "    named = list(model.named_modules())\n" +
+      "    decoder_layers = []\n" +
+      "    found_bottleneck = False\n" +
+      "    for name, mod in named:\n" +
+      "        if hasattr(mod, 'out_features') and mod.out_features == latent_dim:\n" +
+      "            found_bottleneck = True; continue\n" +
+      "        if found_bottleneck and isinstance(mod, (nn.Linear, nn.ReLU, nn.Tanh, nn.Sigmoid)):\n" +
+      "            decoder_layers.append(mod)\n\n" +
+      "    if decoder_layers:\n" +
+      "        decoder = nn.Sequential(*decoder_layers).to(device)\n" +
+      "        z = torch.randn(16, latent_dim, device=device)\n" +
+      "        with torch.no_grad():\n" +
+      "            generated = decoder(z).cpu().numpy()\n\n" +
+      "        if is_image:\n" +
+      "            fig, axes = plt.subplots(2, 8, figsize=(12, 3))\n" +
+      "            for i in range(16):\n" +
+      "                axes[i // 8, i % 8].imshow(generated[i].reshape(img_h, img_w), cmap='gray', vmin=0, vmax=1)\n" +
+      "                axes[i // 8, i % 8].axis('off')\n" +
+      "            plt.suptitle('Random Samples from Latent Space', fontsize=12)\n" +
+      "            plt.tight_layout(); plt.show()\n" +
+      "        else:\n" +
+      "            plt.figure(figsize=(10, 4))\n" +
+      "            for i in range(min(8, len(generated))):\n" +
+      "                plt.plot(generated[i], alpha=0.7, label=f'Sample {i}')\n" +
+      "            plt.title('Random Samples from Latent Space')\n" +
+      "            plt.legend(fontsize=8); plt.tight_layout(); plt.show()\n" +
+      "    else:\n" +
+      "        print('Could not extract decoder — model may not be VAE/AE.')\n" +
+      "except Exception as e:\n" +
+      "    print(f'Random sampling failed (model may not be VAE): {e}')\n"
     ));
 
     return {
