@@ -483,12 +483,34 @@
     // for now: compile with all losses per phase, toggle trainable on layers
     // Phase 1 heads get trained first, phase 2 heads second
 
-    var xTrain = tf.tensor2d(dataset.xTrain);
+    // handle multi-input models (GAN: SampleZ + ImageSource)
+    var inputNodes = opts.inputNodes || [];
+    var numInputs = model.inputs ? model.inputs.length : 1;
+    var nSamples = dataset.xTrain.length;
+    var xTrainInputs;
+    if (numInputs > 1 && inputNodes.length > 1) {
+      // create per-input tensors
+      xTrainInputs = inputNodes.map(function (inp) {
+        if (inp.name === "sample_z_layer") {
+          // SampleZ: generate random noise each epoch (will be regenerated per batch later)
+          var zDim = model.inputs.filter(function (i) { return i.name.indexOf("z_input") >= 0; })[0];
+          var dim = zDim ? zDim.shape[zDim.shape.length - 1] : 128;
+          return tf.randomNormal([nSamples, dim]);
+        }
+        return tf.tensor2d(dataset.xTrain);
+      });
+    } else {
+      xTrainInputs = tf.tensor2d(dataset.xTrain);
+    }
+
     var yTrainArrays = [];
     var targetMode = String(dataset.targetMode || "xv");
     var datasetMeta = { paramNames: dataset.paramNames, paramSize: dataset.paramSize };
     headConfigs.forEach(function (head) {
-      var trainRows = extractHeadRows(dataset.yTrain, dataset.pTrain, targetMode, head, datasetMeta);
+      var headTarget = String(head.target || head.targetType || "xv");
+      var isReconHead = headTarget === "xv" || headTarget === "x" || headTarget === "traj";
+      // reconstruction heads use xTrain as target (y = x)
+      var trainRows = isReconHead ? dataset.xTrain : extractHeadRows(dataset.yTrain, dataset.pTrain, targetMode, head, datasetMeta);
       var inferredCols = trainRows[0] ? (Array.isArray(trainRows[0]) ? trainRows[0].length : 1) : 1;
       yTrainArrays.push(rowsToTensor(tf, trainRows, inferredCols));
     });
@@ -505,7 +527,8 @@
       function nextEpoch() {
         if (epoch >= epochs) {
           // cleanup
-          xTrain.dispose();
+          if (Array.isArray(xTrainInputs)) xTrainInputs.forEach(function (t) { t.dispose(); });
+          else xTrainInputs.dispose();
           yTrainArrays.forEach(function (t) { t.dispose(); });
           resolve({
             mae: 0, mse: 0,
@@ -565,7 +588,17 @@
           });
 
           var yTargets = headConfigs.length === 1 ? yTrainArrays[0] : yTrainArrays;
-          model.fit(xTrain, yTargets, {
+          // regenerate z noise for GAN each phase
+          if (Array.isArray(xTrainInputs)) {
+            xTrainInputs.forEach(function (t, ti) {
+              if (inputNodes[ti] && inputNodes[ti].name === "sample_z_layer") {
+                var old = xTrainInputs[ti];
+                xTrainInputs[ti] = tf.randomNormal(old.shape);
+                old.dispose();
+              }
+            });
+          }
+          model.fit(xTrainInputs, yTargets, {
             batchSize: batchSize, epochs: 1, shuffle: true, verbose: 0,
           }).then(function (h) {
             phaseLosses[phase] = h.history.loss[0] || 0;

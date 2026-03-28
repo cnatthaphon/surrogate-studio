@@ -30,21 +30,29 @@
       to.inputs[inPort].connections.push({ node: fromId, output: outPort });
     }
 
-    // Generator: z(128) → Dense(256, relu) → Dense(512, relu) → Dense(784, sigmoid)
-    var z = node("sample_z", { dim: 128, distribution: "normal" }, 60, 80);
-    var g1 = node("dense", { units: 256, activation: "relu" }, 230, 80);
-    var g2 = node("dense", { units: 512, activation: "relu" }, 400, 80);
-    var g3 = node("dense", { units: 784, activation: "sigmoid" }, 570, 80);
-    var gOut = node("output", { target: "xv", targetType: "xv", loss: "mse", matchWeight: 1, phase: 2 }, 740, 80);
+    // Generator path: z(128) → Dense(256) → Dense(512) → Dense(784, sigmoid)
+    var z = node("sample_z", { dim: 128, distribution: "normal" }, 60, 60);
+    var g1 = node("dense", { units: 256, activation: "relu" }, 230, 60);
+    var g2 = node("dense", { units: 512, activation: "relu" }, 400, 60);
+    var g3 = node("dense", { units: 784, activation: "sigmoid" }, 570, 60);
+    // Generator output (Phase 2: train G to reconstruct/generate)
+    var gOut = node("output", { target: "xv", targetType: "xv", loss: "mse", matchWeight: 1, phase: 2 }, 740, 60);
     conn(z, g1); conn(g1, g2); conn(g2, g3); conn(g3, gOut);
 
-    // Discriminator: image(784) → Dense(512, relu) → Dense(256, relu) → Dense(1, sigmoid)
-    var img = node("image_source", { sourceKey: "pixel_values", featureSize: 784, imageShape: [28, 28, 1] }, 60, 250);
-    var d1 = node("dense", { units: 512, activation: "relu" }, 260, 250);
-    var d2 = node("dense", { units: 256, activation: "relu" }, 430, 250);
-    var d3 = node("dense", { units: 1, activation: "sigmoid" }, 600, 250);
-    var dOut = node("output", { target: "label", targetType: "label", loss: "bce", matchWeight: 1, phase: 1 }, 770, 250);
+    // Discriminator path: ImageSource(784) → Dense(512) → Dense(256) → Dense(1, sigmoid)
+    var img = node("image_source", { sourceKey: "pixel_values", featureSize: 784, imageShape: [28, 28, 1] }, 60, 240);
+    var d1 = node("dense", { units: 512, activation: "relu" }, 260, 240);
+    var d2 = node("dense", { units: 256, activation: "relu" }, 430, 240);
+    var d3 = node("dense", { units: 784, activation: "sigmoid" }, 600, 240);
+    // Discriminator output (Phase 1: train D as autoencoder on real images)
+    var dOut = node("output", { target: "xv", targetType: "xv", loss: "mse", matchWeight: 1, phase: 1 }, 770, 240);
     conn(img, d1); conn(d1, d2); conn(d2, d3); conn(d3, dOut);
+
+    // NOTE: In this simple GAN, G and D are trained as separate paths.
+    // Phase 1 trains D on real images.
+    // Phase 2 trains G to produce images that minimize reconstruction loss.
+    // A full adversarial GAN requires G output → D input (with Detach in between)
+    // which requires shared layer support in the model builder (future enhancement).
 
     return { drawflow: { Home: { data: d } } };
   }

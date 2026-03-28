@@ -1441,7 +1441,7 @@
         var _trainFn = _isPhased && trainingEngine.trainModelPhased ? trainingEngine.trainModelPhased : trainingEngine.trainModel;
         onStatus("Training on TF.js (" + (_isPhased ? "phased" : "main thread") + ", " + (tf.getBackend ? tf.getBackend() : "cpu") + ")...");
         _trainFn(tf, {
-          model: buildResult.model, isSequence: buildResult.isSequence, headConfigs: buildResult.headConfigs,
+          model: buildResult.model, isSequence: buildResult.isSequence, headConfigs: buildResult.headConfigs, inputNodes: buildResult.inputNodes || [],
           dataset: {
             xTrain: activeDs.xTrain, yTrain: activeDs.yTrain, seqTrain: activeDs.seqTrain,
             xVal: activeDs.xVal, yVal: activeDs.yVal, seqVal: activeDs.seqVal,
