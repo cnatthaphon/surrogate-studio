@@ -120,20 +120,12 @@
       for (var i = 0; i < n; i++) zeros[i] = new Array(units).fill(0);
       return zeros;
     }
+    // classification: return as-is (labels or one-hot)
     if (headTarget === "logits" || headTarget === "label") {
       return rowsMain;
     }
-    if (headTarget === "xv" || headTarget === "traj") return rowsMain;
-    if (headTarget === "x") {
-      // if data is multi-dim (e.g. 40 features), return as-is; only extract [0] for 2-col xv format
-      if (rowsMain[0] && Array.isArray(rowsMain[0]) && rowsMain[0].length > 2) return rowsMain;
-      return rowsMain.map(function (r) { return [Number(Array.isArray(r) ? r[0] : r || 0)]; });
-    }
-    if (headTarget === "v") {
-      if (String(targetMode) === "v") return rowsMain.map(function (r) { return [Number(Array.isArray(r) ? r[0] : r || 0)]; });
-      if (rowsMain[0] && Array.isArray(rowsMain[0]) && rowsMain[0].length > 2) return rowsMain;
-      return rowsMain.map(function (r) { return [Number(Array.isArray(r) ? (r[1] || 0) : 0)]; });
-    }
+    // reconstruction / any other target: return as-is
+    // the data format is determined by the dataset, not the target name
     return rowsMain;
   }
 
@@ -226,12 +218,12 @@
         ? extractHeadRows(headYTest, dataset.pTest, targetMode, head, datasetMeta)
         : null;
       var inferredCols = trainRows[0] ? (Array.isArray(trainRows[0]) ? trainRows[0].length : 1) : 1;
-      var cols = (target === "xv" || target === "traj") ? Math.max(1, inferredCols)
-        : (target === "params" ? Math.max(1, Number(dataset.paramSize || inferredCols))
-        : (target === "latent_diff" ? Math.max(1, Number(head.units || 1))
-        : (target === "latent_kl" ? Math.max(2, Number(head.units || 2))
-        : (target === "logits" || target === "label" ? Math.max(1, Number(dataset.numClasses || inferredCols))
-        : Math.max(1, inferredCols)))));
+      // classification: cols = numClasses. KL/latent: cols from head. Everything else: inferred from data.
+      var cols;
+      if (target === "logits" || target === "label") cols = Math.max(1, Number(dataset.numClasses || inferredCols));
+      else if (target === "latent_diff") cols = Math.max(1, Number(head.units || 1));
+      else if (target === "latent_kl") cols = Math.max(2, Number(head.units || 2));
+      else cols = Math.max(1, inferredCols);
       yTrainTensors.push(rowsToTensor(tf, trainRows, cols));
       yValTensors.push(rowsToTensor(tf, valRows, cols));
       if (testRows) yTestTensors.push(rowsToTensor(tf, testRows, cols));
@@ -528,9 +520,9 @@
     var targetMode = String(dataset.targetMode || "xv");
     var datasetMeta = { paramNames: dataset.paramNames, paramSize: dataset.paramSize };
     headConfigs.forEach(function (head) {
-      var headTarget = String(head.target || head.targetType || "xv");
-      var isReconHead = headTarget === "xv" || headTarget === "x" || headTarget === "traj";
-      // reconstruction heads use xTrain as target (y = x)
+      var headTarget = String(head.target || head.targetType || "x");
+      var isClsHead = headTarget === "label" || headTarget === "logits";
+      var isReconHead = !isClsHead; // anything that's not classification is reconstruction (y = x)
       var trainRows = isReconHead ? dataset.xTrain : extractHeadRows(dataset.yTrain, dataset.pTrain, targetMode, head, datasetMeta);
       var inferredCols = trainRows[0] ? (Array.isArray(trainRows[0]) ? trainRows[0].length : 1) : 1;
       yTrainArrays.push(rowsToTensor(tf, trainRows, inferredCols));

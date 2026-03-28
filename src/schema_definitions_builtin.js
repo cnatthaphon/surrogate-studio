@@ -2767,6 +2767,7 @@
     },
     model: {
       outputs: [
+        { key: "pixel_values", label: "image reconstruction" },
         { key: "label", label: "digit label (0-9)" },
         { key: "logits", label: "class logits" }
       ],
@@ -3081,6 +3082,7 @@
     },
     model: {
       outputs: [
+        { key: "pixel_values", label: "image reconstruction" },
         { key: "label", label: "label (0-9)" },
         { key: "logits", label: "class logits" }
       ],

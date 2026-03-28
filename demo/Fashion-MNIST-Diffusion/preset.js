@@ -41,7 +41,7 @@
     conn(noise, d1); conn(d1, d2); conn(d2, d3);
 
     // Output: predict the clean image (denoising autoencoder)
-    var out = node("output", { target: "xv", targetType: "xv", loss: "mse", matchWeight: 1 }, 910, 100);
+    var out = node("output", { target: "pixel_values", targetType: "pixel_values", loss: "mse", matchWeight: 1 }, 910, 100);
     conn(d3, out);
 
     return { drawflow: { Home: { data: d } } };

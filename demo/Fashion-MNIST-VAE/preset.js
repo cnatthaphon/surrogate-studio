@@ -42,7 +42,7 @@
     var d1 = node("dense", { units: 256, activation: "relu" }, 960, 100);
     var d2 = node("dense", { units: 512, activation: "relu" }, 1120, 100);
     // reconstruction output — target matches input (784 pixels), not class labels
-    var out = node("output", { target: "xv", targetType: "xv", loss: "mse", matchWeight: 1 }, 1280, 100);
+    var out = node("output", { target: "pixel_values", targetType: "pixel_values", loss: "mse", matchWeight: 1 }, 1280, 100);
 
     conn(img, e1); conn(e1, e2);
     conn(e2, mu); conn(e2, logvar);
@@ -79,7 +79,7 @@
     var bn = node("dense", { units: 32, activation: "relu" }, 480, 100);
     var d1 = node("dense", { units: 256, activation: "relu" }, 620, 100);
     var d2 = node("dense", { units: 512, activation: "relu" }, 760, 100);
-    var out = node("output", { target: "xv", targetType: "xv", loss: "mse", matchWeight: 1 }, 900, 100);
+    var out = node("output", { target: "pixel_values", targetType: "pixel_values", loss: "mse", matchWeight: 1 }, 900, 100);
     conn(img, e1); conn(e1, e2); conn(e2, bn); conn(bn, d1); conn(d1, d2); conn(d2, out);
 
     return { drawflow: { Home: { data: d } } };
@@ -151,7 +151,7 @@
     // Decoder: z → Dense(256) → Dense(512) → Output(xv)
     var d1 = node("dense", { units: 256, activation: "relu" }, 890, 120);
     var d2 = node("dense", { units: 512, activation: "relu" }, 1050, 120);
-    var reconOut = node("output", { target: "xv", targetType: "xv", loss: "mse", matchWeight: 1 }, 1210, 120);
+    var reconOut = node("output", { target: "pixel_values", targetType: "pixel_values", loss: "mse", matchWeight: 1 }, 1210, 120);
     conn(reparam, d1); conn(d1, d2); conn(d2, reconOut);
 
     // Classifier head: encoder output → Dense(128) → Output(label)
