@@ -1,28 +1,33 @@
-# Oscillator Surrogate — Surrogate Studio Demo
+# Oscillator Surrogate — Full Platform Demo
 
-**Train multiple surrogate models for damped oscillator dynamics and compare them.**
+**5 model architectures on physics-based trajectory data. Demonstrates every feature of Surrogate Studio.**
 
-Three architectures trained on the same RK4-generated trajectory data:
-1. **Direct-MLP**: params+time → x,v (direct prediction)
-2. **AR-GRU**: window history → next step (autoregressive with recurrence)
-3. **VAE**: trajectory reconstruction with latent space for generation
+## Models
 
-## Features Demonstrated
+| # | Model | Architecture | Purpose |
+|---|-------|-------------|---------|
+| 1 | **Direct-MLP** | Input → Dense(64) → Dense(32) → Output(xv) | Baseline direct prediction |
+| 2 | **AR-GRU** | Input → GRU(64) → Dense(32) → Output(xv) | Recurrent autoregressive |
+| 3 | **VAE** | Input → Dense(32) → μ(8)/logσ²(8) → Reparam → Dense(32) → Output(xv) | Latent space + generation |
+| 4 | **VAE+Classifier** | Shared encoder → reconstruction + scenario classification | Classifier-guided generation |
+| 5 | **Denoising AE** | Input → AddNoise(0.2) → Dense(64) → Dense(32) → Dense(64) → Output(xv) | 1D diffusion / Langevin |
 
-- **Dataset**: RK4-simulated spring/pendulum/bouncing ball trajectories (generated at runtime)
-- **Model comparison**: 3 architectures in evaluation benchmark (MAE, RMSE, R², Bias)
-- **Generation**: VAE reconstruct + random sampling from latent space
-- **All from graph**: no hardcodes, every model defined purely by Drawflow nodes
+## Generation Methods
 
-## How to Use
+- **Reconstruct**: Pass test trajectories through model → compare original vs reconstructed
+- **Random Sampling**: Sample z ~ N(0,1) → decoder → synthetic trajectories
+- **Classifier-Guided**: Optimize z to generate trajectories matching specific physics:
+  - Target class 0 = spring, 1 = pendulum, 2 = bouncing ball
+  - Control: "generate a heavily damped spring trajectory"
+- **Langevin Dynamics**: Iterative denoising from random noise → trajectory
 
-1. Open `index.html` — oscillator playground shows trajectory previews
-2. **Dataset tab**: Generate oscillator trajectories
-3. **Model tab**: 3 model graphs pre-loaded (MLP, GRU, VAE)
-4. **Trainer tab**: Train each model (3 trainers pre-configured)
-5. **Evaluation tab**: "MLP vs GRU vs VAE" benchmark pre-configured → Run
-6. **Generation tab**: VAE generation session → Reconstruct or Random
+## Evaluation
 
-## Architecture
+Pre-configured benchmark: all 5 models compared on MAE, RMSE, R², Bias.
 
-Uses built-in oscillator schema — no custom module needed. Just preset.js + index.html.
+## Dataset
+
+RK4-simulated oscillator trajectories (generated at runtime):
+- **Spring**: m·x'' + c·x' + k·x = 0
+- **Pendulum**: θ'' + (c/m)·θ' + (g/L)·sin(θ) = 0
+- **Bouncing ball**: y'' = -g with impact restitution
