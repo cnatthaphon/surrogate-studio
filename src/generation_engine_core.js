@@ -73,6 +73,15 @@
     if (method === "reconstruct") {
       return _generateReconstruct(tf, cfg, numSamples);
     }
+    if (method === "classifier_guided") {
+      // use optimize method with classifier guidance objective
+      if (!cfg.classifierModel) return Promise.reject(new Error("classifier_guided requires classifierModel"));
+      var targetClass = cfg.targetClass || 0;
+      var guidanceWeight = cfg.guidanceWeight || 1.0;
+      cfg.objective = objectives.classifierGuidance(cfg.classifierModel, targetClass, guidanceWeight);
+      cfg.method = "optimize";
+      return _generateOptimize(tf, cfg, numSamples, latentDim, steps, lr, temperature, onStep);
+    }
 
     return Promise.reject(new Error("Unknown generation method: " + method));
   }
@@ -393,6 +402,48 @@
       };
     },
 
+    // classifierGuidance: optimize z so decoded output is classified as targetClass
+    // classifierModel: trained classifier that maps input → class probabilities
+    // targetClass: integer class index to maximize
+    // weight: how much to weight guidance vs reconstruction
+    classifierGuidance: function (classifierModel, targetClass, weight) {
+      var cls = targetClass || 0;
+      var w = weight || 1.0;
+      return function (tf, z, decoderModel) {
+        var generated = decoderModel.predict(z);
+        var genOut = Array.isArray(generated) ? generated[0] : generated;
+        var classProbs = classifierModel.predict(genOut);
+        var probs = Array.isArray(classProbs) ? classProbs[0] : classProbs;
+        // maximize log P(targetClass) → minimize -log P(targetClass)
+        var targetProb = probs.gather([cls], 1).mean();
+        return targetProb.log().neg().mul(w);
+      };
+    },
+
+    // classifierGuidedReconstruction: combine reconstruction + classifier guidance
+    // reconstructs toward target while steering to target class
+    classifierGuidedReconstruction: function (classifierModel, targetClass, target, guidanceWeight) {
+      var cls = targetClass || 0;
+      var gw = guidanceWeight || 0.5;
+      var tArr = target;
+      return function (tf, z, decoderModel) {
+        var generated = decoderModel.predict(z);
+        var genOut = Array.isArray(generated) ? generated[0] : generated;
+        // reconstruction loss
+        var reconLoss = tf.scalar(0);
+        if (tArr) {
+          var targetT = tf.tensor(tArr);
+          reconLoss = genOut.sub(targetT).square().mean();
+          targetT.dispose();
+        }
+        // classifier guidance loss
+        var classProbs = classifierModel.predict(genOut);
+        var probs = Array.isArray(classProbs) ? classProbs[0] : classProbs;
+        var guidanceLoss = probs.gather([cls], 1).mean().log().neg();
+        return reconLoss.add(guidanceLoss.mul(gw));
+      };
+    },
+
     // diversity: maximize pairwise distance between generated samples
     diversity: function () {
       return function (tf, z, model) {
@@ -427,6 +478,7 @@
       family: family,
       canReconstruct: family === "vae" || family === "supervised",
       canRandomSample: family === "vae",
+      canClassifierGuide: family === "vae",
       canLangevin: family === "diffusion" || family === "vae",
       canOptimize: family === "vae",
       canInverse: true, // always possible with any differentiable model
@@ -436,6 +488,7 @@
     };
     if (caps.canReconstruct) caps.availableMethods.push({ id: "reconstruct", label: "Reconstruct (input → model → output)" });
     if (caps.canRandomSample) caps.availableMethods.push({ id: "random", label: "Random Sampling (z ~ N(0,1))" });
+    if (caps.canClassifierGuide) caps.availableMethods.push({ id: "classifier_guided", label: "Classifier-Guided Sampling" });
     if (caps.canOptimize) caps.availableMethods.push({ id: "optimize", label: "Latent Optimization" });
     if (caps.canLangevin) caps.availableMethods.push({ id: "langevin", label: "Langevin Dynamics" });
     if (caps.canDDPM) caps.availableMethods.push({ id: "ddpm", label: "DDPM Denoising" });

@@ -85,6 +85,14 @@ Train a GAN with phased training (alternating Discriminator/Generator updates). 
 - Discriminator: ImageSource(784) → Dense(512) → Dense(256) → Dense(1, sigmoid)
 - Phase 1 = D loss, Phase 2 = G loss, alternated per epoch
 
+### [Fashion-MNIST Diffusion](demo/Fashion-MNIST-Diffusion/)
+
+Train a denoising autoencoder with noise injection. Generate new images via Langevin dynamics.
+
+- AddNoise node injects Gaussian noise during training
+- Denoiser: noisy(784) → Dense(512) → Dense(256) → Dense(784)
+- Generation: Langevin dynamics from random noise → iterative denoising
+
 ---
 
 ## Quick Start

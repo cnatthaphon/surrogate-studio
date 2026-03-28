@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Fashion-MNIST Diffusion — Surrogate Studio Demo</title>
+
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/jerosoler/Drawflow/dist/drawflow.min.css">
+  <script src="https://cdn.jsdelivr.net/gh/jerosoler/Drawflow/dist/drawflow.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.22.0/dist/tf.min.js"></script>
+  <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+
+  <script src="../../src/schema_registry.js"></script>
+  <script src="../../src/schema_definitions_builtin.js"></script>
+  <script src="../../src/oscillator_dataset_core.js"></script>
+  <script src="../../src/dataset_modules/mnist_source_loader.js"></script>
+  <script src="../../src/dataset_modules/mnist_module.js"></script>
+  <script src="../../src/dataset_modules/fashion_mnist_module.js"></script>
+  <script src="../../src/dataset_modules/cifar10_source_loader.js"></script>
+  <script src="../../src/dataset_modules/cifar10_module.js"></script>
+  <script src="../../src/dataset_modules/oscillator_module.js"></script>
+  <script src="../../src/dataset_source_registry.js"></script>
+  <script src="../../src/dataset_modules.js"></script>
+  <script src="../../src/dataset_runtime.js"></script>
+  <script src="../../src/dataset_processing_core.js"></script>
+  <script src="../../src/workspace_store.js"></script>
+  <script src="../../src/ui_shared_engine.js"></script>
+  <script src="../../src/item_panel_module.js"></script>
+  <script src="../../src/config_panel_module.js"></script>
+  <script src="../../src/tab_manager_core.js"></script>
+  <script src="../../src/entity_create_core.js"></script>
+  <script src="../../src/image_render_core.js"></script>
+  <script src="../../src/model_graph_core.js"></script>
+  <script src="../../src/model_graph_drawflow_adapter.js"></script>
+  <script src="../../src/trainer_session_state_core.js"></script>
+  <script src="../../src/training_session_core.js"></script>
+  <script src="../../src/training_worker_bridge.js"></script>
+  <script src="../../src/dataset_bundle_adapter.js"></script>
+  <script src="../../src/notebook_bundle_core.js"></script>
+  <script src="../../src/notebook_runtime_assets.js"></script>
+  <script src="../../src/model_builder_core.js"></script>
+  <script src="../../src/training_engine_core.js"></script>
+  <script src="../../src/prediction_core.js"></script>
+  <script src="../../src/generation_engine_core.js"></script>
+  <script src="../../src/weight_converter.js"></script>
+  <script src="../../src/server_runtime_adapter.js"></script>
+  <script src="../../src/app_state_core.js"></script>
+  <script src="../../src/layout_renderer_core.js"></script>
+  <script src="../../src/tabs/playground_tab.js"></script>
+  <script src="../../src/tabs/dataset_tab.js"></script>
+  <script src="../../src/tabs/model_tab.js"></script>
+  <script src="../../src/tabs/trainer_tab.js"></script>
+  <script src="../../src/tabs/generation_tab.js"></script>
+  <script src="../../src/tabs/evaluation_tab.js"></script>
+  <script src="../../src/surrogate_studio.js"></script>
+
+  <script src="./preset.js"></script>
+</head>
+<body>
+  <div id="app"></div>
+  <script>
+    var store = OSCWorkspaceStore.createMemoryStore();
+    var preset = window.FASHION_MNIST_DIFFUSION_PRESET;
+    if (preset) {
+      if (preset.dataset) store.upsertDataset(preset.dataset);
+      if (preset.models) preset.models.forEach(function (m) { store.upsertModel(m); });
+      if (preset.trainers) preset.trainers.forEach(function (t) { store.upsertTrainerCard(t); });
+      store.initTables({ tables: ["generationRuns", "evaluations"] });
+      if (preset.generations) preset.generations.forEach(function (g) { store.save({ table: "generationRuns", values: [g] }); });
+    }
+    SurrogateStudio.init({ mountEl: document.getElementById("app"), defaultSchemaId: "fashion_mnist", defaultTab: "model", store: store });
+  </script>
+</body>
+</html>

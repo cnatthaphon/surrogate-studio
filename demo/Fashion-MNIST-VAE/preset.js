@@ -114,6 +114,54 @@
     return { drawflow: { Home: { data: d } } };
   }
 
+  function _makeVaeClassifierGraph() {
+    var d = {};
+    var id = 0;
+    function node(name, data, posX, posY, inputs, outputs) {
+      id++;
+      d[String(id)] = {
+        id: id, name: name + "_layer", data: data || {}, class: name + "_layer",
+        html: "<div><div>" + name + "_layer</div></div>", typenode: false,
+        inputs: inputs || {}, outputs: outputs || {}, pos_x: posX, pos_y: posY,
+      };
+      return String(id);
+    }
+    function conn(fromId, toId, outPort, inPort) {
+      var from = d[fromId]; var to = d[toId];
+      if (!from.outputs[outPort || "output_1"]) from.outputs[outPort || "output_1"] = { connections: [] };
+      from.outputs[outPort || "output_1"].connections.push({ node: toId, input: inPort || "input_1" });
+      if (!to.inputs[inPort || "input_1"]) to.inputs[inPort || "input_1"] = { connections: [] };
+      to.inputs[inPort || "input_1"].connections.push({ node: fromId, output: outPort || "output_1" });
+    }
+
+    // Shared encoder: ImageSource → Dense(512) → Dense(256)
+    var img = node("image_source", { sourceKey: "pixel_values", featureSize: 784, imageShape: [28, 28, 1] }, 60, 120);
+    var e1 = node("dense", { units: 512, activation: "relu" }, 230, 120);
+    var e2 = node("dense", { units: 256, activation: "relu" }, 400, 120);
+    conn(img, e1); conn(e1, e2);
+
+    // VAE latent
+    var mu = node("latent_mu", { units: 32, group: "z_vae" }, 570, 60);
+    var logvar = node("latent_logvar", { units: 32, group: "z_vae" }, 570, 180);
+    var reparam = node("reparam", { group: "z_vae", beta: 1.0 }, 730, 120);
+    conn(e2, mu); conn(e2, logvar);
+    conn(mu, reparam, "output_1", "input_1");
+    conn(logvar, reparam, "output_1", "input_2");
+
+    // Decoder: z → Dense(256) → Dense(512) → Output(xv)
+    var d1 = node("dense", { units: 256, activation: "relu" }, 890, 120);
+    var d2 = node("dense", { units: 512, activation: "relu" }, 1050, 120);
+    var reconOut = node("output", { target: "xv", targetType: "xv", loss: "mse", matchWeight: 1 }, 1210, 120);
+    conn(reparam, d1); conn(d1, d2); conn(d2, reconOut);
+
+    // Classifier head: encoder output → Dense(128) → Output(label)
+    var cls1 = node("dense", { units: 128, activation: "relu" }, 570, 300);
+    var clsOut = node("output", { target: "label", targetType: "label", loss: "categoricalCrossentropy", matchWeight: 0.5 }, 730, 300);
+    conn(e2, cls1); conn(cls1, clsOut);
+
+    return { drawflow: { Home: { data: d } } };
+  }
+
   window.FASHION_MNIST_VAE_PRESET = {
     dataset: {
       id: "demo-fmnist-ds",
@@ -149,6 +197,13 @@
         createdAt: Date.now(),
       },
       {
+        id: "demo-fmnist-vae-cls",
+        name: "VAE + Classifier (guided generation)",
+        schemaId: "fashion_mnist",
+        graph: _makeVaeClassifierGraph(),
+        createdAt: Date.now(),
+      },
+      {
         id: "demo-fmnist-classifier",
         name: "Fashion-MNIST Classifier",
         schemaId: "fashion_mnist",
@@ -178,6 +233,20 @@
         schemaId: "fashion_mnist",
         datasetId: "demo-fmnist-ds",
         modelId: "demo-fmnist-ae",
+        status: "draft",
+        config: {
+          epochs: 20, batchSize: 128, learningRate: 0.001,
+          optimizerType: "adam", lrSchedulerType: "plateau",
+          earlyStoppingPatience: 10, restoreBestWeights: true,
+          useServer: true,
+        },
+      },
+      {
+        id: "demo-fmnist-vae-cls-trainer",
+        name: "VAE+Classifier Trainer",
+        schemaId: "fashion_mnist",
+        datasetId: "demo-fmnist-ds",
+        modelId: "demo-fmnist-vae-cls",
         status: "draft",
         config: {
           epochs: 20, batchSize: 128, learningRate: 0.001,
