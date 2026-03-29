@@ -148,7 +148,7 @@ def main():
         hp = str(hc.get("phase", "")).strip()
         # explicit loss field takes priority
         if hl == "bce":
-            head_losses.append({"fn": nn.BCELoss(), "weight": hw, "phase": hp, "cls": False})
+            head_losses.append({"fn": nn.BCELoss(), "weight": hw, "phase": hp, "cls": False, "bce_binary": True})
         elif hl in ("categoricalcrossentropy", "categorical_crossentropy", "cross_entropy", "sparsecategoricalcrossentropy"):
             head_losses.append({"fn": nn.CrossEntropyLoss(), "weight": hw, "phase": hp, "cls": True})
         elif hl == "mae":
@@ -165,19 +165,33 @@ def main():
     labels_train = np.array(ds.get("labelsTrain", []), dtype=np.float32) if ds.get("labelsTrain") else None
     labels_val = np.array(ds.get("labelsVal", []), dtype=np.float32) if ds.get("labelsVal") else None
 
+    n_heads = len(head_losses)
+
     def compute_loss(pred, xb, yb, active_phase):
         """Compute weighted loss across heads for active phase."""
         total = torch.tensor(0.0, device=device)
+        # pred can be a list (multi-output) or single tensor
+        preds = pred if isinstance(pred, list) else [pred]
         for i, hl in enumerate(head_losses):
             if hl["phase"] != active_phase and hl["phase"] != "" and active_phase != "":
                 continue  # skip heads not in this phase
-            target = yb
-            if hl["cls"] and labels_train is not None:
-                target = yb  # labels already mapped
-            if hl["cls"]:
-                total = total + hl["weight"] * hl["fn"](pred, target.long().squeeze(-1))
+            # get this head's prediction (by index, or first if single-output)
+            head_pred = preds[i] if i < len(preds) else preds[0]
+            # determine target for this head
+            if hl.get("bce_binary"):
+                # BCE head with 1-dim output: target = ones (real images during D phase)
+                target = torch.ones(head_pred.shape[0], 1, device=device)
+            elif hl["cls"]:
+                target = yb.long().squeeze(-1) if yb.dtype != torch.long else yb.squeeze(-1)
+                total = total + hl["weight"] * hl["fn"](head_pred, target)
+                continue
             else:
-                total = total + hl["weight"] * hl["fn"](pred, target)
+                target = yb
+            # match target shape to prediction shape
+            if target.shape != head_pred.shape:
+                if head_pred.shape[-1] == 1 and target.dim() > 1:
+                    target = torch.ones_like(head_pred)  # default: all 1s for BCE
+            total = total + hl["weight"] * hl["fn"](head_pred, target)
         return total
 
     # --- Train ---
@@ -311,7 +325,8 @@ def main():
     model.eval()
     with torch.no_grad():
         x_val_t = torch.tensor(x_val).to(device)
-        pred_val = model(x_val_t).cpu().numpy()
+        raw_val = model(x_val_t)
+        pred_val = (raw_val[0] if isinstance(raw_val, list) else raw_val).cpu().numpy()
         if is_classification:
             pred_labels = pred_val.argmax(axis=1)
             true_labels = y_val.flatten().astype(int)
@@ -333,7 +348,8 @@ def main():
             pred_chunks = []
             for bi in range(0, len(x_test), batch_sz):
                 chunk = torch.tensor(x_test[bi:bi+batch_sz]).to(device)
-                pred_chunks.append(model(chunk).cpu().numpy())
+                raw = model(chunk)
+                pred_chunks.append((raw[0] if isinstance(raw, list) else raw).cpu().numpy())
             pred_test = np.concatenate(pred_chunks, axis=0)
             t_flat = y_test.flatten()
             p_flat = pred_test.flatten()
@@ -599,7 +615,14 @@ def build_model_from_graph(graph, feature_size, target_size, num_classes=0):
                         dim_map[nid] = in_dim
                 elif t == "output":
                     htype = str(c.get("headType", "regression")).lower()
-                    odim = num_classes if (htype == "classification" and num_classes > 0) else target_size
+                    oloss = str(c.get("loss", "mse")).lower()
+                    # BCE = binary (1 unit), CE = multi-class (numClasses)
+                    if oloss == "bce":
+                        odim = 1
+                    elif htype == "classification" and num_classes > 0:
+                        odim = num_classes
+                    else:
+                        odim = target_size
                     out_in = in_dim if isinstance(in_dim, int) else (in_dim[-1] if isinstance(in_dim, list) else in_dim)
                     setattr(self, f"out_{nid}", nn.Linear(out_in, odim))
                     dim_map[nid] = odim
@@ -695,13 +718,12 @@ def build_model_from_graph(graph, feature_size, target_size, num_classes=0):
                 else:
                     tensors[nid] = inp
 
-            # return outputs — for multi-output (phased training), return all concatenated or first
+            # return outputs
             if self.output_ids:
                 if len(self.output_ids) == 1:
                     return tensors[self.output_ids[0]]
-                # multi-output: return first available (phased training alternates which path runs)
-                # both outputs should produce tensors, return first
-                return tensors[self.output_ids[0]]
+                # multi-output: return list of all outputs
+                return [tensors[oid] for oid in self.output_ids]
             return x
 
     return _GraphModel()
