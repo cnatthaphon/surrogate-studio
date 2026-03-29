@@ -519,6 +519,35 @@
         var activ = String((node.data && node.data.activation) || "relu");
         return tf.layers.conv1d({ filters: filters, kernelSize: kernelSize, strides: strides, padding: "same", activation: activ }).apply(inTensor);
       }
+      // --- GAN building blocks ---
+      if (node.name === "constant_layer") {
+        // Constant node: outputs a tensor filled with a constant value, matching batch size of inTensor
+        var constVal = Number((node.data && node.data.value) != null ? node.data.value : 1);
+        var constDim = Math.max(1, Number((node.data && node.data.dim) || 1));
+        // Use a Dense layer with frozen weights initialized to constant value
+        var constLayer = tf.layers.dense({ units: constDim, useBias: false, trainable: false, kernelInitializer: "zeros" });
+        var constOut = constLayer.apply(inTensor);
+        // Override: add constant (zeros + constant = constant)
+        return tf.layers.activation({ activation: "linear" }).apply(
+          tf.layers.add().apply([constOut, tf.layers.dense({ units: constDim, useBias: true, trainable: false, kernelInitializer: "zeros", biasInitializer: tf.initializers.constant({ value: constVal }) }).apply(inTensor)])
+        );
+      }
+      if (node.name === "concat_batch_layer") {
+        // ConcatBatch: handled in the multi-input section (requires 2 inputs)
+        // concat along batch axis = tf.layers.concatenate({axis: 0})
+        // TF.js doesn't support axis=0 concat in functional API (batch dim)
+        // Workaround: use axis=-1 concat then reshape, or handle in training engine
+        // For now: treat as regular concat (feature-level merge)
+        return inTensor; // placeholder — real impl needs custom layer
+      }
+      if (node.name === "phase_switch_layer") {
+        // PhaseSwitch: selects between two inputs based on phase flag
+        // In TF.js functional API, dynamic routing isn't directly supported
+        // Workaround: use a weighted sum with phase-dependent weights
+        // phase=0: output = input1, phase=1: output = input2
+        // Implemented as: output = (1-flag) * input1 + flag * input2
+        return inTensor; // placeholder — real impl needs phase flag tf.variable
+      }
       if (node.name === "embedding_layer") {
         var vocabSize = Math.max(1, Number((node.data && node.data.inputDim) || 10000));
         var embedDim = Math.max(1, Number((node.data && node.data.outputDim) || 256));

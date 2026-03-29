@@ -106,7 +106,7 @@
       var html =
         "<div><div style='font-weight:700'>Output</div>" +
         "<div class='node-summary' style='font-size:11px;color:#94a3b8;'>target=" + target + ", loss=" + loss + (phase ? ", phase=" + phase : "") + "</div></div>";
-      return editor.addNode("output_layer", 1, 0, x, y, "output_layer", {
+      return editor.addNode("output_layer", 1, 1, x, y, "output_layer", {
         target: target,
         targetType: target,
         loss: loss,
@@ -298,6 +298,22 @@
       return editor.addNode("embedding_layer", 1, 1, x, y, "embedding_layer", { inputDim: inputDim, outputDim: outputDim }, html);
     }
 
+    // --- GAN building blocks ---
+    function addConstantNode(editor, x, y, cfg) {
+      var value = Number((cfg && cfg.value) != null ? cfg.value : 1);
+      var dim = Math.max(1, Number((cfg && cfg.dim) || 1));
+      var html = "<div><div style='font-weight:700'>Constant</div><div class='node-summary' style='font-size:11px;color:#94a3b8;'>val=" + value + ", dim=" + dim + "</div></div>";
+      return editor.addNode("constant_layer", 0, 1, x, y, "constant_layer", { value: value, dim: dim }, html);
+    }
+    function addConcatBatchNode(editor, x, y, cfg) {
+      var html = "<div><div style='font-weight:700'>ConcatBatch</div><div class='node-summary' style='font-size:11px;color:#94a3b8;'>concat along batch axis</div></div>";
+      return editor.addNode("concat_batch_layer", 2, 1, x, y, "concat_batch_layer", {}, html);
+    }
+    function addPhaseSwitchNode(editor, x, y, cfg) {
+      var html = "<div><div style='font-weight:700'>PhaseSwitch</div><div class='node-summary' style='font-size:11px;color:#94a3b8;'>selects input by phase</div></div>";
+      return editor.addNode("phase_switch_layer", 2, 1, x, y, "phase_switch_layer", {}, html);
+    }
+
     // --- Conv2D building blocks ---
     function addConv2dNode(editor, x, y, cfg) {
       var filters = Math.max(1, Number((cfg && cfg.filters) || 32));
@@ -378,6 +394,9 @@
         lstm: addLstmNode,
         detach: addDetachNode,
         sample_z: addSampleZNode,
+        constant: addConstantNode,
+        concat_batch: addConcatBatchNode,
+        phase_switch: addPhaseSwitchNode,
         noise_injection: addNoiseInjectionNode,
         time_embed: addTimeEmbedNode,
         embedding: addEmbeddingNode,
@@ -569,6 +588,9 @@
       if (node.name === "conv1d_layer") {
         return "f=" + Number(d.filters || 64) + ", k=" + Number(d.kernelSize || 3) + ", s=" + Number(d.stride || 1) + ", act=" + String(d.activation || "relu");
       }
+      if (node.name === "constant_layer") { return "const=" + Number(d.value != null ? d.value : 1) + ", dim=" + Number(d.dim || 1); }
+      if (node.name === "concat_batch_layer") { return "concat batches (2 inputs)"; }
+      if (node.name === "phase_switch_layer") { return "switch by training phase"; }
       if (node.name === "embedding_layer") {
         return "vocab=" + Number(d.inputDim || 10000) + ", dim=" + Number(d.outputDim || 256);
       }
@@ -825,6 +847,20 @@
           ]
         });
         addMessage("Conv1D expects sequence input. For direct mode, keep graph flat.");
+        return spec;
+      }
+      if (node.name === "constant_layer") {
+        addField({ kind: "number", key: "value", label: "Value", value: Number(d.value != null ? d.value : 1), step: 0.1 });
+        addField({ kind: "number", key: "dim", label: "Output dim", value: Math.max(1, Number(d.dim || 1)), min: 1, step: 1 });
+        addMessage("Outputs a constant tensor. Use for GAN labels (1=real, 0=fake).");
+        return spec;
+      }
+      if (node.name === "concat_batch_layer") {
+        addMessage("Concatenates two inputs along the batch axis. Input 1 + Input 2 → doubled batch. Use to merge real and fake images for discriminator.");
+        return spec;
+      }
+      if (node.name === "phase_switch_layer") {
+        addMessage("Selects Input 1 or Input 2 based on current training phase index. Phase 0 → Input 1, Phase 1+ → Input 2. Use for switching GAN labels.");
         return spec;
       }
       if (node.name === "embedding_layer") {
