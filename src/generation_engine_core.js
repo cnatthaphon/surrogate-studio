@@ -93,11 +93,30 @@
       if (!model) throw new Error("generation: model required");
 
       var z = tf.randomNormal([numSamples, latentDim], 0, temperature);
-      var output = model.predict(z);
+      var inputTensors = z;
+      var extraTensors = [];
+      // multi-input models (e.g., GAN with SampleZ + ImageSource): provide all inputs
+      if (model.inputs && model.inputs.length > 1) {
+        var inputs = [];
+        for (var ii = 0; ii < model.inputs.length; ii++) {
+          var inputShape = model.inputs[ii].shape;
+          var inputDim = inputShape[inputShape.length - 1];
+          if (inputDim === latentDim) {
+            inputs.push(z); // this is the z input
+          } else {
+            var dummy = tf.zeros([numSamples, inputDim]); // dummy for non-z inputs
+            inputs.push(dummy);
+            extraTensors.push(dummy);
+          }
+        }
+        inputTensors = inputs;
+      }
+      var output = model.predict(inputTensors);
       var samples = (Array.isArray(output) ? output[0] : output).arraySync();
       var latents = z.arraySync();
 
       z.dispose();
+      extraTensors.forEach(function (t) { t.dispose(); });
       if (Array.isArray(output)) output.forEach(function (t) { t.dispose(); }); else output.dispose();
 
       resolve({

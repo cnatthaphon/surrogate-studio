@@ -323,6 +323,19 @@
         return;
       }
 
+      // skip test for models that don't have meaningful test metrics (e.g., GAN generator)
+      var modelRec0 = store ? store.getModel(t.modelId) : null;
+      if (modelRec0 && modelRec0.graph && modelBuilder) {
+        var family0 = modelBuilder.inferModelFamily(modelRec0.graph);
+        if (family0 === "gan") {
+          mainEl.appendChild(el("div", { className: "osc-card", style: "margin-top:8px;text-align:center;padding:24px;" },
+            el("div", { style: "font-size:13px;color:#94a3b8;" }, "GAN models generate from noise \u2014 test metrics are not applicable."),
+            el("div", { style: "font-size:12px;color:#67e8f9;margin-top:8px;" }, "Use the Generation tab to see generated images.")
+          ));
+          return;
+        }
+      }
+
       var statusEl = el("div", { style: "font-size:11px;color:#94a3b8;padding:4px 8px;" }, "Running inference on full test set (TF.js)...");
       mainEl.appendChild(statusEl);
 

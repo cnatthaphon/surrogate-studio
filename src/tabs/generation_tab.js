@@ -485,10 +485,23 @@
         // load weights
         _loadWeights(tf, built.model, trainer.modelArtifacts);
 
-        // decoder extraction for VAE
+        // determine latent dim and model for generation
         var genModel = built.model;
-        var genLatentDim = featureSize;
         var family = g.family || modelBuilder.inferModelFamily(modelRec.graph);
+        // for GAN: latentDim = SampleZ dim from graph. For VAE: from reparam. Otherwise: featureSize.
+        var genLatentDim = featureSize;
+        if (family === "gan") {
+          // read SampleZ dim from graph
+          var gData = modelBuilder.extractGraphData ? modelBuilder.extractGraphData(modelRec.graph) : {};
+          Object.keys(gData).forEach(function (nid) {
+            var nd = gData[nid];
+            if (nd && (nd.name === "sample_z_layer" || nd.name === "sample_z_block")) {
+              genLatentDim = Number((nd.data && nd.data.dim) || 128);
+            }
+          });
+        } else if (latentDim > 0) {
+          genLatentDim = latentDim;
+        }
         if (family === "vae" && method !== "inverse" && method !== "reconstruct") {
           try {
             var decoder = modelBuilder.extractDecoder(tf, built.model, latentDim);
