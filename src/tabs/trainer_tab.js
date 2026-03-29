@@ -285,11 +285,13 @@
 
       // read task type from model graph output nodes
       var schemaId = t.schemaId;
-      var allowedOutputKeys = schemaRegistry ? schemaRegistry.getOutputKeys(schemaId) : ["x"];
+      var allowedOutputKeys = schemaRegistry ? schemaRegistry.getOutputKeys(schemaId) : [];
       var model = t.modelId ? (store ? store.getModel(t.modelId) : null) : null;
-      var heads = (model && model.graph && modelBuilder) ? modelBuilder.inferOutputHeads(model.graph, allowedOutputKeys, "x") : [];
-      var defaultTarget = (heads.length && heads[0].target) ? heads[0].target : ((allowedOutputKeys[0] && (allowedOutputKeys[0].key || allowedOutputKeys[0])) || "x");
-      var isClassification = defaultTarget === "label" || defaultTarget === "logits";
+      var _defOk = allowedOutputKeys.length ? (allowedOutputKeys[0].key || allowedOutputKeys[0]) : "";
+      var heads = (model && model.graph && modelBuilder) ? modelBuilder.inferOutputHeads(model.graph, allowedOutputKeys, _defOk) : [];
+      var defaultTarget = (heads.length && heads[0].target) ? heads[0].target : _defOk;
+      var defaultHeadType = (heads.length && heads[0].headType) ? heads[0].headType : "regression";
+      var isClassification = defaultHeadType === "classification";
 
       // --- check if server returned raw predictions (full charts) ---
       var m = t.metrics || {};
@@ -310,10 +312,10 @@
       }
 
       // --- client-side evaluation (TF.js rebuild + inference — full charts) ---
-      _renderTestSubTabClient(mainEl, t, activeId, Plotly, _darkLayout, pc, schemaId, allowedOutputKeys, defaultTarget, isClassification);
+      _renderTestSubTabClient(mainEl, t, activeId, Plotly, _darkLayout, pc, schemaId, allowedOutputKeys, defaultTarget, isClassification, defaultHeadType);
     }
 
-    function _renderTestSubTabClient(mainEl, t, activeId, Plotly, _darkLayout, pc, schemaId, allowedOutputKeys, defaultTarget, isClassification) {
+    function _renderTestSubTabClient(mainEl, t, activeId, Plotly, _darkLayout, pc, schemaId, allowedOutputKeys, defaultTarget, isClassification, defaultHeadType) {
       var tf = getTf();
       // --- load dataset + model for TF.js inference ---
       if (!tf || !t.modelArtifacts || !t.datasetId || !modelBuilder) {
@@ -344,7 +346,7 @@
           var W2 = typeof window !== "undefined" ? window : {};
           var srcReg2 = W2.OSCDatasetSourceRegistry || null;
           var oh = function (l, n) { var a = new Array(n).fill(0); a[l] = 1; return a; };
-          var isReconstruction2 = !isClassification && defaultTarget !== "label" && defaultTarget !== "logits";
+          var isRecon3 = defaultHeadType === "reconstruction" || defaultHeadType === "regression";
           var testSplit;
           if (srcReg2 && typeof srcReg2.resolveDatasetSplit === "function") {
             testSplit = srcReg2.resolveDatasetSplit(activeDs, "test");
@@ -357,7 +359,7 @@
           activeDs = {
             xTest: testSplit.x,
             yTest: isClassification ? testSplit.y.map(function (l) { return typeof l === "number" ? oh(l, nCls) : l; })
-              : isReconstruction2 ? testSplit.x : testSplit.y,
+              : isRecon3 ? testSplit.x : testSplit.y,
             yTestRaw: testSplit.y,
             featureSize: resolvedFS || 1,
             numClasses: nCls,
@@ -1192,10 +1194,12 @@
       }
 
       var schemaId = tCard.schemaId;
-      var allowedOutputKeys = schemaRegistry ? schemaRegistry.getOutputKeys(schemaId) : ["x"];
+      var allowedOutputKeys = schemaRegistry ? schemaRegistry.getOutputKeys(schemaId) : [];
       // read target from model graph (not schema)
-      var _heads = modelBuilder ? modelBuilder.inferOutputHeads(model.graph, allowedOutputKeys, "x") : [];
-      var defaultTarget = (_heads.length && _heads[0].target) ? _heads[0].target : (allowedOutputKeys[0] || "x");
+      var _defOk2 = allowedOutputKeys.length ? (allowedOutputKeys[0].key || allowedOutputKeys[0]) : "";
+      var _heads = modelBuilder ? modelBuilder.inferOutputHeads(model.graph, allowedOutputKeys, _defOk2) : [];
+      var defaultTarget = (_heads.length && _heads[0].target) ? _heads[0].target : _defOk2;
+      var defaultHeadType2 = (_heads.length && _heads[0].headType) ? _heads[0].headType : "regression";
       var dsData = dataset.data;
       var isBundle = dsData.kind === "dataset_bundle" && dsData.datasets;
       var activeDs = isBundle ? dsData.datasets[dsData.activeVariantId || Object.keys(dsData.datasets)[0]] : dsData;
@@ -1204,8 +1208,8 @@
       var srcReg = W.OSCDatasetSourceRegistry || null;
       if (!activeDs.xTrain) {
         var nClasses = activeDs.classCount || activeDs.numClasses || 10;
-        var isClassification = defaultTarget === "label" || defaultTarget === "logits";
-        var isReconstruction = !isClassification && defaultTarget !== "label" && defaultTarget !== "logits";
+        var isClassification2 = defaultHeadType2 === "classification";
+        var isReconstruction2 = defaultHeadType2 === "reconstruction" || (!isClassification2 && defaultHeadType2 !== "classification");
         function oneHot(label, n) { var arr = new Array(n).fill(0); arr[label] = 1; return arr; }
         function resolveSplit(ds, split) {
           if (srcReg && typeof srcReg.resolveDatasetSplit === "function") return srcReg.resolveDatasetSplit(ds, split);
@@ -1216,24 +1220,24 @@
         var val = resolveSplit(activeDs, "val");
         var test = resolveSplit(activeDs, "test");
         function mapY(splitData) {
-          if (isClassification) return splitData.y.map(function (l) { return typeof l === "number" ? oneHot(l, nClasses) : l; });
-          if (isReconstruction) return splitData.x; // y = x
+          if (isClassification2) return splitData.y.map(function (l) { return typeof l === "number" ? oneHot(l, nClasses) : l; });
+          if (isReconstruction2) return splitData.x; // y = x for reconstruction
           return splitData.y;
         }
         var resolvedFeatureSize = (srcReg && typeof srcReg.getFeatureSize === "function") ? srcReg.getFeatureSize(activeDs) : 0;
         if (!resolvedFeatureSize && train.x.length) resolvedFeatureSize = train.x[0].length;
         // for multi-head models (VAE+Classifier): provide labels separately
-        var hasClsHead = _heads && _heads.some(function (h) { return h.target === "label" || h.target === "logits"; });
+        var hasClsHead = _heads && _heads.some(function (h) { return h.headType === "classification"; });
         activeDs = {
           xTrain: train.x, yTrain: mapY(train),
           xVal: val.x, yVal: mapY(val),
           xTest: test.x, yTest: mapY(test),
           featureSize: resolvedFeatureSize || activeDs.featureSize || 1,
           numClasses: nClasses,
-          targetMode: isClassification ? "logits" : (activeDs.targetMode || defaultTarget),
+          targetMode: defaultTarget,
         };
         // add raw labels for classification heads (before one-hot mapping)
-        if (hasClsHead && !isClassification) {
+        if (hasClsHead && !isClassification2) {
           activeDs.labelsTrain = train.y.map(function (l) { return typeof l === "number" ? oneHot(l, nClasses) : l; });
           activeDs.labelsVal = val.y.map(function (l) { return typeof l === "number" ? oneHot(l, nClasses) : l; });
           activeDs.labelsTest = test.y.map(function (l) { return typeof l === "number" ? oneHot(l, nClasses) : l; });

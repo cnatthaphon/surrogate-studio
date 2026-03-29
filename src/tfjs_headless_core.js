@@ -33,13 +33,14 @@ function clamp(value, lo, hi) {
 
 function outputTargetDefaultForSchema(schemaId) {
   const allowed = getOutputKeys(schemaId);
-  if (allowed.indexOf("x") >= 0) return "x";
-  if (allowed.indexOf("logits") >= 0) return "logits";
-  return String(allowed[0] || "x");
+  if (!allowed.length) return "";
+  // return first key from schema — no hardcoded preference
+  return String(allowed[0].key || allowed[0] || "");
 }
 
 function normalizeOutputTargetsList(raw, fallbackTargets, schemaId) {
   const allowed = getOutputKeys(schemaId);
+  const allowedStrs = allowed.map(function (k) { return k.key || String(k); });
   const defaultTarget = outputTargetDefaultForSchema(schemaId);
   let list = [];
   if (Array.isArray(raw)) list = raw.slice();
@@ -47,12 +48,12 @@ function normalizeOutputTargetsList(raw, fallbackTargets, schemaId) {
   else if (raw != null) list = [raw];
   list = list
     .map(function (x) { return String(x || "").trim().toLowerCase(); })
-    .filter(function (x) { return x && allowed.indexOf(x) >= 0; });
+    .filter(function (x) { return x && allowedStrs.indexOf(x) >= 0; });
   if (!list.length) {
     const fb = Array.isArray(fallbackTargets) ? fallbackTargets : [fallbackTargets || defaultTarget];
     list = fb
       .map(function (x) { return String(x || "").trim().toLowerCase(); })
-      .filter(function (x) { return x && allowed.indexOf(x) >= 0; });
+      .filter(function (x) { return x && allowedStrs.indexOf(x) >= 0; });
   }
   if (!list.length) list = [defaultTarget];
   const uniq = [];

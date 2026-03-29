@@ -36,7 +36,7 @@
     var d = {};
     C(d, N(d,1,"input",{mode:"flat"},60,100), N(d,2,"dense",{units:64,activation:"relu"},230,100));
     C(d, "2", N(d,3,"dense",{units:32,activation:"relu"},400,100));
-    C(d, "3", N(d,4,"output",{target:"xv",loss:"mse"},570,100));
+    C(d, "3", N(d,4,"output",{target:"xv",loss:"mse",headType:"regression"},570,100));
     return { drawflow: { Home: { data: d } } };
   }
 
@@ -45,7 +45,7 @@
     var d = {};
     C(d, N(d,1,"input",{mode:"flat"},60,100), N(d,2,"gru",{units:64,dropout:0.1,returnseq:"false"},260,100));
     C(d, "2", N(d,3,"dense",{units:32,activation:"relu"},430,100));
-    C(d, "3", N(d,4,"output",{target:"xv",loss:"mse"},600,100));
+    C(d, "3", N(d,4,"output",{target:"xv",loss:"mse",headType:"regression"},600,100));
     return { drawflow: { Home: { data: d } } };
   }
 
@@ -58,7 +58,7 @@
     var lv = N(d,4,"latent_logvar",{units:8,group:"z"},350,150);
     var rep = N(d,5,"reparam",{group:"z",beta:0.001},500,100);
     var d1 = N(d,6,"dense",{units:32,activation:"relu"},650,100);
-    var out = N(d,7,"output",{target:"xv",loss:"mse"},800,100);
+    var out = N(d,7,"output",{target:"xv",loss:"mse",headType:"regression"},800,100);
     C(d, inp, e1); C(d, e1, mu); C(d, e1, lv);
     C(d, mu, rep, "output_1", "input_1"); C(d, lv, rep, "output_1", "input_2");
     C(d, rep, d1); C(d, d1, out);
@@ -79,10 +79,10 @@
     // Decoder → reconstruction
     var d1 = N(d,7,"dense",{units:32,activation:"relu"},800,120);
     var d2 = N(d,8,"dense",{units:64,activation:"relu"},950,120);
-    var reconOut = N(d,9,"output",{target:"xv",loss:"mse",matchWeight:1},1100,120);
+    var reconOut = N(d,9,"output",{target:"xv",loss:"mse",matchWeight:1,headType:"regression"},1100,120);
     // Classifier head → scenario type (spring/pendulum/bouncing)
     var cls1 = N(d,10,"dense",{units:16,activation:"relu"},500,300);
-    var clsOut = N(d,11,"output",{target:"label",loss:"categoricalCrossentropy",matchWeight:0.3},650,300);
+    var clsOut = N(d,11,"output",{target:"label",loss:"categoricalCrossentropy",matchWeight:0.3,headType:"classification"},650,300);
 
     C(d, inp, e1); C(d, e1, e2); C(d, e2, mu); C(d, e2, lv);
     C(d, mu, rep, "output_1", "input_1"); C(d, lv, rep, "output_1", "input_2");
@@ -100,7 +100,7 @@
     var d1 = N(d,3,"dense",{units:64,activation:"relu"},370,100);
     var d2 = N(d,4,"dense",{units:32,activation:"relu"},540,100);
     var d3 = N(d,5,"dense",{units:64,activation:"relu"},710,100);
-    var out = N(d,6,"output",{target:"xv",loss:"mse"},880,100);
+    var out = N(d,6,"output",{target:"xv",loss:"mse",headType:"regression"},880,100);
     C(d, inp, noise); C(d, noise, d1); C(d, d1, d2); C(d, d2, d3); C(d, d3, out);
     return { drawflow: { Home: { data: d } } };
   }
@@ -135,11 +135,11 @@
         config: { epochs: 30, batchSize: 32, learningRate: 0.001, optimizerType: "adam", useServer: true } },
     ],
     generations: [
-      { id: "demo-osc-vae-gen", name: "VAE Reconstruct", schemaId: "oscillator", trainerId: "", family: "",
+      { id: "demo-osc-vae-gen", name: "VAE Reconstruct", schemaId: "oscillator", trainerId: "demo-osc-vae-t", family: "vae",
         config: { method: "reconstruct", numSamples: 16, seed: 42 }, status: "draft", runs: [], createdAt: Date.now() },
-      { id: "demo-osc-cls-gen", name: "Classifier-Guided", schemaId: "oscillator", trainerId: "", family: "",
+      { id: "demo-osc-cls-gen", name: "Classifier-Guided", schemaId: "oscillator", trainerId: "demo-osc-vae-cls-t", family: "vae",
         config: { method: "classifier_guided", numSamples: 8, steps: 100, lr: 0.01, targetClass: 0, guidanceWeight: 1.0, seed: 42 }, status: "draft", runs: [], createdAt: Date.now() },
-      { id: "demo-osc-lang-gen", name: "Langevin Sampling", schemaId: "oscillator", trainerId: "", family: "",
+      { id: "demo-osc-lang-gen", name: "Langevin Sampling", schemaId: "oscillator", trainerId: "demo-osc-den-t", family: "diffusion",
         config: { method: "langevin", numSamples: 8, steps: 50, lr: 0.01, temperature: 0.5, seed: 42 }, status: "draft", runs: [], createdAt: Date.now() },
     ],
     evaluations: [

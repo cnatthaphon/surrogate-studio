@@ -105,7 +105,7 @@ async function main() {
       ws.querySelectorAll(".osc-form-row,.row").forEach(row => {
         const l = row.querySelector("label"), i = row.querySelector("input"); if (!l || !i) return;
         if (l.textContent.toLowerCase().includes("epoch") && i.type === "number") { i.value = String(ep); i.dispatchEvent(new Event("input", { bubbles: true })); }
-        if (l.textContent.includes("PyTorch") && i.type === "checkbox" && i.checked) { i.checked = false; i.dispatchEvent(new Event("change", { bubbles: true })); }
+        if (l.textContent.includes("PyTorch") && i.type === "checkbox" && !i.checked) { i.checked = true; i.dispatchEvent(new Event("change", { bubbles: true })); }
       });
     }, EPOCHS);
     await sleep(300);

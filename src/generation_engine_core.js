@@ -476,14 +476,14 @@
     var family = String(modelFamily || "supervised").toLowerCase();
     var caps = {
       family: family,
-      canReconstruct: family === "vae" || family === "supervised",
-      canRandomSample: family === "vae",
+      canReconstruct: family === "vae" || family === "supervised" || family === "diffusion",
+      canRandomSample: family === "vae" || family === "gan",
       canClassifierGuide: family === "vae",
-      canLangevin: family === "diffusion" || family === "vae",
+      canLangevin: family === "diffusion",
       canOptimize: family === "vae",
-      canInverse: true, // always possible with any differentiable model
+      canInverse: family === "supervised",
       canDDPM: family === "diffusion",
-      defaultMethod: family === "vae" ? "reconstruct" : family === "diffusion" ? "ddpm" : "reconstruct",
+      defaultMethod: family === "vae" ? "reconstruct" : family === "diffusion" ? "langevin" : family === "gan" ? "random" : "reconstruct",
       availableMethods: [],
     };
     if (caps.canReconstruct) caps.availableMethods.push({ id: "reconstruct", label: "Reconstruct (input → model → output)" });

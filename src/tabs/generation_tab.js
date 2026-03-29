@@ -143,7 +143,25 @@
           var sid = _schemaSelect ? _schemaSelect.value : "";
           if (!name) { onStatus("Enter a name"); return; }
           var id = "gen_" + Date.now() + "_" + Math.floor(Math.random() * 10000);
-          var rec = { id: id, name: name, schemaId: sid, trainerId: "", family: "", config: { method: "reconstruct", numSamples: 16, steps: 100, lr: 0.01, temperature: 1.0, seed: 42 }, status: "draft", runs: [], createdAt: Date.now() };
+          // auto-select first trained model for this schema
+          var _autoTrainerId = "";
+          var _autoFamily = "";
+          var _autoMethod = "reconstruct";
+          if (store) {
+            var _allTrainers = store.listTrainerCards ? store.listTrainerCards() : [];
+            var _trained = _allTrainers.filter(function (t) { return t.schemaId === sid && t.status === "done"; });
+            if (_trained.length) {
+              _autoTrainerId = _trained[0].id;
+              var _tm = _trained[0].modelId ? store.getModel(_trained[0].modelId) : null;
+              _autoFamily = _tm && _tm.graph && modelBuilder ? modelBuilder.inferModelFamily(_tm.graph) : "";
+              var _eng = getGenerationEngine();
+              if (_eng && _autoFamily) {
+                var _caps = _eng.detectCapabilities(_autoFamily);
+                _autoMethod = _caps.defaultMethod || "reconstruct";
+              }
+            }
+          }
+          var rec = { id: id, name: name, schemaId: sid, trainerId: _autoTrainerId, family: _autoFamily, config: { method: _autoMethod, numSamples: 16, steps: 100, lr: 0.01, temperature: 1.0, seed: 42 }, status: "draft", runs: [], createdAt: Date.now() };
           _saveGen(rec);
           _activeGenId = id;
           onStatus("Created: " + name);
@@ -377,9 +395,11 @@
       var method = config.method || "random";
       var trainerBackend = (trainer.config && trainer.config.runtimeBackend) || "auto";
 
-      // try server if model was server-trained, fallback to client if unreachable
-      // only route to server if model has server weights AND useServer is still checked
-      if (trainer.trainedOnServer && trainer.config && trainer.config.useServer) {
+      // Generation always runs on client — model weights are already downloaded locally,
+      // and methods like reconstruct/langevin need local data or produce small outputs.
+      // Server generation is only useful for very large batch generation.
+      var useServerForGen = false;
+      if (useServerForGen) {
         var serverAdapter = _getServerAdapter();
         if (serverAdapter) {
           var serverUrl = (trainer.config && trainer.config.serverUrl) || "";
@@ -394,17 +414,24 @@
             }
             onStatus("Generating on server (" + method + ")...");
             var dataset = trainer.datasetId ? store.getDataset(trainer.datasetId) : null;
-            var dsData = dataset && dataset.data ? dataset.data : {};
-            var activeDs = dsData.kind === "dataset_bundle" && dsData.datasets ? dsData.datasets[dsData.activeVariantId || Object.keys(dsData.datasets)[0]] : dsData;
-            var testX = (activeDs.records && activeDs.records.test && activeDs.records.test.x) || (activeDs.xTest || []);
+            var dsData2 = dataset && dataset.data ? dataset.data : {};
+            var activeDs2 = dsData2.kind === "dataset_bundle" && dsData2.datasets ? dsData2.datasets[dsData2.activeVariantId || Object.keys(dsData2.datasets)[0]] : dsData2;
+            // resolve test data via source registry (zero-copy) or fallback
+            var W2 = typeof window !== "undefined" ? window : {};
+            var srcReg2 = W2.OSCDatasetSourceRegistry || null;
+            var sTestSplit = null;
+            if (srcReg2 && typeof srcReg2.resolveDatasetSplit === "function") sTestSplit = srcReg2.resolveDatasetSplit(activeDs2, "test");
+            var sTestX = (sTestSplit && sTestSplit.x) ? sTestSplit.x : ((activeDs2.records && activeDs2.records.test && activeDs2.records.test.x) || (activeDs2.xTest || []));
+            var sFeatureSize = (srcReg2 && typeof srcReg2.getFeatureSize === "function") ? srcReg2.getFeatureSize(activeDs2) : 0;
+            if (!sFeatureSize && sTestX.length && sTestX[0]) sFeatureSize = sTestX[0].length;
             var serverConfig = {
               graph: modelRec.graph, weightValues: trainer.modelArtifacts.weightValues,
-              featureSize: Number(dsData.featureSize || (testX[0] && testX[0].length) || 40),
-              targetSize: Number(dsData.featureSize || 40), numClasses: dsData.numClasses || dsData.classCount || 0,
+              featureSize: Number(sFeatureSize || dsData2.featureSize || 40),
+              targetSize: Number(sFeatureSize || dsData2.featureSize || 40), numClasses: dsData2.numClasses || dsData2.classCount || 0,
               method: method, numSamples: config.numSamples || 16,
               latentDim: modelBuilder.extractLatentInfo ? (modelBuilder.extractLatentInfo(modelRec.graph).latentDim || 20) : 20,
               temperature: config.temperature || 1.0, seed: config.seed || 42,
-              originals: method === "reconstruct" ? testX.slice(0, config.numSamples || 16) : undefined,
+              originals: method === "reconstruct" ? sTestX.slice(0, config.numSamples || 16) : undefined,
             };
             serverAdapter.generateOnServer(serverConfig, serverUrl).then(function (result) {
               _isGenerating = false;
@@ -440,8 +467,8 @@
 
       try {
         var schemaId = trainer.schemaId || g.schemaId;
-        var allowedOutputKeys = schemaRegistry ? schemaRegistry.getOutputKeys(schemaId) : ["x"];
-        var defaultTarget = (allowedOutputKeys[0] && (allowedOutputKeys[0].key || allowedOutputKeys[0])) || "x";
+        var allowedOutputKeys = schemaRegistry ? schemaRegistry.getOutputKeys(schemaId) : [];
+        var defaultTarget = (allowedOutputKeys[0] && (allowedOutputKeys[0].key || allowedOutputKeys[0])) || "";
         var graphMode = modelBuilder.inferGraphMode(modelRec.graph, "direct");
 
         var dataset = trainer.datasetId ? store.getDataset(trainer.datasetId) : null;
@@ -486,19 +513,42 @@
           genConfig.classifierModel = built.model;
         }
 
+        // helper: resolve split data from source registry or legacy records
+        function _resolveGenSplit(ds, split) {
+          var W = typeof window !== "undefined" ? window : {};
+          var srcReg = W.OSCDatasetSourceRegistry || null;
+          if (srcReg && typeof srcReg.resolveDatasetSplit === "function") {
+            var s = srcReg.resolveDatasetSplit(ds, split);
+            if (s && s.x && s.x.length) return s;
+          }
+          var rec = ds.records && ds.records[split];
+          if (rec) return { x: rec.x || [], y: rec.y || [], length: (rec.x || []).length };
+          // fallback to flat fields
+          var xKey = "x" + split.charAt(0).toUpperCase() + split.slice(1);
+          var yKey = "y" + split.charAt(0).toUpperCase() + split.slice(1);
+          return { x: ds[xKey] || [], y: ds[yKey] || [], length: (ds[xKey] || []).length };
+        }
+
         // reconstruct: pass real data through full model
         if (method === "reconstruct") {
           genConfig.fullModel = built.model; genConfig.model = built.model;
           var rActiveDs = _getActiveDs(dsData);
-          var testX = (rActiveDs.records && rActiveDs.records.test && rActiveDs.records.test.x) || (rActiveDs.xTest || []);
-          if (!testX.length) testX = (rActiveDs.records && rActiveDs.records.train && rActiveDs.records.train.x) || (rActiveDs.xTrain || []);
-          genConfig.originals = testX;
+          var rSplit = _resolveGenSplit(rActiveDs, "test");
+          var testX = rSplit.x;
+          if (!testX.length) { rSplit = _resolveGenSplit(rActiveDs, "train"); testX = rSplit.x; }
+          genConfig.originals = testX.slice(0, config.numSamples || 16);
+        }
+
+        // langevin: pass scoreModel for denoiser-based generation
+        if (method === "langevin") {
+          genConfig.scoreModel = built.model;
         }
 
         // inverse: need target
         if (method === "inverse") {
           var iActiveDs = _getActiveDs(dsData);
-          var testY = (iActiveDs.records && iActiveDs.records.test && iActiveDs.records.test.y) || (iActiveDs.yTest || []);
+          var iSplit = _resolveGenSplit(iActiveDs, "test");
+          var testY = iSplit.y;
           if (testY.length) {
             var nTarget = Math.min(config.numSamples || 1, testY.length);
             var targets = [];
@@ -591,14 +641,32 @@
       var coreRenderer = W.OSCImageRenderCore || null;
       if (sampleType === "image" && coreRenderer) {
         var imgShape = dsData.imageShape || [28, 28, 1];
+        // originals first (side-by-side comparison for reconstruct)
+        if (originals && originals.length && method === "reconstruct") {
+          mountEl.appendChild(el("div", { style: "font-size:10px;color:#67e8f9;margin-bottom:4px;font-weight:600;" }, "Original → Reconstructed"));
+        }
         var gridWrap = el("div", { style: "display:flex;flex-wrap:wrap;gap:4px;" });
         var maxShow = Math.min(samples.length, 32);
         for (var si = 0; si < maxShow; si++) {
+          // for reconstruct: show original-reconstructed pairs
+          if (originals && originals[si] && method === "reconstruct") {
+            var origCanvas = document.createElement("canvas");
+            origCanvas.width = imgShape[0]; origCanvas.height = imgShape[1];
+            origCanvas.style.cssText = "width:48px;height:48px;border:1px solid #334155;border-radius:3px;image-rendering:pixelated;";
+            coreRenderer.drawImageToCanvas(origCanvas.getContext("2d"), originals[si], imgShape[0], imgShape[1]);
+            gridWrap.appendChild(origCanvas);
+          }
           var canvas = document.createElement("canvas");
           canvas.width = imgShape[0]; canvas.height = imgShape[1];
           canvas.style.cssText = "width:48px;height:48px;border:1px solid #2d3748;border-radius:3px;image-rendering:pixelated;";
-          coreRenderer.drawImageToCanvas(canvas.getContext("2d"), samples[si], imgShape[0], imgShape[1]);
+          // clamp generated values to [0,1] range (Langevin/DDPM can produce out-of-range)
+          var pixelsClamped = samples[si].map(function (v) { return Math.max(0, Math.min(1, v)); });
+          coreRenderer.drawImageToCanvas(canvas.getContext("2d"), pixelsClamped, imgShape[0], imgShape[1]);
           gridWrap.appendChild(canvas);
+          // gap between pairs
+          if (originals && originals[si] && method === "reconstruct") {
+            gridWrap.appendChild(el("div", { style: "width:8px;" }));
+          }
         }
         mountEl.appendChild(gridWrap);
         return;

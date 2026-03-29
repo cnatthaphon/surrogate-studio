@@ -67,6 +67,14 @@
       _paletteItem("addInputBtn", "input", "Input", "NN", { mode: "flat" }),
       _paletteItem("addDenseBtn", "dense", "Dense", "NN", { units: 32, activation: "relu" }),
       _paletteItem("addConv1dBtn", "conv1d", "Conv1D", "NN", { filters: 32, kernelSize: 3, stride: 1, activation: "relu" }),
+      _paletteItem("addEmbeddingBtn", "embedding", "Embedding", "NN", { inputDim: 10000, outputDim: 256 }),
+      _paletteItem("addConv2dBtn", "conv2d", "Conv2D", "Conv", { filters: 32, kernelSize: 3, strides: 1, padding: "same", activation: "relu" }),
+      _paletteItem("addMaxPool2dBtn", "maxpool2d", "MaxPool2D", "Conv", { poolSize: 2, strides: 2 }),
+      _paletteItem("addConv2dTransposeBtn", "conv2d_transpose", "ConvT2D", "Conv", { filters: 32, kernelSize: 3, strides: 2, padding: "same", activation: "relu" }),
+      _paletteItem("addUpSample2dBtn", "upsample2d", "UpSample2D", "Conv", { size: 2 }),
+      _paletteItem("addFlattenBtn", "flatten", "Flatten", "Conv", {}),
+      _paletteItem("addReshapeBtn", "reshape", "Reshape", "Conv", { targetShape: "28,28,1" }),
+      _paletteItem("addGlobalAvgPool2dBtn", "global_avg_pool2d", "GlobalAvgPool2D", "Conv", {}),
       _paletteItem("addRnnBtn", "rnn", "RNN", "NN", { units: 64, dropout: 0.1, returnseq: "auto" }),
       _paletteItem("addGruBtn", "gru", "GRU", "NN", { units: 64, dropout: 0.1, returnseq: "auto" }),
       _paletteItem("addLstmBtn", "lstm", "LSTM", "NN", { units: 64, dropout: 0.1, returnseq: "auto" }),
@@ -117,11 +125,11 @@
     },
     model: {
       outputs: [
-        { key: "x", label: "x" },
-        { key: "v", label: "v" },
-        { key: "xv", label: "x+v" },
-        { key: "traj", label: "traj (full sequence)" },
-        { key: "params", label: "params" },
+        { key: "x", label: "x", headType: "regression" },
+        { key: "v", label: "v", headType: "regression" },
+        { key: "xv", label: "x+v", headType: "regression" },
+        { key: "traj", label: "traj (full sequence)", headType: "regression" },
+        { key: "params", label: "params", headType: "regression" },
       ],
       params: [
         { key: "m", label: "m" },
@@ -2767,9 +2775,9 @@
     },
     model: {
       outputs: [
-        { key: "pixel_values", label: "image reconstruction" },
-        { key: "label", label: "digit label (0-9)" },
-        { key: "logits", label: "class logits" }
+        { key: "pixel_values", label: "image reconstruction", headType: "reconstruction" },
+        { key: "label", label: "digit label (0-9)", headType: "classification" },
+        { key: "logits", label: "class logits", headType: "classification" }
       ],
       params: [],
       presets:         [
@@ -3082,9 +3090,9 @@
     },
     model: {
       outputs: [
-        { key: "pixel_values", label: "image reconstruction" },
-        { key: "label", label: "label (0-9)" },
-        { key: "logits", label: "class logits" }
+        { key: "pixel_values", label: "image reconstruction", headType: "reconstruction" },
+        { key: "label", label: "label (0-9)", headType: "classification" },
+        { key: "logits", label: "class logits", headType: "classification" }
       ],
       params: [],
       presets:         [
@@ -3324,6 +3332,62 @@
                                         ]
                                 }
                         }
+                },
+                {
+                        "id": "fashion_mnist_cnn_lenet",
+                        "label": "Fashion-MNIST: CNN (LeNet-5)",
+                        "metadata": { "graphSpec": { "nodes": [
+                                { "key": "image", "type": "image_source", "x": 60, "y": 80, "config": { "sourceKey": "pixel_values" } },
+                                { "key": "reshape", "type": "reshape", "x": 200, "y": 80, "config": { "targetShape": "28,28,1" } },
+                                { "key": "conv1", "type": "conv2d", "x": 340, "y": 80, "config": { "filters": 32, "kernelSize": 3, "strides": 1, "padding": "same", "activation": "relu" } },
+                                { "key": "pool1", "type": "maxpool2d", "x": 480, "y": 80, "config": { "poolSize": 2, "strides": 2 } },
+                                { "key": "conv2", "type": "conv2d", "x": 620, "y": 80, "config": { "filters": 64, "kernelSize": 3, "strides": 1, "padding": "same", "activation": "relu" } },
+                                { "key": "pool2", "type": "maxpool2d", "x": 760, "y": 80, "config": { "poolSize": 2, "strides": 2 } },
+                                { "key": "flat", "type": "flatten", "x": 900, "y": 80, "config": {} },
+                                { "key": "dense1", "type": "dense", "x": 1040, "y": 80, "config": { "units": 128, "activation": "relu" } },
+                                { "key": "drop1", "type": "dropout", "x": 1180, "y": 80, "config": { "rate": 0.25 } },
+                                { "key": "output", "type": "output", "x": 1320, "y": 80, "config": { "target": "label", "targetType": "label", "loss": "categoricalCrossentropy", "headType": "classification" } }
+                        ], "edges": [
+                                { "from": "image", "to": "reshape", "out": "output_1", "in": "input_1" },
+                                { "from": "reshape", "to": "conv1", "out": "output_1", "in": "input_1" },
+                                { "from": "conv1", "to": "pool1", "out": "output_1", "in": "input_1" },
+                                { "from": "pool1", "to": "conv2", "out": "output_1", "in": "input_1" },
+                                { "from": "conv2", "to": "pool2", "out": "output_1", "in": "input_1" },
+                                { "from": "pool2", "to": "flat", "out": "output_1", "in": "input_1" },
+                                { "from": "flat", "to": "dense1", "out": "output_1", "in": "input_1" },
+                                { "from": "dense1", "to": "drop1", "out": "output_1", "in": "input_1" },
+                                { "from": "drop1", "to": "output", "out": "output_1", "in": "input_1" }
+                        ] } }
+                },
+                {
+                        "id": "fashion_mnist_conv_ae",
+                        "label": "Fashion-MNIST: Conv Autoencoder",
+                        "metadata": { "graphSpec": { "nodes": [
+                                { "key": "image", "type": "image_source", "x": 60, "y": 80, "config": { "sourceKey": "pixel_values" } },
+                                { "key": "reshape", "type": "reshape", "x": 180, "y": 80, "config": { "targetShape": "28,28,1" } },
+                                { "key": "enc1", "type": "conv2d", "x": 300, "y": 80, "config": { "filters": 32, "kernelSize": 3, "strides": 2, "padding": "same", "activation": "relu" } },
+                                { "key": "enc2", "type": "conv2d", "x": 420, "y": 80, "config": { "filters": 64, "kernelSize": 3, "strides": 2, "padding": "same", "activation": "relu" } },
+                                { "key": "flat", "type": "flatten", "x": 540, "y": 80, "config": {} },
+                                { "key": "latent", "type": "dense", "x": 660, "y": 80, "config": { "units": 32, "activation": "relu" } },
+                                { "key": "dec_dense", "type": "dense", "x": 780, "y": 80, "config": { "units": 3136, "activation": "relu" } },
+                                { "key": "dec_reshape", "type": "reshape", "x": 900, "y": 80, "config": { "targetShape": "7,7,64" } },
+                                { "key": "dec1", "type": "conv2d_transpose", "x": 1020, "y": 80, "config": { "filters": 32, "kernelSize": 3, "strides": 2, "padding": "same", "activation": "relu" } },
+                                { "key": "dec2", "type": "conv2d_transpose", "x": 1140, "y": 80, "config": { "filters": 1, "kernelSize": 3, "strides": 2, "padding": "same", "activation": "sigmoid" } },
+                                { "key": "out_flat", "type": "flatten", "x": 1260, "y": 80, "config": {} },
+                                { "key": "output", "type": "output", "x": 1380, "y": 80, "config": { "target": "pixel_values", "targetType": "pixel_values", "loss": "mse", "headType": "reconstruction" } }
+                        ], "edges": [
+                                { "from": "image", "to": "reshape", "out": "output_1", "in": "input_1" },
+                                { "from": "reshape", "to": "enc1", "out": "output_1", "in": "input_1" },
+                                { "from": "enc1", "to": "enc2", "out": "output_1", "in": "input_1" },
+                                { "from": "enc2", "to": "flat", "out": "output_1", "in": "input_1" },
+                                { "from": "flat", "to": "latent", "out": "output_1", "in": "input_1" },
+                                { "from": "latent", "to": "dec_dense", "out": "output_1", "in": "input_1" },
+                                { "from": "dec_dense", "to": "dec_reshape", "out": "output_1", "in": "input_1" },
+                                { "from": "dec_reshape", "to": "dec1", "out": "output_1", "in": "input_1" },
+                                { "from": "dec1", "to": "dec2", "out": "output_1", "in": "input_1" },
+                                { "from": "dec2", "to": "out_flat", "out": "output_1", "in": "input_1" },
+                                { "from": "out_flat", "to": "output", "out": "output_1", "in": "input_1" }
+                        ] } }
                 }
         ],
 
@@ -3386,8 +3450,8 @@
     },
     model: {
       outputs: [
-        { key: "label", label: "class label (0-9)" },
-        { key: "logits", label: "class logits" }
+        { key: "label", label: "class label (0-9)", headType: "classification" },
+        { key: "logits", label: "class logits", headType: "classification" }
       ],
       params: [],
       presets: [

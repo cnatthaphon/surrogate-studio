@@ -1,48 +1,40 @@
-# Fashion-MNIST GAN — Surrogate Studio Demo
+# Fashion-MNIST GAN — MLP-GAN vs DCGAN
 
 ![Demo Workflow](images/demo_workflow.gif)
 
 
-**Train a Generative Adversarial Network on Fashion-MNIST in the browser.**
+**Train and compare two generative adversarial network architectures in the browser.**
 
-Uses phased training: Phase 1 trains the Discriminator, Phase 2 trains the Generator. Both phases alternate each epoch.
+Phased training: Generator and Discriminator alternate each epoch, exactly as described in the original papers.
 
-## Architecture
+## Models
 
-### Generator (Phase 2)
-```
-SampleZ(128) → Dense(256, relu) → Dense(512, relu) → Dense(784, sigmoid)
-```
-Takes random noise z~N(0,1) and generates 28×28 images.
-
-### Discriminator (Phase 1)
-```
-ImageSource(784) → Dense(512, relu) → Dense(256, relu) → Dense(1, sigmoid)
-```
-Classifies real vs generated images.
-
-### Training
-- Phase 1: Train D on real images (label=1) + generated (label=0)
-- Phase 2: Train G to fool D (generated → D → target label=1)
-- Alternates each epoch
+| # | Model | Generator | Discriminator | Paper |
+|---|---|---|---|---|
+| 1 | **MLP-GAN** | z(128) → Dense(256) → Dense(512) → Dense(784) | Dense(512) → Dense(256) → Dense(784) | Goodfellow 2014 |
+| 2 | **DCGAN** | z(128) → Dense(6272) → Reshape(7,7,128) → ConvT2D(64) → ConvT2D(1) | Reshape(28,28,1) → Conv2D(64) → Conv2D(128) → Flatten → Dense(784) | Radford 2015 |
 
 ## How to Use
 
-1. Open `index.html` in Chrome/Edge
-2. **Dataset tab**: Generate Fashion-MNIST dataset (~30MB CDN download)
-3. **Model tab**: GAN graph pre-loaded — Generator (top) + Discriminator (bottom)
-4. **Trainer tab**: Click Start Training — phased training shows D-loss and G-loss per epoch
-5. **Generation tab**: After training, sample from z → Generator → images
+1. Open `index.html`, generate Fashion-MNIST dataset
+2. **Trainer tab**: Train MLP-GAN and DCGAN (phased training — watch G-loss and D-loss)
+3. **Generation tab**: Generate images from both models → compare quality
+4. **Evaluation tab**: Run benchmark → compare reconstruction metrics
 
-## Files
+## Training Phases
 
-| File | Description |
-|------|-------------|
-| `index.html` | Loads core from `../../src/` + preset |
-| `preset.js` | Pre-configured GAN graph + trainer |
+Both models use phased training (the key GAN innovation):
+- **Generator phase**: Generator creates fake images, loss = how different from real images
+- **Discriminator phase**: Discriminator trains on real images, learns reconstruction
+
+Phases alternate each epoch. The generator never sees real data directly — it learns only through the training signal.
 
 ## Reference
 
-GAN architecture based on the original:
-> **Generative Adversarial Nets** — Goodfellow et al., 2014
+Original GAN:
+> **Generative Adversarial Nets** — Goodfellow, Pouget-Abadie, Mirza, Xu, Warde-Farley, Ozair, Courville, Bengio, 2014
 > [arXiv:1406.2661](https://arxiv.org/abs/1406.2661)
+
+DCGAN:
+> **Unsupervised Representation Learning with Deep Convolutional Generative Adversarial Networks** — Radford, Metz, Chintala, 2015
+> [arXiv:1511.06434](https://arxiv.org/abs/1511.06434)

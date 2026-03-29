@@ -289,6 +289,64 @@
       return editor.addNode("time_embed_layer", 0, 1, x, y, "time_embed_layer", { dim: dim }, html);
     }
 
+    // --- Embedding node ---
+    function addEmbeddingNode(editor, x, y, cfg) {
+      var inputDim = Math.max(1, Number((cfg && cfg.inputDim) || 10000));
+      var outputDim = Math.max(1, Number((cfg && cfg.outputDim) || 256));
+      var html =
+        "<div><div style='font-weight:700'>Embedding</div><div class='node-summary' style='font-size:11px;color:#94a3b8;'>vocab=" + inputDim + ", dim=" + outputDim + "</div></div>";
+      return editor.addNode("embedding_layer", 1, 1, x, y, "embedding_layer", { inputDim: inputDim, outputDim: outputDim }, html);
+    }
+
+    // --- Conv2D building blocks ---
+    function addConv2dNode(editor, x, y, cfg) {
+      var filters = Math.max(1, Number((cfg && cfg.filters) || 32));
+      var kernelSize = Math.max(1, Number((cfg && cfg.kernelSize) || 3));
+      var strides = Math.max(1, Number((cfg && cfg.strides) || 1));
+      var padding = String((cfg && cfg.padding) || "same");
+      var activation = String((cfg && cfg.activation) || "relu");
+      var html =
+        "<div><div style='font-weight:700'>Conv2D</div><div class='node-summary' style='font-size:11px;color:#94a3b8;'>f=" + filters + ", k=" + kernelSize + ", s=" + strides + ", " + padding + "</div></div>";
+      return editor.addNode("conv2d_layer", 1, 1, x, y, "conv2d_layer", { filters: filters, kernelSize: kernelSize, strides: strides, padding: padding, activation: activation }, html);
+    }
+    function addMaxPool2dNode(editor, x, y, cfg) {
+      var poolSize = Math.max(1, Number((cfg && cfg.poolSize) || 2));
+      var strides = Math.max(1, Number((cfg && cfg.strides) || poolSize));
+      var html =
+        "<div><div style='font-weight:700'>MaxPool2D</div><div class='node-summary' style='font-size:11px;color:#94a3b8;'>pool=" + poolSize + ", s=" + strides + "</div></div>";
+      return editor.addNode("maxpool2d_layer", 1, 1, x, y, "maxpool2d_layer", { poolSize: poolSize, strides: strides }, html);
+    }
+    function addFlattenNode(editor, x, y, cfg) {
+      var html = "<div><div style='font-weight:700'>Flatten</div><div class='node-summary' style='font-size:11px;color:#94a3b8;'>ND → 1D</div></div>";
+      return editor.addNode("flatten_layer", 1, 1, x, y, "flatten_layer", {}, html);
+    }
+    function addConv2dTransposeNode(editor, x, y, cfg) {
+      var filters = Math.max(1, Number((cfg && cfg.filters) || 32));
+      var kernelSize = Math.max(1, Number((cfg && cfg.kernelSize) || 3));
+      var strides = Math.max(1, Number((cfg && cfg.strides) || 2));
+      var padding = String((cfg && cfg.padding) || "same");
+      var activation = String((cfg && cfg.activation) || "relu");
+      var html =
+        "<div><div style='font-weight:700'>ConvT2D</div><div class='node-summary' style='font-size:11px;color:#94a3b8;'>f=" + filters + ", k=" + kernelSize + ", s=" + strides + "</div></div>";
+      return editor.addNode("conv2d_transpose_layer", 1, 1, x, y, "conv2d_transpose_layer", { filters: filters, kernelSize: kernelSize, strides: strides, padding: padding, activation: activation }, html);
+    }
+    function addUpSampling2dNode(editor, x, y, cfg) {
+      var size = Math.max(1, Number((cfg && cfg.size) || 2));
+      var html =
+        "<div><div style='font-weight:700'>UpSample2D</div><div class='node-summary' style='font-size:11px;color:#94a3b8;'>size=" + size + "</div></div>";
+      return editor.addNode("upsample2d_layer", 1, 1, x, y, "upsample2d_layer", { size: size }, html);
+    }
+    function addReshapeNode(editor, x, y, cfg) {
+      var targetShape = String((cfg && cfg.targetShape) || "28,28,1");
+      var html =
+        "<div><div style='font-weight:700'>Reshape</div><div class='node-summary' style='font-size:11px;color:#94a3b8;'>[" + targetShape + "]</div></div>";
+      return editor.addNode("reshape_layer", 1, 1, x, y, "reshape_layer", { targetShape: targetShape }, html);
+    }
+    function addGlobalAvgPool2dNode(editor, x, y, cfg) {
+      var html = "<div><div style='font-weight:700'>GlobalAvgPool2D</div><div class='node-summary' style='font-size:11px;color:#94a3b8;'>spatial → 1</div></div>";
+      return editor.addNode("global_avg_pool2d_layer", 1, 1, x, y, "global_avg_pool2d_layer", {}, html);
+    }
+
     function getNodeFactories() {
       return {
         input: addInputNode,
@@ -322,6 +380,14 @@
         sample_z: addSampleZNode,
         noise_injection: addNoiseInjectionNode,
         time_embed: addTimeEmbedNode,
+        embedding: addEmbeddingNode,
+        conv2d: addConv2dNode,
+        maxpool2d: addMaxPool2dNode,
+        flatten: addFlattenNode,
+        conv2d_transpose: addConv2dTransposeNode,
+        upsample2d: addUpSampling2dNode,
+        reshape: addReshapeNode,
+        global_avg_pool2d: addGlobalAvgPool2dNode,
       };
     }
 
@@ -503,6 +569,20 @@
       if (node.name === "conv1d_layer") {
         return "f=" + Number(d.filters || 64) + ", k=" + Number(d.kernelSize || 3) + ", s=" + Number(d.stride || 1) + ", act=" + String(d.activation || "relu");
       }
+      if (node.name === "embedding_layer") {
+        return "vocab=" + Number(d.inputDim || 10000) + ", dim=" + Number(d.outputDim || 256);
+      }
+      if (node.name === "conv2d_layer") {
+        return "f=" + Number(d.filters || 32) + ", k=" + Number(d.kernelSize || 3) + ", s=" + Number(d.strides || 1) + ", " + String(d.padding || "same");
+      }
+      if (node.name === "conv2d_transpose_layer") {
+        return "f=" + Number(d.filters || 32) + ", k=" + Number(d.kernelSize || 3) + ", s=" + Number(d.strides || 2) + " (deconv)";
+      }
+      if (node.name === "maxpool2d_layer") { return "pool=" + Number(d.poolSize || 2) + ", s=" + Number(d.strides || d.poolSize || 2); }
+      if (node.name === "flatten_layer") { return "flatten ND\u21921D"; }
+      if (node.name === "upsample2d_layer") { return "upsample \u00d7" + Number(d.size || 2); }
+      if (node.name === "reshape_layer") { return "reshape [" + String(d.targetShape || "?") + "]"; }
+      if (node.name === "global_avg_pool2d_layer") { return "global avg pool"; }
       if (node.name === "concat_block") {
         var nIn = Object.keys(node.inputs || {}).length || Math.max(1, Number(d.numInputs || 5));
         var featW = typeof api.estimateNodeFeatureWidth === "function"
@@ -513,17 +593,13 @@
       if (node.name === "output_layer") {
         var rawLoss = String(d.loss || "mse");
         var loss = rawLoss === "use_global" ? "mse" : rawLoss;
-        var target = String(d.targetType || d.target || "x");
-        if (target === "xv") {
-          return "target=x+v, loss=" + loss + ", w=(" + Number(d.wx || 1).toFixed(2) + "," + Number(d.wv || 1).toFixed(2) + ")";
-        }
-        if (target === "params") {
-          var s = String(d.paramsSelect || "").trim();
-          return "target=params[" + (s ? s : "all") + "], loss=" + loss;
-        }
-        if (target === "traj") return "target=traj(full x-seq), loss=" + loss;
-        if (target === "label" || target === "logits") return "target=" + target + ", loss=" + loss;
-        return "target=" + target + ", loss=" + loss;
+        var target = String(d.targetType || d.target || "");
+        var ht = String(d.headType || "");
+        var phase = String(d.phase || "");
+        var summary = "target=" + (target || "?") + ", loss=" + loss;
+        if (ht) summary += " [" + ht + "]";
+        if (phase) summary += " phase=" + phase;
+        return summary;
       }
       return "";
     }
@@ -540,9 +616,10 @@
         spec.push({ kind: "message", text: String(text || "") });
       }
       if (node.name === "output_layer") {
-        var target = String(d.targetType || d.target || "x");
+        var target = String(d.targetType || d.target || "");
         var rawLoss = String(d.loss || "mse");
         var loss = rawLoss === "use_global" ? "mse" : rawLoss;
+        var headType = String(d.headType || "");
         // target options from schema only — no hardcoded options
         var outputKeys = (typeof api.getOutputKeys === "function") ? api.getOutputKeys(sid) : [];
         var targetOptions = [];
@@ -551,7 +628,7 @@
           var l = k.label || v;
           targetOptions.push({ value: v, label: l });
         });
-        if (!targetOptions.length) targetOptions.push({ value: "xv", label: "reconstruction (xv)" });
+        if (!targetOptions.length && target) targetOptions.push({ value: target, label: target });
         addField({
           kind: "select",
           key: "targetType",
@@ -559,6 +636,9 @@
           value: target,
           options: targetOptions
         });
+        // headType: auto-derived from schema target metadata
+        var htLabel = headType || "auto (from schema)";
+        addField({ kind: "info", key: "headType", label: "Head type", value: htLabel });
         addField({
           kind: "select",
           key: "loss",
@@ -573,10 +653,10 @@
             { value: "sparseCategoricalCrossentropy", label: "Sparse Cat. CE" }
           ]
         });
-        // target-specific hints (no hardcoded fields — just informational)
-        if (target === "label" || target === "logits") {
+        // informational hint based on headType (from schema, not target name)
+        if (headType === "classification") {
           addMessage("Classification head. Use categoricalCrossentropy for one-hot, sparseCategoricalCrossentropy for integer labels.");
-        } else if (target === "xv" || target === "x" || target === "traj") {
+        } else if (headType === "reconstruction") {
           addMessage("Reconstruction head. Target = input features (y = x).");
         }
         addField({ kind: "number", key: "matchWeight", label: "Head weight", value: Math.max(0, Number(d.matchWeight || 1)).toFixed(2), min: 0, step: 0.1 });
@@ -749,6 +829,37 @@
         addMessage("Conv1D expects sequence input. For direct mode, keep graph flat.");
         return spec;
       }
+      if (node.name === "embedding_layer") {
+        addField({ kind: "number", key: "inputDim", label: "Vocab size", value: Math.max(1, Number(d.inputDim || 10000)), min: 1, step: 1 });
+        addField({ kind: "number", key: "outputDim", label: "Embed dim", value: Math.max(1, Number(d.outputDim || 256)), min: 1, step: 1 });
+        addMessage("Maps integer token IDs → dense vectors. Input must be integer sequences.");
+        return spec;
+      }
+      // --- Conv2D family config specs ---
+      if (node.name === "conv2d_layer" || node.name === "conv2d_transpose_layer") {
+        var isTranspose = node.name === "conv2d_transpose_layer";
+        addField({ kind: "number", key: "filters", label: "Filters", value: Math.max(1, Number(d.filters || 32)), min: 1, step: 1 });
+        addField({ kind: "number", key: "kernelSize", label: "Kernel size", value: Math.max(1, Number(d.kernelSize || 3)), min: 1, step: 1 });
+        addField({ kind: "number", key: "strides", label: "Strides", value: Math.max(1, Number(d.strides || (isTranspose ? 2 : 1))), min: 1, step: 1 });
+        addField({ kind: "select", key: "padding", label: "Padding", value: String(d.padding || "same"), options: [{ value: "same", label: "same" }, { value: "valid", label: "valid" }] });
+        addField({ kind: "select", key: "activation", label: "Activation", value: String(d.activation || "relu"), options: [{ value: "relu", label: "relu" }, { value: "tanh", label: "tanh" }, { value: "sigmoid", label: "sigmoid" }, { value: "linear", label: "linear" }] });
+        if (isTranspose) addMessage("Upsampling convolution (decoder). Strides=2 doubles spatial dims.");
+        return spec;
+      }
+      if (node.name === "maxpool2d_layer") {
+        addField({ kind: "number", key: "poolSize", label: "Pool size", value: Math.max(1, Number(d.poolSize || 2)), min: 1, step: 1 });
+        addField({ kind: "number", key: "strides", label: "Strides", value: Math.max(1, Number(d.strides || d.poolSize || 2)), min: 1, step: 1 });
+        return spec;
+      }
+      if (node.name === "flatten_layer" || node.name === "global_avg_pool2d_layer") { return spec; }
+      if (node.name === "upsample2d_layer") {
+        addField({ kind: "number", key: "size", label: "Upsample factor", value: Math.max(1, Number(d.size || 2)), min: 1, step: 1 });
+        return spec;
+      }
+      if (node.name === "reshape_layer") {
+        addField({ kind: "text", key: "targetShape", label: "Target shape (H,W,C)", value: String(d.targetShape || "28,28,1"), placeholder: "28,28,1" });
+        return spec;
+      }
       if (node.name === "dropout_layer") {
         addField({ kind: "number", key: "rate", label: "Rate", value: api.clamp(Number(d.rate || 0.1), 0, 0.9).toFixed(2), min: 0, max: 0.9, step: 0.05 });
         return spec;
@@ -795,11 +906,17 @@
       var data = Object.assign({}, node.data || {});
       var k = String(key || "");
       if (k === "target" || k === "targetType") {
-        var currentTarget = String(data.targetType || data.target || "x");
-        var targets = api.normalizeOutputTargetsList(rawValue, [currentTarget], sid);
-        var target = String((targets && targets[0]) || currentTarget || "x");
+        var currentTarget = String(data.targetType || data.target || "");
+        var targets = api.normalizeOutputTargetsList(rawValue, currentTarget ? [currentTarget] : [], sid);
+        var target = String((targets && targets[0]) || currentTarget || "");
         data.target = target;
         data.targetType = target;
+        // auto-set headType from schema metadata
+        var _outKeys = (typeof api.getOutputKeys === "function") ? api.getOutputKeys(sid) : [];
+        var _matched = _outKeys.filter(function (ok) { return (ok.key || ok) === target; });
+        if (_matched.length && _matched[0].headType) {
+          data.headType = _matched[0].headType;
+        }
       } else if (k === "paramsSelect") {
         data.paramsSelect = String(rawValue || "")
           .replace(/[^a-zA-Z0-9_,]/g, "")

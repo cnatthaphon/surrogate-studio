@@ -43,8 +43,15 @@ def main():
         sys.exit(1)
 
     config_path = sys.argv[1]
-    with open(config_path) as f:
-        config = json.load(f)
+    status("Loading config...")
+    # use orjson for fast JSON parsing if available (5-10x faster for large payloads)
+    try:
+        import orjson
+        with open(config_path, "rb") as f:
+            config = orjson.loads(f.read())
+    except ImportError:
+        with open(config_path) as f:
+            config = json.load(f)
 
     try:
         import torch
@@ -58,6 +65,7 @@ def main():
     status(f"PyTorch {torch.__version__} on {device}")
 
     # --- Extract data ---
+    status("Loading dataset into memory...")
     ds = config.get("dataset", {})
     x_train = np.array(ds.get("xTrain", []), dtype=np.float32)
     y_train = np.array(ds.get("yTrain", []), dtype=np.float32)
@@ -69,17 +77,17 @@ def main():
         sys.exit(1)
 
     feature_size = x_train.shape[1] if x_train.ndim > 1 else 1
-    # determine target_size from graph output nodes (not y_train shape which changes after label conversion)
+    # determine classification from headConfigs headType (set by schema, not target names)
     graph = config.get("graph", {})
-    _gd = graph.get("drawflow", {}).get("Home", {}).get("data", graph)
-    _out_targets = [_gd[k].get("data", {}).get("target", "") for k in _gd if _gd[k].get("name", "").replace("_layer", "") == "output"]
-    _is_all_cls = all(t in ("label", "logits") for t in _out_targets if t)
+    head_configs = config.get("headConfigs", [])
+    _head_types = [str(hc.get("headType", "regression")) for hc in head_configs] if head_configs else ["regression"]
+    _is_all_cls = all(ht == "classification" for ht in _head_types)
     target_size = 1 if _is_all_cls else feature_size
     status(f"Data: {x_train.shape[0]} train, {x_val.shape[0]} val, features={feature_size}, targets={target_size}")
 
     # --- Build model from graph ---
-    graph = config.get("graph", {})
-    model = build_model_from_graph(graph, feature_size, target_size, ds.get("numClasses", 0))
+    num_classes = ds.get("numClasses", 0)
+    model = build_model_from_graph(graph, feature_size, target_size, num_classes)
     model = model.to(device)
     param_count = sum(p.numel() for p in model.parameters())
     status(f"Model: {param_count} params")
@@ -103,9 +111,8 @@ def main():
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=3, factor=0.5, min_lr=1e-6)
 
     # --- Determine loss + prepare labels ---
-    head_configs = config.get("headConfigs", [])
-    target_mode = ds.get("targetMode", "xv")
-    is_classification = target_mode in ("label", "logits") or (ds.get("numClasses", 0) > 0 and target_mode not in ("xv", "traj", "x", "v"))
+    # head_configs already extracted above from config
+    is_classification = _is_all_cls
     if is_classification:
         loss_fn = nn.CrossEntropyLoss()
         # CrossEntropyLoss expects integer labels, not one-hot float
@@ -130,14 +137,14 @@ def main():
     phases = sorted(set(str(h.get("phase", "")).strip() for h in head_configs)) if head_configs else [""]
     is_phased = any(p != "" for p in phases)
 
-    # per-head loss functions (for multi-head/phased models)
+    # per-head loss functions — use headType from config, not target name matching
     head_losses = []
     for hc in (head_configs or [{}]):
-        ht = str(hc.get("target", target_mode))
+        htype = str(hc.get("headType", "regression")).lower()
         hl = str(hc.get("loss", "mse")).lower()
         hw = float(hc.get("matchWeight", 1.0))
         hp = str(hc.get("phase", "")).strip()
-        if ht in ("label", "logits"):
+        if htype == "classification":
             head_losses.append({"fn": nn.CrossEntropyLoss(), "weight": hw, "phase": hp, "cls": True})
         elif hl == "bce":
             head_losses.append({"fn": nn.BCELoss(), "weight": hw, "phase": hp, "cls": False})
@@ -236,7 +243,7 @@ def main():
     # PyTorch LSTM: weight_ih [4*hidden, input], weight_hh [4*hidden, hidden], bias_ih, bias_hh
     # TF.js LSTM: kernel [input, 4*hidden], recurrent_kernel [hidden, 4*hidden], bias [4*hidden]
     weight_specs = []
-    weight_values = []
+    weight_arrays = []  # collect numpy arrays, concatenate at end (much faster than Python list)
     offset = 0
 
     state = model.state_dict()
@@ -251,33 +258,29 @@ def main():
 
         # Check if this is an RNN weight_ih (followed by weight_hh, bias_ih, bias_hh)
         if "weight_ih_l0" in name and i + 3 < len(keys) and "weight_hh_l0" in keys[i+1]:
-            w_ih = state[keys[i]].detach().cpu().numpy()     # [4*H, input]
-            w_hh = state[keys[i+1]].detach().cpu().numpy()   # [4*H, hidden]
-            b_ih = state[keys[i+2]].detach().cpu().numpy()    # [4*H]
-            b_hh = state[keys[i+3]].detach().cpu().numpy()    # [4*H]
+            w_ih = state[keys[i]].detach().cpu().numpy()
+            w_hh = state[keys[i+1]].detach().cpu().numpy()
+            b_ih = state[keys[i+2]].detach().cpu().numpy()
+            b_hh = state[keys[i+3]].detach().cpu().numpy()
 
-            # TF.js format: kernel = w_ih.T [input, 4*H], recurrent = w_hh.T [hidden, 4*H], bias = b_ih + b_hh
-            # CRITICAL: PyTorch gate order = [i, f, g, o], TF.js = [i, g, f, o]
-            # Must swap forget (f) and cell candidate (g) gate blocks
             H = w_ih.shape[0] // 4
             def swap_gates(w):
-                """Swap gate blocks 1 (forget) and 2 (cell) for PyTorch→TF.js"""
-                chunks = [w[i*H:(i+1)*H] for i in range(4)]  # i, f, g, o
-                return np.concatenate([chunks[0], chunks[2], chunks[1], chunks[3]], axis=0)  # i, g, f, o
+                chunks = [w[i*H:(i+1)*H] for i in range(4)]
+                return np.concatenate([chunks[0], chunks[2], chunks[1], chunks[3]], axis=0)
 
-            kernel = swap_gates(w_ih).T  # reorder gates then transpose
-            recurrent = swap_gates(w_hh).T  # reorder gates then transpose
-            bias = swap_gates(b_ih + b_hh)  # combine biases then reorder
+            kernel = swap_gates(w_ih).T
+            recurrent = swap_gates(w_hh).T
+            bias = swap_gates(b_ih + b_hh)
 
             for arr, suffix, shape in [
                 (kernel, "kernel", list(kernel.shape)),
                 (recurrent, "recurrent_kernel", list(recurrent.shape)),
                 (bias, "bias", list(bias.shape)),
             ]:
-                data = arr.flatten().tolist()
+                flat = arr.astype(np.float32).flatten()
                 weight_specs.append({"name": f"tfjs_{suffix}", "shape": shape, "dtype": "float32", "offset": offset})
-                weight_values.extend(data)
-                offset += len(data) * 4
+                weight_arrays.append(flat)
+                offset += flat.size * 4
             i += 4
             continue
 
@@ -285,12 +288,18 @@ def main():
         if param.ndim == 2:
             param = param.T  # [out, in] → [in, out]
 
-        data = param.flatten().tolist()
+        flat = param.astype(np.float32).flatten()
         shape = list(param.shape)
         weight_specs.append({"name": f"tfjs_{name}", "shape": shape, "dtype": "float32", "offset": offset})
-        weight_values.extend(data)
-        offset += len(data) * 4
+        weight_arrays.append(flat)
+        offset += flat.size * 4
         i += 1
+
+    # concatenate all weight arrays into one flat list (numpy concat is fast)
+    if weight_arrays:
+        weight_values = np.concatenate(weight_arrays).tolist()
+    else:
+        weight_values = []
 
     status("Computing test metrics...")
     # --- Compute final metrics (val + test) ---
@@ -308,12 +317,19 @@ def main():
             mse = float(np.mean((pred_val - y_val) ** 2))
 
         # Test metrics (if test data provided)
-        x_test = np.array(ds.get("xTest", []), dtype=np.float32)
-        y_test = np.array(ds.get("yTest", []), dtype=np.float32)
+        x_test_raw = ds.get("xTest", [])
+        y_test_raw = ds.get("yTest", [])
         test_metrics = {}
-        if x_test.size > 0 and y_test.size > 0:
-            x_test_t = torch.tensor(x_test).to(device)
-            pred_test = model(x_test_t).cpu().numpy()
+        if x_test_raw and y_test_raw:
+            x_test = np.array(x_test_raw, dtype=np.float32)
+            y_test = np.array(y_test_raw, dtype=np.float32)
+            # batch prediction to avoid OOM on large test sets
+            batch_sz = 512
+            pred_chunks = []
+            for bi in range(0, len(x_test), batch_sz):
+                chunk = torch.tensor(x_test[bi:bi+batch_sz]).to(device)
+                pred_chunks.append(model(chunk).cpu().numpy())
+            pred_test = np.concatenate(pred_chunks, axis=0)
             t_flat = y_test.flatten()
             p_flat = pred_test.flatten()
             test_metrics["testMae"] = float(np.mean(np.abs(p_flat - t_flat)))
@@ -324,15 +340,36 @@ def main():
             ss_res = float(np.sum((t_flat - p_flat) ** 2))
             test_metrics["testR2"] = 1 - ss_res / ss_tot if ss_tot > 0 else 0
             test_metrics["testN"] = len(x_test)
-            # raw predictions for client-side visualization (charts, scatter, residuals)
-            test_metrics["testPredictions"] = pred_test.tolist()
-            test_metrics["testTruth"] = y_test.tolist()
+            # skip raw predictions for large outputs (client re-predicts from weights)
+            # only include for small outputs (classification, small regression)
+            if pred_test.shape[1] <= 20:
+                test_metrics["testPredictions"] = pred_test.tolist()
+                test_metrics["testTruth"] = y_test.tolist()
 
-            # Classification metrics
+            # Classification metrics: confusion matrix, per-class P/R/F1
             if is_classification and num_classes > 0:
                 pred_labels = pred_test.argmax(axis=1)
                 true_labels = y_test.flatten().astype(int) if y_test.ndim == 1 or y_test.shape[1] == 1 else y_test.argmax(axis=1)
                 test_metrics["testAccuracy"] = float((pred_labels == true_labels).sum()) / len(x_test)
+                # Confusion matrix [num_classes x num_classes]
+                cm = np.zeros((num_classes, num_classes), dtype=int)
+                for tl, pl in zip(true_labels, pred_labels):
+                    if 0 <= tl < num_classes and 0 <= pl < num_classes:
+                        cm[tl][pl] += 1
+                test_metrics["confusionMatrix"] = cm.tolist()
+                # Per-class precision, recall, F1
+                per_class = []
+                for c in range(num_classes):
+                    tp = int(cm[c][c])
+                    fp = int(cm[:, c].sum() - tp)
+                    fn = int(cm[c, :].sum() - tp)
+                    prec = tp / (tp + fp) if (tp + fp) > 0 else 0.0
+                    rec = tp / (tp + fn) if (tp + fn) > 0 else 0.0
+                    f1 = 2 * prec * rec / (prec + rec) if (prec + rec) > 0 else 0.0
+                    per_class.append({"precision": round(prec, 4), "recall": round(rec, 4), "f1": round(f1, 4)})
+                test_metrics["perClassMetrics"] = per_class
+                macro_f1 = float(np.mean([pc["f1"] for pc in per_class]))
+                test_metrics["testMacroF1"] = round(macro_f1, 4)
 
     result = {
         "mae": mae,
@@ -482,10 +519,84 @@ def build_model_from_graph(graph, feature_size, target_size, num_classes=0):
                 elif t == "image_source":
                     # image input — like input node
                     dim_map[nid] = int(c.get("featureSize", feature_size))
+                elif t == "embedding":
+                    vocab_size = int(c.get("inputDim", 10000))
+                    embed_dim = int(c.get("outputDim", 256))
+                    setattr(self, f"embed_{nid}", nn.Embedding(vocab_size, embed_dim))
+                    dim_map[nid] = embed_dim
+                elif t == "reshape":
+                    shape_str = str(c.get("targetShape", "28,28,1"))
+                    shape = [max(1, int(s.strip())) for s in shape_str.split(",")]
+                    self._reshape_shapes = getattr(self, '_reshape_shapes', {})
+                    self._reshape_shapes[nid] = shape
+                    dim_map[nid] = shape  # track as tuple for conv layers
+                elif t == "conv2d":
+                    filters = int(c.get("filters", 32))
+                    ks = int(c.get("kernelSize", 3))
+                    st = int(c.get("strides", 1))
+                    pad_mode = str(c.get("padding", "same"))
+                    pad = ks // 2 if pad_mode == "same" else 0
+                    in_ch = in_dim[-1] if isinstance(in_dim, list) else 1
+                    setattr(self, f"conv2d_{nid}", nn.Conv2d(in_ch, filters, ks, st, pad))
+                    act = str(c.get("activation", "relu"))
+                    if act == "relu": setattr(self, f"act_{nid}", nn.ReLU())
+                    elif act == "tanh": setattr(self, f"act_{nid}", nn.Tanh())
+                    elif act == "sigmoid": setattr(self, f"act_{nid}", nn.Sigmoid())
+                    if isinstance(in_dim, list):
+                        h, w = in_dim[0], in_dim[1]
+                        if pad_mode == "same": dim_map[nid] = [h // st, w // st, filters]
+                        else: dim_map[nid] = [(h - ks) // st + 1, (w - ks) // st + 1, filters]
+                    else:
+                        dim_map[nid] = [1, 1, filters]
+                elif t == "conv2d_transpose":
+                    filters = int(c.get("filters", 32))
+                    ks = int(c.get("kernelSize", 3))
+                    st = int(c.get("strides", 2))
+                    pad_mode = str(c.get("padding", "same"))
+                    pad = ks // 2 if pad_mode == "same" else 0
+                    out_pad = st - 1 if pad_mode == "same" else 0
+                    in_ch = in_dim[-1] if isinstance(in_dim, list) else 1
+                    setattr(self, f"convt2d_{nid}", nn.ConvTranspose2d(in_ch, filters, ks, st, pad, out_pad))
+                    act = str(c.get("activation", "relu"))
+                    if act == "relu": setattr(self, f"act_{nid}", nn.ReLU())
+                    elif act == "tanh": setattr(self, f"act_{nid}", nn.Tanh())
+                    elif act == "sigmoid": setattr(self, f"act_{nid}", nn.Sigmoid())
+                    if isinstance(in_dim, list):
+                        dim_map[nid] = [in_dim[0] * st, in_dim[1] * st, filters]
+                    else:
+                        dim_map[nid] = [1, 1, filters]
+                elif t == "maxpool2d":
+                    ps = int(c.get("poolSize", 2))
+                    st = int(c.get("strides", ps))
+                    setattr(self, f"pool_{nid}", nn.MaxPool2d(ps, st))
+                    if isinstance(in_dim, list):
+                        dim_map[nid] = [in_dim[0] // st, in_dim[1] // st, in_dim[2]]
+                    else:
+                        dim_map[nid] = in_dim
+                elif t == "upsample2d":
+                    sz = int(c.get("size", 2))
+                    setattr(self, f"up_{nid}", nn.Upsample(scale_factor=sz, mode='nearest'))
+                    if isinstance(in_dim, list):
+                        dim_map[nid] = [in_dim[0] * sz, in_dim[1] * sz, in_dim[2]]
+                    else:
+                        dim_map[nid] = in_dim
+                elif t == "flatten":
+                    if isinstance(in_dim, list):
+                        flat_dim = 1
+                        for dd in in_dim: flat_dim *= dd
+                        dim_map[nid] = flat_dim
+                    else:
+                        dim_map[nid] = in_dim
+                elif t == "global_avg_pool2d":
+                    if isinstance(in_dim, list):
+                        dim_map[nid] = in_dim[-1]  # channels
+                    else:
+                        dim_map[nid] = in_dim
                 elif t == "output":
-                    target = str(c.get("target", ""))
-                    odim = num_classes if (target in ("label", "logits") and num_classes > 0) else target_size
-                    setattr(self, f"out_{nid}", nn.Linear(in_dim, odim))
+                    htype = str(c.get("headType", "regression")).lower()
+                    odim = num_classes if (htype == "classification" and num_classes > 0) else target_size
+                    out_in = in_dim if isinstance(in_dim, int) else (in_dim[-1] if isinstance(in_dim, list) else in_dim)
+                    setattr(self, f"out_{nid}", nn.Linear(out_in, odim))
                     dim_map[nid] = odim
                     self.output_ids.append(nid)
                 else:
@@ -500,6 +611,14 @@ def build_model_from_graph(graph, feature_size, target_size, num_classes=0):
 
                 if t == "input":
                     tensors[nid] = x
+                    continue
+                if t == "image_source":
+                    tensors[nid] = x
+                    continue
+                if t == "sample_z":
+                    # generate fresh random noise each forward pass (like TF.js SampleZ)
+                    zdim = int(self.node_configs[nid].get("dim", 128))
+                    tensors[nid] = torch.randn(x.shape[0], zdim, device=x.device)
                     continue
 
                 # get input tensor (first parent)
@@ -539,13 +658,44 @@ def build_model_from_graph(graph, feature_size, target_size, num_classes=0):
                         tensors[nid] = inp
                 elif t == "detach":
                     tensors[nid] = inp.detach()
+                elif t == "embedding":
+                    tensors[nid] = getattr(self, f"embed_{nid}")(inp.long())
+                elif t == "reshape":
+                    shapes = getattr(self, '_reshape_shapes', {})
+                    shape = shapes.get(nid, [28, 28, 1])
+                    # TF.js: [batch, H, W, C] → PyTorch: [batch, C, H, W]
+                    tensors[nid] = inp.view(inp.shape[0], shape[2], shape[0], shape[1])
+                    continue
+                elif t == "conv2d":
+                    out = getattr(self, f"conv2d_{nid}")(inp)
+                    act = getattr(self, f"act_{nid}", None)
+                    tensors[nid] = act(out) if act else out
+                elif t == "conv2d_transpose":
+                    out = getattr(self, f"convt2d_{nid}")(inp)
+                    act = getattr(self, f"act_{nid}", None)
+                    tensors[nid] = act(out) if act else out
+                elif t == "maxpool2d":
+                    tensors[nid] = getattr(self, f"pool_{nid}")(inp)
+                elif t == "upsample2d":
+                    tensors[nid] = getattr(self, f"up_{nid}")(inp)
+                elif t == "flatten":
+                    tensors[nid] = inp.view(inp.shape[0], -1)
+                elif t == "global_avg_pool2d":
+                    # [batch, C, H, W] → [batch, C]
+                    tensors[nid] = inp.mean(dim=[2, 3]) if inp.dim() == 4 else inp
                 elif t == "output":
-                    tensors[nid] = getattr(self, f"out_{nid}")(inp)
+                    # flatten conv output if needed before linear
+                    out_inp = inp.view(inp.shape[0], -1) if inp.dim() > 2 else inp
+                    tensors[nid] = getattr(self, f"out_{nid}")(out_inp)
                 else:
                     tensors[nid] = inp
 
-            # return first output
+            # return outputs — for multi-output (phased training), return all concatenated or first
             if self.output_ids:
+                if len(self.output_ids) == 1:
+                    return tensors[self.output_ids[0]]
+                # multi-output: return first available (phased training alternates which path runs)
+                # both outputs should produce tensors, return first
                 return tensors[self.output_ids[0]]
             return x
 

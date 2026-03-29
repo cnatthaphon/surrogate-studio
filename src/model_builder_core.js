@@ -84,18 +84,15 @@
   }
 
   function normalizeHistorySeriesKey(raw) {
-    var key = String(raw || "").trim().toLowerCase();
-    return key || "x";
+    return String(raw || "").trim().toLowerCase();
   }
 
   function nodeUsesHistoryField(node, fieldKey) {
     if (!node) return false;
-    var name = String(node.name || "");
     var d = node.data || {};
-    if (name === "hist_x_block" || name === "x_block" || name === "window_hist_x_block") return fieldKey === "x";
-    if (name === "hist_v_block" || name === "v_block" || name === "window_hist_v_block") return fieldKey === "v";
-    if (name === "hist_block" || name === "window_hist_block") return normalizeHistorySeriesKey(d.featureKey || "x") === String(fieldKey || "");
-    return false;
+    // read featureKey from node config — no hardcoded block name matching
+    var nodeKey = normalizeHistorySeriesKey(d.featureKey || d.sourceKey || "");
+    return nodeKey === String(fieldKey || "");
   }
 
   // --- output target helpers ---
@@ -104,6 +101,9 @@
    * Get the single target for an output node.
    * One output node = one target. If you want multiple targets, use multiple output nodes.
    */
+  // helper: extract key string from output key (string or {key, headType} object)
+  function _okKey(ok) { return typeof ok === "object" && ok !== null ? String(ok.key || "") : String(ok || ""); }
+
   function normalizeOutputTargetsList(raw, fallbackTargets, allowedKeys) {
     // extract single target from raw value
     var target = "";
@@ -115,22 +115,34 @@
     if (target.indexOf(",") >= 0) target = target.split(",")[0].trim();
 
     if (!target) {
-      // fallback: from provided fallbacks
-      if (Array.isArray(fallbackTargets) && fallbackTargets.length) target = String(fallbackTargets[0] || "x").trim().toLowerCase();
-      else if (typeof fallbackTargets === "string") target = fallbackTargets.trim().toLowerCase();
-    }
-    if (!target) {
+      // fallback from schema allowedKeys first, then provided fallbackTargets
       var allowed = Array.isArray(allowedKeys) ? allowedKeys : [];
-      target = allowed.length ? String(allowed[0] || "x") : "x";
+      if (allowed.length) {
+        target = _okKey(allowed[0]);
+      } else if (Array.isArray(fallbackTargets) && fallbackTargets.length) {
+        target = _okKey(fallbackTargets[0]);
+      } else if (typeof fallbackTargets === "string" && fallbackTargets) {
+        target = fallbackTargets.trim().toLowerCase();
+      }
     }
-    return [target];
+    return target ? [target] : [];
+  }
+
+  // helper: look up headType for a target key from allowedOutputKeys
+  function _lookupHeadType(target, allowedOutputKeys) {
+    if (!Array.isArray(allowedOutputKeys)) return "regression";
+    for (var i = 0; i < allowedOutputKeys.length; i++) {
+      var ok = allowedOutputKeys[i];
+      if (typeof ok === "object" && ok !== null && ok.key === target) return String(ok.headType || "regression");
+    }
+    return "regression";
   }
 
   function outputTargetsFromNodeData(data, allowedKeys, fallbackTarget) {
     var d = data || {};
     // read single target from node — no multi-target, no CSV
-    var raw = d.target || d.targetType || fallbackTarget || "x";
-    return normalizeOutputTargetsList(raw, [String(fallbackTarget || "x")], allowedKeys);
+    var raw = d.target || d.targetType || fallbackTarget || "";
+    return normalizeOutputTargetsList(raw, fallbackTarget ? [String(fallbackTarget)] : [], allowedKeys);
   }
 
   // --- graph inference (pure, no DOM, no state) ---
@@ -138,12 +150,11 @@
   function inferGraphMode(graphData, fallbackMode) {
     var data = extractGraphData(graphData);
     var names = getUpstreamFeatureNodeNamesFromData(data);
-    var hasHistory = Boolean(
-      names.hist_block || names.hist_x_block || names.hist_v_block ||
-      names.x_block || names.v_block ||
-      names.window_hist_block || names.window_hist_x_block || names.window_hist_v_block ||
-      names.sliding_window_block
-    );
+    // detect autoregressive by presence of any history/window feature nodes upstream of input
+    var nameKeys = Object.keys(names);
+    var hasHistory = nameKeys.some(function (n) {
+      return n.indexOf("hist") >= 0 || n.indexOf("window") >= 0 || n.indexOf("sliding") >= 0;
+    });
     return hasHistory ? "autoregressive" : String(fallbackMode || "direct");
   }
 
@@ -151,9 +162,14 @@
     var data = extractGraphData(graphData);
     var ids = Object.keys(data || {});
     var names = ids.map(function (id) { return String((data[id] && data[id].name) || ""); });
-    if (names.indexOf("noise_schedule_block") >= 0) return "diffusion";
-    if (names.indexOf("reparam_layer") >= 0) return "vae";
-    if (names.indexOf("latent_layer") >= 0 || names.indexOf("latent_mu_layer") >= 0 || names.indexOf("latent_logvar_layer") >= 0) return "vae";
+    // detect by node name patterns, not exact names
+    var hasNoise = names.some(function (n) { return n.indexOf("noise_injection") >= 0 || n.indexOf("noise_schedule") >= 0; });
+    var hasReparam = names.some(function (n) { return n.indexOf("reparam") >= 0; });
+    var hasLatent = names.some(function (n) { return n.indexOf("latent_mu") >= 0 || n.indexOf("latent_logvar") >= 0; });
+    var hasSampleZ = names.some(function (n) { return n.indexOf("sample_z") >= 0; });
+    if (hasNoise) return "diffusion";
+    if (hasReparam || hasLatent) return "vae";
+    if (hasSampleZ) return "gan";
     return "supervised";
   }
 
@@ -161,9 +177,12 @@
     var wFallback = Math.max(5, Number(fallbackWindow) || 20);
     var data = extractGraphData(graphData);
     var nodes = getUpstreamFeatureNodesFromData(data);
-    var n = nodes.window_hist_block || nodes.window_hist_x_block || nodes.window_hist_v_block || nodes.sliding_window_block;
-    if (n) return Math.max(5, Number((n.data && n.data.windowSize) || wFallback));
-    if (nodes.hist_block || nodes.hist_x_block || nodes.hist_v_block || nodes.x_block || nodes.v_block) return 1;
+    // find any window/sliding node by name pattern (not hardcoded block names)
+    var allNodes = nodes.__all || [];
+    var winNode = allNodes.find(function (n) { var nm = n.name || ""; return nm.indexOf("window") >= 0 || nm.indexOf("sliding") >= 0; });
+    if (winNode) return Math.max(5, Number((winNode.data && winNode.data.windowSize) || wFallback));
+    var histNode = allNodes.find(function (n) { var nm = n.name || ""; return nm.indexOf("hist") >= 0; });
+    if (histNode) return 1;
     return wFallback;
   }
 
@@ -174,7 +193,9 @@
     };
     var data = extractGraphData(graphData);
     var nodes = getUpstreamFeatureNodesFromData(data);
-    var n = nodes.window_hist_block || nodes.window_hist_x_block || nodes.window_hist_v_block || nodes.sliding_window_block;
+    // find window/sliding node by name pattern
+    var allNodes = nodes.__all || [];
+    var n = allNodes.find(function (nd) { var nm = nd.name || ""; return nm.indexOf("window") >= 0 || nm.indexOf("sliding") >= 0; });
     if (n) {
       var d = n.data || {};
       var windowSize = Math.max(5, Number(d.windowSize || fallback.windowSize));
@@ -195,7 +216,9 @@
       if (!uniq.length) return { windowSize: windowSize, stride: stride, lagMode: "contiguous", lags: null, padMode: padMode };
       return { windowSize: uniq.length, stride: stride, lagMode: "exact", lags: uniq, padMode: padMode };
     }
-    if (nodes.hist_block || nodes.hist_x_block || nodes.hist_v_block || nodes.x_block || nodes.v_block) {
+    // hist-only node (no window): single-step
+    var histNode = allNodes.find(function (nd) { var nm = nd.name || ""; return nm.indexOf("hist") >= 0; });
+    if (histNode) {
       return { windowSize: 1, stride: 1, lagMode: "contiguous", lags: null, padMode: "none" };
     }
     return fallback;
@@ -203,11 +226,13 @@
 
   function inferOutputHeads(graphData, allowedOutputKeys, fallbackTarget) {
     var data = extractGraphData(graphData);
-    var fallback = String(fallbackTarget || "x");
+    // fallback from caller (which gets it from schema), never hardcoded
+    var fallback = typeof fallbackTarget === "object" ? _okKey(fallbackTarget) : String(fallbackTarget || "");
+    if (!fallback && Array.isArray(allowedOutputKeys) && allowedOutputKeys.length) fallback = _okKey(allowedOutputKeys[0]);
     var ids = Object.keys(data || {});
     var inputNodeNames = { "input_layer": true, "image_source_block": true, "image_source_layer": true, "sample_z_layer": true, "time_embed_layer": true };
     var inputIds = ids.filter(function (id) { return data[id] && inputNodeNames[data[id].name]; });
-    if (!inputIds.length) return [{ id: "fallback", target: fallback, loss: "mse", wx: 1, wv: 1 }];
+    if (!inputIds.length) return [{ id: "fallback", target: fallback, loss: "mse", headType: _lookupHeadType(fallback, allowedOutputKeys) }];
     var reachable = {};
     var q = inputIds.map(String);
     q.forEach(function (id) { reachable[id] = true; });
@@ -227,7 +252,7 @@
       .map(function (id) { return { id: String(id), node: data[id] }; })
       .filter(function (x) { return reachable[x.id] && x.node && x.node.name === "output_layer"; })
       .sort(function (a, b) { return Number(a.id) - Number(b.id); });
-    if (!outputNodes.length) return [{ id: "fallback", target: fallback, loss: "mse", wx: 1, wv: 1 }];
+    if (!outputNodes.length) return fallback ? [{ id: "fallback", target: fallback, loss: "mse", headType: _lookupHeadType(fallback, allowedOutputKeys) }] : [];
     var heads = [];
     outputNodes.forEach(function (x) {
       var d = x.node.data || {};
@@ -235,26 +260,26 @@
       var normalizedLoss = String(d.loss || "mse");
       if (normalizedLoss === "use_global") normalizedLoss = "mse";
       targets.forEach(function (target, ti) {
+        // headType: read from node config first, then look up in schema outputKeys
+        var ht = String(d.headType || "").trim().toLowerCase();
+        if (!ht || ht === "auto") ht = _lookupHeadType(target, allowedOutputKeys);
         heads.push({
           id: x.id + ":" + String(target) + ":" + String(ti + 1),
           nodeId: x.id, target: target, targetType: target,
-          loss: normalizedLoss,
+          loss: normalizedLoss, headType: ht,
           matchWeight: Math.max(0, Number(d.matchWeight || 1)),
           phase: String(d.phase || ""),
         });
       });
     });
-    return heads.length ? heads : [{ id: "fallback", target: fallback, loss: "mse", wx: 1, wv: 1 }];
+    return heads.length ? heads : (fallback ? [{ id: "fallback", target: fallback, loss: "mse", headType: _lookupHeadType(fallback, allowedOutputKeys) }] : []);
   }
 
   function inferDatasetTargetMode(heads, fallback) {
+    // returns the first head's target — no hardcoded target name assumptions
     var list = Array.isArray(heads) ? heads : [];
-    var hasX = list.some(function (h) { var t = String(h.target || ""); return t === "x" || t === "xv" || t === "traj"; });
-    var hasV = list.some(function (h) { return String(h.target) === "v" || String(h.target) === "xv"; });
-    if (hasX && hasV) return "xv";
-    if (hasV) return "v";
-    if (hasX) return "x";
-    return String(fallback || "x");
+    if (list.length && list[0].target) return list[0].target;
+    return String(fallback || "");
   }
 
   function inferFeatureSpec(graphData, mode, featurePolicy) {
@@ -315,15 +340,22 @@
     if (!ids.length) throw new Error("Graph is empty.");
 
     var inputNodeNames = { "input_layer": true, "image_source_block": true, "image_source_layer": true, "sample_z_layer": true };
+    // only nodes with NO incoming connections are true external inputs
+    // (e.g., Input node connected FROM ImageSource is NOT an external input)
     var inputIds = ids.filter(function (id) {
-      return moduleData[id] && inputNodeNames[moduleData[id].name];
+      if (!moduleData[id] || !inputNodeNames[moduleData[id].name]) return false;
+      var ins = moduleData[id].inputs || {};
+      var hasIncoming = Object.keys(ins).some(function (k) {
+        return ins[k] && ins[k].connections && ins[k].connections.length > 0;
+      });
+      return !hasIncoming;
     });
     if (!inputIds.length) throw new Error("Graph must contain at least one Input/ImageSource/SampleZ node.");
     var inputId = String(inputIds[0]); // primary input
     var allInputIds = inputIds.map(String);
 
-    var allowedOutputKeys = Array.isArray(datasetMeta.allowedOutputKeys) ? datasetMeta.allowedOutputKeys : ["x"];
-    var fallbackTarget = datasetMeta.defaultTarget || "x";
+    var allowedOutputKeys = Array.isArray(datasetMeta.allowedOutputKeys) ? datasetMeta.allowedOutputKeys : [];
+    var fallbackTarget = datasetMeta.defaultTarget || (allowedOutputKeys.length ? _okKey(allowedOutputKeys[0]) : "");
 
     var parsePortIndex = function (name) {
       var m = String(name || "").match(/_(\d+)$/);
@@ -454,30 +486,26 @@
     // 1. Explicit units/unitsHint in the output node config
     // 2. Schema-defined output keys (with featureSize)
     // 3. Infer from target type + dataset metadata
-    var targetUnitsFromMode = function (target, paramsSelectRaw, nodeData) {
+    var targetUnitsFromMode = function (target, paramsSelectRaw, nodeData, headType) {
       // 1. explicit units on the output node
       var nd = nodeData || {};
       if (nd.units && Number(nd.units) > 0) return Number(nd.units);
       if (nd.unitsHint && Number(nd.unitsHint) > 0) return Number(nd.unitsHint);
 
-      // 2. from dataset metadata based on target type
-      if (target === "logits" || target === "label") {
+      // 2. from headType (set by schema, not hardcoded target names)
+      var ht = String(headType || "regression");
+      if (ht === "classification") {
         return Math.max(1, Number(datasetMeta.numClasses || 10));
       }
-      if (target === "params") {
-        var pnames = Array.isArray(datasetMeta.paramNames) ? datasetMeta.paramNames.map(String) : [];
-        var picks = String(paramsSelectRaw || "").split(",").map(function (s) { return String(s || "").trim(); }).filter(Boolean);
-        if (picks.length && pnames.length) {
-          var count = picks.filter(function (k) { return pnames.indexOf(k) >= 0; }).length;
-          return Math.max(1, count);
-        }
-        return Math.max(1, Number(datasetMeta.paramSize || 1));
-      }
-      // anything not classification: reconstruction → output = input feature size
+      // regression / reconstruction: output = input feature size
       return Math.max(1, Number(datasetMeta.featureSize || 1));
     };
 
     var applyNodeOp = function (node, inTensor, laterHasRecurrent) {
+      // input/image_source that receives from another node: passthrough
+      if (node.name === "input_layer" || node.name === "image_source_layer" || node.name === "image_source_block") {
+        return inTensor;
+      }
       if (node.name === "dense_layer") {
         var units = Math.max(1, Number(node.data.units || 32));
         var activation = String(node.data.activation || "relu");
@@ -490,6 +518,48 @@
         var strides = Math.max(1, Number((node.data && node.data.stride) || 1));
         var activ = String((node.data && node.data.activation) || "relu");
         return tf.layers.conv1d({ filters: filters, kernelSize: kernelSize, strides: strides, padding: "same", activation: activ }).apply(inTensor);
+      }
+      if (node.name === "embedding_layer") {
+        var vocabSize = Math.max(1, Number((node.data && node.data.inputDim) || 10000));
+        var embedDim = Math.max(1, Number((node.data && node.data.outputDim) || 256));
+        return tf.layers.embedding({ inputDim: vocabSize, outputDim: embedDim }).apply(inTensor);
+      }
+      // --- Conv2D family ---
+      if (node.name === "reshape_layer") {
+        var shapeStr = String((node.data && node.data.targetShape) || "28,28,1");
+        var shape = shapeStr.split(",").map(function (s) { return Math.max(1, parseInt(s.trim()) || 1); });
+        return tf.layers.reshape({ targetShape: shape }).apply(inTensor);
+      }
+      if (node.name === "conv2d_layer") {
+        var f2 = Math.max(1, Number((node.data && node.data.filters) || 32));
+        var k2 = Math.max(1, Number((node.data && node.data.kernelSize) || 3));
+        var s2 = Math.max(1, Number((node.data && node.data.strides) || 1));
+        var p2 = String((node.data && node.data.padding) || "same");
+        var a2 = String((node.data && node.data.activation) || "relu");
+        return tf.layers.conv2d({ filters: f2, kernelSize: k2, strides: s2, padding: p2, activation: a2 }).apply(inTensor);
+      }
+      if (node.name === "conv2d_transpose_layer") {
+        var ft = Math.max(1, Number((node.data && node.data.filters) || 32));
+        var kt = Math.max(1, Number((node.data && node.data.kernelSize) || 3));
+        var st = Math.max(1, Number((node.data && node.data.strides) || 2));
+        var pt = String((node.data && node.data.padding) || "same");
+        var at = String((node.data && node.data.activation) || "relu");
+        return tf.layers.conv2dTranspose({ filters: ft, kernelSize: kt, strides: st, padding: pt, activation: at }).apply(inTensor);
+      }
+      if (node.name === "maxpool2d_layer") {
+        var ps = Math.max(1, Number((node.data && node.data.poolSize) || 2));
+        var ss = Math.max(1, Number((node.data && node.data.strides) || ps));
+        return tf.layers.maxPooling2d({ poolSize: ps, strides: ss }).apply(inTensor);
+      }
+      if (node.name === "flatten_layer") {
+        return tf.layers.flatten().apply(inTensor);
+      }
+      if (node.name === "upsample2d_layer") {
+        var us = Math.max(1, Number((node.data && node.data.size) || 2));
+        return tf.layers.upSampling2d({ size: [us, us] }).apply(inTensor);
+      }
+      if (node.name === "global_avg_pool2d_layer") {
+        return tf.layers.globalAveragePooling2d().apply(inTensor);
       }
       if (node.name === "latent_layer" || node.name === "latent_mu_layer" || node.name === "latent_logvar_layer") {
         var u = Math.max(2, Number((node.data && node.data.units) || 16));
@@ -576,17 +646,18 @@
           ? tf.layers.globalAveragePooling1d().apply(inTensor) : inTensor;
         var generated = [];
         targets.forEach(function (target, tti) {
-          var units = targetUnitsFromMode(target, paramsSelect, odata);
-          var act = (target === "logits" || target === "label") ? "softmax" : "linear";
+          // headType from node config or schema lookup — no string matching on target names
+          var ht = String(odata.headType || "").trim().toLowerCase();
+          if (!ht || ht === "auto") ht = _lookupHeadType(target, allowedOutputKeys);
+          var units = targetUnitsFromMode(target, paramsSelect, odata, ht);
+          var act = (ht === "classification") ? "softmax" : "linear";
           var headTensor = tf.layers.dense({ units: units, activation: act }).apply(inForHead);
           outTensors.push(headTensor);
           generated.push(headTensor);
           headConfigs.push({
             id: String(id) + ":" + String(target) + ":" + String(tti + 1),
-            nodeId: String(id), target: target, targetType: target,
+            nodeId: String(id), target: target, targetType: target, headType: ht,
             paramsSelect: paramsSelect, units: units, loss: lossName,
-            wx: Math.max(0, Number((odata && odata.wx) || 1)),
-            wv: Math.max(0, Number((odata && odata.wv) || 1)),
             matchWeight: headMatchWeight,
             phase: String(odata.phase || ""),
           });

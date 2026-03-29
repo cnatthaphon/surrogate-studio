@@ -441,8 +441,8 @@
       var isClassification = false;
       if (ev.schemaId && schemaRegistry) {
         var outputKeys = schemaRegistry.getOutputKeys(ev.schemaId);
-        var defTarget = outputKeys && outputKeys[0] ? (outputKeys[0].key || outputKeys[0]) : "x";
-        isClassification = defTarget === "label" || defTarget === "logits";
+        var defHt = outputKeys && outputKeys[0] ? (outputKeys[0].headType || "regression") : "regression";
+        isClassification = defHt === "classification";
       }
       var allEvaluators = _getAllEvaluators(ev.schemaId, isClassification);
       if (allEvaluators.length) {
@@ -559,9 +559,10 @@
       }
 
       var schemaId = ev.schemaId;
-      var allowedOutputKeys = schemaRegistry ? schemaRegistry.getOutputKeys(schemaId) : ["x"];
-      var defaultTarget = (allowedOutputKeys[0] && (allowedOutputKeys[0].key || allowedOutputKeys[0])) || "x";
-      var isClassification = defaultTarget === "label" || defaultTarget === "logits";
+      var allowedOutputKeys = schemaRegistry ? schemaRegistry.getOutputKeys(schemaId) : [];
+      var defaultTarget = (allowedOutputKeys[0] && (allowedOutputKeys[0].key || allowedOutputKeys[0])) || "";
+      var defHeadType = (allowedOutputKeys[0] && allowedOutputKeys[0].headType) || "regression";
+      var isClassification = defHeadType === "classification";
 
       var dsData = dataset.data;
       var isBundle = dsData.kind === "dataset_bundle" && dsData.datasets;

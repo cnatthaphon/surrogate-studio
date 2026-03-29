@@ -62,15 +62,13 @@
   }
 
   function makeHeadLoss(tf, head, resolvedGlobal) {
-    var target = String((head && head.target) || "x");
     var type = mapLossAlias(head && head.loss, resolvedGlobal);
-    var wx = Math.max(0, Number((head && head.wx) || 1));
-    var wv = Math.max(0, Number((head && head.wv) || 1));
     var headWeight = Math.max(0, Number((head && head.matchWeight) || 1));
     var klBeta = Math.max(0, Number((head && head.beta) || 1e-3));
+    var ht = String((head && head.headType) || "regression");
     return function (yTrue, yPred) {
       return tf.tidy(function () {
-        if (target === "latent_kl") {
+        if (ht === "latent_kl") {
           var total = Math.max(2, Number((head && head.units) || (yPred.shape && yPred.shape[1]) || 2));
           var zDim = Math.max(1, Math.floor(total / 2));
           var mu = yPred.slice([0, 0], [-1, zDim]);
@@ -80,7 +78,7 @@
           var kl = tf.mul(tf.scalar(-0.5), tf.mean(tf.sum(klTerm, -1)));
           return tf.mul(tf.scalar(headWeight * klBeta), kl);
         }
-        if (target === "logits" || target === "label") {
+        if (ht === "classification") {
           var ce = tf.losses.softmaxCrossEntropy(yTrue, yPred);
           return tf.mul(tf.scalar(headWeight), ce);
         }
@@ -96,36 +94,16 @@
   }
 
   function extractHeadRows(rowsMain, rowsParams, targetMode, head, datasetMeta) {
-    var headTarget = String((head && head.targetType) || (head && head.target) || "x");
-    if (headTarget === "params") {
-      if (!Array.isArray(rowsParams) || !rowsParams.length) throw new Error("Params target requested but parameter targets are missing.");
-      var rawSelect = String((head && head.paramsSelect) || "");
-      var picks = rawSelect.split(",").map(function (s) { return String(s || "").trim(); }).filter(Boolean);
-      var names = Array.isArray(datasetMeta.paramNames) ? datasetMeta.paramNames.map(String) : [];
-      if (picks.length && names.length) {
-        var idx = picks.map(function (k) { return names.indexOf(k); }).filter(function (i) { return i >= 0; });
-        if (idx.length) {
-          return rowsParams.map(function (r) {
-            var row = Array.isArray(r) ? r : [r];
-            return idx.map(function (j) { return Number(row[j] || 0); });
-          });
-        }
-      }
-      return rowsParams;
-    }
-    if (headTarget === "latent_diff" || headTarget === "latent_kl") {
+    var ht = String((head && head.headType) || "regression");
+    if (ht === "latent_kl") {
       var n = Array.isArray(rowsMain) ? rowsMain.length : 0;
       var units = Math.max(1, Number(head.units || 1));
       var zeros = new Array(n);
       for (var i = 0; i < n; i++) zeros[i] = new Array(units).fill(0);
       return zeros;
     }
-    // classification: return as-is (labels or one-hot)
-    if (headTarget === "logits" || headTarget === "label") {
-      return rowsMain;
-    }
-    // reconstruction / any other target: return as-is
-    // the data format is determined by the dataset, not the target name
+    // all other head types: return data as-is
+    // the data format is determined by the dataset + trainer, not the target name
     return rowsMain;
   }
 
@@ -202,12 +180,12 @@
     var datasetMeta = { paramNames: dataset.paramNames, paramSize: dataset.paramSize };
 
     headConfigs.forEach(function (head) {
-      var target = String(head.target || "x");
+      var ht = String(head.headType || "regression");
       // for multi-head models: classification heads use labels, reconstruction heads use pixels
       var headYTrain = dataset.yTrain;
       var headYVal = dataset.yVal;
       var headYTest = dataset.yTest;
-      if ((target === "label" || target === "logits") && dataset.labelsTrain) {
+      if (ht === "classification" && dataset.labelsTrain) {
         headYTrain = dataset.labelsTrain;
         headYVal = dataset.labelsVal || headYVal;
         headYTest = dataset.labelsTest || headYTest;
@@ -218,11 +196,10 @@
         ? extractHeadRows(headYTest, dataset.pTest, targetMode, head, datasetMeta)
         : null;
       var inferredCols = trainRows[0] ? (Array.isArray(trainRows[0]) ? trainRows[0].length : 1) : 1;
-      // classification: cols = numClasses. KL/latent: cols from head. Everything else: inferred from data.
+      // determine cols from headType: classification → numClasses, latent → from head.units, else → from data
       var cols;
-      if (target === "logits" || target === "label") cols = Math.max(1, Number(dataset.numClasses || inferredCols));
-      else if (target === "latent_diff") cols = Math.max(1, Number(head.units || 1));
-      else if (target === "latent_kl") cols = Math.max(2, Number(head.units || 2));
+      if (ht === "classification") cols = Math.max(1, Number(dataset.numClasses || inferredCols));
+      else if (ht === "latent_kl") cols = Math.max(2, Number(head.units || 2));
       else cols = Math.max(1, inferredCols);
       yTrainTensors.push(rowsToTensor(tf, trainRows, cols));
       yValTensors.push(rowsToTensor(tf, valRows, cols));
@@ -520,10 +497,12 @@
     var targetMode = String(dataset.targetMode || "xv");
     var datasetMeta = { paramNames: dataset.paramNames, paramSize: dataset.paramSize };
     headConfigs.forEach(function (head) {
-      var headTarget = String(head.target || head.targetType || "x");
-      var isClsHead = headTarget === "label" || headTarget === "logits";
-      var isReconHead = !isClsHead; // anything that's not classification is reconstruction (y = x)
-      var trainRows = isReconHead ? dataset.xTrain : extractHeadRows(dataset.yTrain, dataset.pTrain, targetMode, head, datasetMeta);
+      var ht = String(head.headType || "regression");
+      var isClsHead = ht === "classification";
+      // classification uses labels, everything else uses main y data (which may be x for reconstruction)
+      var trainRows = isClsHead
+        ? extractHeadRows(dataset.labelsTrain || dataset.yTrain, dataset.pTrain, targetMode, head, datasetMeta)
+        : extractHeadRows(dataset.yTrain, dataset.pTrain, targetMode, head, datasetMeta);
       var inferredCols = trainRows[0] ? (Array.isArray(trainRows[0]) ? trainRows[0].length : 1) : 1;
       yTrainArrays.push(rowsToTensor(tf, trainRows, inferredCols));
     });

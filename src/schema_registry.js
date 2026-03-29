@@ -27,15 +27,16 @@
       .map(function (o) {
         var key = String(o && o.key != null ? o.key : "").trim().toLowerCase();
         if (!key) return null;
+        var ht = String(o && o.headType != null ? o.headType : "regression").trim().toLowerCase();
         return {
           key: key,
           label: String(o && o.label != null ? o.label : key),
+          headType: ht,
         };
       })
       .filter(Boolean);
-    if (!outputs.length) {
-      outputs = [{ key: "x", label: "x" }];
-    }
+    // no hardcoded fallback — if schema has no outputs, return empty
+    // the schema MUST define its own output keys
 
     var params = Array.isArray(m.params) ? m.params.slice() : [];
     params = params
@@ -239,8 +240,8 @@
 
   function getOutputKeys(schemaId) {
     var m = getModelSchema(schemaId);
-    if (!m || !Array.isArray(m.outputs)) return ["x"];
-    return m.outputs.map(function (o) { return String(o.key); });
+    if (!m || !Array.isArray(m.outputs)) return [{ key: "x", headType: "regression" }];
+    return m.outputs.map(function (o) { return { key: String(o.key), headType: String(o.headType || "regression") }; });
   }
 
   function getParamDefs(schemaId) {

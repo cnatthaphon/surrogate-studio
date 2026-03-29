@@ -342,12 +342,13 @@
             // model_graph_core passes schemaId as 3rd arg — resolve to keys
             var keys = Array.isArray(schemaIdOrKeys) ? schemaIdOrKeys : (schemaRegistry ? schemaRegistry.getOutputKeys(String(schemaIdOrKeys || "")) : []);
             if (mbc) return mbc.normalizeOutputTargetsList(raw, fb, keys);
-            return Array.isArray(raw) ? raw : [String(raw || "x")];
+            return Array.isArray(raw) ? raw : [String(raw || "")];
           },
           outputTargetsSummaryText: function (targets, schemaId) {
             var keys = schemaRegistry ? schemaRegistry.getOutputKeys(String(schemaId || "")) : [];
+            var keyStrs = keys.map(function (k) { return k.key || k; });
             var t = Array.isArray(targets) ? targets : [String(targets || "")];
-            if (keys.length) t = t.filter(function (x) { return keys.indexOf(x) >= 0; });
+            if (keyStrs.length) t = t.filter(function (x) { return keyStrs.indexOf(x) >= 0; });
             return "targets=[" + t.join(",") + "]";
           },
           normalizeOneHotKey: function (raw, schemaId) {
@@ -374,7 +375,7 @@
             var series = Array.isArray(meta.historySeries) ? meta.historySeries : [];
             var key = String(raw || "").trim().toLowerCase();
             var allowed = series.map(function (s) { return s.key; });
-            return allowed.indexOf(key) >= 0 ? key : (allowed[0] || "x");
+            return allowed.indexOf(key) >= 0 ? key : (allowed[0] || key || "");
           },
           historySeriesLabel: function (key, schemaId) {
             var sid = schemaRegistry ? schemaRegistry.resolveSchemaId(schemaId) : "";
@@ -382,7 +383,7 @@
             var meta = (ms && ms.metadata && ms.metadata.featureNodes) || {};
             var series = Array.isArray(meta.historySeries) ? meta.historySeries : [];
             var hit = series.find(function (s) { return s.key === key; });
-            return (hit && hit.label) || key || "x";
+            return (hit && hit.label) || key || "";
           },
           getImageSourceSpec: function (rawKey, schemaId) {
             var sid = schemaRegistry ? schemaRegistry.resolveSchemaId(schemaId) : schemaId;
