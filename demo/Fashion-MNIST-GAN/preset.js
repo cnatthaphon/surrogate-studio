@@ -56,12 +56,12 @@
     var g3 = N(d, "dense", { units: 784, activation: "sigmoid" }, 540, 60);
     var gOut = N(d, "output", { target: "pixel_values", targetType: "pixel_values", loss: "mse", matchWeight: 1, phase: "generator", headType: "reconstruction" }, 700, 60);
     C(d,z,g1); C(d,g1,g2); C(d,g2,g3); C(d,g3,gOut);
-    // Discriminator path (autoencoder on real images)
+    // Discriminator path: classifies real images as "real" (target=1)
     var img = N(d, "image_source", { sourceKey: "pixel_values", featureSize: 784, imageShape: [28,28,1] }, 60, 240);
     var d1 = N(d, "dense", { units: 512, activation: "relu" }, 260, 240);
     var d2 = N(d, "dense", { units: 256, activation: "relu" }, 420, 240);
-    var d3 = N(d, "dense", { units: 784, activation: "sigmoid" }, 580, 240);
-    var dOut = N(d, "output", { target: "pixel_values", targetType: "pixel_values", loss: "mse", matchWeight: 1, phase: "discriminator", headType: "reconstruction" }, 740, 240);
+    var d3 = N(d, "dense", { units: 1, activation: "sigmoid" }, 580, 240);
+    var dOut = N(d, "output", { target: "label", targetType: "label", loss: "bce", matchWeight: 1, phase: "discriminator", headType: "classification" }, 740, 240);
     C(d,img,d1); C(d,d1,d2); C(d,d2,d3); C(d,d3,dOut);
     return graph(d);
   }
@@ -78,14 +78,14 @@
     var gf = N(d, "flatten", {}, 760, 60);
     var gOut = N(d, "output", { target: "pixel_values", targetType: "pixel_values", loss: "mse", matchWeight: 1, phase: "generator", headType: "reconstruction" }, 900, 60);
     C(d,z,gd); C(d,gd,gr); C(d,gr,gc1); C(d,gc1,gc2); C(d,gc2,gf); C(d,gf,gOut);
-    // Discriminator: image → conv → flatten → reconstruct
+    // Discriminator: classifies real images as "real" (target=1)
     var img = N(d, "image_source", { sourceKey: "pixel_values", featureSize: 784, imageShape: [28,28,1] }, 60, 260);
     var dr = N(d, "reshape", { targetShape: "28,28,1" }, 200, 260);
     var dc1 = N(d, "conv2d", { filters: 64, kernelSize: 4, strides: 2, padding: "same", activation: "relu" }, 340, 260);
     var dc2 = N(d, "conv2d", { filters: 128, kernelSize: 4, strides: 2, padding: "same", activation: "relu" }, 480, 260);
     var df = N(d, "flatten", {}, 620, 260);
-    var dd = N(d, "dense", { units: 784, activation: "sigmoid" }, 760, 260);
-    var dOut = N(d, "output", { target: "pixel_values", targetType: "pixel_values", loss: "mse", matchWeight: 1, phase: "discriminator", headType: "reconstruction" }, 900, 260);
+    var dd = N(d, "dense", { units: 1, activation: "sigmoid" }, 760, 260);
+    var dOut = N(d, "output", { target: "label", targetType: "label", loss: "bce", matchWeight: 1, phase: "discriminator", headType: "classification" }, 900, 260);
     C(d,img,dr); C(d,dr,dc1); C(d,dc1,dc2); C(d,dc2,df); C(d,df,dd); C(d,dd,dOut);
     return graph(d);
   }
