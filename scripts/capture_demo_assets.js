@@ -117,11 +117,20 @@ async function main() {
       if (b) b.click();
     });
 
-    // capture during training
+    // capture during training — skip blank frames during data transfer
     const t0 = Date.now();
-    while (Date.now() - t0 < 120000) {
-      await captureFrame(page);
-      await sleep(500);
+    let lastStatus = "";
+    while (Date.now() - t0 < 180000) {
+      const status = await page.evaluate(() => {
+        const el = document.querySelector(".osc-status");
+        return el ? el.textContent.trim() : "";
+      });
+      // only capture frames when status changes or during actual training (Epoch updates)
+      if (status !== lastStatus || status.includes("Epoch") || status.includes("Done") || status.includes("done")) {
+        await captureFrame(page);
+        lastStatus = status;
+      }
+      await sleep(1000);
       const done = await page.evaluate(() => {
         const ws = document.querySelector(".osc-workspace.active");
         return ws ? Array.from(ws.querySelectorAll("button")).some(b => b.textContent.trim() === "Continue Training") : false;

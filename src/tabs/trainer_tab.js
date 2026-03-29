@@ -438,6 +438,8 @@
         var allX = activeDs.xTest;
         var allY = activeDs.yTest;
         var allPreds;
+        // check if model has multiple inputs (e.g., GAN with SampleZ + ImageSource)
+        var modelInputCount = rebuiltModel.model.inputs ? rebuiltModel.model.inputs.length : 1;
         // batch predict to avoid OOM
         var batchSize = 256;
         var allPredsArr = [];
@@ -445,9 +447,26 @@
           var bEnd = Math.min(bi + batchSize, maxAvailable);
           var batchX = allX.slice(bi, bEnd);
           var bTensor = tf.tensor2d(batchX);
-          var bRaw = rebuiltModel.model.predict(bTensor);
+          var inputTensors = bTensor;
+          // multi-input: provide matching tensors for each input
+          if (modelInputCount > 1) {
+            var inputArr = [];
+            var batchN = bEnd - bi;
+            for (var ii = 0; ii < modelInputCount; ii++) {
+              var inputShape = rebuiltModel.model.inputs[ii].shape;
+              var inputDim = inputShape[inputShape.length - 1];
+              if (inputDim === featureSize) {
+                inputArr.push(bTensor); // real data input
+              } else {
+                inputArr.push(tf.randomNormal([batchN, inputDim])); // SampleZ input
+              }
+            }
+            inputTensors = inputArr;
+          }
+          var bRaw = rebuiltModel.model.predict(inputTensors);
           var bData = (Array.isArray(bRaw) ? bRaw[0] : bRaw).arraySync();
           allPredsArr = allPredsArr.concat(bData);
+          if (Array.isArray(inputTensors)) inputTensors.forEach(function (t) { if (t !== bTensor) t.dispose(); });
           bTensor.dispose();
           if (Array.isArray(bRaw)) bRaw.forEach(function (pt) { pt.dispose(); }); else bRaw.dispose();
         }
