@@ -1,40 +1,44 @@
-# Fashion-MNIST Autoencoder Generation — Dense vs Conv
+# Fashion-MNIST GAN — Real Adversarial Training
 
 ![Demo Workflow](images/demo_workflow.gif)
 
 
-**Train autoencoders, then generate new images from the decoder (latent space sampling).**
+**Train a GAN with real adversarial structure — all defined in the visual graph editor.**
 
-Two architectures compared: Dense AE vs Convolutional AE. Train as reconstruction, generate from random latent vectors through the decoder.
+No hardcoded GAN logic. The graph itself defines the adversarial architecture using composable building blocks: Detach (gradient stop), ConcatBatch (merge real+fake), PhaseSwitch (label routing by phase).
 
-## Models
+## Architecture
 
-| # | Model | Encoder | Decoder (Generator) | Bottleneck |
-|---|---|---|---|---|
-| 1 | **Dense AE** | 784 → 512 → 128 | 128 → 512 → 784 | 128-dim |
-| 2 | **Conv AE** | 28x28 → Conv(32) → Conv(64) → 128 | 128 → 7x7x64 → ConvT(32) → ConvT(1) → 28x28 | 128-dim |
+```
+Generator:     SampleZ(128) → Dense(256) → Dense(512) → Dense(784,σ) → Output(recon)
+                                                                              ↓
+                                                                           Detach
+                                                                              ↓
+Discriminator: ImageSource(784) ───────────────────────────→ ConcatBatch(real+fake)
+                                                                              ↓
+                                                              Dense(512) → Dense(256) → Dense(1,σ)
+                                                                              ↓
+Labels:        Constant(1) ──→ PhaseSwitch ───────────────→ Output(BCE, discriminator)
+               Constant(0) ──→
+```
 
-## How to Use
+## Training Phases
 
-1. Open `index.html`, generate Fashion-MNIST dataset
-2. **Trainer tab**: Train both models (20 epochs recommended)
-3. **Generation tab**: Reconstruct → see original vs decoded pairs
-4. **Evaluation tab**: Compare Dense vs Conv reconstruction quality
+| Phase | What happens |
+|---|---|
+| **Discriminator** | D sees real images (label=1) + G output through Detach (label=0). G frozen. |
+| **Generator** | PhaseSwitch flips labels to 1. G trains to fool D. D weights included in gradient. |
 
-## Generation
+## Building Blocks Used
 
-After training, the decoder acts as a generator:
-- **Reconstruct**: Input → Encoder → Decoder → Output (compare with original)
-- The latent bottleneck (128-dim) captures compressed features
-- Conv AE preserves spatial structure → sharper reconstructions
+| Block | Purpose |
+|---|---|
+| **SampleZ** | Random noise input for generator |
+| **Detach** | Stops gradient — D doesn't update G during D phase |
+| **ConcatBatch** | Merges real + fake images into one batch for D |
+| **PhaseSwitch** | Routes labels: phase 0 → real/fake labels, phase 1 → all-real (fool D) |
+| **Constant** | Produces label tensors (1.0 = real, 0.0 = fake) |
 
 ## Reference
 
-Autoencoder-based generation:
-> **Generative Adversarial Nets** — Goodfellow et al., 2014. [arXiv:1406.2661](https://arxiv.org/abs/1406.2661)
-
-DCGAN architecture:
-> **Unsupervised Representation Learning with Deep Convolutional Generative Adversarial Networks** — Radford et al., 2015. [arXiv:1511.06434](https://arxiv.org/abs/1511.06434)
-
-Convolutional autoencoders:
-> **Stacked Convolutional Auto-Encoders** — Masci et al., 2011. [Springer](https://doi.org/10.1007/978-3-642-21735-7_7)
+> **Generative Adversarial Nets** — Goodfellow et al., NeurIPS 2014. [arXiv:1406.2661](https://arxiv.org/abs/1406.2661)
