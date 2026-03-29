@@ -113,7 +113,9 @@ def main():
     # --- Determine loss + prepare labels ---
     # head_configs already extracted above from config
     is_classification = _is_all_cls
-    if is_classification:
+    # check if any head uses BCE (needs float labels, not int)
+    _any_bce = any(str(hc.get("loss", "")).lower() == "bce" for hc in head_configs) if head_configs else False
+    if is_classification and not _any_bce:
         loss_fn = nn.CrossEntropyLoss()
         # CrossEntropyLoss expects integer labels, not one-hot float
         if y_train.ndim > 1 and y_train.shape[1] > 1:
@@ -125,7 +127,7 @@ def main():
         else:
             y_val = y_val.flatten().astype(np.int64)
     else:
-        loss_fn = nn.MSELoss()
+        loss_fn = nn.BCELoss() if _any_bce else nn.MSELoss()
 
     # --- DataLoaders (after label conversion) ---
     train_ds = TensorDataset(torch.tensor(x_train), torch.tensor(y_train))
@@ -137,19 +139,22 @@ def main():
     phases = sorted(set(str(h.get("phase", "")).strip() for h in head_configs)) if head_configs else [""]
     is_phased = any(p != "" for p in phases)
 
-    # per-head loss functions — use headType from config, not target name matching
+    # per-head loss functions — loss field takes priority, headType as fallback
     head_losses = []
     for hc in (head_configs or [{}]):
         htype = str(hc.get("headType", "regression")).lower()
         hl = str(hc.get("loss", "mse")).lower()
         hw = float(hc.get("matchWeight", 1.0))
         hp = str(hc.get("phase", "")).strip()
-        if htype == "classification":
-            head_losses.append({"fn": nn.CrossEntropyLoss(), "weight": hw, "phase": hp, "cls": True})
-        elif hl == "bce":
+        # explicit loss field takes priority
+        if hl == "bce":
             head_losses.append({"fn": nn.BCELoss(), "weight": hw, "phase": hp, "cls": False})
+        elif hl in ("categoricalcrossentropy", "categorical_crossentropy", "cross_entropy", "sparsecategoricalcrossentropy"):
+            head_losses.append({"fn": nn.CrossEntropyLoss(), "weight": hw, "phase": hp, "cls": True})
         elif hl == "mae":
             head_losses.append({"fn": nn.L1Loss(), "weight": hw, "phase": hp, "cls": False})
+        elif htype == "classification":
+            head_losses.append({"fn": nn.CrossEntropyLoss(), "weight": hw, "phase": hp, "cls": True})
         else:
             head_losses.append({"fn": nn.MSELoss(), "weight": hw, "phase": hp, "cls": False})
 
