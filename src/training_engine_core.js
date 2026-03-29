@@ -568,6 +568,130 @@
           var phaseHeads = headsByPhase[phase] || [];
           if (!phaseHeads.length) { phaseIdx++; nextPhase(); return; }
 
+          // === GAN-aware training ===
+          // Detect if this is a GAN: has SampleZ input + classification D output
+          var hasSampleZ = inputNodes.some(function (n) { return n.name === "sample_z_layer"; });
+          var hasClsHead = headConfigs.some(function (h) { return h.headType === "classification"; });
+          var hasReconHead = headConfigs.some(function (h) { return h.headType === "reconstruction"; });
+          var isGAN = hasSampleZ && hasClsHead && hasReconHead && phases.length >= 2;
+
+          if (isGAN) {
+            // GAN training: extract G and D sub-models from the multi-output model
+            // model.outputs[0] = G output (pixel_values), model.outputs[1] = D output (real/fake)
+            // Find which output is G (reconstruction) and which is D (classification)
+            var gOutIdx = -1, dOutIdx = -1;
+            var gInput = null, dInput = null;
+            var zDim = 128;
+            headConfigs.forEach(function (h, i) {
+              if (h.headType === "reconstruction") gOutIdx = i;
+              if (h.headType === "classification") dOutIdx = i;
+            });
+            inputNodes.forEach(function (n) {
+              if (n.name === "sample_z_layer") zDim = Number(n.data && n.data.dim || 128);
+            });
+
+            // Get G and D output tensors
+            var gOutput = model.outputs[gOutIdx];
+            var dOutput = model.outputs[dOutIdx];
+
+            // Build D-only model: takes 784-dim image input → D classification output
+            var dModelInput = tf.input({ shape: [Number(dataset.featureSize || 784)] });
+            // Find D's first layer (connected to ImageSource) and build D chain
+            // For now: use the full model but only backprop through D's loss
+
+            // Simpler approach: use the combined model with proper targets per phase
+            // D phase: G generates fake images, concat with real, D classifies both
+            // G phase: G generates, D classifies, G trains to fool D
+
+            // For each training step within this phase:
+            var phaseStepsDone = 0;
+            function ganPhaseStep() {
+              if (phaseStepsDone >= phaseSteps) {
+                phaseIdx++;
+                nextPhase();
+                return;
+              }
+
+              // regenerate z noise
+              if (Array.isArray(xTrainInputs)) {
+                xTrainInputs.forEach(function (xt, ti) {
+                  if (inputNodes[ti] && inputNodes[ti].name === "sample_z_layer") {
+                    var old = xTrainInputs[ti];
+                    xTrainInputs[ti] = tf.randomNormal(old.shape);
+                    old.dispose();
+                  }
+                });
+              }
+
+              // Generate fake images from G
+              var fakePred = model.predict(xTrainInputs);
+              var fakeImages = Array.isArray(fakePred) ? fakePred[gOutIdx] : fakePred;
+
+              if (phase === phases[dOutIdx >= 0 ? 1 : 0] || phase.toLowerCase().indexOf("discrim") >= 0) {
+                // === D phase: train D on real (label=1) and fake (label=0) ===
+                // D sees real images → should output 1
+                // D sees fake images → should output 0
+                var realInput = xTrainInputs.find ? xTrainInputs.find(function (_, i) { return inputNodes[i] && inputNodes[i].name !== "sample_z_layer"; }) : xTrainInputs;
+                if (Array.isArray(realInput)) realInput = realInput[0] || xTrainInputs;
+                var nReal = realInput.shape[0];
+                var realLabels = tf.ones([nReal, 1]);
+                var fakeLabels = tf.zeros([nReal, 1]);
+
+                // Train D on real images
+                var dLossWeights = headConfigs.map(function (h) {
+                  return h.headType === "classification" ? 1 : 0;
+                });
+                var dRealTargets = headConfigs.map(function (h) {
+                  return h.headType === "classification" ? realLabels : yTrainArrays[headConfigs.indexOf(h)];
+                });
+                model.compile({ optimizer: tf.train.adam(lr), loss: headConfigs.map(function (h) { return h.headType === "classification" ? "binaryCrossentropy" : "meanSquaredError"; }), lossWeights: dLossWeights });
+
+                model.fit(xTrainInputs, dRealTargets, { batchSize: batchSize, epochs: 1, shuffle: true, verbose: 0 }).then(function (hReal) {
+                  var dRealLoss = hReal.history.loss[0] || 0;
+                  // Now train D on fake images (G output, detached)
+                  // Replace real image input with fake images
+                  var fakeInput = xTrainInputs.map ? xTrainInputs.map(function (xt, i) {
+                    return inputNodes[i] && inputNodes[i].name !== "sample_z_layer" ? fakeImages.clone() : xt;
+                  }) : fakeImages;
+                  var dFakeTargets = headConfigs.map(function (h) {
+                    return h.headType === "classification" ? fakeLabels : yTrainArrays[headConfigs.indexOf(h)];
+                  });
+                  model.fit(fakeInput, dFakeTargets, { batchSize: batchSize, epochs: 1, shuffle: true, verbose: 0 }).then(function (hFake) {
+                    var dFakeLoss = hFake.history.loss[0] || 0;
+                    phaseLosses[phase] = (dRealLoss + dFakeLoss) / 2;
+                    realLabels.dispose(); fakeLabels.dispose();
+                    if (Array.isArray(fakePred)) fakePred.forEach(function (p) { p.dispose(); }); else fakePred.dispose();
+                    phaseStepsDone++;
+                    setTimeout(ganPhaseStep, 0);
+                  });
+                });
+
+              } else {
+                // === G phase: train G to fool D (D(G(z)) → 1) ===
+                var foolLabels = tf.ones([nSamples, 1]);
+                var gLossWeights = headConfigs.map(function (h) {
+                  // both G output (pixel quality) and D output (fool D) should contribute
+                  return h.matchWeight || 1;
+                });
+                var gTargets = headConfigs.map(function (h, i) {
+                  return h.headType === "classification" ? foolLabels : yTrainArrays[i];
+                });
+                model.compile({ optimizer: tf.train.adam(lr), loss: headConfigs.map(function (h) { return h.headType === "classification" ? "binaryCrossentropy" : "meanSquaredError"; }), lossWeights: gLossWeights });
+
+                model.fit(xTrainInputs, gTargets, { batchSize: batchSize, epochs: 1, shuffle: true, verbose: 0 }).then(function (hG) {
+                  phaseLosses[phase] = hG.history.loss[0] || 0;
+                  foolLabels.dispose();
+                  if (Array.isArray(fakePred)) fakePred.forEach(function (p) { p.dispose(); }); else fakePred.dispose();
+                  phaseStepsDone++;
+                  setTimeout(ganPhaseStep, 0);
+                });
+              }
+            }
+            ganPhaseStep();
+            return; // don't fall through to generic path
+          }
+
+          // === Generic phased training (non-GAN) ===
           // compile model for this phase
           var losses = headConfigs.map(function (h, i) {
             var p = String(h.phase || "").trim();
@@ -586,9 +710,9 @@
           });
 
           var yTargets = headConfigs.length === 1 ? yTrainArrays[0] : yTrainArrays;
-          // regenerate z noise for GAN each phase
+          // regenerate z noise each phase
           if (Array.isArray(xTrainInputs)) {
-            xTrainInputs.forEach(function (t, ti) {
+            xTrainInputs.forEach(function (xt, ti) {
               if (inputNodes[ti] && inputNodes[ti].name === "sample_z_layer") {
                 var old = xTrainInputs[ti];
                 xTrainInputs[ti] = tf.randomNormal(old.shape);
@@ -599,7 +723,6 @@
           model.fit(xTrainInputs, yTargets, {
             batchSize: batchSize, epochs: phaseSteps, shuffle: true, verbose: 0,
           }).then(function (h) {
-            // average loss across phase steps
             var losses = h.history.loss || [0];
             phaseLosses[phase] = losses[losses.length - 1] || 0;
             phaseIdx++;
