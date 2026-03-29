@@ -1187,8 +1187,41 @@
 
               phCard.appendChild(row);
             });
-            phCard.appendChild(el("div", { style: "font-size:9px;color:#64748b;margin-top:4px;" },
-              "Reorder with \u25B2\u25BC. Set epochs per phase before switching."));
+            // freeze option
+            var freezeRow = el("div", { style: "display:flex;align-items:center;gap:6px;margin-top:6px;padding-top:6px;border-top:1px solid #1e293b;" });
+            var freezeCb = el("input", { type: "checkbox" });
+            freezeCb.checked = t.config.freezeByTag !== false; // default on
+            freezeCb.addEventListener("change", function () {
+              t.config.freezeByTag = freezeCb.checked;
+              if (store) store.upsertTrainerCard(t);
+            });
+            freezeRow.appendChild(freezeCb);
+            freezeRow.appendChild(el("span", { style: "font-size:10px;color:#e2e8f0;" }, "Freeze other weight tags per phase"));
+            phCard.appendChild(freezeRow);
+
+            // detect weight tags from model
+            var tagSet = {};
+            phHeads.forEach(function () {}); // heads don't have tags, layers do
+            var graphData = modelBuilder.extractGraphData ? modelBuilder.extractGraphData(phModel.graph) : {};
+            Object.keys(graphData).forEach(function (nid) {
+              var nd = graphData[nid];
+              var wt = nd && nd.data && nd.data.weightTag;
+              if (wt) tagSet[wt] = (tagSet[wt] || 0) + 1;
+            });
+            var tagKeys = Object.keys(tagSet);
+            if (tagKeys.length) {
+              var tagInfo = el("div", { style: "font-size:9px;color:#94a3b8;margin-top:4px;" },
+                "Tags: " + tagKeys.map(function (k) { return k + " (" + tagSet[k] + " layers)"; }).join(", "));
+              phCard.appendChild(tagInfo);
+              phCard.appendChild(el("div", { style: "font-size:9px;color:#64748b;" },
+                "Each phase trains layers with matching tag. Others frozen."));
+            } else {
+              phCard.appendChild(el("div", { style: "font-size:9px;color:#64748b;margin-top:4px;" },
+                "No weight tags found. Add weightTag to Dense/Conv nodes for per-phase freeze."));
+            }
+
+            phCard.appendChild(el("div", { style: "font-size:9px;color:#475569;margin-top:4px;" },
+              "Reorder with \u25B2\u25BC. Set epochs per phase."));
             rightEl.appendChild(phCard);
           }
         }
@@ -1599,6 +1632,7 @@
           gradClipValue: Number(config.gradClipValue || 0),
           phaseOrder: config.phaseOrder || null,
           phaseEpochs: config.phaseEpochs || null,
+          freezeByTag: config.freezeByTag !== false,
           onEpochEnd: function (epoch, logs) {
             if (currentMountId !== _mountId) return;
             var logEntry = { epoch: epoch + 1, loss: logs.loss, val_loss: logs.val_loss, current_lr: logs.current_lr, improved: logs.improved, phaseLosses: logs.phaseLosses || null };

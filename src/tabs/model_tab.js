@@ -284,7 +284,69 @@
       });
       importBtn.addEventListener("click", function () { importFile.click(); });
       var autoArrangeBtn = el("button", { className: "osc-btn secondary" }, "Auto Arrange");
-      autoArrangeBtn.addEventListener("click", function () { onStatus("Auto arrange: not yet implemented"); });
+      autoArrangeBtn.addEventListener("click", function () {
+        if (!_editor) return;
+        try {
+          var data = _editor.export().drawflow.Home.data;
+          var ids = Object.keys(data);
+          if (!ids.length) { onStatus("No nodes to arrange"); return; }
+          // topological sort
+          var indeg = {}; var adj = {};
+          ids.forEach(function (id) { indeg[id] = 0; adj[id] = []; });
+          ids.forEach(function (id) {
+            var n = data[id]; if (!n || !n.outputs) return;
+            Object.keys(n.outputs).forEach(function (ok) {
+              (n.outputs[ok].connections || []).forEach(function (c) {
+                var to = String(c.node);
+                if (indeg[to] != null) { indeg[to]++; adj[id].push(to); }
+              });
+            });
+          });
+          var q = ids.filter(function (id) { return indeg[id] === 0; }).sort(function (a, b) { return Number(a) - Number(b); });
+          var topo = []; var levels = {};
+          while (q.length) {
+            var cur = q.shift(); topo.push(cur);
+            var lvl = 0;
+            // level = max parent level + 1
+            var n = data[cur];
+            if (n && n.inputs) {
+              Object.keys(n.inputs).forEach(function (ik) {
+                (n.inputs[ik].connections || []).forEach(function (c) {
+                  var from = String(c.node);
+                  if (levels[from] != null) lvl = Math.max(lvl, levels[from] + 1);
+                });
+              });
+            }
+            levels[cur] = lvl;
+            adj[cur].forEach(function (to) { indeg[to]--; if (indeg[to] === 0) q.push(to); });
+            q.sort(function (a, b) { return Number(a) - Number(b); });
+          }
+          // assign positions by level
+          var nodesPerLevel = {};
+          topo.forEach(function (id) {
+            var l = levels[id] || 0;
+            if (!nodesPerLevel[l]) nodesPerLevel[l] = [];
+            nodesPerLevel[l].push(id);
+          });
+          var xGap = 180, yGap = 120, xStart = 80, yStart = 60;
+          Object.keys(nodesPerLevel).forEach(function (lvl) {
+            var nodes = nodesPerLevel[lvl];
+            nodes.forEach(function (id, idx) {
+              var node = _editor.getNodeFromId(id);
+              if (node) {
+                var nx = xStart + Number(lvl) * xGap;
+                var ny = yStart + idx * yGap;
+                _editor.drawflow.drawflow.Home.data[id].pos_x = nx;
+                _editor.drawflow.drawflow.Home.data[id].pos_y = ny;
+              }
+            });
+          });
+          // re-render
+          var exported = _editor.export();
+          _editor.import(exported);
+          onStatus("Arranged " + topo.length + " nodes");
+        } catch (e) { onStatus("Arrange error: " + e.message); }
+      });
       actBar.appendChild(saveBtn); actBar.appendChild(clearBtn); actBar.appendChild(exportBtn); actBar.appendChild(importBtn); actBar.appendChild(autoArrangeBtn);
       mainEl.appendChild(actBar);
 
