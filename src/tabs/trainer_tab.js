@@ -262,9 +262,16 @@
       }
       var tr = el("tr", {});
       tr.appendChild(el("td", {}, String(ep.epoch || "")));
-      tr.appendChild(el("td", {}, ep.loss != null ? Number(ep.loss).toExponential(3) : "—"));
-      tr.appendChild(el("td", {}, ep.val_loss != null ? Number(ep.val_loss).toExponential(3) : "—"));
-      tr.appendChild(el("td", {}, ep.current_lr != null ? Number(ep.current_lr).toExponential(2) : "—"));
+      tr.appendChild(el("td", {}, ep.loss != null ? Number(ep.loss).toExponential(3) : "\u2014"));
+      // show per-phase losses if available, otherwise val_loss
+      if (ep.phaseLosses && typeof ep.phaseLosses === "object") {
+        var phKeys = Object.keys(ep.phaseLosses);
+        var phStr = phKeys.map(function (k) { return k + ":" + Number(ep.phaseLosses[k]).toExponential(3); }).join(" ");
+        tr.appendChild(el("td", { style: "font-size:9px;" }, phStr));
+      } else {
+        tr.appendChild(el("td", {}, ep.val_loss != null ? Number(ep.val_loss).toExponential(3) : "\u2014"));
+      }
+      tr.appendChild(el("td", {}, ep.current_lr != null ? Number(ep.current_lr).toExponential(2) : "\u2014"));
       tr.appendChild(el("td", { style: ep.improved ? "color:#4ade80;" : "" }, ep.improved ? "\u2713" : ""));
       _epochTableBody.appendChild(tr);
       // auto-scroll to bottom
@@ -1115,19 +1122,73 @@
             if (p && !phSeen[p]) { phSeen[p] = true; phPhases.push(p); }
           });
           if (phPhases.length > 0) {
+            // read saved phase config or init defaults
+            if (!tCard.config) tCard.config = {};
+            if (!tCard.config.phaseOrder) tCard.config.phaseOrder = phPhases.slice();
+            if (!tCard.config.phaseEpochs) {
+              tCard.config.phaseEpochs = {};
+              phPhases.forEach(function (p) { tCard.config.phaseEpochs[p] = 1; });
+            }
+            // ensure all detected phases are in config
+            phPhases.forEach(function (p) {
+              if (tCard.config.phaseOrder.indexOf(p) < 0) tCard.config.phaseOrder.push(p);
+              if (!tCard.config.phaseEpochs[p]) tCard.config.phaseEpochs[p] = 1;
+            });
+            var orderedPhases = tCard.config.phaseOrder.filter(function (p) { return phPhases.indexOf(p) >= 0; });
+
             var phCard = el("div", { style: "margin-top:8px;padding:6px 8px;border:1px solid #1e293b;border-radius:6px;background:#0f172a;" });
             phCard.appendChild(el("div", { style: "font-size:10px;color:#67e8f9;font-weight:600;margin-bottom:4px;" }, "Training Phases"));
-            phPhases.forEach(function (p, idx) {
-              var row = el("div", { style: "display:flex;align-items:center;gap:6px;margin-bottom:3px;" });
-              row.appendChild(el("span", { style: "font-size:10px;color:#e2e8f0;min-width:20px;" }, String(idx + 1) + "."));
-              row.appendChild(el("span", { style: "font-size:11px;color:#38bdf8;font-weight:600;" }, p));
-              // heads in this phase
+
+            orderedPhases.forEach(function (p, idx) {
+              var row = el("div", { style: "display:flex;align-items:center;gap:4px;margin-bottom:3px;" });
+
+              // up/down buttons
+              var upBtn = el("button", { style: "font-size:9px;padding:1px 4px;background:#1e293b;color:#94a3b8;border:1px solid #334155;border-radius:3px;cursor:pointer;" }, "\u25B2");
+              var downBtn = el("button", { style: "font-size:9px;padding:1px 4px;background:#1e293b;color:#94a3b8;border:1px solid #334155;border-radius:3px;cursor:pointer;" }, "\u25BC");
+              if (idx === 0) upBtn.disabled = true;
+              if (idx === orderedPhases.length - 1) downBtn.disabled = true;
+              (function (phase, index) {
+                upBtn.addEventListener("click", function () {
+                  var arr = tCard.config.phaseOrder;
+                  var i = arr.indexOf(phase);
+                  if (i > 0) { var tmp = arr[i - 1]; arr[i - 1] = arr[i]; arr[i] = tmp; }
+                  if (store) store.upsertTrainerCard(tCard);
+                  _renderRightPanel();
+                });
+                downBtn.addEventListener("click", function () {
+                  var arr = tCard.config.phaseOrder;
+                  var i = arr.indexOf(phase);
+                  if (i < arr.length - 1) { var tmp = arr[i + 1]; arr[i + 1] = arr[i]; arr[i] = tmp; }
+                  if (store) store.upsertTrainerCard(tCard);
+                  _renderRightPanel();
+                });
+              })(p, idx);
+              row.appendChild(upBtn);
+              row.appendChild(downBtn);
+
+              // phase name
+              row.appendChild(el("span", { style: "font-size:11px;color:#38bdf8;font-weight:600;min-width:80px;" }, p));
+
+              // epochs per phase input
+              var epInput = el("input", { type: "number", min: 1, max: 100, step: 1, value: String(tCard.config.phaseEpochs[p] || 1),
+                style: "width:40px;padding:2px 4px;font-size:10px;background:#0b1220;color:#e2e8f0;border:1px solid #334155;border-radius:3px;text-align:center;" });
+              (function (phase) {
+                epInput.addEventListener("change", function () {
+                  tCard.config.phaseEpochs[phase] = Math.max(1, parseInt(epInput.value) || 1);
+                  if (store) store.upsertTrainerCard(tCard);
+                });
+              })(p);
+              row.appendChild(epInput);
+              row.appendChild(el("span", { style: "font-size:9px;color:#64748b;" }, "epochs"));
+
+              // head targets in this phase
               var phHeadTargets = phHeads.filter(function (h) { return String(h.phase || "").trim() === p; }).map(function (h) { return h.target; });
-              row.appendChild(el("span", { style: "font-size:9px;color:#64748b;" }, "→ " + phHeadTargets.join(", ")));
+              row.appendChild(el("span", { style: "font-size:9px;color:#475569;margin-left:4px;" }, "\u2192 " + phHeadTargets.join(", ")));
+
               phCard.appendChild(row);
             });
             phCard.appendChild(el("div", { style: "font-size:9px;color:#64748b;margin-top:4px;" },
-              "Phases train in order shown. Each phase runs for 1 epoch step before switching."));
+              "Reorder with \u25B2\u25BC. Set epochs per phase before switching."));
             rightEl.appendChild(phCard);
           }
         }
@@ -1536,9 +1597,11 @@
           minLr: Number(config.minLr || 0.000001),
           gradClipNorm: Number(config.gradClipNorm || 0),
           gradClipValue: Number(config.gradClipValue || 0),
+          phaseOrder: config.phaseOrder || null,
+          phaseEpochs: config.phaseEpochs || null,
           onEpochEnd: function (epoch, logs) {
             if (currentMountId !== _mountId) return;
-            var logEntry = { epoch: epoch + 1, loss: logs.loss, val_loss: logs.val_loss, current_lr: logs.current_lr, improved: logs.improved };
+            var logEntry = { epoch: epoch + 1, loss: logs.loss, val_loss: logs.val_loss, current_lr: logs.current_lr, improved: logs.improved, phaseLosses: logs.phaseLosses || null };
             if (store) store.appendTrainerEpoch(activeId, logEntry);
             if (stateApi && stateApi.getActiveTrainer() === activeId) {
               var epochs = store.getTrainerEpochs(activeId);

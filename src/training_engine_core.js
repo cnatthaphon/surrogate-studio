@@ -454,7 +454,10 @@
     var dataset = opts.dataset;
     if (!dataset) throw new Error("opts.dataset required");
 
-    var phases = detectPhases(headConfigs);
+    var detectedPhases = detectPhases(headConfigs);
+    // user can override phase order and epochs-per-phase from trainer config
+    var phases = (Array.isArray(opts.phaseOrder) && opts.phaseOrder.length) ? opts.phaseOrder.filter(function (p) { return detectedPhases.indexOf(p) >= 0; }) : detectedPhases;
+    var phaseEpochs = opts.phaseEpochs || {};
     var epochs = Math.max(1, Number(opts.epochs) || 20);
     var batchSize = Math.max(1, Number(opts.batchSize) || 32);
     var lr = Math.max(1e-8, Number(opts.learningRate) || 1e-3);
@@ -547,10 +550,12 @@
             if (totalLoss < bestValLoss) { bestValLoss = totalLoss; bestEpoch = epoch + 1; }
 
             if (typeof onEpochEnd === "function") {
+              // format phase losses as string for display
+              var phaseStr = phases.map(function (p) { return p + "=" + (phaseLosses[p] != null ? phaseLosses[p].toExponential(3) : "?"); }).join(" | ");
               onEpochEnd(epoch, {
                 loss: totalLoss, val_loss: totalLoss,
                 current_lr: lr, improved: epoch + 1 === bestEpoch,
-                phaseLosses: phaseLosses,
+                phaseLosses: phaseLosses, phaseStr: phaseStr,
               });
             }
             epoch++;
@@ -559,6 +564,7 @@
           }
 
           var phase = phases[phaseIdx];
+          var phaseSteps = Math.max(1, Number(phaseEpochs[phase]) || 1);
           var phaseHeads = headsByPhase[phase] || [];
           if (!phaseHeads.length) { phaseIdx++; nextPhase(); return; }
 
@@ -591,9 +597,11 @@
             });
           }
           model.fit(xTrainInputs, yTargets, {
-            batchSize: batchSize, epochs: 1, shuffle: true, verbose: 0,
+            batchSize: batchSize, epochs: phaseSteps, shuffle: true, verbose: 0,
           }).then(function (h) {
-            phaseLosses[phase] = h.history.loss[0] || 0;
+            // average loss across phase steps
+            var losses = h.history.loss || [0];
+            phaseLosses[phase] = losses[losses.length - 1] || 0;
             phaseIdx++;
             nextPhase();
           });
