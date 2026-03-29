@@ -70,6 +70,7 @@ def main():
 
     feature_size = x_train.shape[1] if x_train.ndim > 1 else 1
     # determine target_size from graph output nodes (not y_train shape which changes after label conversion)
+    graph = config.get("graph", {})
     _gd = graph.get("drawflow", {}).get("Home", {}).get("data", graph)
     _out_targets = [_gd[k].get("data", {}).get("target", "") for k in _gd if _gd[k].get("name", "").replace("_layer", "") == "output"]
     _is_all_cls = all(t in ("label", "logits") for t in _out_targets if t)
@@ -295,11 +296,16 @@ def main():
     # --- Compute final metrics (val + test) ---
     model.eval()
     with torch.no_grad():
-        # Validation metrics
         x_val_t = torch.tensor(x_val).to(device)
         pred_val = model(x_val_t).cpu().numpy()
-        mae = float(np.mean(np.abs(pred_val - y_val)))
-        mse = float(np.mean((pred_val - y_val) ** 2))
+        if is_classification:
+            pred_labels = pred_val.argmax(axis=1)
+            true_labels = y_val.flatten().astype(int)
+            mae = float(np.mean(np.abs(pred_labels - true_labels)))
+            mse = float(np.mean((pred_labels - true_labels) ** 2))
+        else:
+            mae = float(np.mean(np.abs(pred_val - y_val)))
+            mse = float(np.mean((pred_val - y_val) ** 2))
 
         # Test metrics (if test data provided)
         x_test = np.array(ds.get("xTest", []), dtype=np.float32)
