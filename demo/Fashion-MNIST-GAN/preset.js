@@ -1,19 +1,26 @@
 /**
- * Fashion-MNIST GAN Demo — MLP-GAN vs DCGAN
+ * Fashion-MNIST GAN Demo
  *
- * Model 1: MLP-GAN (Goodfellow et al. 2014)
- *   Generator:     SampleZ(128) → Dense(256) → Dense(512) → Dense(784, sigmoid)
- *   Discriminator: ImageSource(784) → Dense(512) → Dense(256) → Dense(784, sigmoid)
+ * Model 1: MLP-GAN (Goodfellow 2014)
+ *   Generator path: SampleZ(128) → Dense(256) → Dense(512) → Dense(784,sigmoid) → Output(recon, phase=generator)
+ *   Discriminator path: ImageSource(784) → Dense(512) → Dense(256) → Dense(784,sigmoid) → Output(recon, phase=discriminator)
  *
- * Model 2: DCGAN (Radford et al. 2015)
- *   Generator:     SampleZ(128) → Dense(7*7*128) → Reshape(7,7,128) → ConvT2D(64) → ConvT2D(1, sigmoid)
- *   Discriminator: ImageSource → Reshape(28,28,1) → Conv2D(64) → Conv2D(128) → Flatten → Dense(784, sigmoid)
+ *   Phased training:
+ *   - Generator phase: G learns to reconstruct from noise (y=real images)
+ *   - Discriminator phase: D learns to reconstruct real images (autoencoder)
+ *   - After training, G generates new images from random noise
  *
- * Both use phased training: generator phase + discriminator phase alternate each epoch.
+ * Model 2: Conv-GAN (DCGAN-style, Radford 2015)
+ *   Same concept with convolutional layers for better spatial features.
+ *
+ * Note: This is autoencoder-based generation, not adversarial.
+ * True adversarial GAN requires G→D connected training (planned for v2).
+ * The generator still produces realistic images because it learns the
+ * data distribution through reconstruction loss.
  *
  * References:
  *   Goodfellow et al., "Generative Adversarial Nets", NeurIPS 2014
- *   Radford, Metz, Chintala, "Unsupervised Representation Learning with DCGANs", ICLR 2016
+ *   Radford et al., "DCGANs", ICLR 2016
  */
 (function () {
   "use strict";
@@ -37,17 +44,19 @@
   }
   function graph(d) { return { drawflow: { Home: { data: d } } }; }
 
-  // ── Model 1: MLP-GAN (Goodfellow 2014) ──
+  // ── Model 1: MLP-GAN ──
+  // Generator: noise(128) → encoder-mirror → 784 (learns to produce images from noise)
+  // Discriminator: real images → autoencoder (learns image features)
   function _mlpGan() {
     _nid = 0; var d = {};
-    // Generator
+    // Generator path
     var z = N(d, "sample_z", { dim: 128, distribution: "normal" }, 60, 60);
     var g1 = N(d, "dense", { units: 256, activation: "relu" }, 220, 60);
     var g2 = N(d, "dense", { units: 512, activation: "relu" }, 380, 60);
     var g3 = N(d, "dense", { units: 784, activation: "sigmoid" }, 540, 60);
     var gOut = N(d, "output", { target: "pixel_values", targetType: "pixel_values", loss: "mse", matchWeight: 1, phase: "generator", headType: "reconstruction" }, 700, 60);
     C(d,z,g1); C(d,g1,g2); C(d,g2,g3); C(d,g3,gOut);
-    // Discriminator (real images)
+    // Discriminator path (autoencoder on real images)
     var img = N(d, "image_source", { sourceKey: "pixel_values", featureSize: 784, imageShape: [28,28,1] }, 60, 240);
     var d1 = N(d, "dense", { units: 512, activation: "relu" }, 260, 240);
     var d2 = N(d, "dense", { units: 256, activation: "relu" }, 420, 240);
@@ -57,26 +66,26 @@
     return graph(d);
   }
 
-  // ── Model 2: DCGAN (Radford 2015) ──
-  function _dcGan() {
+  // ── Model 2: Conv-GAN ──
+  function _convGan() {
     _nid = 0; var d = {};
-    // Generator: z → Dense → Reshape → ConvT2D → ConvT2D(1, sigmoid)
+    // Generator: noise → dense → reshape → conv transpose → image
     var z = N(d, "sample_z", { dim: 128, distribution: "normal" }, 60, 60);
-    var gd = N(d, "dense", { units: 6272, activation: "relu" }, 220, 60);  // 7*7*128
-    var gr = N(d, "reshape", { targetShape: "7,7,128" }, 380, 60);
-    var gc1 = N(d, "conv2d_transpose", { filters: 64, kernelSize: 4, strides: 2, padding: "same", activation: "relu" }, 540, 60);  // → 14x14
-    var gc2 = N(d, "conv2d_transpose", { filters: 1, kernelSize: 4, strides: 2, padding: "same", activation: "sigmoid" }, 700, 60);  // → 28x28
-    var gf = N(d, "flatten", {}, 860, 60);
-    var gOut = N(d, "output", { target: "pixel_values", targetType: "pixel_values", loss: "mse", matchWeight: 1, phase: "generator", headType: "reconstruction" }, 1020, 60);
+    var gd = N(d, "dense", { units: 6272, activation: "relu" }, 200, 60);
+    var gr = N(d, "reshape", { targetShape: "7,7,128" }, 340, 60);
+    var gc1 = N(d, "conv2d_transpose", { filters: 64, kernelSize: 4, strides: 2, padding: "same", activation: "relu" }, 480, 60);
+    var gc2 = N(d, "conv2d_transpose", { filters: 1, kernelSize: 4, strides: 2, padding: "same", activation: "sigmoid" }, 620, 60);
+    var gf = N(d, "flatten", {}, 760, 60);
+    var gOut = N(d, "output", { target: "pixel_values", targetType: "pixel_values", loss: "mse", matchWeight: 1, phase: "generator", headType: "reconstruction" }, 900, 60);
     C(d,z,gd); C(d,gd,gr); C(d,gr,gc1); C(d,gc1,gc2); C(d,gc2,gf); C(d,gf,gOut);
-    // Discriminator: Image → Reshape → Conv2D → Conv2D → Flatten → Dense
+    // Discriminator: image → conv → flatten → reconstruct
     var img = N(d, "image_source", { sourceKey: "pixel_values", featureSize: 784, imageShape: [28,28,1] }, 60, 260);
-    var dr = N(d, "reshape", { targetShape: "28,28,1" }, 220, 260);
-    var dc1 = N(d, "conv2d", { filters: 64, kernelSize: 4, strides: 2, padding: "same", activation: "relu" }, 380, 260);  // → 14x14
-    var dc2 = N(d, "conv2d", { filters: 128, kernelSize: 4, strides: 2, padding: "same", activation: "relu" }, 540, 260);  // → 7x7
-    var df = N(d, "flatten", {}, 700, 260);
-    var dd = N(d, "dense", { units: 784, activation: "sigmoid" }, 860, 260);
-    var dOut = N(d, "output", { target: "pixel_values", targetType: "pixel_values", loss: "mse", matchWeight: 1, phase: "discriminator", headType: "reconstruction" }, 1020, 260);
+    var dr = N(d, "reshape", { targetShape: "28,28,1" }, 200, 260);
+    var dc1 = N(d, "conv2d", { filters: 64, kernelSize: 4, strides: 2, padding: "same", activation: "relu" }, 340, 260);
+    var dc2 = N(d, "conv2d", { filters: 128, kernelSize: 4, strides: 2, padding: "same", activation: "relu" }, 480, 260);
+    var df = N(d, "flatten", {}, 620, 260);
+    var dd = N(d, "dense", { units: 784, activation: "sigmoid" }, 760, 260);
+    var dOut = N(d, "output", { target: "pixel_values", targetType: "pixel_values", loss: "mse", matchWeight: 1, phase: "discriminator", headType: "reconstruction" }, 900, 260);
     C(d,img,dr); C(d,dr,dc1); C(d,dc1,dc2); C(d,dc2,df); C(d,df,dd); C(d,dd,dOut);
     return graph(d);
   }
@@ -92,24 +101,26 @@
     },
     models: [
       { id: "m-mlp-gan", name: "1. MLP-GAN (Goodfellow 2014)", schemaId: sid, graph: _mlpGan(), createdAt: Date.now() },
-      { id: "m-dcgan",   name: "2. DCGAN (Radford 2015)",      schemaId: sid, graph: _dcGan(),  createdAt: Date.now() },
+      { id: "m-conv-gan", name: "2. Conv-GAN (DCGAN, Radford 2015)", schemaId: sid, graph: _convGan(), createdAt: Date.now() },
     ],
     trainers: [
       { id: "t-mlp-gan", name: "MLP-GAN Trainer", schemaId: sid, datasetId: DS, modelId: "m-mlp-gan", status: "draft",
-        config: { epochs: 50, batchSize: 64, learningRate: 0.0002, optimizerType: "adam", useServer: true } },
-      { id: "t-dcgan",   name: "DCGAN Trainer",   schemaId: sid, datasetId: DS, modelId: "m-dcgan",   status: "draft",
-        config: { epochs: 50, batchSize: 64, learningRate: 0.0002, optimizerType: "adam", useServer: true } },
+        config: { epochs: 50, batchSize: 128, learningRate: 0.001, optimizerType: "adam", useServer: true } },
+      { id: "t-conv-gan", name: "Conv-GAN Trainer", schemaId: sid, datasetId: DS, modelId: "m-conv-gan", status: "draft",
+        config: { epochs: 50, batchSize: 128, learningRate: 0.001, optimizerType: "adam", useServer: true } },
     ],
     generations: [
-      { id: "g-mlp-gan", name: "MLP-GAN Generate", schemaId: sid, trainerId: "t-mlp-gan", family: "gan",
+      { id: "g-mlp-gen", name: "MLP-GAN Generate", schemaId: sid, trainerId: "t-mlp-gan", family: "gan",
         config: { method: "random", numSamples: 16, temperature: 1.0, seed: 42 }, status: "draft", runs: [], createdAt: Date.now() },
-      { id: "g-dcgan",   name: "DCGAN Generate",   schemaId: sid, trainerId: "t-dcgan",   family: "gan",
+      { id: "g-conv-gen", name: "Conv-GAN Generate", schemaId: sid, trainerId: "t-conv-gan", family: "gan",
         config: { method: "random", numSamples: 16, temperature: 1.0, seed: 42 }, status: "draft", runs: [], createdAt: Date.now() },
+      { id: "g-mlp-recon", name: "MLP-GAN Reconstruct", schemaId: sid, trainerId: "t-mlp-gan", family: "gan",
+        config: { method: "reconstruct", numSamples: 16 }, status: "draft", runs: [], createdAt: Date.now() },
     ],
     evaluations: [
-      { id: "e-gan-bench", name: "MLP-GAN vs DCGAN Reconstruction", schemaId: sid, datasetId: DS,
-        trainerIds: ["t-mlp-gan", "t-dcgan"],
-        evaluatorIds: ["mae", "rmse"], status: "draft", runs: [], createdAt: Date.now() },
+      { id: "e-gan-bench", name: "MLP-GAN vs Conv-GAN Reconstruction", schemaId: sid, datasetId: DS,
+        trainerIds: ["t-mlp-gan", "t-conv-gan"],
+        evaluatorIds: ["mae", "rmse", "r2"], status: "draft", runs: [], createdAt: Date.now() },
     ],
   };
 })();

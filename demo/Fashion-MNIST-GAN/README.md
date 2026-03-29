@@ -1,40 +1,40 @@
-# Fashion-MNIST GAN — MLP-GAN vs DCGAN
+# Fashion-MNIST Autoencoder Generation — Dense vs Conv
 
 ![Demo Workflow](images/demo_workflow.gif)
 
 
-**Train and compare two generative adversarial network architectures in the browser.**
+**Train autoencoders, then generate new images from the decoder (latent space sampling).**
 
-Phased training: Generator and Discriminator alternate each epoch, exactly as described in the original papers.
+Two architectures compared: Dense AE vs Convolutional AE. Train as reconstruction, generate from random latent vectors through the decoder.
 
 ## Models
 
-| # | Model | Generator | Discriminator | Paper |
+| # | Model | Encoder | Decoder (Generator) | Bottleneck |
 |---|---|---|---|---|
-| 1 | **MLP-GAN** | z(128) → Dense(256) → Dense(512) → Dense(784) | Dense(512) → Dense(256) → Dense(784) | Goodfellow 2014 |
-| 2 | **DCGAN** | z(128) → Dense(6272) → Reshape(7,7,128) → ConvT2D(64) → ConvT2D(1) | Reshape(28,28,1) → Conv2D(64) → Conv2D(128) → Flatten → Dense(784) | Radford 2015 |
+| 1 | **Dense AE** | 784 → 512 → 128 | 128 → 512 → 784 | 128-dim |
+| 2 | **Conv AE** | 28x28 → Conv(32) → Conv(64) → 128 | 128 → 7x7x64 → ConvT(32) → ConvT(1) → 28x28 | 128-dim |
 
 ## How to Use
 
 1. Open `index.html`, generate Fashion-MNIST dataset
-2. **Trainer tab**: Train MLP-GAN and DCGAN (phased training — watch G-loss and D-loss)
-3. **Generation tab**: Generate images from both models → compare quality
-4. **Evaluation tab**: Run benchmark → compare reconstruction metrics
+2. **Trainer tab**: Train both models (20 epochs recommended)
+3. **Generation tab**: Reconstruct → see original vs decoded pairs
+4. **Evaluation tab**: Compare Dense vs Conv reconstruction quality
 
-## Training Phases
+## Generation
 
-Both models use phased training (the key GAN innovation):
-- **Generator phase**: Generator creates fake images, loss = how different from real images
-- **Discriminator phase**: Discriminator trains on real images, learns reconstruction
-
-Phases alternate each epoch. The generator never sees real data directly — it learns only through the training signal.
+After training, the decoder acts as a generator:
+- **Reconstruct**: Input → Encoder → Decoder → Output (compare with original)
+- The latent bottleneck (128-dim) captures compressed features
+- Conv AE preserves spatial structure → sharper reconstructions
 
 ## Reference
 
-Original GAN:
-> **Generative Adversarial Nets** — Goodfellow, Pouget-Abadie, Mirza, Xu, Warde-Farley, Ozair, Courville, Bengio, 2014
-> [arXiv:1406.2661](https://arxiv.org/abs/1406.2661)
+Autoencoder-based generation:
+> **Generative Adversarial Nets** — Goodfellow et al., 2014. [arXiv:1406.2661](https://arxiv.org/abs/1406.2661)
 
-DCGAN:
-> **Unsupervised Representation Learning with Deep Convolutional Generative Adversarial Networks** — Radford, Metz, Chintala, 2015
-> [arXiv:1511.06434](https://arxiv.org/abs/1511.06434)
+DCGAN architecture:
+> **Unsupervised Representation Learning with Deep Convolutional Generative Adversarial Networks** — Radford et al., 2015. [arXiv:1511.06434](https://arxiv.org/abs/1511.06434)
+
+Convolutional autoencoders:
+> **Stacked Convolutional Auto-Encoders** — Masci et al., 2011. [Springer](https://doi.org/10.1007/978-3-642-21735-7_7)

@@ -388,8 +388,22 @@
       if (!g || !g.trainerId) { onStatus("Select a model first"); return; }
 
       var trainer = store.getTrainerCard(g.trainerId);
+      // if referenced trainer not trained, auto-find first trained model for this schema
+      if (!trainer || !trainer.modelArtifacts) {
+        var allTrainers = _listTrainersForSchema(g.schemaId);
+        var trained = allTrainers.filter(function (t) { return t.status === "done" && t.modelArtifacts; });
+        if (trained.length) {
+          trainer = trained[0];
+          g.trainerId = trainer.id;
+          var m2 = store ? store.getModel(trainer.modelId) : null;
+          g.family = m2 && m2.graph && modelBuilder ? modelBuilder.inferModelFamily(m2.graph) : g.family;
+          _saveGen(g);
+          onStatus("Auto-selected trained model: " + trainer.name);
+        }
+      }
+      if (!trainer || !trainer.modelArtifacts) { onStatus("No trained model available. Train a model first in the Trainer tab."); return; }
       var modelRec = store.getModel(trainer.modelId);
-      if (!trainer || !modelRec || !trainer.modelArtifacts) { onStatus("Model weights not available"); return; }
+      if (!modelRec) { onStatus("Model not found"); return; }
 
       var config = g.config || {};
       var method = config.method || "random";
