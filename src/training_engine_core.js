@@ -574,6 +574,23 @@
             model._phaseFlag.assign(tf.scalar(phaseIndex, "int32"));
           }
 
+          // freeze/unfreeze layers by weightTag per phase
+          // layers tagged with the CURRENT phase are trainable, others are frozen
+          if (model.layers) {
+            var hasAnyTag = model.layers.some(function (l) { return l._weightTag; });
+            if (hasAnyTag) {
+              model.layers.forEach(function (l) {
+                if (l._weightTag) {
+                  // layer has a tag: trainable only if tag matches current phase
+                  l.trainable = (l._weightTag === phase);
+                } else {
+                  // no tag: always trainable
+                  l.trainable = true;
+                }
+              });
+            }
+          }
+
           // compile model for this phase
           var losses = headConfigs.map(function (h, i) {
             var p = String(h.phase || "").trim();

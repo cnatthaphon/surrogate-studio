@@ -512,7 +512,9 @@
       if (node.name === "dense_layer") {
         var units = Math.max(1, Number(node.data.units || 32));
         var activation = String(node.data.activation || "relu");
-        return tf.layers.dense({ units: units, activation: activation }).apply(inTensor);
+        var denseLayer = tf.layers.dense({ units: units, activation: activation });
+        if (node.data.weightTag) denseLayer._weightTag = String(node.data.weightTag);
+        return denseLayer.apply(inTensor);
       }
       if (node.name === "conv1d_layer") {
         if (!isSequence) throw new Error("Conv1D requires sequence input mode.");

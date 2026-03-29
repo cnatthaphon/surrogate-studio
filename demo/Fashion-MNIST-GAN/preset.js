@@ -46,11 +46,11 @@
   function _mlpGan() {
     _nid = 0; var d = {};
 
-    // --- Generator: noise → image ---
+    // --- Generator: noise → image (tagged "generator") ---
     var z =    N(d, "sample_z",     { dim: 128, distribution: "normal" },         80, 60);
-    var g1 =   N(d, "dense",        { units: 256, activation: "relu" },          240, 60);
-    var g2 =   N(d, "dense",        { units: 512, activation: "relu" },          400, 60);
-    var g3 =   N(d, "dense",        { units: 784, activation: "sigmoid" },       560, 60);
+    var g1 =   N(d, "dense",        { units: 256, activation: "relu", weightTag: "generator" }, 240, 60);
+    var g2 =   N(d, "dense",        { units: 512, activation: "relu", weightTag: "generator" }, 400, 60);
+    var g3 =   N(d, "dense",        { units: 784, activation: "sigmoid", weightTag: "generator" }, 560, 60);
     var gOut = N(d, "output",       { target: "pixel_values", targetType: "pixel_values", loss: "mse", matchWeight: 1, phase: "generator", headType: "reconstruction" }, 720, 60);
     C(d, z, g1); C(d, g1, g2); C(d, g2, g3); C(d, g3, gOut);
 
@@ -64,10 +64,10 @@
     C(d, img, cat, "output_1", "input_1");
     C(d, det, cat, "output_1", "input_2");
 
-    // --- Discriminator ---
-    var d1 =   N(d, "dense",        { units: 512, activation: "relu" },          560, 240);
-    var d2 =   N(d, "dense",        { units: 256, activation: "relu" },          720, 240);
-    var d3 =   N(d, "dense",        { units: 1, activation: "sigmoid" },         880, 240);
+    // --- Discriminator (tagged "discriminator") ---
+    var d1 =   N(d, "dense",        { units: 512, activation: "relu", weightTag: "discriminator" }, 560, 240);
+    var d2 =   N(d, "dense",        { units: 256, activation: "relu", weightTag: "discriminator" }, 720, 240);
+    var d3 =   N(d, "dense",        { units: 1, activation: "sigmoid", weightTag: "discriminator" }, 880, 240);
     var dOut = N(d, "output",       { target: "label", targetType: "label", loss: "bce", matchWeight: 1, phase: "discriminator", headType: "classification" }, 1040, 240);
     C(d, cat, d1); C(d, d1, d2); C(d, d2, d3); C(d, d3, dOut);
 
@@ -79,6 +79,8 @@
     var sw =   N(d, "phase_switch", { activePhase: "discriminator" },             880, 440);
     C(d, c1, sw, "output_1", "input_1");
     C(d, c0, sw, "output_1", "input_2");
+    // PhaseSwitch → D Output input_2 (custom label source)
+    C(d, sw, dOut, "output_1", "input_2");
 
     return graph(d);
   }
@@ -89,12 +91,12 @@
   function _dcGan() {
     _nid = 0; var d = {};
 
-    // --- Conv Generator ---
+    // --- Conv Generator (tagged "generator") ---
     var z =    N(d, "sample_z",          { dim: 128, distribution: "normal" },    80, 60);
-    var gd =   N(d, "dense",             { units: 6272, activation: "relu" },    240, 60);
+    var gd =   N(d, "dense",             { units: 6272, activation: "relu", weightTag: "generator" }, 240, 60);
     var gr =   N(d, "reshape",           { targetShape: "7,7,128" },             400, 60);
-    var gc1 =  N(d, "conv2d_transpose",  { filters: 64, kernelSize: 4, strides: 2, padding: "same", activation: "relu" }, 560, 60);
-    var gc2 =  N(d, "conv2d_transpose",  { filters: 1, kernelSize: 4, strides: 2, padding: "same", activation: "sigmoid" }, 720, 60);
+    var gc1 =  N(d, "conv2d_transpose",  { filters: 64, kernelSize: 4, strides: 2, padding: "same", activation: "relu", weightTag: "generator" }, 560, 60);
+    var gc2 =  N(d, "conv2d_transpose",  { filters: 1, kernelSize: 4, strides: 2, padding: "same", activation: "sigmoid", weightTag: "generator" }, 720, 60);
     var gf =   N(d, "flatten",           {},                                     880, 60);
     var gOut = N(d, "output",            { target: "pixel_values", targetType: "pixel_values", loss: "mse", matchWeight: 1, phase: "generator", headType: "reconstruction" }, 1040, 60);
     C(d, z, gd); C(d, gd, gr); C(d, gr, gc1); C(d, gc1, gc2); C(d, gc2, gf); C(d, gf, gOut);
@@ -109,12 +111,12 @@
     C(d, img, cat, "output_1", "input_1");
     C(d, det, cat, "output_1", "input_2");
 
-    // --- Conv Discriminator ---
+    // --- Conv Discriminator (tagged "discriminator") ---
     var dr =   N(d, "reshape",           { targetShape: "28,28,1" },             560, 260);
-    var dc1 =  N(d, "conv2d",            { filters: 64, kernelSize: 4, strides: 2, padding: "same", activation: "relu" }, 720, 260);
-    var dc2 =  N(d, "conv2d",            { filters: 128, kernelSize: 4, strides: 2, padding: "same", activation: "relu" }, 880, 260);
+    var dc1 =  N(d, "conv2d",            { filters: 64, kernelSize: 4, strides: 2, padding: "same", activation: "relu", weightTag: "discriminator" }, 720, 260);
+    var dc2 =  N(d, "conv2d",            { filters: 128, kernelSize: 4, strides: 2, padding: "same", activation: "relu", weightTag: "discriminator" }, 880, 260);
     var df =   N(d, "flatten",           {},                                     1040, 260);
-    var dd =   N(d, "dense",             { units: 1, activation: "sigmoid" },    1200, 260);
+    var dd =   N(d, "dense",             { units: 1, activation: "sigmoid", weightTag: "discriminator" }, 1200, 260);
     var dOut = N(d, "output",            { target: "label", targetType: "label", loss: "bce", matchWeight: 1, phase: "discriminator", headType: "classification" }, 1360, 260);
     C(d, cat, dr); C(d, dr, dc1); C(d, dc1, dc2); C(d, dc2, df); C(d, df, dd); C(d, dd, dOut);
 
@@ -124,6 +126,8 @@
     var sw =   N(d, "phase_switch",      { activePhase: "discriminator" },        1200, 460);
     C(d, c1, sw, "output_1", "input_1");
     C(d, c0, sw, "output_1", "input_2");
+    // PhaseSwitch → D Output input_2 (custom label source)
+    C(d, sw, dOut, "output_1", "input_2");
 
     return graph(d);
   }

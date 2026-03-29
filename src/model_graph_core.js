@@ -106,7 +106,8 @@
       var html =
         "<div><div style='font-weight:700'>Output</div>" +
         "<div class='node-summary' style='font-size:11px;color:#94a3b8;'>target=" + target + ", loss=" + loss + (phase ? ", phase=" + phase : "") + "</div></div>";
-      return editor.addNode("output_layer", 1, 1, x, y, "output_layer", {
+      // 2 inputs: input_1 = prediction data, input_2 = custom label (optional, from PhaseSwitch/Constant)
+      return editor.addNode("output_layer", 2, 1, x, y, "output_layer", {
         target: target,
         targetType: target,
         loss: loss,
@@ -642,6 +643,14 @@
       function addMessage(text) {
         spec.push({ kind: "message", text: String(text || "") });
       }
+      // weightTag: common field for all trainable layer nodes
+      var _trainableNodes = { "dense_layer": 1, "conv1d_layer": 1, "conv2d_layer": 1, "conv2d_transpose_layer": 1, "lstm_layer": 1, "gru_layer": 1, "rnn_layer": 1, "embedding_layer": 1, "batchnorm_layer": 1 };
+      if (_trainableNodes[node.name]) {
+        // add weightTag at end (will appear after node-specific fields)
+        // defer: push later via _addWeightTag flag
+      }
+      var _hasWeightTag = !!_trainableNodes[node.name];
+
       if (node.name === "output_layer") {
         var target = String(d.targetType || d.target || "");
         var rawLoss = String(d.loss || "mse");
@@ -834,6 +843,7 @@
             { value: "linear", label: "linear" }
           ]
         });
+        addField({ kind: "text", key: "weightTag", label: "Weight tag (for freeze)", value: String(d.weightTag || ""), placeholder: "e.g. generator, discriminator" });
         return spec;
       }
       if (node.name === "conv1d_layer") {
@@ -884,6 +894,7 @@
         addField({ kind: "number", key: "strides", label: "Strides", value: Math.max(1, Number(d.strides || (isTranspose ? 2 : 1))), min: 1, step: 1 });
         addField({ kind: "select", key: "padding", label: "Padding", value: String(d.padding || "same"), options: [{ value: "same", label: "same" }, { value: "valid", label: "valid" }] });
         addField({ kind: "select", key: "activation", label: "Activation", value: String(d.activation || "relu"), options: [{ value: "relu", label: "relu" }, { value: "tanh", label: "tanh" }, { value: "sigmoid", label: "sigmoid" }, { value: "linear", label: "linear" }] });
+        addField({ kind: "text", key: "weightTag", label: "Weight tag (for freeze)", value: String(d.weightTag || ""), placeholder: "e.g. generator, discriminator" });
         if (isTranspose) addMessage("Upsampling convolution (decoder). Strides=2 doubles spatial dims.");
         return spec;
       }
@@ -972,6 +983,8 @@
         data.phase = String(rawValue || "").trim();
       } else if (k === "activePhase") {
         data.activePhase = String(rawValue || "").trim();
+      } else if (k === "weightTag") {
+        data.weightTag = String(rawValue || "").trim();
       } else if (k === "matchWeight") {
         data.matchWeight = Math.max(0, Number(rawValue) || 1);
       } else if (k === "wx") {
