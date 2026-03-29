@@ -1,8 +1,18 @@
 /**
  * Fashion-MNIST GAN Demo — Real Adversarial Architecture
  *
- * All GAN logic is in the graph — no hardcoded training code.
- * Building blocks: Detach, ConcatBatch, PhaseSwitch, Constant
+ * Graph structure (all composable blocks, no hardcoded training logic):
+ *
+ *   Generator:     SampleZ(128) → Dense(256) → Dense(512) → Dense(784,σ) → Output(recon, phase=generator)
+ *                                                                                ↓ [connectable]
+ *                                                                             Detach
+ *                                                                                ↓
+ *   Discriminator: ImageSource(784) ──────────────────────→ ConcatBatch(real+fake)
+ *                                                                                ↓
+ *                                                              Dense(512) → Dense(256) → Dense(1,σ) → Output(BCE, phase=discriminator)
+ *
+ *   Labels:        Constant(1) → PhaseSwitch → (training engine reads as D label source)
+ *                  Constant(0) →
  *
  * References:
  *   Goodfellow et al., "Generative Adversarial Nets", NeurIPS 2014
@@ -37,91 +47,83 @@
     _nid = 0; var d = {};
 
     // --- Generator: noise → image ---
-    var z =    N(d, "sample_z",    { dim: 128, distribution: "normal" },          80, 60);
-    var g1 =   N(d, "dense",       { units: 256, activation: "relu" },           240, 60);
-    var g2 =   N(d, "dense",       { units: 512, activation: "relu" },           400, 60);
-    var g3 =   N(d, "dense",       { units: 784, activation: "sigmoid" },        560, 60);
-    var gOut = N(d, "output",      { target: "pixel_values", targetType: "pixel_values", loss: "mse", matchWeight: 1, phase: "generator", headType: "reconstruction" }, 720, 60);
+    var z =    N(d, "sample_z",     { dim: 128, distribution: "normal" },         80, 60);
+    var g1 =   N(d, "dense",        { units: 256, activation: "relu" },          240, 60);
+    var g2 =   N(d, "dense",        { units: 512, activation: "relu" },          400, 60);
+    var g3 =   N(d, "dense",        { units: 784, activation: "sigmoid" },       560, 60);
+    var gOut = N(d, "output",       { target: "pixel_values", targetType: "pixel_values", loss: "mse", matchWeight: 1, phase: "generator", headType: "reconstruction" }, 720, 60);
     C(d, z, g1); C(d, g1, g2); C(d, g2, g3); C(d, g3, gOut);
 
-    // --- G output → Detach (stop G gradient during D phase) ---
-    var det =  N(d, "detach",      {},                                           720, 180);
+    // --- G output → Detach → feeds into D ---
+    var det =  N(d, "detach",       {},                                          720, 180);
     C(d, gOut, det);
 
-    // --- ConcatBatch: real + fake → doubled batch ---
+    // --- ConcatBatch: real + fake ---
     var img =  N(d, "image_source", { sourceKey: "pixel_values", featureSize: 784, imageShape: [28,28,1] }, 80, 300);
-    var cat =  N(d, "concat_batch", {},                                          400, 260);
+    var cat =  N(d, "concat_batch", {},                                          400, 240);
     C(d, img, cat, "output_1", "input_1");
     C(d, det, cat, "output_1", "input_2");
 
-    // --- Discriminator: real/fake classifier ---
-    var d1 =   N(d, "dense",       { units: 512, activation: "relu" },           560, 260);
-    var d2 =   N(d, "dense",       { units: 256, activation: "relu" },           720, 260);
-    var d3 =   N(d, "dense",       { units: 1, activation: "sigmoid" },          880, 260);
-    C(d, cat, d1); C(d, d1, d2); C(d, d2, d3);
+    // --- Discriminator ---
+    var d1 =   N(d, "dense",        { units: 512, activation: "relu" },          560, 240);
+    var d2 =   N(d, "dense",        { units: 256, activation: "relu" },          720, 240);
+    var d3 =   N(d, "dense",        { units: 1, activation: "sigmoid" },         880, 240);
+    var dOut = N(d, "output",       { target: "label", targetType: "label", loss: "bce", matchWeight: 1, phase: "discriminator", headType: "classification" }, 1040, 240);
+    C(d, cat, d1); C(d, d1, d2); C(d, d2, d3); C(d, d3, dOut);
 
-    // --- Labels: PhaseSwitch routes by phase ---
-    var c1 =   N(d, "constant",    { value: 1, dim: 1 },                        560, 420);
-    var c0 =   N(d, "constant",    { value: 0, dim: 1 },                        560, 500);
-    var sw =   N(d, "phase_switch", {},                                          720, 460);
+    // --- Label routing: Constant(1) + Constant(0) → PhaseSwitch ---
+    // PhaseSwitch output = labels for D (phase 0→input_1, phase 1→input_2)
+    // Training engine reads PhaseSwitch output as target override for D
+    var c1 =   N(d, "constant",     { value: 1, dim: 1 },                       720, 400);
+    var c0 =   N(d, "constant",     { value: 0, dim: 1 },                       720, 480);
+    var sw =   N(d, "phase_switch", {},                                          880, 440);
     C(d, c1, sw, "output_1", "input_1");
     C(d, c0, sw, "output_1", "input_2");
-
-    // --- D Output: concat D prediction + phase label → BCE ---
-    var dOut = N(d, "output",      { target: "label", targetType: "label", loss: "bce", matchWeight: 1, phase: "discriminator", headType: "classification" }, 1040, 340);
-    C(d, d3, dOut);
-    // PhaseSwitch provides the target label for training
-    // (connected as second input to output — the engine reads it as label source)
-    C(d, sw, dOut, "output_1", "input_2");
 
     return graph(d);
   }
 
   // ═══════════════════════════════════════════
-  // Model 2: DCGAN (Radford 2015) — Conv layers
+  // Model 2: DCGAN (Radford 2015)
   // ═══════════════════════════════════════════
   function _dcGan() {
     _nid = 0; var d = {};
 
-    // --- Conv Generator: noise → reshape → convT → image ---
-    var z =    N(d, "sample_z",         { dim: 128, distribution: "normal" },     80, 60);
-    var gd =   N(d, "dense",            { units: 6272, activation: "relu" },     240, 60);
-    var gr =   N(d, "reshape",          { targetShape: "7,7,128" },              400, 60);
-    var gc1 =  N(d, "conv2d_transpose", { filters: 64, kernelSize: 4, strides: 2, padding: "same", activation: "relu" }, 560, 60);
-    var gc2 =  N(d, "conv2d_transpose", { filters: 1, kernelSize: 4, strides: 2, padding: "same", activation: "sigmoid" }, 720, 60);
-    var gf =   N(d, "flatten",          {},                                      880, 60);
-    var gOut = N(d, "output",           { target: "pixel_values", targetType: "pixel_values", loss: "mse", matchWeight: 1, phase: "generator", headType: "reconstruction" }, 1040, 60);
+    // --- Conv Generator ---
+    var z =    N(d, "sample_z",          { dim: 128, distribution: "normal" },    80, 60);
+    var gd =   N(d, "dense",             { units: 6272, activation: "relu" },    240, 60);
+    var gr =   N(d, "reshape",           { targetShape: "7,7,128" },             400, 60);
+    var gc1 =  N(d, "conv2d_transpose",  { filters: 64, kernelSize: 4, strides: 2, padding: "same", activation: "relu" }, 560, 60);
+    var gc2 =  N(d, "conv2d_transpose",  { filters: 1, kernelSize: 4, strides: 2, padding: "same", activation: "sigmoid" }, 720, 60);
+    var gf =   N(d, "flatten",           {},                                     880, 60);
+    var gOut = N(d, "output",            { target: "pixel_values", targetType: "pixel_values", loss: "mse", matchWeight: 1, phase: "generator", headType: "reconstruction" }, 1040, 60);
     C(d, z, gd); C(d, gd, gr); C(d, gr, gc1); C(d, gc1, gc2); C(d, gc2, gf); C(d, gf, gOut);
 
     // --- G output → Detach ---
-    var det =  N(d, "detach",           {},                                      1040, 180);
+    var det =  N(d, "detach",            {},                                     1040, 180);
     C(d, gOut, det);
 
     // --- ConcatBatch: real + fake ---
-    var img =  N(d, "image_source",     { sourceKey: "pixel_values", featureSize: 784, imageShape: [28,28,1] }, 80, 320);
-    var cat =  N(d, "concat_batch",     {},                                      400, 280);
+    var img =  N(d, "image_source",      { sourceKey: "pixel_values", featureSize: 784, imageShape: [28,28,1] }, 80, 320);
+    var cat =  N(d, "concat_batch",      {},                                     400, 260);
     C(d, img, cat, "output_1", "input_1");
     C(d, det, cat, "output_1", "input_2");
 
     // --- Conv Discriminator ---
-    var dr =   N(d, "reshape",          { targetShape: "28,28,1" },              560, 280);
-    var dc1 =  N(d, "conv2d",           { filters: 64, kernelSize: 4, strides: 2, padding: "same", activation: "relu" }, 720, 280);
-    var dc2 =  N(d, "conv2d",           { filters: 128, kernelSize: 4, strides: 2, padding: "same", activation: "relu" }, 880, 280);
-    var df =   N(d, "flatten",          {},                                      1040, 280);
-    var dd =   N(d, "dense",            { units: 1, activation: "sigmoid" },     1200, 280);
-    C(d, cat, dr); C(d, dr, dc1); C(d, dc1, dc2); C(d, dc2, df); C(d, df, dd);
+    var dr =   N(d, "reshape",           { targetShape: "28,28,1" },             560, 260);
+    var dc1 =  N(d, "conv2d",            { filters: 64, kernelSize: 4, strides: 2, padding: "same", activation: "relu" }, 720, 260);
+    var dc2 =  N(d, "conv2d",            { filters: 128, kernelSize: 4, strides: 2, padding: "same", activation: "relu" }, 880, 260);
+    var df =   N(d, "flatten",           {},                                     1040, 260);
+    var dd =   N(d, "dense",             { units: 1, activation: "sigmoid" },    1200, 260);
+    var dOut = N(d, "output",            { target: "label", targetType: "label", loss: "bce", matchWeight: 1, phase: "discriminator", headType: "classification" }, 1360, 260);
+    C(d, cat, dr); C(d, dr, dc1); C(d, dc1, dc2); C(d, dc2, df); C(d, df, dd); C(d, dd, dOut);
 
     // --- Labels ---
-    var c1 =   N(d, "constant",         { value: 1, dim: 1 },                   880, 440);
-    var c0 =   N(d, "constant",         { value: 0, dim: 1 },                   880, 520);
-    var sw =   N(d, "phase_switch",     {},                                      1040, 480);
+    var c1 =   N(d, "constant",          { value: 1, dim: 1 },                  1040, 420);
+    var c0 =   N(d, "constant",          { value: 0, dim: 1 },                  1040, 500);
+    var sw =   N(d, "phase_switch",      {},                                     1200, 460);
     C(d, c1, sw, "output_1", "input_1");
     C(d, c0, sw, "output_1", "input_2");
-
-    // --- D Output ---
-    var dOut = N(d, "output",           { target: "label", targetType: "label", loss: "bce", matchWeight: 1, phase: "discriminator", headType: "classification" }, 1360, 360);
-    C(d, dd, dOut);
-    C(d, sw, dOut, "output_1", "input_2");
 
     return graph(d);
   }
