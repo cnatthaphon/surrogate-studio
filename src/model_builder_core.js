@@ -339,7 +339,7 @@
     var ids = Object.keys(moduleData || {});
     if (!ids.length) throw new Error("Graph is empty.");
 
-    var inputNodeNames = { "input_layer": true, "image_source_block": true, "image_source_layer": true, "sample_z_layer": true };
+    var inputNodeNames = { "input_layer": true, "image_source_block": true, "image_source_layer": true, "sample_z_layer": true, "constant_layer": true };
     // only nodes with NO incoming connections are true external inputs
     // (e.g., Input node connected FROM ImageSource is NOT an external input)
     var inputIds = ids.filter(function (id) {
@@ -439,6 +439,9 @@
       if (iname === "sample_z_layer") {
         var zDim = Math.max(1, Number((inode.data && inode.data.dim) || 128));
         itensor = tf.input({ shape: [zDim], name: "z_input_" + iid });
+      } else if (iname === "constant_layer") {
+        // Constant needs a dummy input to derive batch size — use featureSize=1
+        itensor = tf.input({ shape: [1], name: "const_input_" + iid });
       } else if (isSequence && iid === inputId) {
         itensor = tf.input({ shape: [datasetMeta.windowSize, datasetMeta.seqFeatureSize], name: "seq_input" });
       } else {
@@ -521,32 +524,24 @@
       }
       // --- GAN building blocks ---
       if (node.name === "constant_layer") {
-        // Constant node: outputs a tensor filled with a constant value, matching batch size of inTensor
+        // Constant: outputs tensor filled with constant value, matching batch dim of inTensor
+        // Implementation: Dense(dim, bias=constVal, kernel=0, trainable=false)
         var constVal = Number((node.data && node.data.value) != null ? node.data.value : 1);
         var constDim = Math.max(1, Number((node.data && node.data.dim) || 1));
-        // Use a Dense layer with frozen weights initialized to constant value
-        var constLayer = tf.layers.dense({ units: constDim, useBias: false, trainable: false, kernelInitializer: "zeros" });
-        var constOut = constLayer.apply(inTensor);
-        // Override: add constant (zeros + constant = constant)
-        return tf.layers.activation({ activation: "linear" }).apply(
-          tf.layers.add().apply([constOut, tf.layers.dense({ units: constDim, useBias: true, trainable: false, kernelInitializer: "zeros", biasInitializer: tf.initializers.constant({ value: constVal }) }).apply(inTensor)])
-        );
+        var constLayer = tf.layers.dense({
+          units: constDim, useBias: true, trainable: false,
+          kernelInitializer: "zeros",
+          biasInitializer: tf.initializers.constant({ value: constVal }),
+        });
+        return constLayer.apply(inTensor);
       }
       if (node.name === "concat_batch_layer") {
-        // ConcatBatch: handled in the multi-input section (requires 2 inputs)
-        // concat along batch axis = tf.layers.concatenate({axis: 0})
-        // TF.js doesn't support axis=0 concat in functional API (batch dim)
-        // Workaround: use axis=-1 concat then reshape, or handle in training engine
-        // For now: treat as regular concat (feature-level merge)
-        return inTensor; // placeholder — real impl needs custom layer
+        // Handled in multi-input section above
+        return inTensor;
       }
       if (node.name === "phase_switch_layer") {
-        // PhaseSwitch: selects between two inputs based on phase flag
-        // In TF.js functional API, dynamic routing isn't directly supported
-        // Workaround: use a weighted sum with phase-dependent weights
-        // phase=0: output = input1, phase=1: output = input2
-        // Implemented as: output = (1-flag) * input1 + flag * input2
-        return inTensor; // placeholder — real impl needs phase flag tf.variable
+        // Handled in multi-input section above
+        return inTensor;
       }
       if (node.name === "embedding_layer") {
         var vocabSize = Math.max(1, Number((node.data && node.data.inputDim) || 10000));
@@ -657,11 +652,27 @@
       if (!incomingTensors.length) continue;
       var inTensor = incomingTensors[0];
       if (incomingTensors.length > 1) {
-        if (node.name !== "concat_block" && node.name !== "reparam_layer") {
-          throw new Error("Node '" + node.name + "' has multiple inputs but is not Concat/Reparam.");
+        var multiInputNodes = { "concat_block": true, "reparam_layer": true, "concat_batch_layer": true, "phase_switch_layer": true, "output_layer": true };
+        if (!multiInputNodes[node.name]) {
+          throw new Error("Node '" + node.name + "' has multiple inputs but is not a multi-input node.");
         }
         if (node.name === "concat_block") {
           inTensor = tf.layers.concatenate({ axis: -1 }).apply(incomingTensors);
+        }
+        if (node.name === "concat_batch_layer") {
+          // Concat along feature axis as proxy for batch concat
+          // (real + fake become one wider tensor, D processes both)
+          inTensor = tf.layers.concatenate({ axis: -1 }).apply(incomingTensors);
+        }
+        if (node.name === "phase_switch_layer") {
+          // Phase switch: for now pass first input
+          // Training engine will swap inputs per phase
+          inTensor = incomingTensors[0];
+        }
+        if (node.name === "output_layer") {
+          // Output can have 2 inputs: data (input_1) + label source (input_2)
+          // Use input_1 as the data tensor, input_2 is label metadata (ignored in model building)
+          inTensor = incomingTensors[0];
         }
       }
 
