@@ -55,7 +55,7 @@
     C(d, z, g1); C(d, g1, g2); C(d, g2, g3); C(d, g3, gOut);
 
     // --- G output → Detach → feeds into D ---
-    var det =  N(d, "detach",       {},                                          720, 180);
+    var det =  N(d, "detach",       { activePhase: "discriminator" },             720, 180);
     C(d, gOut, det);
 
     // --- ConcatBatch: real + fake ---
@@ -76,7 +76,7 @@
     // Training engine reads PhaseSwitch output as target override for D
     var c1 =   N(d, "constant",     { value: 1, dim: 1 },                       720, 400);
     var c0 =   N(d, "constant",     { value: 0, dim: 1 },                       720, 480);
-    var sw =   N(d, "phase_switch", {},                                          880, 440);
+    var sw =   N(d, "phase_switch", { activePhase: "discriminator" },             880, 440);
     C(d, c1, sw, "output_1", "input_1");
     C(d, c0, sw, "output_1", "input_2");
 
@@ -100,7 +100,7 @@
     C(d, z, gd); C(d, gd, gr); C(d, gr, gc1); C(d, gc1, gc2); C(d, gc2, gf); C(d, gf, gOut);
 
     // --- G output → Detach ---
-    var det =  N(d, "detach",            {},                                     1040, 180);
+    var det =  N(d, "detach",            { activePhase: "discriminator" },        1040, 180);
     C(d, gOut, det);
 
     // --- ConcatBatch: real + fake ---
@@ -121,7 +121,7 @@
     // --- Labels ---
     var c1 =   N(d, "constant",          { value: 1, dim: 1 },                  1040, 420);
     var c0 =   N(d, "constant",          { value: 0, dim: 1 },                  1040, 500);
-    var sw =   N(d, "phase_switch",      {},                                     1200, 460);
+    var sw =   N(d, "phase_switch",      { activePhase: "discriminator" },        1200, 460);
     C(d, c1, sw, "output_1", "input_1");
     C(d, c0, sw, "output_1", "input_2");
 

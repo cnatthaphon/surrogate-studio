@@ -626,10 +626,12 @@
       // TF.js doesn't have a built-in stopGradient layer,
       // but we mark it and handle in phased training engine
       if (node.name === "detach_layer") {
-        // for single-phase training: identity (no gradient control needed)
-        // for phased training: the engine will use tf.stopGradients
+        // Phase-conditional gradient stop:
+        // activePhase set → only stop gradient during that phase, passthrough otherwise
+        // activePhase empty → stop gradient always
         var detachLayer = tf.layers.activation({ activation: "linear" });
         detachLayer._isDetach = true;
+        detachLayer._detachActivePhase = String((node.data && node.data.activePhase) || "");
         return detachLayer.apply(inTensor);
       }
       // NoiseInjection: add Gaussian noise (training only)

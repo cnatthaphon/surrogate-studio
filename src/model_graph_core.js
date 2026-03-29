@@ -258,9 +258,11 @@
 
     // === New building blocks for GAN/Diffusion ===
 
-    function addDetachNode(editor, x, y) {
-      var html = "<div><div style='font-weight:700'>Detach</div><div class='node-summary' style='font-size:11px;color:#94a3b8;'>stop gradient</div></div>";
-      return editor.addNode("detach_layer", 1, 1, x, y, "detach_layer", {}, html);
+    function addDetachNode(editor, x, y, cfg) {
+      var activePhase = String((cfg && cfg.activePhase) || "");
+      var html = "<div><div style='font-weight:700'>Detach</div><div class='node-summary' style='font-size:11px;color:#94a3b8;'>" +
+        (activePhase ? "stop grad in phase=" + activePhase : "stop gradient (all phases)") + "</div></div>";
+      return editor.addNode("detach_layer", 1, 1, x, y, "detach_layer", { activePhase: activePhase }, html);
     }
 
     function addSampleZNode(editor, x, y, cfg) {
@@ -310,8 +312,10 @@
       return editor.addNode("concat_batch_layer", 2, 1, x, y, "concat_batch_layer", {}, html);
     }
     function addPhaseSwitchNode(editor, x, y, cfg) {
-      var html = "<div><div style='font-weight:700'>PhaseSwitch</div><div class='node-summary' style='font-size:11px;color:#94a3b8;'>selects input by phase</div></div>";
-      return editor.addNode("phase_switch_layer", 2, 1, x, y, "phase_switch_layer", {}, html);
+      var activePhase = String((cfg && cfg.activePhase) || "");
+      var html = "<div><div style='font-weight:700'>PhaseSwitch</div><div class='node-summary' style='font-size:11px;color:#94a3b8;'>" +
+        (activePhase ? "phase=" + activePhase + " \u2192 in1, else \u2192 in2" : "set activePhase") + "</div></div>";
+      return editor.addNode("phase_switch_layer", 2, 1, x, y, "phase_switch_layer", { activePhase: activePhase }, html);
     }
 
     // --- Conv2D building blocks ---
@@ -590,7 +594,8 @@
       }
       if (node.name === "constant_layer") { return "const=" + Number(d.value != null ? d.value : 1) + ", dim=" + Number(d.dim || 1); }
       if (node.name === "concat_batch_layer") { return "concat batches (2 inputs)"; }
-      if (node.name === "phase_switch_layer") { return "switch by training phase"; }
+      if (node.name === "phase_switch_layer") { var swPh = String(d.activePhase || ""); return swPh ? "phase=" + swPh + " \u2192 in1, else \u2192 in2" : "set activePhase"; }
+      if (node.name === "detach_layer") { var detPh = String(d.activePhase || ""); return detPh ? "stop grad in " + detPh : "stop gradient"; }
       if (node.name === "embedding_layer") {
         return "vocab=" + Number(d.inputDim || 10000) + ", dim=" + Number(d.outputDim || 256);
       }
@@ -685,7 +690,8 @@
       }
       // --- Detach node ---
       if (node.name === "detach_layer") {
-        addMessage("Stops gradient flow. Data passes through unchanged, but backpropagation stops here.");
+        addField({ kind: "text", key: "activePhase", label: "Active phase (stop gradient)", value: String(d.activePhase || ""), placeholder: "e.g. discriminator (empty=all)" });
+        addMessage("Stops gradient in the specified phase. Empty = stop in all phases. In GAN: set to discriminator phase so G gradient flows during generator phase.");
         return spec;
       }
       // --- SampleZ node ---
@@ -860,7 +866,8 @@
         return spec;
       }
       if (node.name === "phase_switch_layer") {
-        addMessage("Selects Input 1 or Input 2 based on current training phase index. Phase 0 → Input 1, Phase 1+ → Input 2. Use for switching GAN labels.");
+        addField({ kind: "text", key: "activePhase", label: "Active phase (select input 1)", value: String(d.activePhase || ""), placeholder: "e.g. discriminator" });
+        addMessage("When training phase matches → passes Input 1. Otherwise → passes Input 2. Use for GAN label switching.");
         return spec;
       }
       if (node.name === "embedding_layer") {
@@ -963,6 +970,8 @@
         data.loss = validLosses.indexOf(vLoss) >= 0 ? vLoss : "mse";
       } else if (k === "phase") {
         data.phase = String(rawValue || "").trim();
+      } else if (k === "activePhase") {
+        data.activePhase = String(rawValue || "").trim();
       } else if (k === "matchWeight") {
         data.matchWeight = Math.max(0, Number(rawValue) || 1);
       } else if (k === "wx") {
