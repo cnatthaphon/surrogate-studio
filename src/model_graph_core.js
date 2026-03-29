@@ -636,9 +636,7 @@
           value: target,
           options: targetOptions
         });
-        // headType: auto-derived from schema target metadata
-        var htLabel = headType || "auto (from schema)";
-        addField({ kind: "info", key: "headType", label: "Head type", value: htLabel });
+        // headType is internal — used by engine, not shown to user
         addField({
           kind: "select",
           key: "loss",
