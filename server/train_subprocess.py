@@ -616,7 +616,6 @@ def build_model_from_graph(graph, feature_size, target_size, num_classes=0):
                 elif t == "output":
                     htype = str(c.get("headType", "regression")).lower()
                     oloss = str(c.get("loss", "mse")).lower()
-                    # BCE = binary (1 unit), CE = multi-class (numClasses)
                     if oloss == "bce":
                         odim = 1
                     elif htype == "classification" and num_classes > 0:
@@ -624,7 +623,11 @@ def build_model_from_graph(graph, feature_size, target_size, num_classes=0):
                     else:
                         odim = target_size
                     out_in = in_dim if isinstance(in_dim, int) else (in_dim[-1] if isinstance(in_dim, list) else in_dim)
-                    setattr(self, f"out_{nid}", nn.Linear(out_in, odim))
+                    # skip linear projection if input dim already matches output dim
+                    if out_in == odim:
+                        setattr(self, f"out_{nid}", nn.Identity())
+                    else:
+                        setattr(self, f"out_{nid}", nn.Linear(out_in, odim))
                     dim_map[nid] = odim
                     self.output_ids.append(nid)
                 else:
