@@ -1428,6 +1428,8 @@
           earlyStoppingPatience: config.earlyStoppingPatience != null ? Number(config.earlyStoppingPatience) : 5,
           restoreBestWeights: config.restoreBestWeights !== false,
           gradClipNorm: Number(config.gradClipNorm || 0),
+          trainingSchedule: config.trainingSchedule || null,
+          rotateSchedule: config.rotateSchedule !== false,
           onEpochData: function (payload) {
             if (currentMountId !== _mountId) return;
             var logEntry = { epoch: payload.epoch, loss: payload.loss, val_loss: payload.val_loss, current_lr: payload.current_lr, improved: payload.improved };
