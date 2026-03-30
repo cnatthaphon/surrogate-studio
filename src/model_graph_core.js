@@ -314,7 +314,9 @@
     }
     function addPhaseSwitchNode(editor, x, y, cfg) {
       var activePhase = String((cfg && cfg.activePhase) || "");
-      var html = "<div><div style='font-weight:700'>PhaseSwitch</div><div class='node-summary' style='font-size:11px;color:#94a3b8;'>" +
+      var html = "<div><div style='font-weight:700'>PhaseSwitch</div>" +
+        "<div style='font-size:9px;color:#64748b;'>in1: phase=" + (activePhase || "?") + " | in2: else</div>" +
+        "<div class='node-summary' style='font-size:11px;color:#94a3b8;'>" +
         (activePhase ? "phase=" + activePhase + " \u2192 in1, else \u2192 in2" : "set activePhase") + "</div></div>";
       return editor.addNode("phase_switch_layer", 2, 1, x, y, "phase_switch_layer", { activePhase: activePhase }, html);
     }
@@ -543,6 +545,14 @@
       if (!node) return "";
       var d = node.data || {};
       var sid = api.resolveSchemaId(schemaId || api.getCurrentSchemaId() || "oscillator");
+      // build main summary then append common tags
+      var _main = _getNodeMainSummary(node, nodeId, moduleData, sid, d);
+      var _tags = [];
+      if (d.blockName) _tags.push(d.blockName);
+      if (d.weightTag) _tags.push("[" + d.weightTag + "]");
+      return _tags.length ? _main + " " + _tags.join(" ") : _main;
+    }
+    function _getNodeMainSummary(node, nodeId, moduleData, sid, d) {
       if (node.name === "input_layer") return "mode=" + String(d.mode || "auto");
       if (node.name === "dense_layer") return "u=" + Number(d.units || 32) + ", act=" + String(d.activation || "relu");
       if (node.name === "latent_layer") return "u=" + Number(d.units || 16) + ", g=" + String(d.group || "z_shared") + ", w=" + Number(d.matchWeight || 1).toFixed(2);
@@ -666,6 +676,7 @@
         });
         if (!targetOptions.length && target) targetOptions.push({ value: target, label: target });
         targetOptions.unshift({ value: "none", label: "None (passthrough)" });
+        targetOptions.push({ value: "custom", label: "Custom (from input_2 connection)" });
         addField({
           kind: "select",
           key: "targetType",
@@ -846,6 +857,7 @@
           ]
         });
         addField({ kind: "text", key: "weightTag", label: "Weight tag (for freeze)", value: String(d.weightTag || ""), placeholder: "e.g. generator, discriminator" });
+        addField({ kind: "text", key: "blockName", label: "Block name", value: String(d.blockName || ""), placeholder: "e.g. G_dense1, D_fc2" });
         return spec;
       }
       if (node.name === "conv1d_layer") {
@@ -987,6 +999,8 @@
         data.activePhase = String(rawValue || "").trim();
       } else if (k === "weightTag") {
         data.weightTag = String(rawValue || "").trim();
+      } else if (k === "blockName") {
+        data.blockName = String(rawValue || "").trim();
       } else if (k === "matchWeight") {
         data.matchWeight = Math.max(0, Number(rawValue) || 1);
       } else if (k === "wx") {

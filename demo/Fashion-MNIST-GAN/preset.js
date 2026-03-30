@@ -42,10 +42,10 @@
 
     // Generator (tagged "generator")
     var z =    N(d, "sample_z",     { dim: 128, distribution: "normal" },         80, 60);
-    var g1 =   N(d, "dense",        { units: 256, activation: "relu", weightTag: "generator" }, 240, 60);
-    var g2 =   N(d, "dense",        { units: 512, activation: "relu", weightTag: "generator" }, 400, 60);
-    var g3 =   N(d, "dense",        { units: 784, activation: "sigmoid", weightTag: "generator" }, 560, 60);
-    var gOut = N(d, "output",       { target: "pixel_values", targetType: "pixel_values", loss: "none", matchWeight: 0, phase: "generator", headType: "reconstruction" }, 720, 60);
+    var g1 =   N(d, "dense",        { units: 256, activation: "relu", weightTag: "generator", blockName: "G1" }, 240, 60);
+    var g2 =   N(d, "dense",        { units: 512, activation: "relu", weightTag: "generator", blockName: "G2" }, 400, 60);
+    var g3 =   N(d, "dense",        { units: 784, activation: "sigmoid", weightTag: "generator", blockName: "G3" }, 560, 60);
+    var gOut = N(d, "output",       { target: "none", targetType: "none", loss: "none", matchWeight: 0, phase: "generator", headType: "reconstruction" }, 720, 60);
     C(d, z, g1); C(d, g1, g2); C(d, g2, g3); C(d, g3, gOut);
 
     // G output → ConcatBatch with real images (no Detach — weight tags handle freeze)
@@ -58,7 +58,7 @@
     var d1 =   N(d, "dense",        { units: 512, activation: "relu", weightTag: "discriminator" }, 560, 180);
     var d2 =   N(d, "dense",        { units: 256, activation: "relu", weightTag: "discriminator" }, 720, 180);
     var d3 =   N(d, "dense",        { units: 1, activation: "sigmoid", weightTag: "discriminator" }, 880, 180);
-    var dOut = N(d, "output",       { target: "label", targetType: "label", loss: "bce", matchWeight: 1, phase: "discriminator", headType: "classification" }, 1040, 180);
+    var dOut = N(d, "output",       { target: "custom", targetType: "custom", loss: "bce", matchWeight: 1, phase: "discriminator", headType: "classification" }, 1040, 180);
     C(d, cat, d1); C(d, d1, d2); C(d, d2, d3); C(d, d3, dOut);
 
     // Labels: PhaseSwitch routes by phase → D Output custom label
@@ -85,7 +85,7 @@
     var gc1 =  N(d, "conv2d_transpose",  { filters: 64, kernelSize: 4, strides: 2, padding: "same", activation: "relu", weightTag: "generator" }, 560, 60);
     var gc2 =  N(d, "conv2d_transpose",  { filters: 1, kernelSize: 4, strides: 2, padding: "same", activation: "sigmoid", weightTag: "generator" }, 720, 60);
     var gf =   N(d, "flatten",           {},                                     880, 60);
-    var gOut = N(d, "output",            { target: "pixel_values", targetType: "pixel_values", loss: "none", matchWeight: 0, phase: "generator", headType: "reconstruction" }, 1040, 60);
+    var gOut = N(d, "output",            { target: "none", targetType: "none", loss: "none", matchWeight: 0, phase: "generator", headType: "reconstruction" }, 1040, 60);
     C(d, z, gd); C(d, gd, gr); C(d, gr, gc1); C(d, gc1, gc2); C(d, gc2, gf); C(d, gf, gOut);
 
     // G output → ConcatBatch with real
@@ -100,7 +100,7 @@
     var dc2 =  N(d, "conv2d",            { filters: 128, kernelSize: 4, strides: 2, padding: "same", activation: "relu", weightTag: "discriminator" }, 980, 200);
     var df =   N(d, "flatten",           {},                                     1140, 200);
     var dd =   N(d, "dense",             { units: 1, activation: "sigmoid", weightTag: "discriminator" }, 1300, 200);
-    var dOut = N(d, "output",            { target: "label", targetType: "label", loss: "bce", matchWeight: 1, phase: "discriminator", headType: "classification" }, 1460, 200);
+    var dOut = N(d, "output",            { target: "custom", targetType: "custom", loss: "bce", matchWeight: 1, phase: "discriminator", headType: "classification" }, 1460, 200);
     C(d, cat, dr); C(d, dr, dc1); C(d, dc1, dc2); C(d, dc2, df); C(d, df, dd); C(d, dd, dOut);
 
     // Labels
