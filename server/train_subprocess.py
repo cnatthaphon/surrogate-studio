@@ -185,14 +185,16 @@ def main():
             head_pred = preds[i] if i < len(preds) else preds[0]
             # determine target for this head
             if hl.get("bce_binary"):
-                # BCE with ConcatBatch: first half = real (1), second half = fake (0)
-                n = head_pred.shape[0]
-                half = n // 2
-                if half > 0 and n > yb.shape[0]:
-                    # doubled batch from ConcatBatch: real=1 fake=0
-                    target = torch.cat([torch.ones(half, 1, device=device), torch.zeros(n - half, 1, device=device)], dim=0)
+                # BCE: use custom label from PhaseSwitch (connected to output input_2)
+                custom_labels = getattr(model, '_custom_labels', {})
+                # find which output node this head corresponds to
+                oid = model.output_ids[i] if i < len(model.output_ids) else None
+                if oid and oid in custom_labels:
+                    target = custom_labels[oid]
+                    if target.shape != head_pred.shape:
+                        target = target.expand_as(head_pred)
                 else:
-                    target = torch.ones(n, 1, device=device)
+                    target = torch.ones_like(head_pred)
             elif hl["cls"]:
                 target = yb.long().squeeze(-1) if yb.dtype != torch.long else yb.squeeze(-1)
                 total = total + hl["weight"] * hl["fn"](head_pred, target)
@@ -624,9 +626,9 @@ def build_model_from_graph(graph, feature_size, target_size, num_classes=0):
                 elif t == "detach":
                     dim_map[nid] = in_dim
                 elif t == "concat_batch":
-                    # concat along batch axis: [N, dim] + [N, dim] → [2N, dim]
-                    # feature dim stays the same
-                    dim_map[nid] = in_dim
+                    # concat along feature axis: [N, d1] + [N, d2] → [N, d1+d2]
+                    total_dim = sum(parent_dims) if parent_dims else in_dim * 2
+                    dim_map[nid] = total_dim
                 elif t == "phase_switch":
                     dim_map[nid] = in_dim
                 elif t == "constant":
@@ -789,10 +791,11 @@ def build_model_from_graph(graph, feature_size, target_size, num_classes=0):
                 elif t == "detach":
                     tensors[nid] = inp.detach()
                 elif t == "concat_batch":
-                    # concat along BATCH axis: [N, dim] + [N, dim] → [2N, dim]
+                    # concat along feature axis: [N, dim1] + [N, dim2] → [N, dim1+dim2]
+                    # same as TF.js client — D processes combined features
                     parent_tensors = [tensors[p["from"]] for p in parents_sorted if p["from"] in tensors]
                     if len(parent_tensors) >= 2:
-                        tensors[nid] = torch.cat(parent_tensors, dim=0)
+                        tensors[nid] = torch.cat(parent_tensors, dim=-1)
                     else:
                         tensors[nid] = inp
                     continue
@@ -842,6 +845,13 @@ def build_model_from_graph(graph, feature_size, target_size, num_classes=0):
                     # flatten conv output if needed before linear
                     out_inp = inp.view(inp.shape[0], -1) if inp.dim() > 2 else inp
                     tensors[nid] = getattr(self, f"out_{nid}")(out_inp)
+                    # if target=custom, store input_2 as label (from PhaseSwitch/Constant)
+                    if len(parents_sorted) >= 2:
+                        label_parent = parents_sorted[1]["from"]
+                        if label_parent in tensors:
+                            if not hasattr(self, '_custom_labels'):
+                                self._custom_labels = {}
+                            self._custom_labels[nid] = tensors[label_parent]
                 else:
                     tensors[nid] = inp
 
