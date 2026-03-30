@@ -306,22 +306,26 @@ def main():
 
         total_train_loss = sum(phase_losses.values()) / max(len(phase_losses), 1)
 
-        # Validate
-        model.eval()
-        val_loss = 0.0
-        n_val = 0
-        with torch.no_grad():
-            for xb, yb in val_dl:
-                xb, yb = xb.to(device), yb.to(device)
-                pred = model(xb)
-                loss = compute_loss(pred, xb, yb, "")  # empty = all phases
-                val_loss += loss.item()
-                n_val += 1
-        val_loss /= max(n_val, 1)
+        # Validate (skip if no val data)
+        val_loss = None
+        if x_val.size > 0:
+            model.eval()
+            val_loss = 0.0
+            n_val = 0
+            with torch.no_grad():
+                for xb, yb in val_dl:
+                    xb, yb = xb.to(device), yb.to(device)
+                    pred = model(xb)
+                    loss = compute_loss(pred, xb, yb, "")
+                    val_loss += loss.item()
+                    n_val += 1
+            val_loss /= max(n_val, 1)
 
-        improved = val_loss < best_val_loss
+        # use val_loss if available, else train loss for early stopping
+        check_loss = val_loss if val_loss is not None else total_train_loss
+        improved = check_loss < best_val_loss
         if improved:
-            best_val_loss = val_loss
+            best_val_loss = check_loss
             best_epoch = ep
             best_state = {k: v.cpu().clone() for k, v in model.state_dict().items()}
             no_improve = 0
@@ -329,7 +333,7 @@ def main():
             no_improve += 1
 
         current_lr = optimizer.param_groups[0]["lr"]
-        scheduler.step(val_loss)
+        scheduler.step(check_loss)
 
         epoch_log(ep, total_train_loss, val_loss, current_lr, improved)
 

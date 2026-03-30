@@ -339,7 +339,7 @@
     var ids = Object.keys(moduleData || {});
     if (!ids.length) throw new Error("Graph is empty.");
 
-    var inputNodeNames = { "input_layer": true, "image_source_block": true, "image_source_layer": true, "sample_z_layer": true, "constant_layer": true };
+    var inputNodeNames = { "input_layer": true, "image_source_block": true, "image_source_layer": true, "sample_z_layer": true };
     // only nodes with NO incoming connections are true external inputs
     // (e.g., Input node connected FROM ImageSource is NOT an external input)
     var inputIds = ids.filter(function (id) {
@@ -383,10 +383,23 @@
       return ins;
     };
 
-    // reachability from input
+    // reachability from input + root nodes (Constant, PhaseSwitch have no parents)
     var reachable = {};
     var q = allInputIds.slice();
     allInputIds.forEach(function (iid) { reachable[iid] = true; });
+    // add rootless nodes (no incoming connections, not input nodes)
+    ids.forEach(function (id) {
+      var n = moduleData[id];
+      if (!n || reachable[id]) return;
+      var nm = n.name || "";
+      if (nm === "constant_layer" || nm === "phase_switch_layer") {
+        var ins = n.inputs || {};
+        var hasParentFromInput = Object.keys(ins).some(function (k) { return (ins[k].connections || []).length > 0; });
+        // constant has no parents, phase_switch has parents from constants
+        reachable[id] = true;
+        q.push(id);
+      }
+    });
     while (q.length) {
       var cid = q.shift();
       getOutgoing(cid).forEach(function (e) {
@@ -653,6 +666,10 @@
       var ins = getIncoming(id).filter(function (e) { return reachable[e.from]; });
       if (!ins.length) continue;
       var incomingTensors = ins.map(function (e) { return tensorById[e.from]; }).filter(Boolean);
+      // Constant node: no parents — use primary input as dummy to derive batch size
+      if (!incomingTensors.length && node.name === "constant_layer") {
+        incomingTensors = [inputTensor]; // use primary model input
+      }
       if (!incomingTensors.length) continue;
       var inTensor = incomingTensors[0];
       if (incomingTensors.length > 1) {
