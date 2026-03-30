@@ -1030,12 +1030,18 @@
         { key: "gradClipNorm", label: "Grad clip norm (0=off)", type: "number", min: 0, step: 0.1 },
         { key: "gradClipValue", label: "Grad clip value (0=off)", type: "number", min: 0, step: 0.1 },
       ]);
+      var config = t.config || {};
       var formValue = {
         datasetId: t.datasetId || "", modelId: t.modelId || "",
-        runtimeBackend: "auto", useServer: true, serverUrl: defaultServerUrl, epochs: 20, batchSize: 32, learningRate: 0.001,
-        optimizerType: "adam", lrSchedulerType: "plateau", earlyStoppingPatience: 5,
-        restoreBestWeights: true, lrPatience: 3, lrFactor: 0.5, minLr: 0.000001,
-        gradClipNorm: 0, gradClipValue: 0,
+        runtimeBackend: config.runtimeBackend || "auto",
+        useServer: config.useServer != null ? config.useServer : true,
+        serverUrl: config.serverUrl || defaultServerUrl,
+        epochs: config.epochs || 20, batchSize: config.batchSize || 32, learningRate: config.learningRate || 0.001,
+        optimizerType: config.optimizerType || "adam", lrSchedulerType: config.lrSchedulerType || "plateau",
+        earlyStoppingPatience: config.earlyStoppingPatience != null ? config.earlyStoppingPatience : 5,
+        restoreBestWeights: config.restoreBestWeights !== false, lrPatience: config.lrPatience || 3,
+        lrFactor: config.lrFactor || 0.5, minLr: config.minLr || 0.000001,
+        gradClipNorm: config.gradClipNorm || 0, gradClipValue: config.gradClipValue || 0,
       };
 
       // server status element (created before form so onChange can update it)
