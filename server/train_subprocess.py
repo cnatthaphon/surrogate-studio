@@ -170,15 +170,17 @@ def main():
     n_heads = len(head_losses)
 
     def compute_loss(pred, xb, yb, active_phase):
-        """Compute weighted loss across heads for active phase."""
+        """Compute weighted loss across heads."""
         total = torch.tensor(0.0, device=device)
-        # pred can be a list (multi-output) or single tensor
         preds = pred if isinstance(pred, list) else [pred]
         for i, hl in enumerate(head_losses):
             if hl.get("skip"):
                 continue  # loss=none, passthrough
-            if hl["phase"] != active_phase and hl["phase"] != "" and active_phase != "":
-                continue  # skip heads not in this phase
+            # with schedule: all losses active (weight freeze handles updates)
+            # without schedule: filter by phase name
+            if not _use_schedule and hl["phase"] != active_phase and hl["phase"] != "" and active_phase != "":
+                continue
+                continue
             # get this head's prediction (by index, or first if single-output)
             head_pred = preds[i] if i < len(preds) else preds[0]
             # determine target for this head
@@ -198,15 +200,60 @@ def main():
             total = total + hl["weight"] * hl["fn"](head_pred, target)
         return total
 
+    # --- Training Schedule ---
+    # Read schedule from config or build from phases
+    raw_schedule = config.get("trainingSchedule", None)
+    rotate_schedule = config.get("rotateSchedule", True)
+    _use_schedule = raw_schedule is not None
+    if raw_schedule and isinstance(raw_schedule, list) and len(raw_schedule) > 0:
+        schedule = raw_schedule
+    else:
+        schedule = [{"epochs": 1, "trainableTags": None, "_phase": p} for p in phases]
+
+    # collect weight tags from graph nodes → map to model param names
+    _gd = graph.get("drawflow", {}).get("Home", {}).get("data", graph)
+    _node_tags = {}
+    for nid in _gd:
+        nd = _gd[nid] if isinstance(_gd[nid], dict) else {}
+        tag = (nd.get("data") or {}).get("weightTag", "")
+        if tag:
+            _node_tags[nid] = tag
+
+    weight_tags = {}
+    for name, param in model.named_parameters():
+        for nid, tag in _node_tags.items():
+            if f"_{nid}" in name or f".{nid}." in name or name.startswith(f"dense_{nid}") or name.startswith(f"conv2d_{nid}") or name.startswith(f"convt2d_{nid}") or name.startswith(f"embed_{nid}") or name.startswith(f"act_{nid}"):
+                weight_tags[name] = tag
+                break
+
+    def freeze_by_tags(trainable_tags):
+        """Freeze/unfreeze params by weight tag"""
+        if not trainable_tags and not weight_tags:
+            return
+        for name, param in model.named_parameters():
+            tag = weight_tags.get(name, "")
+            if tag and trainable_tags:
+                param.requires_grad = bool(trainable_tags.get(tag, True))
+            else:
+                param.requires_grad = True
+
+    def unfreeze_all():
+        for param in model.parameters():
+            param.requires_grad = True
+
     # --- Train ---
     best_val_loss = float("inf")
     best_epoch = 0
     best_state = None
     no_improve = 0
+    schedule_done = False
 
     for ep in range(1, epochs + 1):
         phase_losses = {}
-        for phase in phases:
+
+        if schedule_done:
+            # no rotate: train all unfrozen
+            unfreeze_all()
             model.train()
             train_loss = 0.0
             n_batches = 0
@@ -214,14 +261,41 @@ def main():
                 xb, yb = xb.to(device), yb.to(device)
                 optimizer.zero_grad()
                 pred = model(xb)
-                loss = compute_loss(pred, xb, yb, phase)
+                loss = compute_loss(pred, xb, yb, "")
                 loss.backward()
                 if grad_clip > 0:
                     torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
                 optimizer.step()
                 train_loss += loss.item()
                 n_batches += 1
-            phase_losses[phase] = train_loss / max(n_batches, 1)
+            phase_losses["all"] = train_loss / max(n_batches, 1)
+        else:
+            for si, step in enumerate(schedule):
+                step_epochs = max(1, int(step.get("epochs", 1)))
+                trainable_tags = step.get("trainableTags", None)
+                phase_name = step.get("_phase", f"step{si+1}")
+
+                freeze_by_tags(trainable_tags)
+                model.train()
+                step_loss = 0.0
+                n_batches = 0
+                for _ in range(step_epochs):
+                    for xb, yb in train_dl:
+                        xb, yb = xb.to(device), yb.to(device)
+                        optimizer.zero_grad()
+                        pred = model(xb)
+                        loss = compute_loss(pred, xb, yb, phase_name)
+                        if loss.requires_grad:
+                            loss.backward()
+                            if grad_clip > 0:
+                                torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
+                            optimizer.step()
+                        step_loss += loss.item()
+                        n_batches += 1
+                phase_losses[phase_name] = step_loss / max(n_batches, 1)
+
+            if not rotate_schedule:
+                schedule_done = True
 
         total_train_loss = sum(phase_losses.values()) / max(len(phase_losses), 1)
 

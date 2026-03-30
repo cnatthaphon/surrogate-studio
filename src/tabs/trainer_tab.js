@@ -1063,6 +1063,11 @@
           mountEl: formMount, schema: formSchema, value: formValue,
           fieldNamePrefix: "train", rowClassName: "osc-form-row",
           onChange: function (cfg, ctx) {
+            // save config changes to store
+            if (cfg && t) {
+              Object.keys(cfg).forEach(function (k) { t.config[k] = cfg[k]; });
+              if (store) store.upsertTrainerCard(t);
+            }
             // auto-check server when "Use PyTorch Server" is toggled on
             if (ctx && ctx.key === "useServer" && ctx.value && sraForPanel && serverStatusEl) {
               var urlInput = rightEl.querySelector("input[data-config-key='serverUrl']");

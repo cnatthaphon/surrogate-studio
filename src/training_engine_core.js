@@ -472,12 +472,11 @@
       schedule = detectedPhases.map(function (p) { return { epochs: 1, trainableTags: null, _phase: p }; });
     }
 
-    // group heads by phase
+    // group heads by phase (for backward compat)
     var headsByPhase = {};
-    phases.forEach(function (p) { headsByPhase[p] = []; });
     headConfigs.forEach(function (h, i) {
       var p = String(h.phase || "").trim();
-      headsByPhase[p] = headsByPhase[p] || [];
+      if (!headsByPhase[p]) headsByPhase[p] = [];
       headsByPhase[p].push({ head: h, outputIdx: i });
     });
 
