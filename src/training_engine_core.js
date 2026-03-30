@@ -458,14 +458,19 @@
     var dataset = opts.dataset;
     if (!dataset) throw new Error("opts.dataset required");
 
-    var detectedPhases = detectPhases(headConfigs);
-    // user can override phase order and epochs-per-phase from trainer config
-    var phases = (Array.isArray(opts.phaseOrder) && opts.phaseOrder.length) ? opts.phaseOrder.filter(function (p) { return detectedPhases.indexOf(p) >= 0; }) : detectedPhases;
-    var phaseEpochs = opts.phaseEpochs || {};
     var epochs = Math.max(1, Number(opts.epochs) || 20);
     var batchSize = Math.max(1, Number(opts.batchSize) || 32);
     var lr = Math.max(1e-8, Number(opts.learningRate) || 1e-3);
     var onEpochEnd = opts.onEpochEnd || opts.onEpoch || null;
+
+    // training schedule: [{epochs: N, trainableTags: {tag: bool}}]
+    var schedule = Array.isArray(opts.trainingSchedule) && opts.trainingSchedule.length ? opts.trainingSchedule : null;
+    var rotateSchedule = opts.rotateSchedule !== false;
+    // backward compat
+    if (!schedule) {
+      var detectedPhases = detectPhases(headConfigs);
+      schedule = detectedPhases.map(function (p) { return { epochs: 1, trainableTags: null, _phase: p }; });
+    }
 
     // group heads by phase
     var headsByPhase = {};
@@ -522,116 +527,106 @@
 
     return new Promise(function (resolve) {
       var epoch = 0;
+      var scheduleComplete = false;
+
+      function _freezeByStep(step) {
+        if (!model.layers) return;
+        if (step.trainableTags) {
+          model.layers.forEach(function (l) {
+            if (l._weightTag) { l.trainable = !!step.trainableTags[l._weightTag]; }
+            else { l.trainable = true; }
+          });
+        } else if (step._phase) {
+          model.layers.forEach(function (l) {
+            if (l._weightTag) { l.trainable = (l._weightTag === step._phase); }
+            else { l.trainable = true; }
+          });
+        }
+      }
+
+      function _unfreezeAll() {
+        if (model.layers) model.layers.forEach(function (l) { l.trainable = true; });
+      }
+
+      function _compileModel() {
+        var losses = headConfigs.map(function (h) { return makeHeadLoss(tf, h, "meanSquaredError"); });
+        var weights = headConfigs.map(function (h) { return h.matchWeight || 1; });
+        model.compile({ optimizer: tf.train.adam(lr), loss: losses, lossWeights: weights });
+      }
+
+      function _regenNoise() {
+        if (Array.isArray(xTrainInputs)) {
+          xTrainInputs.forEach(function (xt, ti) {
+            if (inputNodes[ti] && inputNodes[ti].name === "sample_z_layer") {
+              var old = xTrainInputs[ti]; xTrainInputs[ti] = tf.randomNormal(old.shape); old.dispose();
+            }
+          });
+        }
+      }
 
       function nextEpoch() {
         if (epoch >= epochs) {
-          // cleanup
           if (Array.isArray(xTrainInputs)) xTrainInputs.forEach(function (t) { t.dispose(); });
           else xTrainInputs.dispose();
           yTrainArrays.forEach(function (t) { t.dispose(); });
-          resolve({
-            mae: 0, mse: 0,
-            bestEpoch: bestEpoch > 0 ? bestEpoch : epochs,
-            bestValLoss: bestValLoss,
-            epochHistory: epochHistory,
-            headCount: headConfigs.length,
-            phased: true,
-            phases: phases,
+          resolve({ mae: 0, mse: 0, bestEpoch: bestEpoch > 0 ? bestEpoch : epochs, bestValLoss: bestValLoss, epochHistory: epochHistory, headCount: headConfigs.length, phased: true });
+          return;
+        }
+
+        var yTargets = headConfigs.length === 1 ? yTrainArrays[0] : yTrainArrays;
+
+        // if schedule done and no rotate → train all unfrozen
+        if (scheduleComplete) {
+          _unfreezeAll(); _compileModel(); _regenNoise();
+          model.fit(xTrainInputs, yTargets, { batchSize: batchSize, epochs: 1, shuffle: true, verbose: 0 }).then(function (h) {
+            var loss = (h.history.loss || [0])[0] || 0;
+            epochHistory.push({ epoch: epoch + 1, loss: loss, phaseLosses: { all: loss } });
+            if (loss < bestValLoss) { bestValLoss = loss; bestEpoch = epoch + 1; }
+            if (typeof onEpochEnd === "function") onEpochEnd(epoch, { loss: loss, val_loss: loss, current_lr: lr, improved: epoch + 1 === bestEpoch, phaseStr: "all (unfrozen)" });
+            epoch++; setTimeout(nextEpoch, 0);
           });
           return;
         }
 
-        var phaseLosses = {};
-        // train each phase sequentially within the epoch
-        var phaseIdx = 0;
+        // run schedule steps
+        var stepLosses = {};
+        var stepIdx = 0;
 
-        function nextPhase() {
-          if (phaseIdx >= phases.length) {
-            // epoch done
+        function nextStep() {
+          if (stepIdx >= schedule.length) {
+            if (!rotateSchedule) scheduleComplete = true;
             var totalLoss = 0;
-            phases.forEach(function (p) { totalLoss += (phaseLosses[p] || 0); });
-            epochHistory.push({ epoch: epoch + 1, loss: totalLoss, phaseLosses: phaseLosses });
+            Object.keys(stepLosses).forEach(function (k) { totalLoss += (stepLosses[k] || 0); });
+            epochHistory.push({ epoch: epoch + 1, loss: totalLoss, phaseLosses: stepLosses });
             if (totalLoss < bestValLoss) { bestValLoss = totalLoss; bestEpoch = epoch + 1; }
-
             if (typeof onEpochEnd === "function") {
-              // format phase losses as string for display
-              var phaseStr = phases.map(function (p) { return p + "=" + (phaseLosses[p] != null ? phaseLosses[p].toExponential(3) : "?"); }).join(" | ");
-              onEpochEnd(epoch, {
-                loss: totalLoss, val_loss: totalLoss,
-                current_lr: lr, improved: epoch + 1 === bestEpoch,
-                phaseLosses: phaseLosses, phaseStr: phaseStr,
-              });
+              var ss = Object.keys(stepLosses).map(function (k) { return k + "=" + (stepLosses[k] != null ? stepLosses[k].toExponential(3) : "?"); }).join(" | ");
+              onEpochEnd(epoch, { loss: totalLoss, val_loss: totalLoss, current_lr: lr, improved: epoch + 1 === bestEpoch, phaseLosses: stepLosses, phaseStr: ss });
             }
-            epoch++;
-            setTimeout(nextEpoch, 0);
+            epoch++; setTimeout(nextEpoch, 0);
             return;
           }
 
-          var phase = phases[phaseIdx];
-          var phaseSteps = Math.max(1, Number(phaseEpochs[phase]) || 1);
-          var phaseHeads = headsByPhase[phase] || [];
-          if (!phaseHeads.length) { phaseIdx++; nextPhase(); return; }
+          var step = schedule[stepIdx];
+          var stepEp = Math.max(1, Number(step.epochs) || 1);
+          var label = step._phase || ("step" + (stepIdx + 1));
 
-          // set phase flag for PhaseSwitch layers (if any)
-          if (model._phaseFlag) {
-            var phaseIndex = phases.indexOf(phase);
-            model._phaseFlag.assign(tf.scalar(phaseIndex, "int32"));
-          }
+          if (model._phaseFlag) model._phaseFlag.assign(tf.scalar(stepIdx, "int32"));
+          _freezeByStep(step);
+          _compileModel();
+          _regenNoise();
 
-          // freeze/unfreeze layers by weightTag per phase
-          var freezeByTag = opts.freezeByTag !== false;
-          if (freezeByTag && model.layers) {
-            var hasAnyTag = model.layers.some(function (l) { return l._weightTag; });
-            if (hasAnyTag) {
-              model.layers.forEach(function (l) {
-                if (l._weightTag) {
-                  l.trainable = (l._weightTag === phase);
-                } else {
-                  l.trainable = true;
-                }
-              });
-            }
-          }
-
-          // compile model for this phase
-          var losses = headConfigs.map(function (h, i) {
-            var p = String(h.phase || "").trim();
-            if (p !== phase && p !== "") return "meanSquaredError";
-            return makeHeadLoss(tf, h, "meanSquaredError");
-          });
-          var lossWeights = headConfigs.map(function (h) {
-            var p = String(h.phase || "").trim();
-            return (p === phase || p === "") ? h.matchWeight || 1 : 0;
-          });
-
-          model.compile({
-            optimizer: tf.train.adam(lr),
-            loss: losses,
-            lossWeights: lossWeights,
-          });
-
-          var yTargets = headConfigs.length === 1 ? yTrainArrays[0] : yTrainArrays;
-          // regenerate z noise each phase
-          if (Array.isArray(xTrainInputs)) {
-            xTrainInputs.forEach(function (xt, ti) {
-              if (inputNodes[ti] && inputNodes[ti].name === "sample_z_layer") {
-                var old = xTrainInputs[ti];
-                xTrainInputs[ti] = tf.randomNormal(old.shape);
-                old.dispose();
-              }
-            });
-          }
           model.fit(xTrainInputs, yTargets, {
-            batchSize: batchSize, epochs: phaseSteps, shuffle: true, verbose: 0,
+            batchSize: batchSize, epochs: stepEp, shuffle: true, verbose: 0,
           }).then(function (h) {
-            var losses = h.history.loss || [0];
-            phaseLosses[phase] = losses[losses.length - 1] || 0;
-            phaseIdx++;
-            nextPhase();
+            var la = h.history.loss || [0];
+            stepLosses[label] = la[la.length - 1] || 0;
+            stepIdx++;
+            nextStep();
           });
         }
 
-        nextPhase();
+        nextStep();
       }
 
       nextEpoch();

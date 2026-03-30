@@ -118,12 +118,12 @@
       if (phase) summaryParts.push("phase=" + phase);
       if (!summaryParts.length) summaryParts.push("passthrough");
       var phaseHtml = phase ? "<div style='font-size:9px;color:#f59e0b;'>phase: " + phase + "</div>" : "";
-      var inputLabel = target === "custom" ? "<div style='font-size:8px;color:#64748b;'>in1: data | in2: target</div>" : "";
+      var numInputs = (target === "custom") ? 2 : 1;
+      var inputLabel = (numInputs === 2) ? "<div style='font-size:8px;color:#64748b;'>in1: data | in2: target</div>" : "";
       var html =
         "<div><div style='font-weight:700'>Output</div>" + phaseHtml + inputLabel +
         "<div class='node-summary' style='font-size:10px;color:#94a3b8;'>" + summaryParts.join(", ") + "</div></div>";
-      // 2 inputs: input_1 = prediction data, input_2 = custom label (optional)
-      return editor.addNode("output_layer", 2, 1, x, y, "output_layer", {
+      return editor.addNode("output_layer", numInputs, 1, x, y, "output_layer", {
         target: target,
         targetType: target,
         loss: loss,

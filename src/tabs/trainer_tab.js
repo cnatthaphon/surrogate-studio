@@ -1121,108 +1121,82 @@
             var p = String(h.phase || "").trim();
             if (p && !phSeen[p]) { phSeen[p] = true; phPhases.push(p); }
           });
-          if (phPhases.length > 0) {
-            // read saved phase config or init defaults
+          // detect weight tags from model graph
+          var tagSet = {};
+          var graphData2 = modelBuilder.extractGraphData ? modelBuilder.extractGraphData(phModel.graph) : {};
+          Object.keys(graphData2).forEach(function (nid) {
+            var nd = graphData2[nid];
+            var wt = nd && nd.data && nd.data.weightTag;
+            if (wt) tagSet[wt] = (tagSet[wt] || 0) + 1;
+          });
+          var tagKeys = Object.keys(tagSet);
+
+          if (tagKeys.length > 0 || phPhases.length > 0) {
             if (!t.config) t.config = {};
-            if (!t.config.phaseOrder) t.config.phaseOrder = phPhases.slice();
-            if (!t.config.phaseEpochs) {
-              t.config.phaseEpochs = {};
-              phPhases.forEach(function (p) { t.config.phaseEpochs[p] = 1; });
+            // init training schedule from phases+tags
+            if (!Array.isArray(t.config.trainingSchedule) || !t.config.trainingSchedule.length) {
+              if (phPhases.length > 0 && tagKeys.length > 0) {
+                t.config.trainingSchedule = phPhases.map(function (p) {
+                  var tr = {}; tagKeys.forEach(function (tag) { tr[tag] = (tag === p); }); return { epochs: 1, trainableTags: tr };
+                });
+              } else {
+                var defTr = {}; tagKeys.forEach(function (tag) { defTr[tag] = true; });
+                t.config.trainingSchedule = [{ epochs: 1, trainableTags: defTr }];
+              }
             }
-            // ensure all detected phases are in config
-            phPhases.forEach(function (p) {
-              if (t.config.phaseOrder.indexOf(p) < 0) t.config.phaseOrder.push(p);
-              if (!t.config.phaseEpochs[p]) t.config.phaseEpochs[p] = 1;
-            });
-            var orderedPhases = t.config.phaseOrder.filter(function (p) { return phPhases.indexOf(p) >= 0; });
+            if (t.config.rotateSchedule === undefined) t.config.rotateSchedule = true;
 
-            var phCard = el("div", { style: "margin-top:8px;padding:6px 8px;border:1px solid #1e293b;border-radius:6px;background:#0f172a;" });
-            phCard.appendChild(el("div", { style: "font-size:10px;color:#67e8f9;font-weight:600;margin-bottom:4px;" }, "Training Phases"));
-
-            orderedPhases.forEach(function (p, idx) {
-              var row = el("div", { style: "display:flex;align-items:center;gap:4px;margin-bottom:3px;" });
-
-              // up/down buttons
-              var upBtn = el("button", { style: "font-size:9px;padding:1px 4px;background:#1e293b;color:#94a3b8;border:1px solid #334155;border-radius:3px;cursor:pointer;" }, "\u25B2");
-              var downBtn = el("button", { style: "font-size:9px;padding:1px 4px;background:#1e293b;color:#94a3b8;border:1px solid #334155;border-radius:3px;cursor:pointer;" }, "\u25BC");
-              if (idx === 0) upBtn.disabled = true;
-              if (idx === orderedPhases.length - 1) downBtn.disabled = true;
-              (function (phase, index) {
-                upBtn.addEventListener("click", function () {
-                  var arr = t.config.phaseOrder;
-                  var i = arr.indexOf(phase);
-                  if (i > 0) { var tmp = arr[i - 1]; arr[i - 1] = arr[i]; arr[i] = tmp; }
-                  if (store) store.upsertTrainerCard(t);
-                  _renderRightPanel();
-                });
-                downBtn.addEventListener("click", function () {
-                  var arr = t.config.phaseOrder;
-                  var i = arr.indexOf(phase);
-                  if (i < arr.length - 1) { var tmp = arr[i + 1]; arr[i + 1] = arr[i]; arr[i] = tmp; }
-                  if (store) store.upsertTrainerCard(t);
-                  _renderRightPanel();
-                });
-              })(p, idx);
-              row.appendChild(upBtn);
-              row.appendChild(downBtn);
-
-              // phase name
-              row.appendChild(el("span", { style: "font-size:11px;color:#38bdf8;font-weight:600;min-width:80px;" }, p));
-
-              // epochs per phase input
-              var epInput = el("input", { type: "number", min: 1, max: 100, step: 1, value: String(t.config.phaseEpochs[p] || 1),
-                style: "width:40px;padding:2px 4px;font-size:10px;background:#0b1220;color:#e2e8f0;border:1px solid #334155;border-radius:3px;text-align:center;" });
-              (function (phase) {
-                epInput.addEventListener("change", function () {
-                  t.config.phaseEpochs[phase] = Math.max(1, parseInt(epInput.value) || 1);
-                  if (store) store.upsertTrainerCard(t);
-                });
-              })(p);
-              row.appendChild(epInput);
-              row.appendChild(el("span", { style: "font-size:9px;color:#64748b;" }, "epochs"));
-
-              // head targets in this phase
-              var phHeadTargets = phHeads.filter(function (h) { return String(h.phase || "").trim() === p; }).map(function (h) { return h.target; });
-              row.appendChild(el("span", { style: "font-size:9px;color:#475569;margin-left:4px;" }, "\u2192 " + phHeadTargets.join(", ")));
-
-              phCard.appendChild(row);
-            });
-            // freeze option
-            var freezeRow = el("div", { style: "display:flex;align-items:center;gap:6px;margin-top:6px;padding-top:6px;border-top:1px solid #1e293b;" });
-            var freezeCb = el("input", { type: "checkbox" });
-            freezeCb.checked = t.config.freezeByTag !== false; // default on
-            freezeCb.addEventListener("change", function () {
-              t.config.freezeByTag = freezeCb.checked;
-              if (store) store.upsertTrainerCard(t);
-            });
-            freezeRow.appendChild(freezeCb);
-            freezeRow.appendChild(el("span", { style: "font-size:10px;color:#e2e8f0;" }, "Freeze other weight tags per phase"));
-            phCard.appendChild(freezeRow);
-
-            // detect weight tags from model
-            var tagSet = {};
-            phHeads.forEach(function () {}); // heads don't have tags, layers do
-            var graphData = modelBuilder.extractGraphData ? modelBuilder.extractGraphData(phModel.graph) : {};
-            Object.keys(graphData).forEach(function (nid) {
-              var nd = graphData[nid];
-              var wt = nd && nd.data && nd.data.weightTag;
-              if (wt) tagSet[wt] = (tagSet[wt] || 0) + 1;
-            });
-            var tagKeys = Object.keys(tagSet);
+            var schCard = el("div", { style: "margin-top:8px;padding:6px 8px;border:1px solid #1e293b;border-radius:6px;background:#0f172a;" });
+            schCard.appendChild(el("div", { style: "font-size:10px;color:#67e8f9;font-weight:600;margin-bottom:6px;" }, "Training Schedule"));
             if (tagKeys.length) {
-              var tagInfo = el("div", { style: "font-size:9px;color:#94a3b8;margin-top:4px;" },
-                "Tags: " + tagKeys.map(function (k) { return k + " (" + tagSet[k] + " layers)"; }).join(", "));
-              phCard.appendChild(tagInfo);
-              phCard.appendChild(el("div", { style: "font-size:9px;color:#64748b;" },
-                "Each phase trains layers with matching tag. Others frozen."));
-            } else {
-              phCard.appendChild(el("div", { style: "font-size:9px;color:#64748b;margin-top:4px;" },
-                "No weight tags found. Add weightTag to Dense/Conv nodes for per-phase freeze."));
+              schCard.appendChild(el("div", { style: "font-size:9px;color:#94a3b8;margin-bottom:4px;" },
+                "Tags: " + tagKeys.map(function (k) { return k + "(" + tagSet[k] + ")"; }).join(", ")));
             }
 
-            phCard.appendChild(el("div", { style: "font-size:9px;color:#475569;margin-top:4px;" },
-              "Reorder with \u25B2\u25BC. Set epochs per phase."));
-            rightEl.appendChild(phCard);
+            t.config.trainingSchedule.forEach(function (step, si) {
+              var sc = el("div", { style: "margin-bottom:5px;padding:4px 6px;border:1px solid #334155;border-radius:4px;background:#0b1220;" });
+              var hr = el("div", { style: "display:flex;align-items:center;gap:3px;margin-bottom:2px;" });
+              var upB = el("button", { style: "font-size:8px;padding:1px 3px;background:#1e293b;color:#94a3b8;border:1px solid #334155;border-radius:2px;cursor:pointer;" }, "\u25B2");
+              var dnB = el("button", { style: "font-size:8px;padding:1px 3px;background:#1e293b;color:#94a3b8;border:1px solid #334155;border-radius:2px;cursor:pointer;" }, "\u25BC");
+              var rmB = el("button", { style: "font-size:8px;padding:1px 3px;background:#1e293b;color:#f43f5e;border:1px solid #334155;border-radius:2px;cursor:pointer;" }, "\u2715");
+              if (si === 0) upB.disabled = true;
+              if (si >= t.config.trainingSchedule.length - 1) dnB.disabled = true;
+              if (t.config.trainingSchedule.length <= 1) rmB.disabled = true;
+              (function (idx) {
+                upB.addEventListener("click", function () { var a = t.config.trainingSchedule; if (idx > 0) { var tmp = a[idx-1]; a[idx-1] = a[idx]; a[idx] = tmp; } if (store) store.upsertTrainerCard(t); _renderRightPanel(); });
+                dnB.addEventListener("click", function () { var a = t.config.trainingSchedule; if (idx < a.length-1) { var tmp = a[idx+1]; a[idx+1] = a[idx]; a[idx] = tmp; } if (store) store.upsertTrainerCard(t); _renderRightPanel(); });
+                rmB.addEventListener("click", function () { t.config.trainingSchedule.splice(idx, 1); if (store) store.upsertTrainerCard(t); _renderRightPanel(); });
+              })(si);
+              hr.appendChild(upB); hr.appendChild(dnB);
+              hr.appendChild(el("span", { style: "font-size:10px;color:#e2e8f0;font-weight:600;flex:1;" }, "Step " + (si + 1)));
+              hr.appendChild(rmB); sc.appendChild(hr);
+              // epochs
+              var er = el("div", { style: "display:flex;align-items:center;gap:4px;margin-bottom:2px;" });
+              var ei = el("input", { type: "number", min: 1, max: 1000, step: 1, value: String(step.epochs || 1),
+                style: "width:42px;padding:2px 4px;font-size:10px;background:#0f172a;color:#e2e8f0;border:1px solid #334155;border-radius:3px;text-align:center;" });
+              (function (idx) { ei.addEventListener("change", function () { t.config.trainingSchedule[idx].epochs = Math.max(1, parseInt(ei.value) || 1); if (store) store.upsertTrainerCard(t); }); })(si);
+              er.appendChild(ei); er.appendChild(el("span", { style: "font-size:9px;color:#64748b;" }, "epochs")); sc.appendChild(er);
+              // tag checkboxes
+              var tr = el("div", { style: "display:flex;flex-wrap:wrap;gap:4px;" });
+              tagKeys.forEach(function (tag) {
+                var lb = el("label", { style: "display:flex;align-items:center;gap:2px;font-size:10px;color:#e2e8f0;cursor:pointer;" });
+                var cb = el("input", { type: "checkbox" }); cb.checked = step.trainableTags && step.trainableTags[tag];
+                (function (idx, tg) { cb.addEventListener("change", function () { if (!t.config.trainingSchedule[idx].trainableTags) t.config.trainingSchedule[idx].trainableTags = {}; t.config.trainingSchedule[idx].trainableTags[tg] = cb.checked; if (store) store.upsertTrainerCard(t); }); })(si, tag);
+                lb.appendChild(cb); lb.appendChild(document.createTextNode(tag)); tr.appendChild(lb);
+              });
+              sc.appendChild(tr); schCard.appendChild(sc);
+            });
+            // add step
+            var addBtn = el("button", { style: "font-size:9px;padding:3px 8px;background:#1e293b;color:#67e8f9;border:1px solid #334155;border-radius:3px;cursor:pointer;margin-top:3px;" }, "+ Add Step");
+            addBtn.addEventListener("click", function () { var nt = {}; tagKeys.forEach(function (tag) { nt[tag] = true; }); t.config.trainingSchedule.push({ epochs: 1, trainableTags: nt }); if (store) store.upsertTrainerCard(t); _renderRightPanel(); });
+            schCard.appendChild(addBtn);
+            // rotate
+            var rr = el("div", { style: "display:flex;align-items:center;gap:6px;margin-top:5px;padding-top:5px;border-top:1px solid #1e293b;" });
+            var rc = el("input", { type: "checkbox" }); rc.checked = t.config.rotateSchedule !== false;
+            rc.addEventListener("change", function () { t.config.rotateSchedule = rc.checked; if (store) store.upsertTrainerCard(t); });
+            rr.appendChild(rc); rr.appendChild(el("span", { style: "font-size:10px;color:#e2e8f0;" }, "Rotate (repeat from step 1)"));
+            schCard.appendChild(rr);
+            rightEl.appendChild(schCard);
           }
         }
       }
@@ -1630,9 +1604,8 @@
           minLr: Number(config.minLr || 0.000001),
           gradClipNorm: Number(config.gradClipNorm || 0),
           gradClipValue: Number(config.gradClipValue || 0),
-          phaseOrder: config.phaseOrder || null,
-          phaseEpochs: config.phaseEpochs || null,
-          freezeByTag: config.freezeByTag !== false,
+          trainingSchedule: config.trainingSchedule || null,
+          rotateSchedule: config.rotateSchedule !== false,
           onEpochEnd: function (epoch, logs) {
             if (currentMountId !== _mountId) return;
             var logEntry = { epoch: epoch + 1, loss: logs.loss, val_loss: logs.val_loss, current_lr: logs.current_lr, improved: logs.improved, phaseLosses: logs.phaseLosses || null };
