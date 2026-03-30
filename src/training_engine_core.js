@@ -66,6 +66,10 @@
     var headWeight = Math.max(0, Number((head && head.matchWeight) || 1));
     var klBeta = Math.max(0, Number((head && head.beta) || 1e-3));
     var ht = String((head && head.headType) || "regression");
+    // loss=none → passthrough, zero loss
+    if (type === "none" || String(head && head.loss || "").toLowerCase() === "none") {
+      return function () { return tf.scalar(0); };
+    }
     return function (yTrue, yPred) {
       return tf.tidy(function () {
         if (ht === "latent_kl") {

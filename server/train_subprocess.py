@@ -147,7 +147,9 @@ def main():
         hw = float(hc.get("matchWeight", 1.0))
         hp = str(hc.get("phase", "")).strip()
         # explicit loss field takes priority
-        if hl == "bce":
+        if hl == "none":
+            head_losses.append({"fn": None, "weight": 0, "phase": hp, "cls": False, "skip": True})
+        elif hl == "bce":
             head_losses.append({"fn": nn.BCELoss(), "weight": hw, "phase": hp, "cls": False, "bce_binary": True})
         elif hl in ("categoricalcrossentropy", "categorical_crossentropy", "cross_entropy", "sparsecategoricalcrossentropy"):
             head_losses.append({"fn": nn.CrossEntropyLoss(), "weight": hw, "phase": hp, "cls": True})
@@ -173,6 +175,8 @@ def main():
         # pred can be a list (multi-output) or single tensor
         preds = pred if isinstance(pred, list) else [pred]
         for i, hl in enumerate(head_losses):
+            if hl.get("skip"):
+                continue  # loss=none, passthrough
             if hl["phase"] != active_phase and hl["phase"] != "" and active_phase != "":
                 continue  # skip heads not in this phase
             # get this head's prediction (by index, or first if single-output)

@@ -45,7 +45,7 @@
     var g1 =   N(d, "dense",        { units: 256, activation: "relu", weightTag: "generator" }, 240, 60);
     var g2 =   N(d, "dense",        { units: 512, activation: "relu", weightTag: "generator" }, 400, 60);
     var g3 =   N(d, "dense",        { units: 784, activation: "sigmoid", weightTag: "generator" }, 560, 60);
-    var gOut = N(d, "output",       { target: "pixel_values", targetType: "pixel_values", loss: "mse", matchWeight: 1, phase: "generator", headType: "reconstruction" }, 720, 60);
+    var gOut = N(d, "output",       { target: "pixel_values", targetType: "pixel_values", loss: "none", matchWeight: 0, phase: "generator", headType: "reconstruction" }, 720, 60);
     C(d, z, g1); C(d, g1, g2); C(d, g2, g3); C(d, g3, gOut);
 
     // G output → ConcatBatch with real images (no Detach — weight tags handle freeze)
@@ -85,7 +85,7 @@
     var gc1 =  N(d, "conv2d_transpose",  { filters: 64, kernelSize: 4, strides: 2, padding: "same", activation: "relu", weightTag: "generator" }, 560, 60);
     var gc2 =  N(d, "conv2d_transpose",  { filters: 1, kernelSize: 4, strides: 2, padding: "same", activation: "sigmoid", weightTag: "generator" }, 720, 60);
     var gf =   N(d, "flatten",           {},                                     880, 60);
-    var gOut = N(d, "output",            { target: "pixel_values", targetType: "pixel_values", loss: "mse", matchWeight: 1, phase: "generator", headType: "reconstruction" }, 1040, 60);
+    var gOut = N(d, "output",            { target: "pixel_values", targetType: "pixel_values", loss: "none", matchWeight: 0, phase: "generator", headType: "reconstruction" }, 1040, 60);
     C(d, z, gd); C(d, gd, gr); C(d, gr, gc1); C(d, gc1, gc2); C(d, gc2, gf); C(d, gf, gOut);
 
     // G output → ConcatBatch with real

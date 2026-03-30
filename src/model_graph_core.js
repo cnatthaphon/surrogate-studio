@@ -665,6 +665,7 @@
           targetOptions.push({ value: v, label: l });
         });
         if (!targetOptions.length && target) targetOptions.push({ value: target, label: target });
+        targetOptions.unshift({ value: "none", label: "None (passthrough)" });
         addField({
           kind: "select",
           key: "targetType",
@@ -679,6 +680,7 @@
           label: "Loss",
           value: loss,
           options: [
+            { value: "none", label: "None (passthrough)" },
             { value: "mse", label: "MSE" },
             { value: "mae", label: "MAE" },
             { value: "huber", label: "Huber" },
