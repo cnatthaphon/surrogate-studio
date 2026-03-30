@@ -23,13 +23,22 @@
     function addDenseNode(editor, x, y, cfg) {
       var units = Math.max(1, Number((cfg && cfg.units) || 32));
       var activation = String((cfg && cfg.activation) || "relu");
+      var weightTag = String((cfg && cfg.weightTag) || "");
+      var blockName = String((cfg && cfg.blockName) || "");
+      var tagHtml = "";
+      if (weightTag || blockName) {
+        var parts = [];
+        if (blockName) parts.push(blockName);
+        if (weightTag) parts.push("[" + weightTag + "]");
+        tagHtml = "<div style='font-size:9px;color:#38bdf8;'>" + parts.join(" ") + "</div>";
+      }
       var html =
-        "<div><div style='font-weight:700'>Dense</div><div style='display:grid;gap:4px'>" +
+        "<div><div style='font-weight:700'>Dense</div>" + tagHtml + "<div style='display:grid;gap:4px'>" +
         "<input type='number' df-units value='" + units + "' min='1' style='width:80px'>" +
         "<select df-activation style='width:120px'>" +
         "<option value='relu'>relu</option><option value='tanh'>tanh</option><option value='sigmoid'>sigmoid</option><option value='linear'>linear</option>" +
         "</select><div class='node-summary' style='font-size:11px;color:#94a3b8;'>u=" + units + ", act=" + activation + "</div></div></div>";
-      return editor.addNode("dense_layer", 1, 1, x, y, "dense_layer", { units: units, activation: activation }, html);
+      return editor.addNode("dense_layer", 1, 1, x, y, "dense_layer", { units: units, activation: activation, weightTag: weightTag, blockName: blockName }, html);
     }
 
     function addDropoutNode(editor, x, y, cfg) {
@@ -99,14 +108,21 @@
     }
 
     function addOutputNode(editor, x, y, cfg) {
-      var target = String((cfg && (cfg.target || cfg.targetType)) || "xv");
+      var target = String((cfg && (cfg.target || cfg.targetType)) || "");
       var loss = String((cfg && cfg.loss) || "mse");
       var matchWeight = Math.max(0, Number((cfg && cfg.matchWeight) || 1));
       var phase = String((cfg && cfg.phase) || "").trim();
+      var summaryParts = [];
+      if (target && target !== "none") summaryParts.push("target=" + target);
+      if (loss && loss !== "none") summaryParts.push("loss=" + loss);
+      if (phase) summaryParts.push("phase=" + phase);
+      if (!summaryParts.length) summaryParts.push("passthrough");
+      var phaseHtml = phase ? "<div style='font-size:9px;color:#f59e0b;'>phase: " + phase + "</div>" : "";
+      var inputLabel = target === "custom" ? "<div style='font-size:8px;color:#64748b;'>in1: data | in2: target</div>" : "";
       var html =
-        "<div><div style='font-weight:700'>Output</div>" +
-        "<div class='node-summary' style='font-size:11px;color:#94a3b8;'>target=" + target + ", loss=" + loss + (phase ? ", phase=" + phase : "") + "</div></div>";
-      // 2 inputs: input_1 = prediction data, input_2 = custom label (optional, from PhaseSwitch/Constant)
+        "<div><div style='font-weight:700'>Output</div>" + phaseHtml + inputLabel +
+        "<div class='node-summary' style='font-size:10px;color:#94a3b8;'>" + summaryParts.join(", ") + "</div></div>";
+      // 2 inputs: input_1 = prediction data, input_2 = custom label (optional)
       return editor.addNode("output_layer", 2, 1, x, y, "output_layer", {
         target: target,
         targetType: target,
