@@ -240,8 +240,8 @@
       });
       var useFullSource = Boolean(cfg.useFullSource);
       var totalCount = useFullSource ? 60000 : (Number(cfg.totalCount) || 1400);
-      var trainFrac = Number(cfg.trainFrac) || 0.8;
-      var valFrac = Number(cfg.valFrac) || 0.1;
+      var trainFrac = cfg.trainFrac != null ? Number(cfg.trainFrac) : 0.8;
+      var valFrac = cfg.valFrac != null ? Number(cfg.valFrac) : 0.1;
       var trainN = Math.round(totalCount * trainFrac);
       var valN = Math.round(totalCount * valFrac);
       var testN = Math.max(0, totalCount - trainN - valN);
@@ -293,9 +293,9 @@
       var globalValue = {
         seed: savedCfg.seed || 42,
         splitMode: savedCfg.splitMode || splitDefaults.mode || "random",
-        trainFrac: Number(savedCfg.trainFrac || splitDefaults.train || 0.7).toFixed(2),
-        valFrac: Number(savedCfg.valFrac || splitDefaults.val || 0.15).toFixed(2),
-        testFrac: Number(savedCfg.testFrac || splitDefaults.test || 0.15).toFixed(2),
+        trainFrac: Number(savedCfg.trainFrac != null ? savedCfg.trainFrac : (splitDefaults.train != null ? splitDefaults.train : 0.7)).toFixed(2),
+        valFrac: Number(savedCfg.valFrac != null ? savedCfg.valFrac : (splitDefaults.val != null ? splitDefaults.val : 0.15)).toFixed(2),
+        testFrac: Number(savedCfg.testFrac != null ? savedCfg.testFrac : (splitDefaults.test != null ? splitDefaults.test : 0.15)).toFixed(2),
       };
 
       if (uiEngine && typeof uiEngine.renderConfigForm === "function") {
