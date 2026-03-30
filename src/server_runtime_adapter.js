@@ -144,9 +144,11 @@
       learningRate: Number(spec.learningRate || 1e-3),
       optimizerType: String(spec.optimizerType || "adam"),
       lrSchedulerType: String(spec.lrSchedulerType || "plateau"),
-      earlyStoppingPatience: Number(spec.earlyStoppingPatience || 5),
+      earlyStoppingPatience: spec.earlyStoppingPatience != null ? Number(spec.earlyStoppingPatience) : 5,
       restoreBestWeights: spec.restoreBestWeights !== false,
       gradClipNorm: Number(spec.gradClipNorm || 0),
+      trainingSchedule: spec.trainingSchedule || null,
+      rotateSchedule: spec.rotateSchedule !== false,
     };
 
     return new Promise(function (resolve, reject) {
