@@ -98,6 +98,9 @@ def main():
     lr = float(config.get("learningRate", 1e-3))
     optimizer_type = config.get("optimizerType", "adam")
     patience = int(config.get("earlyStoppingPatience", 5))
+    # disable early stopping when no val set (GAN etc.)
+    if x_val.size == 0 and patience > 0 and config.get("earlyStoppingPatience") is None:
+        patience = 0
     grad_clip = float(config.get("gradClipNorm", 0))
 
     # --- Optimizer ---

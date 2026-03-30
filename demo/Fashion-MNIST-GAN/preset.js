@@ -129,13 +129,13 @@
     ],
     trainers: [
       { id: "t-mlp-gan", name: "MLP-GAN Trainer", schemaId: sid, datasetId: DS, modelId: "m-mlp-gan", status: "draft",
-        config: { epochs: 50, batchSize: 128, learningRate: 0.0001, optimizerType: "adam", useServer: true,
+        config: { epochs: 100, batchSize: 128, learningRate: 0.0001, optimizerType: "adam", useServer: true, earlyStoppingPatience: 0,
                   trainingSchedule: [
                     { epochs: 1, trainableTags: { discriminator: true, generator: false } },
                     { epochs: 1, trainableTags: { discriminator: false, generator: true } }
                   ], rotateSchedule: true } },
       { id: "t-dcgan", name: "DCGAN Trainer", schemaId: sid, datasetId: DS, modelId: "m-dcgan", status: "draft",
-        config: { epochs: 50, batchSize: 128, learningRate: 0.0001, optimizerType: "adam", useServer: true,
+        config: { epochs: 100, batchSize: 128, learningRate: 0.0001, optimizerType: "adam", useServer: true, earlyStoppingPatience: 0,
                   trainingSchedule: [
                     { epochs: 1, trainableTags: { discriminator: true, generator: false } },
                     { epochs: 1, trainableTags: { discriminator: false, generator: true } }

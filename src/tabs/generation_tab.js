@@ -353,7 +353,7 @@
 
       // check if selected trainer is ready
       var selectedTrainer = g.trainerId ? (store ? store.getTrainerCard(g.trainerId) : null) : null;
-      var isReady = selectedTrainer && selectedTrainer.status === "done" && selectedTrainer.modelArtifacts;
+      var isReady = selectedTrainer && selectedTrainer.modelArtifacts;
 
       if (g.trainerId && !isReady) {
         var statusMsg = !selectedTrainer ? "Trainer not found" : selectedTrainer.status === "training" ? "Model is still training..." : "Model not trained yet. Train it first in the Trainer tab.";
@@ -391,7 +391,7 @@
       // if referenced trainer not trained, auto-find first trained model for this schema
       if (!trainer || !trainer.modelArtifacts) {
         var allTrainers = _listTrainersForSchema(g.schemaId);
-        var trained = allTrainers.filter(function (t) { return t.status === "done" && t.modelArtifacts; });
+        var trained = allTrainers.filter(function (t) { return t.modelArtifacts; });
         if (trained.length) {
           trainer = trained[0];
           g.trainerId = trainer.id;
