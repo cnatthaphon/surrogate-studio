@@ -185,8 +185,14 @@ def main():
             head_pred = preds[i] if i < len(preds) else preds[0]
             # determine target for this head
             if hl.get("bce_binary"):
-                # BCE head with 1-dim output: target = ones (real images during D phase)
-                target = torch.ones(head_pred.shape[0], 1, device=device)
+                # BCE with ConcatBatch: first half = real (1), second half = fake (0)
+                n = head_pred.shape[0]
+                half = n // 2
+                if half > 0 and n > yb.shape[0]:
+                    # doubled batch from ConcatBatch: real=1 fake=0
+                    target = torch.cat([torch.ones(half, 1, device=device), torch.zeros(n - half, 1, device=device)], dim=0)
+                else:
+                    target = torch.ones(n, 1, device=device)
             elif hl["cls"]:
                 target = yb.long().squeeze(-1) if yb.dtype != torch.long else yb.squeeze(-1)
                 total = total + hl["weight"] * hl["fn"](head_pred, target)
@@ -276,6 +282,7 @@ def main():
                 phase_name = step.get("_phase", f"step{si+1}")
 
                 freeze_by_tags(trainable_tags)
+                model._phase_idx = si  # for PhaseSwitch
                 model.train()
                 step_loss = 0.0
                 n_batches = 0
@@ -401,18 +408,20 @@ def main():
     status("Computing test metrics...")
     # --- Compute final metrics (val + test) ---
     model.eval()
+    mae = 0.0; mse = 0.0
     with torch.no_grad():
-        x_val_t = torch.tensor(x_val).to(device)
-        raw_val = model(x_val_t)
-        pred_val = (raw_val[0] if isinstance(raw_val, list) else raw_val).cpu().numpy()
-        if is_classification:
-            pred_labels = pred_val.argmax(axis=1)
-            true_labels = y_val.flatten().astype(int)
-            mae = float(np.mean(np.abs(pred_labels - true_labels)))
-            mse = float(np.mean((pred_labels - true_labels) ** 2))
-        else:
-            mae = float(np.mean(np.abs(pred_val - y_val)))
-            mse = float(np.mean((pred_val - y_val) ** 2))
+        if x_val.size > 0:
+            x_val_t = torch.tensor(x_val).to(device)
+            raw_val = model(x_val_t)
+            pred_val = (raw_val[0] if isinstance(raw_val, list) else raw_val).cpu().numpy()
+            if is_classification:
+                pred_labels = pred_val.argmax(axis=1)
+                true_labels = y_val.flatten().astype(int)
+                mae = float(np.mean(np.abs(pred_labels - true_labels)))
+                mse = float(np.mean((pred_labels - true_labels) ** 2))
+            else:
+                mae = float(np.mean(np.abs(pred_val - y_val)))
+                mse = float(np.mean((pred_val - y_val) ** 2))
 
         # Test metrics (if test data provided)
         x_test_raw = ds.get("xTest", [])
@@ -609,8 +618,16 @@ def build_model_from_graph(graph, feature_size, target_size, num_classes=0):
                     setattr(self, f"noise_scale_{nid}", scale)
                     dim_map[nid] = in_dim
                 elif t == "detach":
-                    # gradient stop — passthrough with same dim
                     dim_map[nid] = in_dim
+                elif t == "concat_batch":
+                    # concat along batch axis: [N, dim] + [N, dim] → [2N, dim]
+                    # feature dim stays the same
+                    dim_map[nid] = in_dim
+                elif t == "phase_switch":
+                    dim_map[nid] = in_dim
+                elif t == "constant":
+                    cdim = int(c.get("dim", 1))
+                    dim_map[nid] = cdim
                 elif t == "sample_z":
                     # random input — like another input node
                     zdim = int(c.get("dim", 128))
@@ -767,6 +784,31 @@ def build_model_from_graph(graph, feature_size, target_size, num_classes=0):
                         tensors[nid] = inp
                 elif t == "detach":
                     tensors[nid] = inp.detach()
+                elif t == "concat_batch":
+                    # concat along BATCH axis: [N, dim] + [N, dim] → [2N, dim]
+                    parent_tensors = [tensors[p["from"]] for p in parents_sorted if p["from"] in tensors]
+                    if len(parent_tensors) >= 2:
+                        tensors[nid] = torch.cat(parent_tensors, dim=0)
+                    else:
+                        tensors[nid] = inp
+                    continue
+                elif t == "phase_switch":
+                    # select input based on phase flag (set externally)
+                    phase_idx = getattr(self, '_phase_idx', 0)
+                    parent_tensors = [tensors[p["from"]] for p in parents_sorted if p["from"] in tensors]
+                    if phase_idx == 0 and len(parent_tensors) >= 1:
+                        tensors[nid] = parent_tensors[0]
+                    elif len(parent_tensors) >= 2:
+                        tensors[nid] = parent_tensors[1]
+                    else:
+                        tensors[nid] = inp
+                    continue
+                elif t == "constant":
+                    # output constant tensor matching batch size
+                    cdim = int(self.node_configs[nid].get("dim", 1))
+                    cval = float(self.node_configs[nid].get("value", 1))
+                    tensors[nid] = torch.full((x.shape[0], cdim), cval, device=x.device)
+                    continue
                 elif t == "embedding":
                     tensors[nid] = getattr(self, f"embed_{nid}")(inp.long())
                 elif t == "reshape":
