@@ -3400,7 +3400,7 @@
             { key: "pixel_values", label: "pixel values (28x28)", featureSize: 784, shape: [28, 28, 1] }
           ],
           oneHot: [
-            { key: "label", label: "label", values: ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"] }
+            { key: "label", label: "label", values: ["T-shirt/top", "Trouser", "Pullover", "Dress", "Coat", "Sandal", "Shirt", "Sneaker", "Bag", "Ankle boot"] }
           ],
           policy: {
             allowHistory: false,
