@@ -313,6 +313,60 @@
         rightEl.appendChild(globalMount);
       }
 
+      // 1b. CLASS FILTER (if schema has labeled classes)
+      var dsSchema2 = schemaRegistry ? schemaRegistry.getDatasetSchema(ds.schemaId) : null;
+      var schemaModel = schemaRegistry ? schemaRegistry.getModelSchema(ds.schemaId) : null;
+      var featureNodesMeta = (schemaModel && schemaModel.metadata && schemaModel.metadata.featureNodes) || {};
+      var oneHotDefs = Array.isArray(featureNodesMeta.oneHot) ? featureNodesMeta.oneHot : [];
+      var classLabels = null;
+      // read class names: from dataset data (after generation), schema oneHot, or fallback
+      if (ds.data && ds.data.classNames) classLabels = ds.data.classNames;
+      if (!classLabels && oneHotDefs.length && oneHotDefs[0].values) classLabels = oneHotDefs[0].values;
+      if (classLabels && classLabels.length > 1) {
+        var filterCard = el("div", { style: "margin-top:8px;padding:6px 8px;border:1px solid #1e293b;border-radius:6px;background:#0f172a;" });
+        filterCard.appendChild(el("div", { style: "font-size:10px;color:#67e8f9;font-weight:600;margin-bottom:4px;" }, "Class Filter"));
+        var currentFilter = Array.isArray(savedCfg.classFilter) ? savedCfg.classFilter : null;
+        var allSelected = !currentFilter || currentFilter.length >= classLabels.length;
+        var grid = el("div", { style: "display:flex;flex-wrap:wrap;gap:3px;" });
+        classLabels.forEach(function (lbl, ci) {
+          var lb = el("label", { style: "display:flex;align-items:center;gap:2px;font-size:10px;color:#e2e8f0;cursor:pointer;min-width:80px;" });
+          var cb = el("input", { type: "checkbox" });
+          cb.checked = allSelected || (currentFilter && currentFilter.indexOf(ci) >= 0);
+          (function (classIdx) {
+            cb.addEventListener("change", function () {
+              var checked = [];
+              grid.querySelectorAll("input[type=checkbox]").forEach(function (c, i) { if (c.checked) checked.push(i); });
+              savedCfg.classFilter = checked.length >= classLabels.length ? null : checked;
+              ds.config = Object.assign(ds.config || {}, { classFilter: savedCfg.classFilter });
+              if (store) store.upsertDataset(ds);
+              _updateAutoCountFields(rightEl);
+            });
+          })(ci);
+          lb.appendChild(cb);
+          lb.appendChild(document.createTextNode(ci + ": " + lbl));
+          grid.appendChild(lb);
+        });
+        filterCard.appendChild(grid);
+        // select all / none buttons
+        var btnRow = el("div", { style: "display:flex;gap:4px;margin-top:4px;" });
+        var allBtn = el("button", { style: "font-size:9px;padding:2px 6px;background:#1e293b;color:#67e8f9;border:1px solid #334155;border-radius:3px;cursor:pointer;" }, "All");
+        var noneBtn = el("button", { style: "font-size:9px;padding:2px 6px;background:#1e293b;color:#f43f5e;border:1px solid #334155;border-radius:3px;cursor:pointer;" }, "None");
+        allBtn.addEventListener("click", function () {
+          grid.querySelectorAll("input[type=checkbox]").forEach(function (c) { c.checked = true; });
+          savedCfg.classFilter = null; ds.config = Object.assign(ds.config || {}, { classFilter: null });
+          if (store) store.upsertDataset(ds); _updateAutoCountFields(rightEl);
+        });
+        noneBtn.addEventListener("click", function () {
+          grid.querySelectorAll("input[type=checkbox]").forEach(function (c) { c.checked = false; });
+          savedCfg.classFilter = []; ds.config = Object.assign(ds.config || {}, { classFilter: [] });
+          if (store) store.upsertDataset(ds); _updateAutoCountFields(rightEl);
+        });
+        btnRow.appendChild(allBtn); btnRow.appendChild(noneBtn);
+        filterCard.appendChild(btnRow);
+        filterCard.appendChild(el("div", { style: "font-size:9px;color:#64748b;margin-top:3px;" }, "Uncheck classes to exclude. For GAN: try single class first."));
+        rightEl.appendChild(filterCard);
+      }
+
       // 2. MODULE-SPECIFIC config (from module.getDatasetConfigSpec, excluding fields already in global)
       var globalKeys = { seed: true, splitMode: true, trainFrac: true, valFrac: true, testFrac: true };
       var mod = _getModuleForSchema(ds.schemaId);

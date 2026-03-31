@@ -469,8 +469,9 @@
     if (!Number.isFinite(totalRaw) || totalRaw <= 0) totalRaw = 1400;
     var total = clampInt(totalRaw, 30, totalAvailable);
     var train = Math.max(1, Math.floor(total * fr.train));
-    var val = Math.max(1, Math.floor(total * fr.val));
-    var test = Math.max(1, total - train - val);
+    var val = fr.val > 0 ? Math.max(1, Math.floor(total * fr.val)) : 0;
+    var test = fr.test > 0 ? Math.max(1, total - train - val) : 0;
+    if (val === 0 && test === 0) train = total;
     var fixed = train + val + test;
     if (fixed > total) {
       var over = fixed - total;
@@ -673,7 +674,20 @@
       };
     }
 
-    var counts = countsFromConfig(c, totalAvailable, splitMode, fr);
+    // class filter: only include selected classes (from config)
+    var classFilter = Array.isArray(c.classFilter) ? c.classFilter : null;
+    var filteredAvailable = totalAvailable;
+    var filteredIndices = null;
+    if (classFilter && classFilter.length > 0 && classFilter.length < (source.classCount || 10)) {
+      filteredIndices = [];
+      for (var fi = 0; fi < totalAvailable; fi++) {
+        var flbl = source.labelsUint8 ? source.labelsUint8[fi] : 0;
+        if (classFilter.indexOf(flbl) >= 0) filteredIndices.push(fi);
+      }
+      filteredAvailable = filteredIndices.length;
+    }
+
+    var counts = countsFromConfig(c, filteredAvailable, splitMode, fr);
     var forceEqual = Boolean(c.forceEqualClass);
     if (forceEqual) splitMode = "stratified_label";
     var sampled;
@@ -701,9 +715,16 @@
         var tmp = sampled[shi]; sampled[shi] = sampled[shj]; sampled[shj] = tmp;
       }
     } else {
-      sampled = splitMode === "stratified_label"
-        ? sampleIndicesStratified(counts.total, source.labelsUint8, rng)
-        : sampleIndicesRandom(counts.total, totalAvailable, rng);
+      if (filteredIndices) {
+        // class-filtered: sample from filtered pool only
+        var pool = filteredIndices.slice();
+        for (var si2 = pool.length - 1; si2 > 0; si2--) { var sj = Math.floor(rng() * (si2 + 1)); var st = pool[si2]; pool[si2] = pool[sj]; pool[sj] = st; }
+        sampled = pool.slice(0, Math.min(counts.total, pool.length));
+      } else {
+        sampled = splitMode === "stratified_label"
+          ? sampleIndicesStratified(counts.total, source.labelsUint8, rng)
+          : sampleIndicesRandom(counts.total, totalAvailable, rng);
+      }
     }
     var splitIdx = splitSampledIndices(sampled, source.labelsUint8, splitMode, fr, counts, rng);
     var allLabels = splitIdx.train.concat(splitIdx.val, splitIdx.test).map(function (i) { return source.labelsUint8 ? source.labelsUint8[i] : 0; });

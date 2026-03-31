@@ -120,7 +120,7 @@
   window.FASHION_MNIST_GAN_PRESET = {
     dataset: {
       id: DS, name: "Fashion-MNIST (60000)", schemaId: sid, status: "draft",
-      config: { seed: 42, splitMode: "stratified_label", trainFrac: 1.0, valFrac: 0, testFrac: 0, totalCount: 60000, useFullSource: true },
+      config: { seed: 42, splitMode: "stratified_label", trainFrac: 1.0, valFrac: 0, testFrac: 0, totalCount: 10000, useFullSource: true },
       data: null, createdAt: Date.now(),
     },
     models: [
