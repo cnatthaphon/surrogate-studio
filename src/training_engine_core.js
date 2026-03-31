@@ -547,10 +547,15 @@
         if (model.layers) model.layers.forEach(function (l) { l.trainable = true; });
       }
 
+      var _compiled = false;
       function _compileModel() {
-        var losses = headConfigs.map(function (h) { return makeHeadLoss(tf, h, "meanSquaredError"); });
-        var weights = headConfigs.map(function (h) { return h.matchWeight || 1; });
-        model.compile({ optimizer: tf.train.adam(lr), loss: losses, lossWeights: weights });
+        if (!_compiled) {
+          var losses = headConfigs.map(function (h) { return makeHeadLoss(tf, h, "meanSquaredError"); });
+          var weights = headConfigs.map(function (h) { return h.matchWeight || 1; });
+          model.compile({ optimizer: tf.train.adam(lr), loss: losses, lossWeights: weights });
+          _compiled = true;
+        }
+        // don't recompile — trainable flags work without recompile in TF.js
       }
 
       function _regenNoise() {

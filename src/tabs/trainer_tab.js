@@ -1265,7 +1265,9 @@
       var tCard = activeId && store ? store.getTrainerCard(activeId) : null;
       if (!tCard) { onStatus("Select a trainer"); return; }
 
-      var config = _configFormApi && typeof _configFormApi.getConfig === "function" ? _configFormApi.getConfig() : {};
+      var formConfig = _configFormApi && typeof _configFormApi.getConfig === "function" ? _configFormApi.getConfig() : {};
+      // merge: tCard.config (has trainingSchedule, classFilter etc.) + form values (has epochs, lr etc.)
+      var config = Object.assign({}, tCard.config || {}, formConfig);
       if (!config.datasetId) { onStatus("Select a dataset"); return; }
       if (!config.modelId) { onStatus("Select a model"); return; }
 
