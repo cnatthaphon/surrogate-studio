@@ -1069,9 +1069,9 @@
           mountEl: formMount, schema: formSchema, value: formValue,
           fieldNamePrefix: "train", rowClassName: "osc-form-row",
           onChange: function (cfg, ctx) {
-            // save config changes to store
-            if (cfg && t) {
-              Object.keys(cfg).forEach(function (k) { t.config[k] = cfg[k]; });
+            // save ONLY the changed field (not all defaults which would overwrite preset values)
+            if (ctx && ctx.key && t) {
+              t.config[ctx.key] = ctx.value;
               if (store) store.upsertTrainerCard(t);
             }
             // auto-check server when "Use PyTorch Server" is toggled on

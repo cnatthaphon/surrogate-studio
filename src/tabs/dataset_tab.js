@@ -433,7 +433,7 @@
         formConfig.steps = Math.floor(Number(formConfig.durationSec) / Number(formConfig.dt));
       }
       if (!formConfig.totalCount && formConfig.mnistTotalCount) formConfig.totalCount = Number(formConfig.mnistTotalCount);
-      var buildConfig = Object.assign({ schemaId: schemaId, moduleId: mod.id, variant: schemaId }, formConfig);
+      var buildConfig = Object.assign({ schemaId: schemaId, moduleId: mod.id, variant: schemaId }, dsRecord.config || {}, formConfig);
 
       // show loading state
       onStatus("Generating " + (dsRecord.name || dsRecord.id) + "...");
