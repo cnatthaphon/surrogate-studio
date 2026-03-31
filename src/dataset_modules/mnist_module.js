@@ -252,7 +252,7 @@
                 seed: String(uiState.seed),
                 splitMode: uiState.splitMode,
                 trainFrac: Number(uiState.trainFrac || 0.8).toFixed(4),
-                valFrac: Number(uiState.valFrac || 0.1).toFixed(4),
+                valFrac: (uiState.valFrac != null ? Number(uiState.valFrac) : 0.1).toFixed(4),
                 testFrac: Number(uiState.testFrac || 0.1).toFixed(4),
                 useFullSource: Boolean(uiState.useFullSource),
                 totalCount: String(uiState.totalCount),
@@ -346,8 +346,8 @@
     if (!Number.isFinite(va)) va = 0.1;
     if (!Number.isFinite(te)) te = 0.1;
     tr = Math.max(0.01, tr);
-    va = Math.max(0.01, va);
-    te = Math.max(0.01, te);
+    va = Math.max(0, va);
+    te = Math.max(0, te);
     var sum = tr + va + te;
     return { train: tr / sum, val: va / sum, test: te / sum };
   }
