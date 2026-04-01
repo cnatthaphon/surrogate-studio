@@ -89,15 +89,16 @@
   function _dcGan() {
     _nid = 0; var d = {};
 
-    // Conv Generator (tagged "generator")
+    // Conv Generator (tagged "generator") — LayerNorm prevents mode collapse
     var z =    N(d, "sample_z",          { dim: 128, distribution: "normal" },    80, 60);
-    var gd =   N(d, "dense",             { units: 6272, activation: "relu", weightTag: "generator" }, 240, 60);
+    var gd =   N(d, "dense",             { units: 6272, activation: "relu", weightTag: "generator" }, 200, 60);
+    var gln1 = N(d, "layernorm",         {},                                     300, 60);
     var gr =   N(d, "reshape",           { targetShape: "7,7,128" },             400, 60);
     var gc1 =  N(d, "conv2d_transpose",  { filters: 64, kernelSize: 4, strides: 2, padding: "same", activation: "relu", weightTag: "generator" }, 560, 60);
     var gc2 =  N(d, "conv2d_transpose",  { filters: 1, kernelSize: 4, strides: 2, padding: "same", activation: "sigmoid", weightTag: "generator" }, 720, 60);
     var gf =   N(d, "flatten",           {},                                     880, 60);
     var gOut = N(d, "output",            { target: "none", targetType: "none", loss: "none", matchWeight: 0, phase: "generator", headType: "reconstruction" }, 1040, 60);
-    C(d, z, gd); C(d, gd, gr); C(d, gr, gc1); C(d, gc1, gc2); C(d, gc2, gf); C(d, gf, gOut);
+    C(d, z, gd); C(d, gd, gln1); C(d, gln1, gr); C(d, gr, gc1); C(d, gc1, gc2); C(d, gc2, gf); C(d, gf, gOut);
 
     // G output → ConcatBatch with real
     var img =  N(d, "image_source",      { sourceKey: "pixel_values", featureSize: 784, imageShape: [28,28,1] }, 80, 260);
@@ -105,14 +106,16 @@
     C(d, gOut, cat, "output_1", "input_1");
     C(d, img, cat, "output_1", "input_2");
 
-    // Conv Discriminator (tagged "discriminator")
+    // Conv Discriminator (tagged "discriminator") — Dropout stabilizes training
     var dr =   N(d, "reshape",           { targetShape: "28,28,1" },             660, 200);
     var dc1 =  N(d, "conv2d",            { filters: 64, kernelSize: 4, strides: 2, padding: "same", activation: "relu", weightTag: "discriminator" }, 820, 200);
+    var ddr1 = N(d, "dropout",           { rate: 0.3 },                          900, 200);
     var dc2 =  N(d, "conv2d",            { filters: 128, kernelSize: 4, strides: 2, padding: "same", activation: "relu", weightTag: "discriminator" }, 980, 200);
+    var ddr2 = N(d, "dropout",           { rate: 0.3 },                          1060, 200);
     var df =   N(d, "flatten",           {},                                     1140, 200);
     var dd =   N(d, "dense",             { units: 1, activation: "sigmoid", weightTag: "discriminator" }, 1300, 200);
     var dOut = N(d, "output",            { target: "custom", targetType: "custom", loss: "bce", matchWeight: 1, phase: "discriminator", headType: "classification" }, 1460, 200);
-    C(d, cat, dr); C(d, dr, dc1); C(d, dc1, dc2); C(d, dc2, df); C(d, df, dd); C(d, dd, dOut);
+    C(d, cat, dr); C(d, dr, dc1); C(d, dc1, ddr1); C(d, ddr1, dc2); C(d, dc2, ddr2); C(d, ddr2, df); C(d, df, dd); C(d, dd, dOut);
 
     // Labels: [fake_label, real_label] via ConcatBatch (label smoothing 0.1/0.9)
     var c0 =   N(d, "constant",          { value: 0.1, dim: 1 },                1140, 360);
