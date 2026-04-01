@@ -107,17 +107,17 @@
     C(d, gOut, cat, "output_1", "input_1");
     C(d, img, cat, "output_1", "input_2");
 
-    // Conv Discriminator (Radford 2015) — BatchNorm + Dropout
+    // Conv Discriminator (Radford 2015) — LeakyReLU(0.2) + BatchNorm
     var dr =   N(d, "reshape",           { targetShape: "28,28,1" },             660, 200);
-    var dc1 =  N(d, "conv2d",            { filters: 64, kernelSize: 4, strides: 2, padding: "same", activation: "relu", weightTag: "discriminator" }, 820, 200);
-    var ddr1 = N(d, "dropout",           { rate: 0.25 },                         900, 200);
-    var dc2 =  N(d, "conv2d",            { filters: 128, kernelSize: 4, strides: 2, padding: "same", activation: "relu", weightTag: "discriminator" }, 980, 200);
-    var dbn1 = N(d, "batchnorm",         {},                                     1060, 200);
-    var ddr2 = N(d, "dropout",           { rate: 0.25 },                         1100, 200);
+    var dc1 =  N(d, "conv2d",            { filters: 64, kernelSize: 4, strides: 2, padding: "same", activation: "linear", weightTag: "discriminator" }, 820, 200);
+    var dlr1 = N(d, "leaky_relu",        { alpha: 0.2 },                         880, 200);
+    var dc2 =  N(d, "conv2d",            { filters: 128, kernelSize: 4, strides: 2, padding: "same", activation: "linear", weightTag: "discriminator" }, 940, 200);
+    var dbn1 = N(d, "batchnorm",         {},                                     1000, 200);
+    var dlr2 = N(d, "leaky_relu",        { alpha: 0.2 },                         1060, 200);
     var df =   N(d, "flatten",           {},                                     1140, 200);
     var dd =   N(d, "dense",             { units: 1, activation: "sigmoid", weightTag: "discriminator" }, 1300, 200);
     var dOut = N(d, "output",            { target: "custom", targetType: "custom", loss: "bce", matchWeight: 1, phase: "discriminator", headType: "classification" }, 1460, 200);
-    C(d, cat, dr); C(d, dr, dc1); C(d, dc1, ddr1); C(d, ddr1, dc2); C(d, dc2, dbn1); C(d, dbn1, ddr2); C(d, ddr2, df); C(d, df, dd); C(d, dd, dOut);
+    C(d, cat, dr); C(d, dr, dc1); C(d, dc1, dlr1); C(d, dlr1, dc2); C(d, dc2, dbn1); C(d, dbn1, dlr2); C(d, dlr2, df); C(d, df, dd); C(d, dd, dOut);
 
     // Labels: [fake_label, real_label] via ConcatBatch (label smoothing 0.1/0.9)
     var c0 =   N(d, "constant",          { value: 0.1, dim: 1 },                1140, 360);
@@ -165,7 +165,7 @@
                   ], rotateSchedule: true } },
       // Pre-trained — generate immediately (weights loaded on init)
       { id: "t-mlp-gan-trained", name: "MLP-GAN (pre-trained)", schemaId: sid, datasetId: DS, modelId: "m-mlp-gan", status: "done",
-        _weightsVar: "MLP_GAN_PRETRAINED_WEIGHTS_B64",
+        _pretrainedVar: "MLP_GAN_PRETRAINED_BIN_B64",
         config: { epochs: 1000, batchSize: 128, learningRate: 0.0005, optimizerType: "adam", useServer: true,
                   earlyStoppingPatience: 0, lrSchedulerType: "none", weightSelection: "last",
                   trainingSchedule: [

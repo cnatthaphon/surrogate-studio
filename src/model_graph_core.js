@@ -50,6 +50,15 @@
       return editor.addNode("dropout_layer", 1, 1, x, y, "dropout_layer", { rate: rate }, html);
     }
 
+    function addLeakyReLUNode(editor, x, y, cfg) {
+      var alpha = api.clamp(Number((cfg && cfg.alpha) || 0.2), 0.01, 0.5);
+      var html =
+        "<div><div style='font-weight:700'>LeakyReLU</div>" +
+        "<input type='number' step='0.05' min='0.01' max='0.5' df-alpha value='" + alpha.toFixed(2) + "' style='width:80px'>" +
+        "<div class='node-summary' style='font-size:11px;color:#94a3b8;'>α=" + alpha.toFixed(2) + "</div></div>";
+      return editor.addNode("leaky_relu_layer", 1, 1, x, y, "leaky_relu_layer", { alpha: alpha }, html);
+    }
+
     function addBatchNormNode(editor, x, y, cfg) {
       var momentum = api.clamp(Number((cfg && cfg.momentum) || 0.99), 0.1, 0.999);
       var epsilon = Math.max(1e-6, Number((cfg && cfg.epsilon) || 1e-3));
@@ -391,6 +400,7 @@
         input: addInputNode,
         dense: addDenseNode,
         dropout: addDropoutNode,
+        leaky_relu: addLeakyReLUNode,
         batchnorm: addBatchNormNode,
         layernorm: addLayerNormNode,
         latent: addLatentNode,
@@ -526,6 +536,7 @@
         latent_logvar_layer: "Latent log\u03c3\u00b2",
         reparam_layer: "Reparam z",
         dropout_layer: "Dropout",
+        leaky_relu_layer: "LeakyReLU",
         batchnorm_layer: "BatchNorm",
         layernorm_layer: "LayerNorm",
         output_layer: "Output",

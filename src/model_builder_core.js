@@ -643,6 +643,10 @@
         var eps = Math.max(1e-6, Number((node.data && node.data.epsilon) || 1e-3));
         return tf.layers.layerNormalization({ axis: -1, epsilon: eps }).apply(inTensor);
       }
+      if (node.name === "leaky_relu_layer") {
+        var alpha = clamp(Number((node.data && node.data.alpha) || 0.2), 0.01, 0.5);
+        return tf.layers.leakyReLU({ alpha: alpha }).apply(inTensor);
+      }
       if (node.name === "rnn_layer" || node.name === "gru_layer" || node.name === "lstm_layer") {
         var rnnUnits = Math.max(1, Number(node.data.units || 64));
         var dropout = clamp(Number(node.data.dropout || 0), 0, 0.8);

@@ -55,7 +55,7 @@
   <script src="../../src/surrogate_studio.js"></script>
 
   <script src="./preset.js"></script>
-  <script src="./mlp_gan_weights.js"></script>
+  <script src="./mlp_gan_pretrained.js"></script>
 </head>
 <body>
   <div id="app"></div>
@@ -66,42 +66,32 @@
       if (preset.dataset) store.upsertDataset(preset.dataset);
       if (preset.models) preset.models.forEach(function (m) { store.upsertModel(m); });
       if (preset.trainers) preset.trainers.forEach(function (t) {
-        // Load pre-trained weights from global base64 variable (works with file://)
-        if (t._weightsVar && t.status === "done" && window[t._weightsVar]) {
+        // Load pre-trained data from base64 binary (same format as Export Trainer)
+        if (t._pretrainedVar && t.status === "done" && window[t._pretrainedVar]) {
           (function (trainer) {
             try {
-              var b64 = window[trainer._weightsVar];
+              var b64 = window[trainer._pretrainedVar];
               var bin = atob(b64);
               var bytes = new Uint8Array(bin.length);
               for (var bi = 0; bi < bin.length; bi++) bytes[bi] = bin.charCodeAt(bi);
-              var floats = new Float32Array(bytes.buffer);
-              var specs = [];
-              var off = 0;
-              var model = preset.models.find(function (m) { return m.id === trainer.modelId; });
-              if (model && model.graph && window.OSCModelBuilderCore) {
-                var tf = window.tf;
-                var built = window.OSCModelBuilderCore.buildModelFromGraph(tf, model.graph, {
-                  mode: "direct", featureSize: 784, windowSize: 1, seqFeatureSize: 784,
-                  allowedOutputKeys: [{ key: "pixel_values", headType: "reconstruction" }],
-                  defaultTarget: "pixel_values", numClasses: 10,
-                });
-                specs = built.model.getWeights().map(function (w, i) {
-                  var shape = w.shape; var sz = shape.reduce(function (a, b) { return a * b; }, 1);
-                  var s = { name: "w" + i, shape: shape, dtype: "float32", offset: off }; off += sz * 4; return s;
-                });
-                built.model.dispose();
-              }
-              trainer.modelArtifacts = { weightSpecs: specs, weightValues: Array.from(floats) };
+              var buf = bytes.buffer;
+              // Same parse as Import Trainer _parseBinary()
+              var view = new DataView(buf);
+              var metaLen = view.getUint32(0, true);
+              var metaBytes = new Uint8Array(buf, 4, metaLen);
+              var meta = JSON.parse(new TextDecoder().decode(metaBytes));
+              var weightStart = 4 + metaLen;
+              var specs = meta.weightSpecs || [];
+              var totalFloats = specs.reduce(function (s, sp) { return s + sp.shape.reduce(function (a, b) { return a * b; }, 1); }, 0);
+              var weightValues = Array.from(new Float32Array(buf, weightStart, totalFloats));
+              trainer.modelArtifacts = { weightSpecs: specs, weightValues: weightValues };
               trainer.modelArtifactsLast = trainer.modelArtifacts;
-              // Load epoch history if available (same var name + _EPOCHS suffix)
-              var epochsVar = trainer._weightsVar.replace(/_B64$/, "_EPOCHS");
-              if (window[epochsVar]) {
-                store.replaceTrainerEpochs(trainer.id, window[epochsVar]);
-                console.log("[preset] Loaded", window[epochsVar].length, "epochs for", trainer.name);
-              }
+              if (meta.config) trainer.config = Object.assign(trainer.config || {}, meta.config);
+              if (meta.metrics) trainer.metrics = meta.metrics;
+              if (meta.epochs && meta.epochs.length) store.replaceTrainerEpochs(trainer.id, meta.epochs);
               store.upsertTrainerCard(trainer);
-              console.log("[preset] Loaded pre-trained weights for", trainer.name, "(" + floats.length + " floats)");
-            } catch (e) { console.warn("[preset] Weight decode failed for", trainer.name, e.message); }
+              console.log("[preset] Loaded pre-trained:", trainer.name, "(" + totalFloats + " weights, " + (meta.epochs || []).length + " epochs)");
+            } catch (e) { console.warn("[preset] Pre-trained load failed:", trainer.name, e.message); }
           })(t);
         }
         store.upsertTrainerCard(t);
