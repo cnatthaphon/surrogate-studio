@@ -93,6 +93,12 @@
               }
               trainer.modelArtifacts = { weightSpecs: specs, weightValues: Array.from(floats) };
               trainer.modelArtifactsLast = trainer.modelArtifacts;
+              // Load epoch history if available (same var name + _EPOCHS suffix)
+              var epochsVar = trainer._weightsVar.replace(/_B64$/, "_EPOCHS");
+              if (window[epochsVar]) {
+                store.replaceTrainerEpochs(trainer.id, window[epochsVar]);
+                console.log("[preset] Loaded", window[epochsVar].length, "epochs for", trainer.name);
+              }
               store.upsertTrainerCard(trainer);
               console.log("[preset] Loaded pre-trained weights for", trainer.name, "(" + floats.length + " floats)");
             } catch (e) { console.warn("[preset] Weight decode failed for", trainer.name, e.message); }
