@@ -732,17 +732,52 @@
       if (artifacts.weightValues && Array.isArray(artifacts.weightValues)) fw = new Float32Array(artifacts.weightValues);
       else if (artifacts.weightData && artifacts.weightData.byteLength) fw = new Float32Array(artifacts.weightData);
       if (!fw) { console.warn("[gen] No weight data in artifacts"); return; }
+      var savedSpecs = artifacts.weightSpecs || [];
+      var modelWeights = model.weights; // {name, shape}
+
+      // Try name-based matching first (handles layer reordering between builds)
+      if (savedSpecs.length && savedSpecs[0].name && modelWeights.length) {
+        // Strip TF.js dedup suffixes: n2/kernel_1 → n2/kernel
+        function stripSuffix(n) { return String(n || "").replace(/_\d+$/, ""); }
+        // Build saved weight map: name → {offset, size}
+        var savedMap = {};
+        var off = 0;
+        savedSpecs.forEach(function (sp) {
+          var sz = sp.shape.reduce(function (a, b) { return a * b; }, 1);
+          savedMap[stripSuffix(sp.name)] = { offset: off, size: sz, shape: sp.shape };
+          off += sz;
+        });
+        var nw = [];
+        var matched = 0;
+        modelWeights.forEach(function (mw) {
+          var key = stripSuffix(mw.name);
+          var saved = savedMap[key];
+          if (saved && saved.size === mw.shape.reduce(function (a, b) { return a * b; }, 1)) {
+            nw.push(tf.tensor(fw.subarray(saved.offset, saved.offset + saved.size), mw.shape));
+            matched++;
+          } else {
+            // Fallback: keep current weight
+            nw.push(mw.read());
+          }
+        });
+        if (matched > 0) {
+          model.setWeights(nw);
+          console.log("[gen] Weights loaded by name (" + matched + "/" + modelWeights.length + " matched)");
+        }
+        return;
+      }
+
+      // Fallback: positional matching
       var mw = model.getWeights();
-      console.log("[gen] Loading weights: saved=" + fw.length + " floats, model expects " + mw.length + " tensors");
-      var nw = []; var off = 0;
+      console.log("[gen] Loading weights positionally: saved=" + fw.length + " floats, model expects " + mw.length + " tensors");
+      var nw2 = []; var off2 = 0;
       for (var i = 0; i < mw.length; i++) {
         var sz = mw[i].shape.reduce(function (a, b) { return a * b; }, 1);
-        if (off + sz > fw.length) { console.warn("[gen] Weight overflow at tensor " + i + " (off=" + off + " + sz=" + sz + " > " + fw.length + ")"); break; }
-        nw.push(tf.tensor(fw.subarray(off, off + sz), mw[i].shape));
-        off += sz;
+        if (off2 + sz > fw.length) break;
+        nw2.push(tf.tensor(fw.subarray(off2, off2 + sz), mw[i].shape));
+        off2 += sz;
       }
-      if (nw.length === mw.length) { model.setWeights(nw); console.log("[gen] Weights loaded OK (" + nw.length + " tensors)"); }
-      else { console.warn("[gen] Weight count mismatch: loaded " + nw.length + " / expected " + mw.length + " — weights NOT applied"); }
+      if (nw2.length === mw.length) model.setWeights(nw2);
     }
 
     // ─── Render generated samples — delegates to dataset module or core ───

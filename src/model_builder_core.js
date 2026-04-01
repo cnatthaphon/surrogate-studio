@@ -540,7 +540,8 @@
       return Math.max(1, Number(datasetMeta.featureSize || 1));
     };
 
-    var applyNodeOp = function (node, inTensor, laterHasRecurrent) {
+    var applyNodeOp = function (node, inTensor, laterHasRecurrent, nodeId) {
+      var _n = "n" + String(nodeId || ""); // deterministic layer name from graph node ID
       // input/image_source that receives from another node: passthrough
       if (node.name === "input_layer" || node.name === "image_source_layer" || node.name === "image_source_block") {
         return inTensor;
@@ -548,7 +549,7 @@
       if (node.name === "dense_layer") {
         var units = Math.max(1, Number(node.data.units || 32));
         var activation = String(node.data.activation || "relu");
-        var denseLayer = tf.layers.dense({ units: units, activation: activation });
+        var denseLayer = tf.layers.dense({ units: units, activation: activation, name: _n });
         if (node.data.weightTag) denseLayer._weightTag = String(node.data.weightTag);
         return denseLayer.apply(inTensor);
       }
@@ -558,7 +559,7 @@
         var kernelSize = Math.max(1, Number((node.data && node.data.kernelSize) || 3));
         var strides = Math.max(1, Number((node.data && node.data.stride) || 1));
         var activ = String((node.data && node.data.activation) || "relu");
-        return tf.layers.conv1d({ filters: filters, kernelSize: kernelSize, strides: strides, padding: "same", activation: activ }).apply(inTensor);
+        return tf.layers.conv1d({ filters: filters, kernelSize: kernelSize, strides: strides, padding: "same", activation: activ, name: _n }).apply(inTensor);
       }
       // --- GAN building blocks ---
       if (node.name === "constant_layer") {
@@ -584,13 +585,13 @@
       if (node.name === "embedding_layer") {
         var vocabSize = Math.max(1, Number((node.data && node.data.inputDim) || 10000));
         var embedDim = Math.max(1, Number((node.data && node.data.outputDim) || 256));
-        return tf.layers.embedding({ inputDim: vocabSize, outputDim: embedDim }).apply(inTensor);
+        return tf.layers.embedding({ inputDim: vocabSize, outputDim: embedDim, name: _n }).apply(inTensor);
       }
       // --- Conv2D family ---
       if (node.name === "reshape_layer") {
         var shapeStr = String((node.data && node.data.targetShape) || "28,28,1");
         var shape = shapeStr.split(",").map(function (s) { return Math.max(1, parseInt(s.trim()) || 1); });
-        return tf.layers.reshape({ targetShape: shape }).apply(inTensor);
+        return tf.layers.reshape({ targetShape: shape, name: _n }).apply(inTensor);
       }
       if (node.name === "conv2d_layer") {
         var f2 = Math.max(1, Number((node.data && node.data.filters) || 32));
@@ -598,7 +599,7 @@
         var s2 = Math.max(1, Number((node.data && node.data.strides) || 1));
         var p2 = String((node.data && node.data.padding) || "same");
         var a2 = String((node.data && node.data.activation) || "relu");
-        return tf.layers.conv2d({ filters: f2, kernelSize: k2, strides: s2, padding: p2, activation: a2 }).apply(inTensor);
+        return tf.layers.conv2d({ filters: f2, kernelSize: k2, strides: s2, padding: p2, activation: a2, name: _n }).apply(inTensor);
       }
       if (node.name === "conv2d_transpose_layer") {
         var ft = Math.max(1, Number((node.data && node.data.filters) || 32));
@@ -606,22 +607,22 @@
         var st = Math.max(1, Number((node.data && node.data.strides) || 2));
         var pt = String((node.data && node.data.padding) || "same");
         var at = String((node.data && node.data.activation) || "relu");
-        return tf.layers.conv2dTranspose({ filters: ft, kernelSize: kt, strides: st, padding: pt, activation: at }).apply(inTensor);
+        return tf.layers.conv2dTranspose({ filters: ft, kernelSize: kt, strides: st, padding: pt, activation: at, name: _n }).apply(inTensor);
       }
       if (node.name === "maxpool2d_layer") {
         var ps = Math.max(1, Number((node.data && node.data.poolSize) || 2));
         var ss = Math.max(1, Number((node.data && node.data.strides) || ps));
-        return tf.layers.maxPooling2d({ poolSize: ps, strides: ss }).apply(inTensor);
+        return tf.layers.maxPooling2d({ poolSize: ps, strides: ss, name: _n }).apply(inTensor);
       }
       if (node.name === "flatten_layer") {
-        return tf.layers.flatten().apply(inTensor);
+        return tf.layers.flatten({ name: _n }).apply(inTensor);
       }
       if (node.name === "upsample2d_layer") {
         var us = Math.max(1, Number((node.data && node.data.size) || 2));
-        return tf.layers.upSampling2d({ size: [us, us] }).apply(inTensor);
+        return tf.layers.upSampling2d({ size: [us, us], name: _n }).apply(inTensor);
       }
       if (node.name === "global_avg_pool2d_layer") {
-        return tf.layers.globalAveragePooling2d().apply(inTensor);
+        return tf.layers.globalAveragePooling2d({ name: _n }).apply(inTensor);
       }
       if (node.name === "latent_layer" || node.name === "latent_mu_layer" || node.name === "latent_logvar_layer") {
         var u = Math.max(2, Number((node.data && node.data.units) || 16));
@@ -632,20 +633,20 @@
       }
       if (node.name === "dropout_layer") {
         var rate = clamp(Number(node.data.rate || 0.1), 0, 0.9);
-        return tf.layers.dropout({ rate: rate }).apply(inTensor);
+        return tf.layers.dropout({ rate: rate, name: _n }).apply(inTensor);
       }
       if (node.name === "batchnorm_layer") {
         var momentum = clamp(Number((node.data && node.data.momentum) || 0.99), 0.1, 0.999);
         var epsilon = Math.max(1e-6, Number((node.data && node.data.epsilon) || 1e-3));
-        return tf.layers.batchNormalization({ momentum: momentum, epsilon: epsilon }).apply(inTensor);
+        return tf.layers.batchNormalization({ momentum: momentum, epsilon: epsilon, name: _n }).apply(inTensor);
       }
       if (node.name === "layernorm_layer") {
         var eps = Math.max(1e-6, Number((node.data && node.data.epsilon) || 1e-3));
-        return tf.layers.layerNormalization({ axis: -1, epsilon: eps }).apply(inTensor);
+        return tf.layers.layerNormalization({ axis: -1, epsilon: eps, name: _n }).apply(inTensor);
       }
       if (node.name === "leaky_relu_layer") {
         var alpha = clamp(Number((node.data && node.data.alpha) || 0.2), 0.01, 0.5);
-        return tf.layers.leakyReLU({ alpha: alpha }).apply(inTensor);
+        return tf.layers.leakyReLU({ alpha: alpha, name: _n }).apply(inTensor);
       }
       if (node.name === "rnn_layer" || node.name === "gru_layer" || node.name === "lstm_layer") {
         var rnnUnits = Math.max(1, Number(node.data.units || 64));
@@ -679,7 +680,7 @@
       // NoiseInjection: add Gaussian noise (training only)
       if (node.name === "noise_injection_layer") {
         var noiseScale = Number((node.data && node.data.scale) || 0.1);
-        return tf.layers.gaussianNoise({ stddev: noiseScale }).apply(inTensor);
+        return tf.layers.gaussianNoise({ stddev: noiseScale, name: _n }).apply(inTensor);
       }
       throw new Error("Unsupported node type: " + node.name);
     };
@@ -826,7 +827,7 @@
             units: Math.max(2, Number(out.shape && out.shape[out.shape.length - 1] || 2)),
           });
         } else {
-          out = applyNodeOp(node, inTensor, laterHasRecurrent);
+          out = applyNodeOp(node, inTensor, laterHasRecurrent, id);
         }
         tensorById[id] = out;
         if (node.name === "latent_layer" || node.name === "latent_mu_layer" || node.name === "latent_logvar_layer") {

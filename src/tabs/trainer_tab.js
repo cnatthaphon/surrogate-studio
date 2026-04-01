@@ -34,11 +34,13 @@
 
     function _extractWeightsFromModel(tfModel) {
       var allW = tfModel.getWeights();
+      var weightMeta = tfModel.weights || [];
       var totalBytes = 0;
       var specs = allW.map(function (w, i) {
         var shape = w.shape;
         var size = shape.reduce(function (a, b) { return a * b; }, 1);
-        var spec = { name: "w" + i, shape: shape, dtype: "float32", offset: totalBytes };
+        var wName = (weightMeta[i] && weightMeta[i].name) || ("w" + i);
+        var spec = { name: wName, shape: shape, dtype: "float32", offset: totalBytes };
         totalBytes += size * 4;
         return spec;
       });
