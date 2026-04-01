@@ -1057,7 +1057,7 @@
         { key: "optimizerType", label: "Optimizer", type: "select", options: optTypes.map(function (t) { return { value: t, label: t }; }) },
         { key: "lrSchedulerType", label: "LR scheduler", type: "select", options: lrTypes.map(function (t) { return { value: t, label: t }; }) },
         { key: "earlyStoppingPatience", label: "Early stop patience", type: "number", min: 0 },
-        { key: "weightSelection", label: "Weights for generation", type: "select", options: [{ value: "last", label: "Last epoch" }, { value: "best", label: "Best loss" }] },
+        { key: "restoreBestWeights", label: "Restore best weights", type: "checkbox" },
         { key: "lrPatience", label: "LR patience", type: "number", min: 1 },
         { key: "lrFactor", label: "LR factor", type: "number", min: 0.05, max: 0.99, step: 0.05 },
         { key: "minLr", label: "Min LR", type: "number", min: 0.0000001, step: 0.0000001 },
@@ -1073,8 +1073,7 @@
         epochs: config.epochs || 20, batchSize: config.batchSize || 32, learningRate: config.learningRate || 0.001,
         optimizerType: config.optimizerType || "adam", lrSchedulerType: config.lrSchedulerType || "plateau",
         earlyStoppingPatience: config.earlyStoppingPatience != null ? config.earlyStoppingPatience : 5,
-        weightSelection: config.weightSelection || (config.restoreBestWeights === false ? "last" : "best"),
-        restoreBestWeights: (config.weightSelection || "best") === "best", lrPatience: config.lrPatience || 3,
+        restoreBestWeights: config.restoreBestWeights !== false, lrPatience: config.lrPatience || 3,
         lrFactor: config.lrFactor || 0.5, minLr: config.minLr || 0.000001,
         gradClipNorm: config.gradClipNorm || 0, gradClipValue: config.gradClipValue || 0,
       };
@@ -1107,10 +1106,6 @@
             // save ONLY the changed field (not all defaults which would overwrite preset values)
             if (ctx && ctx.key && t) {
               t.config[ctx.key] = ctx.value;
-              // Switch active weights when dropdown changes
-              if (ctx.key === "weightSelection" && t.modelArtifactsLast) {
-                t.modelArtifacts = ctx.value === "last" ? t.modelArtifactsLast : (t.modelArtifactsBest || t.modelArtifactsLast);
-              }
               if (store) store.upsertTrainerCard(t);
             }
             // auto-check server when "Use PyTorch Server" is toggled on
@@ -1532,7 +1527,7 @@
           learningRate: Number(config.learningRate || 0.001), optimizerType: String(config.optimizerType || "adam"),
           lrSchedulerType: String(config.lrSchedulerType || "plateau"),
           earlyStoppingPatience: config.earlyStoppingPatience != null ? Number(config.earlyStoppingPatience) : 5,
-          restoreBestWeights: (config.weightSelection || "best") === "best",
+          restoreBestWeights: config.restoreBestWeights !== false,
           gradClipNorm: Number(config.gradClipNorm || 0),
           trainingSchedule: config.trainingSchedule || null,
           rotateSchedule: config.rotateSchedule !== false,
@@ -1646,7 +1641,7 @@
             lrSchedulerType: String(config.lrSchedulerType || "plateau"),
             useLrScheduler: String(config.lrSchedulerType || "plateau") !== "none",
             earlyStoppingPatience: config.earlyStoppingPatience != null ? Number(config.earlyStoppingPatience) : 5,
-            restoreBestWeights: (config.weightSelection || "best") === "best",
+            restoreBestWeights: config.restoreBestWeights !== false,
             lrPatience: Number(config.lrPatience || 3),
             lrFactor: Number(config.lrFactor || 0.5),
             minLr: Number(config.minLr || 0.000001),
@@ -1719,7 +1714,7 @@
           optimizerType: String(config.optimizerType || "adam"),
           lrSchedulerType: String(config.lrSchedulerType || "plateau"),
           earlyStoppingPatience: config.earlyStoppingPatience != null ? Number(config.earlyStoppingPatience) : 5,
-          restoreBestWeights: (config.weightSelection || "best") === "best",
+          restoreBestWeights: config.restoreBestWeights !== false,
           lrPatience: Number(config.lrPatience || 3),
           lrFactor: Number(config.lrFactor || 0.5),
           minLr: Number(config.minLr || 0.000001),
