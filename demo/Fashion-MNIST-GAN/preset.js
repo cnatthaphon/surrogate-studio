@@ -161,7 +161,7 @@
       // Pre-trained — generate immediately (weights loaded on init)
       { id: "t-mlp-gan-trained", name: "MLP-GAN (pre-trained)", schemaId: sid, datasetId: DS, modelId: "m-mlp-gan", status: "done",
         _weightsUrl: "mlp_gan_weights.bin",
-        config: { epochs: 100, batchSize: 128, learningRate: 0.0005, optimizerType: "adam",
+        config: { epochs: 1000, batchSize: 128, learningRate: 0.0005, optimizerType: "adam", useServer: true,
                   earlyStoppingPatience: 0, lrSchedulerType: "none", weightSelection: "last",
                   trainingSchedule: [
                     { epochs: 10, trainableTags: { discriminator: true, generator: false } },
