@@ -699,7 +699,7 @@
           var impr = loss < bestValLoss * (1 - 1e-4);
           if (impr) { bestValLoss = loss; bestEpoch = epoch + 1; }
           _applyLrSchedule(impr);
-          if (typeof onEpochEnd === "function") onEpochEnd(epoch, { loss: loss, val_loss: loss, current_lr: lr, improved: impr, phaseStr: "all (unfrozen)" });
+          if (typeof onEpochEnd === "function") onEpochEnd(epoch, { loss: loss, val_loss: null, current_lr: lr, improved: impr, phaseStr: "all (unfrozen)" });
           epoch++; setTimeout(nextEpoch, 0);
           return;
         }
@@ -719,7 +719,7 @@
             _applyLrSchedule(impr2);
             if (typeof onEpochEnd === "function") {
               var ss = Object.keys(stepLosses).map(function (k) { return k + "=" + (stepLosses[k] != null ? stepLosses[k].toExponential(3) : "?"); }).join(" | ");
-              onEpochEnd(epoch, { loss: totalLoss, val_loss: totalLoss, current_lr: lr, improved: impr2, phaseLosses: stepLosses, phaseStr: ss });
+              onEpochEnd(epoch, { loss: totalLoss, val_loss: null, current_lr: lr, improved: impr2, phaseLosses: stepLosses, phaseStr: ss });
             }
             epoch++; setTimeout(nextEpoch, 0);
             return;
