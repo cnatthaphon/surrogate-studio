@@ -83,7 +83,11 @@
               var weightStart = 4 + metaLen;
               var specs = meta.weightSpecs || [];
               var totalFloats = specs.reduce(function (s, sp) { return s + sp.shape.reduce(function (a, b) { return a * b; }, 1); }, 0);
-              var weightValues = Array.from(new Float32Array(buf, weightStart, totalFloats));
+              // Copy to aligned buffer (meta length may not be multiple of 4)
+              var weightBytes = new Uint8Array(buf, weightStart, totalFloats * 4);
+              var alignedBuf = new ArrayBuffer(totalFloats * 4);
+              new Uint8Array(alignedBuf).set(weightBytes);
+              var weightValues = Array.from(new Float32Array(alignedBuf));
               trainer.modelArtifacts = { weightSpecs: specs, weightValues: weightValues };
               trainer.modelArtifactsLast = trainer.modelArtifacts;
               if (meta.config) trainer.config = Object.assign(trainer.config || {}, meta.config);

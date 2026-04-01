@@ -1366,12 +1366,19 @@
             var weightStart = 4 + metaLen;
             var specs = meta.weightSpecs || [];
             var totalWeightFloats = specs.reduce(function (s, sp) { return s + sp.shape.reduce(function (a, b) { return a * b; }, 1); }, 0);
-            var lastWeights = Array.from(new Float32Array(buf, weightStart, totalWeightFloats));
+            // Copy to aligned buffer (meta length may not be multiple of 4)
+            var lastBytes = new Uint8Array(buf, weightStart, totalWeightFloats * 4);
+            var lastAligned = new ArrayBuffer(totalWeightFloats * 4);
+            new Uint8Array(lastAligned).set(lastBytes);
+            var lastWeights = Array.from(new Float32Array(lastAligned));
             meta.modelArtifactsLast = { weightSpecs: specs, weightValues: lastWeights };
             meta.modelArtifacts = meta.modelArtifactsLast;
             if (meta.hasBestWeights) {
               var bestStart = weightStart + totalWeightFloats * 4;
-              var bestWeights = Array.from(new Float32Array(buf, bestStart, totalWeightFloats));
+              var bestBytes = new Uint8Array(buf, bestStart, totalWeightFloats * 4);
+              var bestAligned = new ArrayBuffer(totalWeightFloats * 4);
+              new Uint8Array(bestAligned).set(bestBytes);
+              var bestWeights = Array.from(new Float32Array(bestAligned));
               meta.modelArtifactsBest = { weightSpecs: specs, weightValues: bestWeights };
             }
             return meta;
