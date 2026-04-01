@@ -143,6 +143,7 @@
       { id: "m-dcgan",    name: "2. DCGAN (Radford 2015)",       schemaId: sid, graph: _dcGan(),  createdAt: Date.now() },
     ],
     trainers: [
+      // Untrained — user trains from scratch
       { id: "t-mlp-gan", name: "MLP-GAN Trainer", schemaId: sid, datasetId: DS, modelId: "m-mlp-gan", status: "draft",
         config: { epochs: 1000, batchSize: 128, learningRate: 0.0005, optimizerType: "adam", useServer: true,
                   earlyStoppingPatience: 0, lrSchedulerType: "none", weightSelection: "last",
@@ -152,15 +153,34 @@
                   ], rotateSchedule: true } },
       { id: "t-dcgan", name: "DCGAN Trainer", schemaId: sid, datasetId: DS, modelId: "m-dcgan", status: "draft",
         config: { epochs: 200, batchSize: 128, learningRate: 0.0005, optimizerType: "adam", useServer: true,
-                  earlyStoppingPatience: 0, lrSchedulerType: "none", restoreBestWeights: false,
+                  earlyStoppingPatience: 0, lrSchedulerType: "none", weightSelection: "last",
+                  trainingSchedule: [
+                    { epochs: 1, trainableTags: { discriminator: true, generator: false } },
+                    { epochs: 2, trainableTags: { discriminator: false, generator: true } }
+                  ], rotateSchedule: true } },
+      // Pre-trained — generate immediately (weights loaded on init)
+      { id: "t-mlp-gan-trained", name: "MLP-GAN (pre-trained)", schemaId: sid, datasetId: DS, modelId: "m-mlp-gan", status: "done",
+        _weightsUrl: "mlp_gan_weights.bin",
+        config: { epochs: 100, batchSize: 128, learningRate: 0.0005, optimizerType: "adam",
+                  earlyStoppingPatience: 0, lrSchedulerType: "none", weightSelection: "last",
+                  trainingSchedule: [
+                    { epochs: 10, trainableTags: { discriminator: true, generator: false } },
+                    { epochs: 1, trainableTags: { discriminator: false, generator: true } }
+                  ], rotateSchedule: true },
+        metrics: { bestEpoch: 100, paramCount: 1102230 } },
+      { id: "t-dcgan-trained", name: "DCGAN (pre-trained, server)", schemaId: sid, datasetId: DS, modelId: "m-dcgan", status: "draft",
+        config: { epochs: 200, batchSize: 128, learningRate: 0.0005, optimizerType: "adam", useServer: true,
+                  earlyStoppingPatience: 0, lrSchedulerType: "none", weightSelection: "last",
                   trainingSchedule: [
                     { epochs: 1, trainableTags: { discriminator: true, generator: false } },
                     { epochs: 2, trainableTags: { discriminator: false, generator: true } }
                   ], rotateSchedule: true } },
     ],
     generations: [
-      { id: "g-mlp-gen",  name: "MLP-GAN Generate",  schemaId: sid, trainerId: "t-mlp-gan", family: "gan", config: { method: "random", numSamples: 16, temperature: 1.0, seed: 42 }, status: "draft", runs: [], createdAt: Date.now() },
-      { id: "g-dcgan-gen", name: "DCGAN Generate",    schemaId: sid, trainerId: "t-dcgan",   family: "gan", config: { method: "random", numSamples: 16, temperature: 1.0, seed: 42 }, status: "draft", runs: [], createdAt: Date.now() },
+      { id: "g-mlp-gen",         name: "MLP-GAN Generate",              schemaId: sid, trainerId: "t-mlp-gan",         family: "gan", config: { method: "random", numSamples: 16, temperature: 1.0, seed: 42 }, status: "draft", runs: [], createdAt: Date.now() },
+      { id: "g-dcgan-gen",       name: "DCGAN Generate",                schemaId: sid, trainerId: "t-dcgan",           family: "gan", config: { method: "random", numSamples: 16, temperature: 1.0, seed: 42 }, status: "draft", runs: [], createdAt: Date.now() },
+      { id: "g-mlp-gen-trained", name: "MLP-GAN Generate (pre-trained)", schemaId: sid, trainerId: "t-mlp-gan-trained", family: "gan", config: { method: "random", numSamples: 16, temperature: 1.0, seed: 42 }, status: "draft", runs: [], createdAt: Date.now() },
+      { id: "g-dcgan-gen-trained", name: "DCGAN Generate (pre-trained)", schemaId: sid, trainerId: "t-dcgan-trained",   family: "gan", config: { method: "random", numSamples: 16, temperature: 1.0, seed: 42 }, status: "draft", runs: [], createdAt: Date.now() },
     ],
     evaluations: [],
   };

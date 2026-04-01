@@ -64,7 +64,43 @@
     if (preset) {
       if (preset.dataset) store.upsertDataset(preset.dataset);
       if (preset.models) preset.models.forEach(function (m) { store.upsertModel(m); });
-      if (preset.trainers) preset.trainers.forEach(function (t) { store.upsertTrainerCard(t); });
+      if (preset.trainers) preset.trainers.forEach(function (t) {
+        // Load pre-trained weights from binary file if specified
+        if (t._weightsUrl && t.status === "done") {
+          (function (trainer) {
+            fetch(t._weightsUrl).then(function (r) { return r.arrayBuffer(); }).then(function (buf) {
+              var floats = new Float32Array(buf);
+              var specs = [];
+              var off = 0;
+              // Build specs from model graph
+              var model = preset.models.find(function (m) { return m.id === trainer.modelId; });
+              if (model && model.graph && window.OSCModelBuilderCore) {
+                try {
+                  var tf = window.tf;
+                  var built = window.OSCModelBuilderCore.buildModelFromGraph(tf, model.graph, {
+                    mode: "direct", featureSize: 784, windowSize: 1, seqFeatureSize: 784,
+                    allowedOutputKeys: [{ key: "pixel_values", headType: "reconstruction" }],
+                    defaultTarget: "pixel_values", numClasses: 10,
+                  });
+                  specs = built.model.getWeights().map(function (w, i) {
+                    var shape = w.shape;
+                    var sz = shape.reduce(function (a, b) { return a * b; }, 1);
+                    var s = { name: "w" + i, shape: shape, dtype: "float32", offset: off };
+                    off += sz * 4;
+                    return s;
+                  });
+                  built.model.dispose();
+                } catch (e) { console.warn("[preset] Failed to build model for weight specs:", e.message); }
+              }
+              trainer.modelArtifacts = { weightSpecs: specs, weightValues: Array.from(floats) };
+              trainer.modelArtifactsLast = trainer.modelArtifacts;
+              store.upsertTrainerCard(trainer);
+              console.log("[preset] Loaded pre-trained weights for", trainer.name, "(" + floats.length + " floats)");
+            }).catch(function (e) { console.warn("[preset] Weight load failed for", trainer.name, e.message); });
+          })(t);
+        }
+        store.upsertTrainerCard(t);
+      });
       store.initTables({ tables: ["generationRuns", "evaluations"] });
       if (preset.generations) preset.generations.forEach(function (g) { store.save({ table: "generationRuns", values: [g] }); });
       if (preset.evaluations) preset.evaluations.forEach(function (e) { store.save({ table: "evaluations", values: [e] }); });
