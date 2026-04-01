@@ -55,6 +55,7 @@
   <script src="../../src/surrogate_studio.js"></script>
 
   <script src="./preset.js"></script>
+  <script src="./mlp_gan_weights.js"></script>
 </head>
 <body>
   <div id="app"></div>
@@ -65,44 +66,36 @@
       if (preset.dataset) store.upsertDataset(preset.dataset);
       if (preset.models) preset.models.forEach(function (m) { store.upsertModel(m); });
       if (preset.trainers) preset.trainers.forEach(function (t) {
-        // Load pre-trained weights from binary file if specified
-        if (t._weightsUrl && t.status === "done") {
+        // Load pre-trained weights from global base64 variable (works with file://)
+        if (t._weightsVar && t.status === "done" && window[t._weightsVar]) {
           (function (trainer) {
-            // Use XMLHttpRequest (works with file:// protocol, fetch doesn't)
-            var xhr = new XMLHttpRequest();
-            xhr.open("GET", t._weightsUrl, true);
-            xhr.responseType = "arraybuffer";
-            xhr.onload = function () { var buf = xhr.response; if (!buf) { console.warn("[preset] Empty response for", trainer.name); return; }
-              var floats = new Float32Array(buf);
+            try {
+              var b64 = window[trainer._weightsVar];
+              var bin = atob(b64);
+              var bytes = new Uint8Array(bin.length);
+              for (var bi = 0; bi < bin.length; bi++) bytes[bi] = bin.charCodeAt(bi);
+              var floats = new Float32Array(bytes.buffer);
               var specs = [];
               var off = 0;
-              // Build specs from model graph
               var model = preset.models.find(function (m) { return m.id === trainer.modelId; });
               if (model && model.graph && window.OSCModelBuilderCore) {
-                try {
-                  var tf = window.tf;
-                  var built = window.OSCModelBuilderCore.buildModelFromGraph(tf, model.graph, {
-                    mode: "direct", featureSize: 784, windowSize: 1, seqFeatureSize: 784,
-                    allowedOutputKeys: [{ key: "pixel_values", headType: "reconstruction" }],
-                    defaultTarget: "pixel_values", numClasses: 10,
-                  });
-                  specs = built.model.getWeights().map(function (w, i) {
-                    var shape = w.shape;
-                    var sz = shape.reduce(function (a, b) { return a * b; }, 1);
-                    var s = { name: "w" + i, shape: shape, dtype: "float32", offset: off };
-                    off += sz * 4;
-                    return s;
-                  });
-                  built.model.dispose();
-                } catch (e) { console.warn("[preset] Failed to build model for weight specs:", e.message); }
+                var tf = window.tf;
+                var built = window.OSCModelBuilderCore.buildModelFromGraph(tf, model.graph, {
+                  mode: "direct", featureSize: 784, windowSize: 1, seqFeatureSize: 784,
+                  allowedOutputKeys: [{ key: "pixel_values", headType: "reconstruction" }],
+                  defaultTarget: "pixel_values", numClasses: 10,
+                });
+                specs = built.model.getWeights().map(function (w, i) {
+                  var shape = w.shape; var sz = shape.reduce(function (a, b) { return a * b; }, 1);
+                  var s = { name: "w" + i, shape: shape, dtype: "float32", offset: off }; off += sz * 4; return s;
+                });
+                built.model.dispose();
               }
               trainer.modelArtifacts = { weightSpecs: specs, weightValues: Array.from(floats) };
               trainer.modelArtifactsLast = trainer.modelArtifacts;
               store.upsertTrainerCard(trainer);
               console.log("[preset] Loaded pre-trained weights for", trainer.name, "(" + floats.length + " floats)");
-            };
-            xhr.onerror = function () { console.warn("[preset] Weight load failed for", trainer.name); };
-            xhr.send();
+            } catch (e) { console.warn("[preset] Weight decode failed for", trainer.name, e.message); }
           })(t);
         }
         store.upsertTrainerCard(t);
