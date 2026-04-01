@@ -68,7 +68,11 @@
         // Load pre-trained weights from binary file if specified
         if (t._weightsUrl && t.status === "done") {
           (function (trainer) {
-            fetch(t._weightsUrl).then(function (r) { return r.arrayBuffer(); }).then(function (buf) {
+            // Use XMLHttpRequest (works with file:// protocol, fetch doesn't)
+            var xhr = new XMLHttpRequest();
+            xhr.open("GET", t._weightsUrl, true);
+            xhr.responseType = "arraybuffer";
+            xhr.onload = function () { var buf = xhr.response; if (!buf) { console.warn("[preset] Empty response for", trainer.name); return; }
               var floats = new Float32Array(buf);
               var specs = [];
               var off = 0;
@@ -96,7 +100,9 @@
               trainer.modelArtifactsLast = trainer.modelArtifacts;
               store.upsertTrainerCard(trainer);
               console.log("[preset] Loaded pre-trained weights for", trainer.name, "(" + floats.length + " floats)");
-            }).catch(function (e) { console.warn("[preset] Weight load failed for", trainer.name, e.message); });
+            };
+            xhr.onerror = function () { console.warn("[preset] Weight load failed for", trainer.name); };
+            xhr.send();
           })(t);
         }
         store.upsertTrainerCard(t);
