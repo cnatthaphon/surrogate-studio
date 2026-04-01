@@ -462,7 +462,7 @@
         var handle = function (data) {
           if (currentMountId !== _mountId) return;
           if (!data) { onStatus("Empty result"); _renderMainPanel(); return; }
-          var updated = Object.assign({}, dsRecord, { data: data, status: "ready", generatedAt: Date.now(), config: formConfig });
+          var updated = Object.assign({}, dsRecord, { data: data, status: "ready", generatedAt: Date.now(), config: Object.assign({}, dsRecord.config || {}, formConfig) });
           if (store) store.upsertDataset(updated);
           onStatus("\u2713 Ready: " + (dsRecord.name || dsRecord.id));
           _renderLeftPanel(); _renderMainPanel();

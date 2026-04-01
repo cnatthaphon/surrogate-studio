@@ -40,13 +40,15 @@
   function _mlpGan() {
     _nid = 0; var d = {};
 
-    // Generator (tagged "generator")
+    // Generator (tagged "generator") — BatchNorm prevents mode collapse by forcing z-dependent statistics
     var z =    N(d, "sample_z",     { dim: 128, distribution: "normal" },         80, 60);
-    var g1 =   N(d, "dense",        { units: 256, activation: "relu", weightTag: "generator", blockName: "G1" }, 240, 60);
-    var g2 =   N(d, "dense",        { units: 512, activation: "relu", weightTag: "generator", blockName: "G2" }, 400, 60);
-    var g3 =   N(d, "dense",        { units: 784, activation: "sigmoid", weightTag: "generator", blockName: "G3" }, 560, 60);
-    var gOut = N(d, "output",       { target: "none", targetType: "none", loss: "none", matchWeight: 0, phase: "generator", headType: "reconstruction" }, 720, 60);
-    C(d, z, g1); C(d, g1, g2); C(d, g2, g3); C(d, g3, gOut);
+    var g1 =   N(d, "dense",        { units: 256, activation: "relu", weightTag: "generator", blockName: "G1" }, 200, 60);
+    var gbn1 = N(d, "layernorm",    {},                                                                          280, 60);
+    var g2 =   N(d, "dense",        { units: 512, activation: "relu", weightTag: "generator", blockName: "G2" }, 360, 60);
+    var gbn2 = N(d, "layernorm",    {},                                                                          440, 60);
+    var g3 =   N(d, "dense",        { units: 784, activation: "sigmoid", weightTag: "generator", blockName: "G3" }, 520, 60);
+    var gOut = N(d, "output",       { target: "none", targetType: "none", loss: "none", matchWeight: 0, phase: "generator", headType: "reconstruction" }, 640, 60);
+    C(d, z, g1); C(d, g1, gbn1); C(d, gbn1, g2); C(d, g2, gbn2); C(d, gbn2, g3); C(d, g3, gOut);
 
     // G output → ConcatBatch with real images (no Detach — weight tags handle freeze)
     var img =  N(d, "image_source", { sourceKey: "pixel_values", featureSize: 784, imageShape: [28,28,1] }, 80, 240);
@@ -54,20 +56,29 @@
     C(d, gOut, cat, "output_1", "input_1");   // fake images from G
     C(d, img, cat, "output_1", "input_2");    // real images
 
-    // Discriminator (tagged "discriminator")
+    // Discriminator (tagged "discriminator") — Dropout stabilizes GAN training (DCGAN paper)
     var d1 =   N(d, "dense",        { units: 512, activation: "relu", weightTag: "discriminator" }, 560, 180);
+    var dr1 =  N(d, "dropout",      { rate: 0.3 },                                                 640, 180);
     var d2 =   N(d, "dense",        { units: 256, activation: "relu", weightTag: "discriminator" }, 720, 180);
+    var dr2 =  N(d, "dropout",      { rate: 0.3 },                                                 800, 180);
     var d3 =   N(d, "dense",        { units: 1, activation: "sigmoid", weightTag: "discriminator" }, 880, 180);
     var dOut = N(d, "output",       { target: "custom", targetType: "custom", loss: "bce", matchWeight: 1, phase: "discriminator", headType: "classification" }, 1040, 180);
-    C(d, cat, d1); C(d, d1, d2); C(d, d2, d3); C(d, d3, dOut);
+    C(d, cat, d1); C(d, d1, dr1); C(d, dr1, d2); C(d, d2, dr2); C(d, dr2, d3); C(d, d3, dOut);
 
-    // Labels: PhaseSwitch routes by phase → D Output custom label
-    var c1 =   N(d, "constant",     { value: 1, dim: 1 },                       720, 340);
-    var c0 =   N(d, "constant",     { value: 0, dim: 1 },                       720, 420);
-    var sw =   N(d, "phase_switch", { activePhase: "discriminator" },             880, 380);
-    C(d, c1, sw, "output_1", "input_1");
-    C(d, c0, sw, "output_1", "input_2");
-    C(d, sw, dOut, "output_1", "input_2");
+    // Labels: construct [fake_label, real_label] via ConcatBatch to match data ConcatBatch
+    // Label smoothing (0.1/0.9) prevents D from becoming overconfident — standard GAN technique
+    // D step: [fake=0.1, real=0.9] — train D to distinguish
+    // G step: [fake=0.9, real=0.9] — fool D into thinking fake is real
+    var c0 =   N(d, "constant",     { value: 0.1, dim: 1 },                     560, 340);
+    var c1 =   N(d, "constant",     { value: 0.9, dim: 1 },                     560, 420);
+    var sw =   N(d, "phase_switch", { activePhase: "discriminator" },             720, 380);
+    C(d, c0, sw, "output_1", "input_1");   // D step → fake_label=0.1
+    C(d, c1, sw, "output_1", "input_2");   // G step → fake_label=0.9
+    var cR =   N(d, "constant",     { value: 0.9, dim: 1 },                     720, 460);
+    var lcat = N(d, "concat_batch", {},                                          880, 420);
+    C(d, sw, lcat, "output_1", "input_1");  // fake_label
+    C(d, cR, lcat, "output_1", "input_2");  // real_label (always 1)
+    C(d, lcat, dOut, "output_1", "input_2");
 
     return graph(d);
   }
@@ -103,13 +114,17 @@
     var dOut = N(d, "output",            { target: "custom", targetType: "custom", loss: "bce", matchWeight: 1, phase: "discriminator", headType: "classification" }, 1460, 200);
     C(d, cat, dr); C(d, dr, dc1); C(d, dc1, dc2); C(d, dc2, df); C(d, df, dd); C(d, dd, dOut);
 
-    // Labels
-    var c1 =   N(d, "constant",          { value: 1, dim: 1 },                  1140, 360);
-    var c0 =   N(d, "constant",          { value: 0, dim: 1 },                  1140, 440);
+    // Labels: [fake_label, real_label] via ConcatBatch (label smoothing 0.1/0.9)
+    var c0 =   N(d, "constant",          { value: 0.1, dim: 1 },                1140, 360);
+    var c1 =   N(d, "constant",          { value: 0.9, dim: 1 },                1140, 440);
     var sw =   N(d, "phase_switch",      { activePhase: "discriminator" },       1300, 400);
-    C(d, c1, sw, "output_1", "input_1");
-    C(d, c0, sw, "output_1", "input_2");
-    C(d, sw, dOut, "output_1", "input_2");
+    C(d, c0, sw, "output_1", "input_1");
+    C(d, c1, sw, "output_1", "input_2");
+    var cR =   N(d, "constant",          { value: 0.9, dim: 1 },                1300, 480);
+    var lcat = N(d, "concat_batch",      {},                                    1460, 440);
+    C(d, sw, lcat, "output_1", "input_1");
+    C(d, cR, lcat, "output_1", "input_2");
+    C(d, lcat, dOut, "output_1", "input_2");
 
     return graph(d);
   }
@@ -129,16 +144,18 @@
     ],
     trainers: [
       { id: "t-mlp-gan", name: "MLP-GAN Trainer", schemaId: sid, datasetId: DS, modelId: "m-mlp-gan", status: "draft",
-        config: { epochs: 100, batchSize: 128, learningRate: 0.0001, optimizerType: "adam", useServer: true, earlyStoppingPatience: 0,
+        config: { epochs: 200, batchSize: 128, learningRate: 0.0005, optimizerType: "adam", useServer: true,
+                  earlyStoppingPatience: 0, lrSchedulerType: "none", restoreBestWeights: false,
                   trainingSchedule: [
                     { epochs: 1, trainableTags: { discriminator: true, generator: false } },
-                    { epochs: 1, trainableTags: { discriminator: false, generator: true } }
+                    { epochs: 3, trainableTags: { discriminator: false, generator: true } }
                   ], rotateSchedule: true } },
       { id: "t-dcgan", name: "DCGAN Trainer", schemaId: sid, datasetId: DS, modelId: "m-dcgan", status: "draft",
-        config: { epochs: 100, batchSize: 128, learningRate: 0.0001, optimizerType: "adam", useServer: true, earlyStoppingPatience: 0,
+        config: { epochs: 200, batchSize: 128, learningRate: 0.0005, optimizerType: "adam", useServer: true,
+                  earlyStoppingPatience: 0, lrSchedulerType: "none", restoreBestWeights: false,
                   trainingSchedule: [
                     { epochs: 1, trainableTags: { discriminator: true, generator: false } },
-                    { epochs: 1, trainableTags: { discriminator: false, generator: true } }
+                    { epochs: 2, trainableTags: { discriminator: false, generator: true } }
                   ], rotateSchedule: true } },
     ],
     generations: [

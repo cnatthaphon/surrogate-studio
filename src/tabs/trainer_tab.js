@@ -30,6 +30,7 @@
     var _mountId = 0;
     var _configFormApi = null;
     var _isTraining = false;
+    var _activeModel = null; // reference to model during training (for weight save on stop)
     var _activeTrainingId = ""; // which trainer is currently being trained
     var _lossChartDiv = null;
     var _epochTableBody = null;
@@ -175,7 +176,20 @@
       header.appendChild(el("h3", { style: "color:#67e8f9;margin:0 0 4px;" }, t.name || t.id));
       header.appendChild(el("div", { style: "font-size:12px;color:#94a3b8;" },
         "Schema: " + escapeHtml(t.schemaId || "") + " | Status: " + (t.status || "draft") +
-        (t.datasetId ? " | Dataset: " + (function () { var d = store.getDataset(t.datasetId); return d ? d.name : t.datasetId; })() : "") +
+        (t.datasetId ? " | Dataset: " + (function () {
+          var d = store.getDataset(t.datasetId);
+          if (!d) return t.datasetId;
+          var label = d.name || t.datasetId;
+          var W = typeof window !== "undefined" ? window : {};
+          var sr = W.OSCDatasetSourceRegistry;
+          if (sr && typeof sr.resolveDatasetSplit === "function") {
+            var tr = sr.resolveDatasetSplit(d.data || d, "train");
+            var va = sr.resolveDatasetSplit(d.data || d, "val");
+            var te = sr.resolveDatasetSplit(d.data || d, "test");
+            label += " [train:" + (tr && tr.x ? tr.x.length : 0) + " val:" + (va && va.x ? va.x.length : 0) + " test:" + (te && te.x ? te.x.length : 0) + "]";
+          }
+          return label;
+        })() : "") +
         (t.modelId ? " | Model: " + (function () { var m = store.getModel(t.modelId); return m ? m.name : t.modelId; })() : "") +
         (t.backend ? " | Backend: " + String(t.backend) : "") +
         (t.metrics && t.metrics.paramCount ? " | Params: " + Number(t.metrics.paramCount).toLocaleString() : "")));
@@ -1220,8 +1234,22 @@
           _isTraining = false;
           _activeTrainingId = "";
           var tc = store ? store.getTrainerCard(activeId) : null;
-          if (tc) { tc.status = "stopped"; store.upsertTrainerCard(tc); }
-          onStatus("Training stopped");
+          if (tc) {
+            tc.status = "stopped";
+            // Save current weights so generation works after stop
+            if (_activeModel) {
+              try {
+                var allW = _activeModel.getWeights();
+                var tb = 0;
+                var sp = allW.map(function (w, i) { var s = w.shape; var sz = s.reduce(function (a, b) { return a * b; }, 1); var r = { name: "w" + i, shape: s, dtype: "float32", offset: tb }; tb += sz * 4; return r; });
+                var buf = new ArrayBuffer(tb); var off = 0;
+                allW.forEach(function (w) { var d = w.dataSync(); new Float32Array(buf, off, d.length).set(d); off += d.length * 4; });
+                tc.modelArtifacts = { weightSpecs: sp, weightValues: Array.from(new Float32Array(buf)) };
+              } catch (e) {}
+            }
+            store.upsertTrainerCard(tc);
+          }
+          onStatus("Training stopped (weights saved)");
           _renderLeftPanel(); _renderMainPanel(); _renderRightPanel();
         });
         btnRow.appendChild(stopBtn);
@@ -1596,9 +1624,11 @@
         // === FALLBACK: main thread (will freeze UI) ===
         var _isPhased = trainingEngine.needsPhasedTraining && trainingEngine.needsPhasedTraining(buildResult.headConfigs);
         var _trainFn = _isPhased && trainingEngine.trainModelPhased ? trainingEngine.trainModelPhased : trainingEngine.trainModel;
-        onStatus("Training on TF.js (" + (_isPhased ? "phased" : "main thread") + ", " + (tf.getBackend ? tf.getBackend() : "cpu") + ")...");
+        _activeModel = buildResult.model;
+        onStatus("Training on TF.js (" + (_isPhased ? "phased" : "main thread") + ", " + (tf.getBackend ? tf.getBackend() : "cpu") + ") — train:" + (activeDs.xTrain ? activeDs.xTrain.length : 0) + " val:" + (activeDs.xVal ? activeDs.xVal.length : 0) + " test:" + (activeDs.xTest ? activeDs.xTest.length : 0));
         _trainFn(tf, {
-          model: buildResult.model, isSequence: buildResult.isSequence, headConfigs: buildResult.headConfigs, inputNodes: buildResult.inputNodes || [],
+          model: buildResult.model, isSequence: buildResult.isSequence, headConfigs: buildResult.headConfigs, inputNodes: buildResult.inputNodes || [], phaseSwitchConfigs: buildResult.phaseSwitchConfigs || [],
+          shouldStop: function () { return !_isTraining; },
           dataset: {
             xTrain: activeDs.xTrain, yTrain: activeDs.yTrain, seqTrain: activeDs.seqTrain,
             xVal: activeDs.xVal, yVal: activeDs.yVal, seqVal: activeDs.seqVal,
@@ -1665,9 +1695,11 @@
           if (store) store.upsertTrainerCard(tCard);
           onStatus("\u2713 Done: MAE=" + (result.mae != null ? Number(result.mae).toExponential(3) : "—"));
           _renderLeftPanel(); _renderMainPanel(); _renderRightPanel();
+          _activeModel = null;
           buildResult.model.dispose();
         }).catch(function (err) {
           _isTraining = false;
+          _activeModel = null;
           tCard.status = "error"; tCard.error = err.message;
           if (store) store.upsertTrainerCard(tCard);
           onStatus("Error: " + err.message);

@@ -323,6 +323,58 @@
       methodRow.appendChild(methodSel);
       configCard.appendChild(methodRow);
 
+      // --- Sample node / Output node selectors (from graph) ---
+      var _selectedTrainerForNodes = g.trainerId ? (store ? store.getTrainerCard(g.trainerId) : null) : null;
+      var _modelForNodes = _selectedTrainerForNodes && _selectedTrainerForNodes.modelId ? (store ? store.getModel(_selectedTrainerForNodes.modelId) : null) : null;
+      var _genNodes = _modelForNodes && _modelForNodes.graph && modelBuilder && modelBuilder.extractGenerationNodes
+        ? modelBuilder.extractGenerationNodes(_modelForNodes.graph) : { sampleNodes: [], outputNodes: [] };
+
+      if (_genNodes.sampleNodes.length > 0) {
+        var sampleRow = el("div", { className: "osc-form-row" });
+        sampleRow.appendChild(el("label", { style: "font-size:11px;color:#94a3b8;" }, "Sample input"));
+        var sampleSel = el("select", { style: "width:100%;padding:4px;background:#1e293b;color:#e2e8f0;border:1px solid #334155;border-radius:4px;font-size:11px;" });
+        _genNodes.sampleNodes.forEach(function (sn) {
+          var label = sn.blockName || ("SampleZ z~" + sn.distribution);
+          label += " (dim=" + sn.dim + ")";
+          var opt = el("option", { value: sn.id }, label);
+          if (sn.id === (g.config.sampleNodeId || _genNodes.sampleNodes[0].id)) opt.selected = true;
+          sampleSel.appendChild(opt);
+        });
+        sampleSel.addEventListener("change", function () { g.config.sampleNodeId = sampleSel.value; _saveGen(g); });
+        sampleRow.appendChild(sampleSel);
+        configCard.appendChild(sampleRow);
+        // auto-set default if not already set
+        if (!g.config.sampleNodeId) g.config.sampleNodeId = _genNodes.sampleNodes[0].id;
+      }
+
+      if (_genNodes.outputNodes.length > 1) {
+        // only show selector when multiple outputs exist
+        var outRow = el("div", { className: "osc-form-row" });
+        outRow.appendChild(el("label", { style: "font-size:11px;color:#94a3b8;" }, "Output head"));
+        var outSel = el("select", { style: "width:100%;padding:4px;background:#1e293b;color:#e2e8f0;border:1px solid #334155;border-radius:4px;font-size:11px;" });
+        // auto-detect default: first output with loss=none (generator) or first output
+        var _defaultOutId = g.config.outputNodeId || "";
+        if (!_defaultOutId) {
+          var _genOut = _genNodes.outputNodes.find(function (o) { return o.loss === "none"; });
+          _defaultOutId = _genOut ? _genOut.id : _genNodes.outputNodes[0].id;
+        }
+        _genNodes.outputNodes.forEach(function (on) {
+          var label = on.blockName || (on.phase ? on.phase : "Output #" + on.id);
+          if (on.loss === "none") label += " [passthrough]";
+          else label += " [" + on.loss + "]";
+          var opt = el("option", { value: on.id }, label);
+          if (on.id === _defaultOutId) opt.selected = true;
+          outSel.appendChild(opt);
+        });
+        outSel.addEventListener("change", function () { g.config.outputNodeId = outSel.value; _saveGen(g); });
+        outRow.appendChild(outSel);
+        configCard.appendChild(outRow);
+        if (!g.config.outputNodeId) g.config.outputNodeId = _defaultOutId;
+      } else if (_genNodes.outputNodes.length === 1) {
+        // single output — auto-select, no dropdown
+        if (!g.config.outputNodeId) g.config.outputNodeId = _genNodes.outputNodes[0].id;
+      }
+
       // numeric params — show relevant fields based on method
       var currentMethod = g.config.method || "";
       var fields = [
@@ -502,24 +554,53 @@
         // determine latent dim and model for generation
         var genModel = built.model;
         var family = g.family || modelBuilder.inferModelFamily(modelRec.graph);
-        // for GAN: latentDim = SampleZ dim from graph. For VAE: from reparam. Otherwise: featureSize.
+
+        // --- resolve sampleNodeId → latentDim + sampleInputIndex ---
         var genLatentDim = featureSize;
-        if (family === "gan") {
-          // read SampleZ dim from graph
-          var gData = modelBuilder.extractGraphData ? modelBuilder.extractGraphData(modelRec.graph) : {};
-          Object.keys(gData).forEach(function (nid) {
-            var nd = gData[nid];
-            if (nd && (nd.name === "sample_z_layer" || nd.name === "sample_z_block")) {
-              genLatentDim = Number((nd.data && nd.data.dim) || 128);
+        var sampleInputIndex = -1; // -1 = auto-detect by dim matching
+        var genNodes = modelBuilder.extractGenerationNodes ? modelBuilder.extractGenerationNodes(modelRec.graph) : { sampleNodes: [], outputNodes: [] };
+
+        if (config.sampleNodeId && genNodes.sampleNodes.length) {
+          var selSample = genNodes.sampleNodes.find(function (s) { return s.id === config.sampleNodeId; });
+          if (selSample) {
+            genLatentDim = selSample.dim;
+            // find index in built.inputNodes
+            if (built.inputNodes) {
+              for (var si = 0; si < built.inputNodes.length; si++) {
+                if (built.inputNodes[si].id === config.sampleNodeId) { sampleInputIndex = si; break; }
+              }
             }
-          });
+          }
+        } else if (family === "gan" && genNodes.sampleNodes.length) {
+          genLatentDim = genNodes.sampleNodes[0].dim;
         } else if (latentDim > 0) {
           genLatentDim = latentDim;
         }
+
+        // --- resolve outputNodeId → outputIndex ---
+        var outputIndex = 0;
+        if (config.outputNodeId && built.headConfigs && built.headConfigs.length > 1) {
+          for (var oi = 0; oi < built.headConfigs.length; oi++) {
+            if (built.headConfigs[oi].id && built.headConfigs[oi].id.indexOf(config.outputNodeId + ":") === 0) {
+              outputIndex = oi; break;
+            }
+          }
+        } else if (genNodes.outputNodes.length > 1) {
+          // auto-detect: first output with loss=none (generator passthrough)
+          var _autoOut = genNodes.outputNodes.find(function (o) { return o.loss === "none"; });
+          if (_autoOut && built.headConfigs) {
+            for (var ai = 0; ai < built.headConfigs.length; ai++) {
+              if (built.headConfigs[ai].id && built.headConfigs[ai].id.indexOf(_autoOut.id + ":") === 0) {
+                outputIndex = ai; break;
+              }
+            }
+          }
+        }
+
         if (family === "vae" && method !== "inverse" && method !== "reconstruct") {
           try {
             var decoder = modelBuilder.extractDecoder(tf, built.model, latentDim);
-            if (decoder && decoder.model) { genModel = decoder.model; genLatentDim = decoder.latentDim || latentDim; }
+            if (decoder && decoder.model) { genModel = decoder.model; genLatentDim = decoder.latentDim || latentDim; outputIndex = 0; }
           } catch (_) { genLatentDim = latentDim; }
         }
 
@@ -527,6 +608,7 @@
           method: method, model: genModel, latentDim: genLatentDim,
           numSamples: config.numSamples || 16, steps: config.steps || 0,
           lr: config.lr || 0.01, temperature: config.temperature || 1.0, seed: config.seed || 42,
+          outputIndex: outputIndex, sampleInputIndex: sampleInputIndex,
           onStep: function (step, loss) { if (step % 10 === 0) onStatus("Step " + step + " loss=" + (typeof loss === "number" ? loss.toExponential(3) : "?")); },
         };
 
@@ -627,16 +709,18 @@
       var fw;
       if (artifacts.weightValues && Array.isArray(artifacts.weightValues)) fw = new Float32Array(artifacts.weightValues);
       else if (artifacts.weightData && artifacts.weightData.byteLength) fw = new Float32Array(artifacts.weightData);
-      if (!fw) return;
+      if (!fw) { console.warn("[gen] No weight data in artifacts"); return; }
       var mw = model.getWeights();
+      console.log("[gen] Loading weights: saved=" + fw.length + " floats, model expects " + mw.length + " tensors");
       var nw = []; var off = 0;
       for (var i = 0; i < mw.length; i++) {
         var sz = mw[i].shape.reduce(function (a, b) { return a * b; }, 1);
-        if (off + sz > fw.length) break;
+        if (off + sz > fw.length) { console.warn("[gen] Weight overflow at tensor " + i + " (off=" + off + " + sz=" + sz + " > " + fw.length + ")"); break; }
         nw.push(tf.tensor(fw.subarray(off, off + sz), mw[i].shape));
         off += sz;
       }
-      if (nw.length === mw.length) model.setWeights(nw);
+      if (nw.length === mw.length) { model.setWeights(nw); console.log("[gen] Weights loaded OK (" + nw.length + " tensors)"); }
+      else { console.warn("[gen] Weight count mismatch: loaded " + nw.length + " / expected " + mw.length + " — weights NOT applied"); }
     }
 
     // ─── Render generated samples — delegates to dataset module or core ───

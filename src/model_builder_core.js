@@ -158,6 +158,26 @@
     return hasHistory ? "autoregressive" : String(fallbackMode || "direct");
   }
 
+  function extractGenerationNodes(graphData) {
+    var data = extractGraphData(graphData);
+    var ids = Object.keys(data || {});
+    var sampleNodes = [];
+    var outputNodes = [];
+    ids.forEach(function (id) {
+      var nd = data[id];
+      if (!nd) return;
+      var name = String(nd.name || "");
+      var d = nd.data || {};
+      if (name === "sample_z_layer") {
+        sampleNodes.push({ id: id, dim: Number(d.dim || 128), distribution: String(d.distribution || "normal"), blockName: String(d.blockName || "") });
+      }
+      if (name === "output_layer") {
+        outputNodes.push({ id: id, loss: String(d.loss || "mse"), phase: String(d.phase || ""), headType: String(d.headType || ""), target: String(d.target || ""), blockName: String(d.blockName || ""), matchWeight: Number(d.matchWeight != null ? d.matchWeight : 1) });
+      }
+    });
+    return { sampleNodes: sampleNodes, outputNodes: outputNodes };
+  }
+
   function inferModelFamily(graphData) {
     var data = extractGraphData(graphData);
     var ids = Object.keys(data || {});
@@ -475,6 +495,9 @@
     var headConfigs = [];
     var latentGroups = {};
     var vaeKLGroups = {};
+    var _headLabelTensors = {};
+    var _phaseFlagInput = null;
+    var _phaseSwitchConfigs = [];
 
     // VAE reparameterization — uses tf.layers.add as the merge layer
     // instead of a custom Layer (which has broken init in TF.js 4.x browser).
@@ -664,7 +687,7 @@
       var node = moduleData[id];
       if (!node) continue;
       var ins = getIncoming(id).filter(function (e) { return reachable[e.from]; });
-      if (!ins.length) continue;
+      if (!ins.length && node.name !== "constant_layer") continue;
       var incomingTensors = ins.map(function (e) { return tensorById[e.from]; }).filter(Boolean);
       // Constant node: no parents — use primary input as dummy to derive batch size
       if (!incomingTensors.length && node.name === "constant_layer") {
@@ -681,25 +704,52 @@
           inTensor = tf.layers.concatenate({ axis: -1 }).apply(incomingTensors);
         }
         if (node.name === "concat_batch_layer") {
-          // Concat along feature axis as proxy for batch concat
-          // (real + fake become one wider tensor, D processes both)
-          inTensor = tf.layers.concatenate({ axis: -1 }).apply(incomingTensors);
+          // Batch-axis concat: [N, D] + [N, D] → [2N, D]
+          inTensor = tf.layers.concatenate({ axis: 0 }).apply(incomingTensors);
         }
         if (node.name === "phase_switch_layer") {
-          // Phase switch: for now pass first input
-          // Training engine will swap inputs per phase
-          inTensor = incomingTensors[0];
+          // PhaseSwitch: select between input_1 and input_2 based on a flag input.
+          // flag=0 → input_1, flag=1 → input_2
+          // output = input_1 + flag * (input_2 - input_1)
+          // Using: diff = subtract(in2, in1), scaled = multiply(diff, flag), output = add(in1, scaled)
+          if (!_phaseFlagInput) {
+            _phaseFlagInput = tf.input({ shape: [1], name: "phase_flag_input" });
+            allInputTensors.push({ id: "phase_flag", tensor: _phaseFlagInput, name: "phase_flag_input" });
+          }
+          var psIn1 = incomingTensors[0];
+          var psIn2 = incomingTensors.length > 1 ? incomingTensors[1] : incomingTensors[0];
+          // output = in1*(1-flag) + in2*flag using only multiply + add (no Dense, no subtract)
+          // = in1 - in1*flag + in2*flag = in1 + flag*(in2 - in1)
+          // TF.js has no subtract layer, so: in2 - in1 via activation trick not clean.
+          // Simpler: out = in1 + flag*in2 - flag*in1 = (1-flag)*in1 + flag*in2
+          // Compute separately: s1 = in1*flag, s2 = in2*flag, out = in1 - s1 + s2 = in1 + (s2 - s1)
+          // Still no subtract... Use: in1 + flag*(in2 + (-1)*in1)
+          // Negate in1 via activation layer? No clean way.
+          // Simplest: two multiply + one add. flag*in2 + (1-flag)*in1
+          // (1-flag) via: create constant 1, subtract... still no subtract.
+          // Just use the Dense(kernel=-1, bias=1) approach but mark it non-trainable properly
+          var psOneMinusFlag = tf.layers.dense({ units: 1, useBias: true, trainable: false,
+            kernelInitializer: tf.initializers.constant({ value: -1 }),
+            biasInitializer: tf.initializers.constant({ value: 1 }),
+            name: "ps_inv_" + id
+          }).apply(_phaseFlagInput);
+          var scaled1 = tf.layers.multiply({ name: "ps_mul1_" + id }).apply([psIn1, psOneMinusFlag]);
+          var scaled2 = tf.layers.multiply({ name: "ps_mul2_" + id }).apply([psIn2, _phaseFlagInput]);
+          inTensor = tf.layers.add({ name: "ps_add_" + id }).apply([scaled1, scaled2]);
+          _phaseSwitchConfigs.push({ nodeId: id, activePhase: String((node.data && node.data.activePhase) || "") });
         }
         if (node.name === "output_layer") {
           // Output can have 2 inputs: data (input_1) + label source (input_2)
-          // Use input_1 as the data tensor, input_2 is label metadata (ignored in model building)
           inTensor = incomingTensors[0];
+          if (incomingTensors.length > 1 && incomingTensors[1]) {
+            _headLabelTensors[String(id)] = incomingTensors[1];
+          }
         }
       }
 
       if (node.name === "output_layer") {
         var odata = node.data || {};
-        var headMatchWeight = Math.max(0, Number(odata.matchWeight || 1));
+        var headMatchWeight = Math.max(0, Number(odata.matchWeight != null ? odata.matchWeight : 1));
         var targets = outputTargetsFromNodeData(odata, allowedOutputKeys, fallbackTarget);
         var lossName = String((odata && odata.loss) || "mse");
         var paramsSelect = String((odata && odata.paramsSelect) || "");
@@ -710,17 +760,45 @@
           // headType from node config or schema lookup — no string matching on target names
           var ht = String(odata.headType || "").trim().toLowerCase();
           if (!ht || ht === "auto") ht = _lookupHeadType(target, allowedOutputKeys);
-          var units = targetUnitsFromMode(target, paramsSelect, odata, ht);
-          var act = (ht === "classification") ? "softmax" : "linear";
-          var headTensor = tf.layers.dense({ units: units, activation: act }).apply(inForHead);
-          outTensors.push(headTensor);
-          generated.push(headTensor);
+          var units, act;
+          if (lossName === "none") {
+            // loss=none: passthrough, no head Dense
+            units = inForHead.shape[inForHead.shape.length - 1] || 1;
+            outTensors.push(inForHead);
+            generated.push(inForHead);
+          } else if (lossName === "bce") {
+            // BCE: binary output (1 unit, sigmoid)
+            units = Number(odata.units || 1);
+            act = "sigmoid";
+            var upDim = inForHead.shape[inForHead.shape.length - 1];
+            if (upDim === units) {
+              // upstream already has matching shape — passthrough
+              outTensors.push(inForHead);
+              generated.push(inForHead);
+            } else {
+              var headT = tf.layers.dense({ units: units, activation: act }).apply(inForHead);
+              outTensors.push(headT);
+              generated.push(headT);
+            }
+          } else {
+            units = targetUnitsFromMode(target, paramsSelect, odata, ht);
+            act = (ht === "classification") ? "softmax" : "linear";
+            var headTensor = tf.layers.dense({ units: units, activation: act }).apply(inForHead);
+            outTensors.push(headTensor);
+            generated.push(headTensor);
+          }
+          var _labelIdx = -1;
+          if (_headLabelTensors[String(id)]) {
+            outTensors.push(_headLabelTensors[String(id)]);
+            _labelIdx = outTensors.length - 1;
+          }
           headConfigs.push({
             id: String(id) + ":" + String(target) + ":" + String(tti + 1),
             nodeId: String(id), target: target, targetType: target, headType: ht,
             paramsSelect: paramsSelect, units: units, loss: lossName,
             matchWeight: headMatchWeight,
             phase: String(odata.phase || ""),
+            graphLabelOutputIdx: _labelIdx,
           });
         });
         tensorById[id] = generated[0];
@@ -806,6 +884,7 @@
       isSequence: isSequence,
       headConfigs: headConfigs,
       inputNodes: allInputTensors.map(function (t) { return { id: t.id, name: t.name }; }),
+      phaseSwitchConfigs: _phaseSwitchConfigs,
     };
   }
 
@@ -944,5 +1023,6 @@
     buildModelFromGraph: buildModelFromGraph,
     extractLatentInfo: extractLatentInfo,
     extractDecoder: extractDecoder,
+    extractGenerationNodes: extractGenerationNodes,
   };
 });

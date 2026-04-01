@@ -26,6 +26,14 @@
   // --- helpers ---
   function clampInt(v, lo, hi) { var n = Math.floor(Number(v)); return n < lo ? lo : n > hi ? hi : n; }
 
+  /** Pick the correct output tensor from model.predict() result.
+   *  outputIndex selects which head when model has multiple outputs. */
+  function pickOutput(output, outputIndex) {
+    if (!Array.isArray(output)) return output;
+    var idx = Number(outputIndex) || 0;
+    return output[Math.min(idx, output.length - 1)];
+  }
+
   /**
    * generate(tf, config) → Promise<{ samples, latents, lossHistory, method }>
    *
@@ -44,6 +52,8 @@
    *   .noiseSchedule — array of noise levels for Langevin/DDPM (optional)
    *   .onStep      — callback(stepIdx, loss) for progress reporting
    *   .batchSize   — batch size for generation (default = numSamples)
+   *   .outputIndex — which output head to use for multi-output models (default 0)
+   *   .sampleInputIndex — which model input to fill with z for multi-input models (-1 = auto)
    */
   function generate(tf, config) {
     var cfg = config || {};
@@ -97,14 +107,16 @@
       var extraTensors = [];
       // multi-input models (e.g., GAN with SampleZ + ImageSource): provide all inputs
       if (model.inputs && model.inputs.length > 1) {
+        var sampleIdx = cfg.sampleInputIndex != null ? Number(cfg.sampleInputIndex) : -1;
         var inputs = [];
         for (var ii = 0; ii < model.inputs.length; ii++) {
           var inputShape = model.inputs[ii].shape;
           var inputDim = inputShape[inputShape.length - 1];
-          if (inputDim === latentDim) {
-            inputs.push(z); // this is the z input
+          // use sampleInputIndex if specified, otherwise fall back to dim matching
+          if (ii === sampleIdx || (sampleIdx < 0 && inputDim === latentDim)) {
+            inputs.push(z);
           } else {
-            var dummy = tf.zeros([numSamples, inputDim]); // dummy for non-z inputs
+            var dummy = tf.zeros([numSamples, inputDim]);
             inputs.push(dummy);
             extraTensors.push(dummy);
           }
@@ -112,7 +124,7 @@
         inputTensors = inputs;
       }
       var output = model.predict(inputTensors);
-      var samples = (Array.isArray(output) ? output[0] : output).arraySync();
+      var samples = pickOutput(output, cfg.outputIndex).arraySync();
       var latents = z.arraySync();
 
       z.dispose();
@@ -149,7 +161,7 @@
         // compute score (gradient of log p(x))
         var gradFn = tf.grad(function (xIn) {
           var pred = scoreModel.predict(xIn);
-          var score = Array.isArray(pred) ? pred[0] : pred;
+          var score = pickOutput(pred, cfg.outputIndex);
           return score.mean(); // scalar score estimate
         });
         var grad = gradFn(x);
@@ -210,7 +222,7 @@
 
       // final decode
       var output = model.predict(z);
-      var samples = (Array.isArray(output) ? output[0] : output).arraySync();
+      var samples = pickOutput(output, cfg.outputIndex).arraySync();
       var latents = z.arraySync();
 
       var result = {
@@ -249,7 +261,7 @@
         var lossVal;
         optimizer.minimize(function () {
           var pred = model.predict(x);
-          var predOut = Array.isArray(pred) ? pred[0] : pred;
+          var predOut = pickOutput(pred, cfg.outputIndex);
           var loss = predOut.sub(targetTensor).square().mean();
           lossVal = loss.arraySync();
           return loss;
@@ -261,7 +273,7 @@
 
       var optimizedInput = x.arraySync();
       var finalOutput = model.predict(x);
-      var samples = (Array.isArray(finalOutput) ? finalOutput[0] : finalOutput).arraySync();
+      var samples = pickOutput(finalOutput, cfg.outputIndex).arraySync();
 
       var result = {
         method: "inverse",
@@ -308,7 +320,7 @@
         var tNorm = tf.fill([numSamples, 1], t / T);
         var input = x.concat(tNorm, 1); // [x_t, t_normalized]
         var predictedNoise = model.predict(input);
-        var eps = Array.isArray(predictedNoise) ? predictedNoise[0] : predictedNoise;
+        var eps = pickOutput(predictedNoise, cfg.outputIndex);
 
         var alpha = alphas[t];
         var alphaCum = alphasCumprod[t];
@@ -363,7 +375,7 @@
       var inputArr = originals.slice(0, n);
       var inputTensor = tf.tensor2d(inputArr);
       var output = model.predict(inputTensor);
-      var reconstructed = (Array.isArray(output) ? output[0] : output).arraySync();
+      var reconstructed = pickOutput(output, cfg.outputIndex).arraySync();
 
       // per-sample MSE
       var metrics = [];
@@ -398,12 +410,13 @@
   // === Preset objective functions ===
   var objectives = {
     // reconstruction: ||decode(z) - target||²
-    reconstruction: function (target) {
+    reconstruction: function (target, outputIndex) {
       var tArr = target;
+      var oi = outputIndex || 0;
       return function (tf, z, model) {
         var targetT = tf.tensor(tArr);
         var pred = model.predict(z);
-        var out = Array.isArray(pred) ? pred[0] : pred;
+        var out = pickOutput(pred, oi);
         var loss = out.sub(targetT).square().mean();
         targetT.dispose();
         return loss;
@@ -411,12 +424,14 @@
     },
 
     // discriminator: maximize D(decode(z)) → minimize -D(decode(z))
-    discriminator: function (discriminatorModel) {
+    discriminator: function (discriminatorModel, genOutputIndex, dOutputIndex) {
+      var goi = genOutputIndex || 0;
+      var doi = dOutputIndex || 0;
       return function (tf, z, decoderModel) {
         var generated = decoderModel.predict(z);
-        var genOut = Array.isArray(generated) ? generated[0] : generated;
+        var genOut = pickOutput(generated, goi);
         var dScore = discriminatorModel.predict(genOut);
-        var dOut = Array.isArray(dScore) ? dScore[0] : dScore;
+        var dOut = pickOutput(dScore, doi);
         return dOut.mean().neg(); // minimize negative discriminator score
       };
     },
@@ -425,14 +440,15 @@
     // classifierModel: trained classifier that maps input → class probabilities
     // targetClass: integer class index to maximize
     // weight: how much to weight guidance vs reconstruction
-    classifierGuidance: function (classifierModel, targetClass, weight) {
+    classifierGuidance: function (classifierModel, targetClass, weight, outputIndex) {
       var cls = targetClass || 0;
       var w = weight || 1.0;
+      var oi = outputIndex || 0;
       return function (tf, z, decoderModel) {
         var generated = decoderModel.predict(z);
-        var genOut = Array.isArray(generated) ? generated[0] : generated;
+        var genOut = pickOutput(generated, oi);
         var classProbs = classifierModel.predict(genOut);
-        var probs = Array.isArray(classProbs) ? classProbs[0] : classProbs;
+        var probs = pickOutput(classProbs, 0);
         // maximize log P(targetClass) → minimize -log P(targetClass)
         var targetProb = probs.gather([cls], 1).mean();
         return targetProb.log().neg().mul(w);
@@ -441,13 +457,14 @@
 
     // classifierGuidedReconstruction: combine reconstruction + classifier guidance
     // reconstructs toward target while steering to target class
-    classifierGuidedReconstruction: function (classifierModel, targetClass, target, guidanceWeight) {
+    classifierGuidedReconstruction: function (classifierModel, targetClass, target, guidanceWeight, outputIndex) {
       var cls = targetClass || 0;
       var gw = guidanceWeight || 0.5;
       var tArr = target;
+      var oi = outputIndex || 0;
       return function (tf, z, decoderModel) {
         var generated = decoderModel.predict(z);
-        var genOut = Array.isArray(generated) ? generated[0] : generated;
+        var genOut = pickOutput(generated, oi);
         // reconstruction loss
         var reconLoss = tf.scalar(0);
         if (tArr) {
@@ -457,17 +474,18 @@
         }
         // classifier guidance loss
         var classProbs = classifierModel.predict(genOut);
-        var probs = Array.isArray(classProbs) ? classProbs[0] : classProbs;
+        var probs = pickOutput(classProbs, 0);
         var guidanceLoss = probs.gather([cls], 1).mean().log().neg();
         return reconLoss.add(guidanceLoss.mul(gw));
       };
     },
 
     // diversity: maximize pairwise distance between generated samples
-    diversity: function () {
+    diversity: function (outputIndex) {
+      var oi = outputIndex || 0;
       return function (tf, z, model) {
         var pred = model.predict(z);
-        var out = Array.isArray(pred) ? pred[0] : pred;
+        var out = pickOutput(pred, oi);
         // pairwise distance: mean ||xi - xj||²
         var expanded1 = out.expandDims(1); // [N,1,D]
         var expanded2 = out.expandDims(0); // [1,N,D]

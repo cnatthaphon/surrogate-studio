@@ -40,16 +40,23 @@
   }
 
   function mapLossAlias(lossName, resolvedGlobal) {
-    var v = String(lossName || "mse");
+    var v = String(lossName || "mse").toLowerCase();
     if (v === "mse") return "meanSquaredError";
     if (v === "mae") return "meanAbsoluteError";
     if (v === "huber") return "huberLoss";
-    if (v === "use_global") return "meanSquaredError";
+    if (v === "bce" || v === "binarycrossentropy") return "binaryCrossentropy";
+    if (v === "none") return "none";
+    if (v === "use_global") return String(resolvedGlobal || "meanSquaredError");
     return String(resolvedGlobal || "meanSquaredError");
   }
 
   function scalarLossByType(tf, pred, truth, type) {
     if (type === "meanAbsoluteError") return tf.mean(tf.abs(tf.sub(pred, truth)));
+    if (type === "binaryCrossentropy") {
+      var eps = 1e-7;
+      var clipped = tf.clipByValue(pred, eps, 1 - eps);
+      return tf.mean(tf.neg(tf.add(tf.mul(truth, tf.log(clipped)), tf.mul(tf.sub(1, truth), tf.log(tf.sub(1, clipped))))));
+    }
     if (type === "huberLoss") {
       var delta = tf.scalar(1.0);
       var err = tf.sub(pred, truth);
@@ -63,7 +70,7 @@
 
   function makeHeadLoss(tf, head, resolvedGlobal) {
     var type = mapLossAlias(head && head.loss, resolvedGlobal);
-    var headWeight = Math.max(0, Number((head && head.matchWeight) || 1));
+    var headWeight = Math.max(0, Number(head && head.matchWeight != null ? head.matchWeight : 1));
     var klBeta = Math.max(0, Number((head && head.beta) || 1e-3));
     var ht = String((head && head.headType) || "regression");
     // loss=none → passthrough, zero loss
@@ -81,6 +88,10 @@
           var klTerm = tf.sub(tf.add(one, logvar), tf.add(tf.square(mu), tf.exp(logvar)));
           var kl = tf.mul(tf.scalar(-0.5), tf.mean(tf.sum(klTerm, -1)));
           return tf.mul(tf.scalar(headWeight * klBeta), kl);
+        }
+        if (type === "binaryCrossentropy") {
+          var bl = scalarLossByType(tf, yPred, yTrue, "binaryCrossentropy");
+          return tf.mul(tf.scalar(headWeight), bl);
         }
         if (ht === "classification") {
           var ce = tf.losses.softmaxCrossEntropy(yTrue, yPred);
@@ -462,6 +473,17 @@
     var batchSize = Math.max(1, Number(opts.batchSize) || 32);
     var lr = Math.max(1e-8, Number(opts.learningRate) || 1e-3);
     var onEpochEnd = opts.onEpochEnd || opts.onEpoch || null;
+    var shouldStop = typeof opts.shouldStop === "function" ? opts.shouldStop : function () { return false; };
+
+    // LR scheduler + early stopping from config
+    var lrSchedulerType = normalizeLrSchedulerType(opts.lrSchedulerType, opts.useLrScheduler === false ? "none" : "plateau");
+    var useLrScheduler = lrSchedulerType !== "none";
+    var lrPatience = Math.max(1, Number(opts.lrPatience) || 3);
+    var lrFactor = clamp(Number(opts.lrFactor) || 0.5, 0.05, 0.99);
+    var minLr = Math.max(1e-8, Number(opts.minLr) || 1e-6);
+    var earlyStoppingPatienceRaw = Number(opts.earlyStoppingPatience);
+    var earlyStoppingPatience = Number.isFinite(earlyStoppingPatienceRaw) && earlyStoppingPatienceRaw > 0
+      ? Math.max(1, Math.floor(earlyStoppingPatienceRaw)) : 0;
 
     // training schedule: [{epochs: N, trainableTags: {tag: bool}}]
     var schedule = Array.isArray(opts.trainingSchedule) && opts.trainingSchedule.length ? opts.trainingSchedule : null;
@@ -484,14 +506,20 @@
     // for now: compile with all losses per phase, toggle trainable on layers
     // Phase 1 heads get trained first, phase 2 heads second
 
-    // handle multi-input models (GAN: SampleZ + ImageSource)
+    // handle multi-input models (GAN: SampleZ + ImageSource + PhaseFlag)
     var inputNodes = opts.inputNodes || [];
+    var phaseSwitchConfigs = opts.phaseSwitchConfigs || [];
     var numInputs = model.inputs ? model.inputs.length : 1;
     var nSamples = dataset.xTrain.length;
+    var _phaseFlagIdx = -1; // index of phase_flag_input in model inputs
+    inputNodes.forEach(function (inp, idx) { if (inp.name === "phase_flag_input") _phaseFlagIdx = idx; });
     var xTrainInputs;
     if (numInputs > 1 && inputNodes.length > 1) {
       // create per-input tensors
       xTrainInputs = inputNodes.map(function (inp) {
+        if (inp.name === "phase_flag_input") {
+          return tf.zeros([nSamples, 1]); // default flag=0, updated per step
+        }
         if (inp.name === "sample_z_layer") {
           // SampleZ: generate random noise each epoch (will be regenerated per batch later)
           var zDim = model.inputs.filter(function (i) { return i.name.indexOf("z_input") >= 0; })[0];
@@ -509,8 +537,19 @@
     var datasetMeta = { paramNames: dataset.paramNames, paramSize: dataset.paramSize };
     headConfigs.forEach(function (head) {
       var ht = String(head.headType || "regression");
+      var headLoss = String(head.loss || "mse").toLowerCase();
+      var headUnits = Number(head.units || 0);
+      // loss=none: dummy zeros (loss is zero anyway, just needs matching shape)
+      if (headLoss === "none" && headUnits > 0) {
+        yTrainArrays.push(tf.zeros([nSamples, headUnits]));
+        return;
+      }
+      // bce: dummy ones (shape must match output [N, units])
+      if (headLoss === "bce" && headUnits > 0) {
+        yTrainArrays.push(tf.ones([nSamples, headUnits]));
+        return;
+      }
       var isClsHead = ht === "classification";
-      // classification uses labels, everything else uses main y data (which may be x for reconstruction)
       var trainRows = isClsHead
         ? extractHeadRows(dataset.labelsTrain || dataset.yTrain, dataset.pTrain, targetMode, head, datasetMeta)
         : extractHeadRows(dataset.yTrain, dataset.pTrain, targetMode, head, datasetMeta);
@@ -523,6 +562,8 @@
     var epochHistory = [];
     var bestValLoss = Infinity;
     var bestEpoch = -1;
+    var lrStaleCount = 0;
+    var noImproveCount = 0;
 
     return new Promise(function (resolve) {
       var epoch = 0;
@@ -533,29 +574,76 @@
         if (step.trainableTags) {
           model.layers.forEach(function (l) {
             if (l._weightTag) { l.trainable = !!step.trainableTags[l._weightTag]; }
-            else { l.trainable = true; }
+            // leave layers without weightTag at their original trainable state
+            // (e.g., Constant layers created with trainable=false stay frozen)
           });
         } else if (step._phase) {
           model.layers.forEach(function (l) {
             if (l._weightTag) { l.trainable = (l._weightTag === step._phase); }
-            else { l.trainable = true; }
           });
         }
       }
 
       function _unfreezeAll() {
-        if (model.layers) model.layers.forEach(function (l) { l.trainable = true; });
+        if (model.layers) model.layers.forEach(function (l) { if (l._weightTag) l.trainable = true; });
       }
 
-      var _compiled = false;
-      function _compileModel() {
-        if (!_compiled) {
-          var losses = headConfigs.map(function (h) { return makeHeadLoss(tf, h, "meanSquaredError"); });
-          var weights = headConfigs.map(function (h) { return h.matchWeight || 1; });
-          model.compile({ optimizer: tf.train.adam(lr), loss: losses, lossWeights: weights });
-          _compiled = true;
-        }
-        // don't recompile — trainable flags work without recompile in TF.js
+      var _lossFns = headConfigs.map(function (h) { return makeHeadLoss(tf, h, "meanSquaredError"); });
+      var _lossWts = headConfigs.map(function (h) { return h.matchWeight != null ? h.matchWeight : 1; });
+      var _hasGraphLabels = headConfigs.some(function (h) { return h.graphLabelOutputIdx >= 0; });
+
+      // Training step: optimizer.minimize with model.apply.
+      // Reads labels from model output when graphLabelOutputIdx is set.
+      function _trainStep(stepOpt, xFull, yFull) {
+        // Collect trainable variables — only layers with weightTag (set by _freezeByStep)
+        var vars = [];
+        model.layers.forEach(function (l) {
+          if (l._weightTag && l.trainable && l.trainableWeights) {
+            l.trainableWeights.forEach(function (w) { vars.push(w.read()); });
+          }
+        });
+        if (!vars.length) return 0;
+        // Sample a random mini-batch (prevents GPU OOM on large models like DCGAN)
+        var fullN = Array.isArray(xFull) ? xFull[0].shape[0] : xFull.shape[0];
+        var bs = Math.min(batchSize, fullN);
+        var indices = tf.randomUniform([bs], 0, fullN, "int32");
+        var xBatch = Array.isArray(xFull) ? xFull.map(function (x) { return tf.gather(x, indices); }) : tf.gather(xFull, indices);
+        var yArrays = Array.isArray(yFull) ? yFull.map(function (y) { return tf.gather(y, indices); }) : tf.gather(yFull, indices);
+        var loss = tf.tidy(function () {
+          return stepOpt.minimize(function () {
+            var preds = model.apply(xBatch, { training: true });
+            var predsArr = Array.isArray(preds) ? preds : [preds];
+            var yArr = Array.isArray(yArrays) ? yArrays : [yArrays];
+            var total = tf.scalar(0);
+            for (var hi = 0; hi < _lossFns.length; hi++) {
+              if (_lossWts[hi] === 0) continue;
+              var yPred = hi < predsArr.length ? predsArr[hi] : predsArr[0];
+              var labelIdx = headConfigs[hi] && headConfigs[hi].graphLabelOutputIdx;
+              var yTrue;
+              if (labelIdx >= 0 && labelIdx < predsArr.length) {
+                yTrue = predsArr[labelIdx]; // label from graph (PhaseSwitch + ConcatBatch)
+              } else {
+                yTrue = hi < yArr.length ? yArr[hi] : yArr[0];
+              }
+              var hl = _lossFns[hi](yTrue, yPred);
+              total = total.add(hl.mul(_lossWts[hi]));
+            }
+            return total;
+          }, true, vars);
+        });
+        var v = loss.dataSync()[0];
+        loss.dispose();
+        indices.dispose();
+        if (Array.isArray(xBatch)) xBatch.forEach(function (t) { t.dispose(); }); else xBatch.dispose();
+        if (Array.isArray(yArrays)) yArrays.forEach(function (t) { t.dispose(); }); else yArrays.dispose();
+        return v;
+      }
+
+      // Per-step optimizers (preserves Adam state per step across epochs)
+      var _stepOpts = {};
+      function _getOpt(key) {
+        if (!_stepOpts[key]) _stepOpts[key] = tf.train.adam(lr);
+        return _stepOpts[key];
       }
 
       function _regenNoise() {
@@ -568,27 +656,51 @@
         }
       }
 
-      function nextEpoch() {
-        if (epoch >= epochs) {
-          if (Array.isArray(xTrainInputs)) xTrainInputs.forEach(function (t) { t.dispose(); });
-          else xTrainInputs.dispose();
-          yTrainArrays.forEach(function (t) { t.dispose(); });
-          resolve({ mae: 0, mse: 0, bestEpoch: bestEpoch > 0 ? bestEpoch : epochs, bestValLoss: bestValLoss, epochHistory: epochHistory, headCount: headConfigs.length, phased: true });
-          return;
-        }
+      function _finish() {
+        if (Array.isArray(xTrainInputs)) xTrainInputs.forEach(function (t) { t.dispose(); });
+        else xTrainInputs.dispose();
+        yTrainArrays.forEach(function (t) { t.dispose(); });
+        resolve({ mae: 0, mse: 0, bestEpoch: bestEpoch > 0 ? bestEpoch : epochs, bestValLoss: bestValLoss, epochHistory: epochHistory, headCount: headConfigs.length, phased: true });
+      }
 
-        var yTargets = headConfigs.length === 1 ? yTrainArrays[0] : yTrainArrays;
+      function _applyLrSchedule(improved) {
+        if (improved) { lrStaleCount = 0; noImproveCount = 0; }
+        else { lrStaleCount++; noImproveCount++; }
+        if (!useLrScheduler) return;
+        var changed = false;
+        if (lrSchedulerType === "plateau" && lrStaleCount >= lrPatience && lr > minLr) {
+          lr = Math.max(minLr, lr * lrFactor); lrStaleCount = 0; changed = true;
+        } else if (lrSchedulerType === "step" && (epoch + 1) % Math.max(1, lrPatience) === 0 && lr > minLr) {
+          lr = Math.max(minLr, lr * lrFactor); changed = true;
+        } else if (lrSchedulerType === "exponential" && lr > minLr) {
+          lr = Math.max(minLr, lr * lrFactor); changed = true;
+        } else if (lrSchedulerType === "cosine") {
+          var initLr = Math.max(1e-8, Number(opts.learningRate) || 1e-3);
+          lr = Math.max(minLr, minLr + (initLr - minLr) * 0.5 * (1 + Math.cos(Math.PI * (epoch + 1) / epochs)));
+          changed = true;
+        }
+        if (changed) {
+          // Update all per-step optimizers
+          Object.keys(_stepOpts).forEach(function (k) {
+            try { _stepOpts[k].setLearningRate(lr); } catch (e) { _stepOpts[k].learningRate = lr; }
+          });
+        }
+      }
+
+      function nextEpoch() {
+        if (epoch >= epochs || shouldStop()) { _finish(); return; }
+        if (earlyStoppingPatience > 0 && noImproveCount >= earlyStoppingPatience) { _finish(); return; }
 
         // if schedule done and no rotate → train all unfrozen
         if (scheduleComplete) {
-          _unfreezeAll(); _compileModel(); _regenNoise();
-          model.fit(xTrainInputs, yTargets, { batchSize: batchSize, epochs: 1, shuffle: true, verbose: 0 }).then(function (h) {
-            var loss = (h.history.loss || [0])[0] || 0;
-            epochHistory.push({ epoch: epoch + 1, loss: loss, phaseLosses: { all: loss } });
-            if (loss < bestValLoss) { bestValLoss = loss; bestEpoch = epoch + 1; }
-            if (typeof onEpochEnd === "function") onEpochEnd(epoch, { loss: loss, val_loss: loss, current_lr: lr, improved: epoch + 1 === bestEpoch, phaseStr: "all (unfrozen)" });
-            epoch++; setTimeout(nextEpoch, 0);
-          });
+          _unfreezeAll(); _regenNoise();
+          var loss = _trainStep(_getOpt("all"), xTrainInputs, yTrainArrays);
+          epochHistory.push({ epoch: epoch + 1, loss: loss, phaseLosses: { all: loss } });
+          var impr = loss < bestValLoss * (1 - 1e-4);
+          if (impr) { bestValLoss = loss; bestEpoch = epoch + 1; }
+          _applyLrSchedule(impr);
+          if (typeof onEpochEnd === "function") onEpochEnd(epoch, { loss: loss, val_loss: loss, current_lr: lr, improved: impr, phaseStr: "all (unfrozen)" });
+          epoch++; setTimeout(nextEpoch, 0);
           return;
         }
 
@@ -602,10 +714,12 @@
             var totalLoss = 0;
             Object.keys(stepLosses).forEach(function (k) { totalLoss += (stepLosses[k] || 0); });
             epochHistory.push({ epoch: epoch + 1, loss: totalLoss, phaseLosses: stepLosses });
-            if (totalLoss < bestValLoss) { bestValLoss = totalLoss; bestEpoch = epoch + 1; }
+            var impr2 = totalLoss < bestValLoss * (1 - 1e-4);
+            if (impr2) { bestValLoss = totalLoss; bestEpoch = epoch + 1; }
+            _applyLrSchedule(impr2);
             if (typeof onEpochEnd === "function") {
               var ss = Object.keys(stepLosses).map(function (k) { return k + "=" + (stepLosses[k] != null ? stepLosses[k].toExponential(3) : "?"); }).join(" | ");
-              onEpochEnd(epoch, { loss: totalLoss, val_loss: totalLoss, current_lr: lr, improved: epoch + 1 === bestEpoch, phaseLosses: stepLosses, phaseStr: ss });
+              onEpochEnd(epoch, { loss: totalLoss, val_loss: totalLoss, current_lr: lr, improved: impr2, phaseLosses: stepLosses, phaseStr: ss });
             }
             epoch++; setTimeout(nextEpoch, 0);
             return;
@@ -617,17 +731,24 @@
 
           if (model._phaseFlag) model._phaseFlag.assign(tf.scalar(stepIdx, "int32"));
           _freezeByStep(step);
-          _compileModel();
           _regenNoise();
+          // Update PhaseSwitch flag: 0 if step matches activePhase, 1 otherwise
+          if (_phaseFlagIdx >= 0 && Array.isArray(xTrainInputs) && phaseSwitchConfigs.length) {
+            var ap = phaseSwitchConfigs[0].activePhase;
+            var tags = step.trainableTags || {};
+            var flagVal = (ap && tags[ap]) ? 0 : 1;
+            var old = xTrainInputs[_phaseFlagIdx];
+            xTrainInputs[_phaseFlagIdx] = tf.fill([nSamples, 1], flagVal);
+            old.dispose();
+          }
 
-          model.fit(xTrainInputs, yTargets, {
-            batchSize: batchSize, epochs: stepEp, shuffle: true, verbose: 0,
-          }).then(function (h) {
-            var la = h.history.loss || [0];
-            stepLosses[label] = la[la.length - 1] || 0;
-            stepIdx++;
-            nextStep();
-          });
+          var stepLoss = 0;
+          for (var se = 0; se < stepEp; se++) {
+            stepLoss = _trainStep(_getOpt(label), xTrainInputs, yTrainArrays);
+          }
+          stepLosses[label] = stepLoss;
+          stepIdx++;
+          setTimeout(nextStep, 0);
         }
 
         nextStep();
