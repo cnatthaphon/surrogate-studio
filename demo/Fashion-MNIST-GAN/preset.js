@@ -89,7 +89,7 @@
   function _dcGan() {
     _nid = 0; var d = {};
 
-    // Conv Generator (Radford 2015) — BatchNorm + ReLU, sigmoid output
+    // Conv Generator (Radford 2015) — BatchNorm + ReLU
     var z =    N(d, "sample_z",          { dim: 128, distribution: "normal" },    80, 60);
     var gd =   N(d, "dense",             { units: 6272, activation: "relu", weightTag: "generator" }, 200, 60);
     var gbn1 = N(d, "batchnorm",         {},                                     300, 60);
