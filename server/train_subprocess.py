@@ -588,7 +588,9 @@ def build_model_from_graph(graph, feature_size, target_size, num_classes=0):
                     dim_map[nid] = feature_size
                 elif t == "dense":
                     units = int(c.get("units", 32))
-                    setattr(self, f"dense_{nid}", nn.Linear(in_dim, units))
+                    # auto-flatten spatial dims: [H,W,C] → H*W*C
+                    flat_dim = in_dim if isinstance(in_dim, int) else int(in_dim[0]) * int(in_dim[1]) * int(in_dim[2]) if isinstance(in_dim, list) and len(in_dim) == 3 else int(in_dim[0]) if isinstance(in_dim, list) else in_dim
+                    setattr(self, f"dense_{nid}", nn.Linear(flat_dim, units))
                     act = str(c.get("activation", "relu"))
                     if act == "relu": setattr(self, f"act_{nid}", nn.ReLU())
                     elif act == "tanh": setattr(self, f"act_{nid}", nn.Tanh())
@@ -596,7 +598,8 @@ def build_model_from_graph(graph, feature_size, target_size, num_classes=0):
                     dim_map[nid] = units
                 elif t in ("latent_mu", "latent_logvar", "latent"):
                     units = int(c.get("units", 8))
-                    setattr(self, f"dense_{nid}", nn.Linear(in_dim, units))
+                    flat_dim = in_dim if isinstance(in_dim, int) else int(in_dim[0]) * int(in_dim[1]) * int(in_dim[2]) if isinstance(in_dim, list) and len(in_dim) == 3 else int(in_dim[0]) if isinstance(in_dim, list) else in_dim
+                    setattr(self, f"dense_{nid}", nn.Linear(flat_dim, units))
                     dim_map[nid] = units
                 elif t == "reparam":
                     # TF.js: dense(logvar → noise, init=zeros) + add(mu, noise)
@@ -616,10 +619,19 @@ def build_model_from_graph(graph, feature_size, target_size, num_classes=0):
                     setattr(self, f"drop_{nid}", nn.Dropout(float(c.get("rate", 0.1))))
                     dim_map[nid] = in_dim
                 elif t == "batchnorm":
-                    setattr(self, f"bn_{nid}", nn.BatchNorm1d(in_dim))
+                    # Use BatchNorm2d for spatial dims, BatchNorm1d for flat
+                    if isinstance(in_dim, list) and len(in_dim) == 3:
+                        setattr(self, f"bn_{nid}", nn.BatchNorm2d(in_dim[2]))
+                    else:
+                        setattr(self, f"bn_{nid}", nn.BatchNorm1d(in_dim if isinstance(in_dim, int) else in_dim[0]))
                     dim_map[nid] = in_dim
                 elif t == "layernorm":
-                    setattr(self, f"ln_{nid}", nn.LayerNorm(in_dim))
+                    flat_dim = in_dim if isinstance(in_dim, int) else int(in_dim[0]) * int(in_dim[1]) * int(in_dim[2]) if isinstance(in_dim, list) and len(in_dim) == 3 else in_dim
+                    setattr(self, f"ln_{nid}", nn.LayerNorm(flat_dim))
+                    dim_map[nid] = in_dim
+                elif t == "leaky_relu":
+                    alpha = float(c.get("alpha", 0.2))
+                    setattr(self, f"lrelu_{nid}", nn.LeakyReLU(alpha))
                     dim_map[nid] = in_dim
                 elif t == "noise_injection":
                     # Gaussian noise (training only) — passthrough with same dim
@@ -759,6 +771,9 @@ def build_model_from_graph(graph, feature_size, target_size, num_classes=0):
                 inp = tensors[parents_sorted[0]["from"]] if parents_sorted else x
 
                 if t == "dense" or t in ("latent_mu", "latent_logvar", "latent"):
+                    # auto-flatten 4D conv output for linear layer
+                    if inp.dim() > 2:
+                        inp = inp.view(inp.shape[0], -1)
                     out = getattr(self, f"dense_{nid}")(inp)
                     act = getattr(self, f"act_{nid}", None)
                     if act is not None:
@@ -783,7 +798,14 @@ def build_model_from_graph(graph, feature_size, target_size, num_classes=0):
                 elif t == "batchnorm":
                     tensors[nid] = getattr(self, f"bn_{nid}")(inp)
                 elif t == "layernorm":
-                    tensors[nid] = getattr(self, f"ln_{nid}")(inp)
+                    # flatten 4D for LayerNorm, then reshape back
+                    if inp.dim() > 2:
+                        shape = inp.shape
+                        tensors[nid] = getattr(self, f"ln_{nid}")(inp.view(shape[0], -1)).view(shape)
+                    else:
+                        tensors[nid] = getattr(self, f"ln_{nid}")(inp)
+                elif t == "leaky_relu":
+                    tensors[nid] = getattr(self, f"lrelu_{nid}")(inp)
                 elif t == "noise_injection":
                     scale = getattr(self, f"noise_scale_{nid}", 0.1)
                     if self.training:
