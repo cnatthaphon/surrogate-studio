@@ -1286,47 +1286,116 @@
       var eiRow = el("div", { style: "display:flex;gap:4px;margin-top:4px;" });
       var expTrainerBtn = el("button", { className: "osc-btn secondary", style: "flex:1;font-size:10px;" }, "Export Trainer");
       expTrainerBtn.addEventListener("click", function () {
-        var exportData = {
+        // Export: metadata as JSON + weights as binary, compressed with gzip
+        var meta = {
           id: t.id, name: t.name, schemaId: t.schemaId, status: t.status,
           config: t.config, metrics: t.metrics, backend: t.backend,
-          modelArtifacts: t.modelArtifacts || null,
-          modelArtifactsLast: t.modelArtifactsLast || null,
-          modelArtifactsBest: t.modelArtifactsBest || null,
           epochs: store ? store.getTrainerEpochs(activeId) : [],
           exportedAt: new Date().toISOString(),
         };
-        var blob = new Blob([JSON.stringify(exportData)], { type: "application/json" });
-        var url = URL.createObjectURL(blob);
-        var a = document.createElement("a"); a.href = url; a.download = (t.name || t.id).replace(/\s+/g, "_") + "_trainer.json";
-        a.click(); URL.revokeObjectURL(url);
-        onStatus("Trainer exported: " + a.download);
+        // Extract weight values as Float32Array for binary storage
+        var artifacts = t.modelArtifactsLast || t.modelArtifacts || null;
+        var artifactsBest = t.modelArtifactsBest || null;
+        var weightSpecs = artifacts ? artifacts.weightSpecs : [];
+        var weightFloats = artifacts && artifacts.weightValues ? new Float32Array(artifacts.weightValues) : new Float32Array(0);
+        var bestFloats = artifactsBest && artifactsBest.weightValues ? new Float32Array(artifactsBest.weightValues) : null;
+        meta.weightSpecs = weightSpecs;
+        meta.hasBestWeights = !!bestFloats;
+
+        // Pack: [4 bytes meta length][meta JSON][last weights binary][best weights binary (optional)]
+        var metaStr = JSON.stringify(meta);
+        var metaBytes = new TextEncoder().encode(metaStr);
+        var totalSize = 4 + metaBytes.length + weightFloats.byteLength + (bestFloats ? bestFloats.byteLength : 0);
+        var packed = new ArrayBuffer(totalSize);
+        var view = new DataView(packed);
+        view.setUint32(0, metaBytes.length, true);
+        new Uint8Array(packed, 4, metaBytes.length).set(metaBytes);
+        new Uint8Array(packed, 4 + metaBytes.length, weightFloats.byteLength).set(new Uint8Array(weightFloats.buffer));
+        if (bestFloats) {
+          new Uint8Array(packed, 4 + metaBytes.length + weightFloats.byteLength, bestFloats.byteLength).set(new Uint8Array(bestFloats.buffer));
+        }
+
+        // Compress with gzip if available, else raw
+        var fileName = (t.name || t.id).replace(/\s+/g, "_") + "_trainer.bin";
+        if (typeof CompressionStream !== "undefined") {
+          var cs = new CompressionStream("gzip");
+          var writer = cs.writable.getWriter();
+          writer.write(new Uint8Array(packed));
+          writer.close();
+          new Response(cs.readable).blob().then(function (gzBlob) {
+            var url = URL.createObjectURL(gzBlob);
+            var a = document.createElement("a"); a.href = url; a.download = fileName + ".gz"; a.click(); URL.revokeObjectURL(url);
+            onStatus("Trainer exported: " + a.download + " (" + (gzBlob.size / 1024 / 1024).toFixed(1) + "MB)");
+          });
+        } else {
+          var blob = new Blob([packed], { type: "application/octet-stream" });
+          var url = URL.createObjectURL(blob);
+          var a = document.createElement("a"); a.href = url; a.download = fileName; a.click(); URL.revokeObjectURL(url);
+          onStatus("Trainer exported: " + a.download + " (" + (blob.size / 1024 / 1024).toFixed(1) + "MB)");
+        }
       });
       eiRow.appendChild(expTrainerBtn);
 
       var impTrainerBtn = el("button", { className: "osc-btn secondary", style: "flex:1;font-size:10px;" }, "Import Trainer");
       impTrainerBtn.addEventListener("click", function () {
-        var inp = document.createElement("input"); inp.type = "file"; inp.accept = ".json";
+        var inp = document.createElement("input"); inp.type = "file"; inp.accept = ".json,.bin,.gz";
         inp.addEventListener("change", function () {
           var file = inp.files && inp.files[0];
           if (!file) return;
-          var reader = new FileReader();
-          reader.onload = function () {
-            try {
-              var data = JSON.parse(reader.result);
-              if (data.config) t.config = Object.assign(t.config || {}, data.config);
-              if (data.metrics) t.metrics = data.metrics;
-              if (data.modelArtifacts) t.modelArtifacts = data.modelArtifacts;
-              if (data.modelArtifactsLast) t.modelArtifactsLast = data.modelArtifactsLast;
-              if (data.modelArtifactsBest) t.modelArtifactsBest = data.modelArtifactsBest;
-              if (data.status) t.status = data.status;
-              if (data.backend) t.backend = data.backend;
-              if (data.epochs && store) store.replaceTrainerEpochs(activeId, data.epochs);
-              if (store) store.upsertTrainerCard(t);
-              onStatus("Trainer imported: " + file.name);
-              _renderLeftPanel(); _renderMainPanel(); _renderRightPanel();
-            } catch (e) { onStatus("Import failed: " + e.message); }
-          };
-          reader.readAsText(file);
+          onStatus("Importing " + file.name + "...");
+
+          function _applyImport(data) {
+            if (data.config) t.config = Object.assign(t.config || {}, data.config);
+            if (data.metrics) t.metrics = data.metrics;
+            if (data.modelArtifacts) t.modelArtifacts = data.modelArtifacts;
+            if (data.modelArtifactsLast) t.modelArtifactsLast = data.modelArtifactsLast;
+            if (data.modelArtifactsBest) t.modelArtifactsBest = data.modelArtifactsBest;
+            if (data.status) t.status = data.status;
+            if (data.backend) t.backend = data.backend;
+            if (data.epochs && store) store.replaceTrainerEpochs(activeId, data.epochs);
+            if (store) store.upsertTrainerCard(t);
+            onStatus("Trainer imported: " + file.name);
+            _renderLeftPanel(); _renderMainPanel(); _renderRightPanel();
+          }
+
+          function _parseBinary(buf) {
+            var view = new DataView(buf);
+            var metaLen = view.getUint32(0, true);
+            var metaBytes = new Uint8Array(buf, 4, metaLen);
+            var meta = JSON.parse(new TextDecoder().decode(metaBytes));
+            var weightStart = 4 + metaLen;
+            var specs = meta.weightSpecs || [];
+            var totalWeightFloats = specs.reduce(function (s, sp) { return s + sp.shape.reduce(function (a, b) { return a * b; }, 1); }, 0);
+            var lastWeights = Array.from(new Float32Array(buf, weightStart, totalWeightFloats));
+            meta.modelArtifactsLast = { weightSpecs: specs, weightValues: lastWeights };
+            meta.modelArtifacts = meta.modelArtifactsLast;
+            if (meta.hasBestWeights) {
+              var bestStart = weightStart + totalWeightFloats * 4;
+              var bestWeights = Array.from(new Float32Array(buf, bestStart, totalWeightFloats));
+              meta.modelArtifactsBest = { weightSpecs: specs, weightValues: bestWeights };
+            }
+            return meta;
+          }
+
+          if (file.name.endsWith(".json")) {
+            var reader = new FileReader();
+            reader.onload = function () { try { _applyImport(JSON.parse(reader.result)); } catch (e) { onStatus("Import failed: " + e.message); } };
+            reader.readAsText(file);
+          } else {
+            // Binary format (.bin or .bin.gz)
+            file.arrayBuffer().then(function (rawBuf) {
+              if (file.name.endsWith(".gz") && typeof DecompressionStream !== "undefined") {
+                var ds = new DecompressionStream("gzip");
+                var writer = ds.writable.getWriter();
+                writer.write(new Uint8Array(rawBuf));
+                writer.close();
+                return new Response(ds.readable).arrayBuffer();
+              }
+              return rawBuf;
+            }).then(function (buf) {
+              try { _applyImport(_parseBinary(buf)); } catch (e) { onStatus("Import failed: " + e.message); }
+            }).catch(function (e) { onStatus("Import failed: " + e.message); });
+          }
         });
         inp.click();
       });
