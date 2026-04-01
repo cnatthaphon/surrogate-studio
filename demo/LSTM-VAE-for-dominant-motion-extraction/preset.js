@@ -3,7 +3,7 @@
  *
  * Pre-configures store with:
  * - Ant trajectory dataset (draft, ready to generate from JSON)
- * - LSTM-VAE model graph (paper architecture: Input → LSTM(32) → μ(8)/logσ²(8) → Reparam → Dense(64) → Output)
+ * - LSTM-VAE model graph (paper architecture: Input → LSTM(100) → μ(20)/logσ²(20) → Reparam → Dense(100) → Output)
  * - Trainer session (configured, linked to dataset + model)
  *
  * Also provides an MLP-AE baseline for comparison in evaluation tab.

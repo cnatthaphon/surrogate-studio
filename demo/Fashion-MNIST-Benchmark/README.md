@@ -3,7 +3,7 @@
 ![Demo Workflow](images/demo_workflow.gif)
 
 
-**A visual survey of 35 years of neural network research, trained and evaluated on the same dataset in one browser page.**
+**A visual survey of three decades of neural network research, trained and evaluated on the same dataset in one browser page.**
 
 7 architectures spanning from 1986 to 2020, each built entirely from the visual graph editor — no code, no hardcodes. Every model trains on both TF.js (browser) and PyTorch (server), with identical results.
 
@@ -12,12 +12,12 @@
 | # | Architecture | Params | Task | Paper |
 |---|---|---|---|---|
 | 1 | **MLP Baseline** | ~236K | Classification | Rumelhart et al. 1986 |
-| 2 | **CNN (LeNet-5)** | ~430K | Classification | LeCun et al. 1998 |
+| 2 | **CNN (LeNet-5)** | ~860K | Classification | LeCun et al. 1998 |
 | 3 | **Dense Autoencoder** | ~450K | Reconstruction | Hinton & Salakhutdinov 2006 |
 | 4 | **Conv Autoencoder** | ~85K | Reconstruction | Masci et al. 2011 |
-| 5 | **VAE** | ~260K | Reconstruction + Generation | Kingma & Welling 2013 |
-| 6 | **VAE+Classifier** | ~260K | Multi-task (recon + class) | Multi-task learning |
-| 7 | **Denoising AE** | ~1.3M | Reconstruction + Generation | Ho et al. 2020 |
+| 5 | **VAE** | ~414K | Reconstruction + Generation | Kingma & Welling 2014 |
+| 6 | **VAE+Classifier** | ~414K | Multi-task (recon + class) | Multi-task learning |
+| 7 | **Denoising AE** | ~734K | Reconstruction + Generation | Ho et al. 2020 |
 
 ## Benchmarks
 
@@ -83,7 +83,7 @@ ImageSource → Reshape(28,28,1) → Conv2D(32, stride=2) → Conv2D(64, stride=
 ```
 Convolutional encoder-decoder preserves spatial structure → better reconstruction.
 
-### 5. VAE (Kingma 2013)
+### 5. VAE (Kingma 2014)
 ```
 ImageSource → Input → Dense(256) → [μ(16), logσ²(16)] → Reparam(z) → Dense(256) → Dense(784, sigmoid) → Output(pixel_values, MSE)
 ```

@@ -5,40 +5,86 @@
 
 **Train a GAN with real adversarial structure — all defined in the visual graph editor.**
 
-No hardcoded GAN logic. The graph itself defines the adversarial architecture using composable building blocks: Detach (gradient stop), ConcatBatch (merge real+fake), PhaseSwitch (label routing by phase).
+No hardcoded GAN logic in the engine. The graph itself defines the full adversarial architecture using composable building blocks: ConcatBatch (merge real+fake), PhaseSwitch (label routing by phase), Constant (label values), weight tags (freeze control).
 
-## Architecture
+## Presets
+
+### 1. MLP-GAN (Goodfellow 2014)
 
 ```
-Generator:     SampleZ(128) → Dense(256) → Dense(512) → Dense(784,σ) → Output(recon)
-                                                                              ↓
-                                                                           Detach
-                                                                              ↓
-Discriminator: ImageSource(784) ───────────────────────────→ ConcatBatch(real+fake)
-                                                                              ↓
-                                                              Dense(512) → Dense(256) → Dense(1,σ)
-                                                                              ↓
-Labels:        Constant(1) ──→ PhaseSwitch ───────────────→ Output(BCE, discriminator)
-               Constant(0) ──→
+Generator:
+  SampleZ(128) → Dense(256, relu) → LayerNorm → Dense(512, relu) → LayerNorm
+    → Dense(784, sigmoid) → Output(loss=none)
+
+Discriminator:
+  ConcatBatch(fake + real) → Dense(512, relu) → Dropout(0.3)
+    → Dense(256, relu) → Dropout(0.3) → Dense(1, sigmoid) → Output(loss=BCE)
+
+Labels:
+  Constant(0.1) → PhaseSwitch(activePhase=discriminator) ← Constant(0.9)
+  ConcatBatch([fake_label, real_label=0.9]) → D Output
+    D step: [0.1, 0.9]  — train D to distinguish
+    G step: [0.9, 0.9]  — fool D into thinking fake is real
 ```
 
-## Training Phases
+- Weight-tag freeze: G layers tagged `generator`, D layers tagged `discriminator`
+- Training schedule: D:10 epochs, G:1 epoch (rotating)
+- LR = 0.0005, Adam, batch size 128
+- Pre-trained weights included (1000 epochs on T-shirt class)
 
-| Phase | What happens |
-|---|---|
-| **Discriminator** | D sees real images (label=1) + G output through Detach (label=0). G frozen. |
-| **Generator** | PhaseSwitch flips labels to 1. G trains to fool D. D weights included in gradient. |
+### 2. DCGAN (Radford 2015)
+
+```
+Generator:
+  SampleZ(128) → Dense(6272, relu) → BatchNorm → Reshape(7,7,128)
+    → ConvT2D(64, 4, stride=2, same, relu) → BatchNorm
+    → ConvT2D(1, 4, stride=2, same, sigmoid) → Flatten → Output(loss=none)
+
+Discriminator:
+  ConcatBatch(fake + real) → Reshape(28,28,1)
+    → Conv2D(64, 4, stride=2, same, linear) → LeakyReLU(0.2)
+    → Conv2D(128, 4, stride=2, same, linear) → BatchNorm → LeakyReLU(0.2)
+    → Flatten → Dense(1, sigmoid) → Output(loss=BCE)
+
+Labels:
+  Same PhaseSwitch + ConcatBatch label routing as MLP-GAN (smoothing 0.1/0.9)
+```
+
+- Training schedule: D:1 epoch, G:2 epochs (rotating)
+- LR = 0.0005, Adam, batch size 128
+- Note: DCGAN training is slow on browser WebGL; recommended to train on PyTorch server
 
 ## Building Blocks Used
 
 | Block | Purpose |
 |---|---|
 | **SampleZ** | Random noise input for generator |
-| **Detach** | Stops gradient — D doesn't update G during D phase |
-| **ConcatBatch** | Merges real + fake images into one batch for D |
-| **PhaseSwitch** | Routes labels: phase 0 → real/fake labels, phase 1 → all-real (fool D) |
-| **Constant** | Produces label tensors (1.0 = real, 0.0 = fake) |
+| **ConcatBatch** | Merges real + fake images (and labels) into one batch for D |
+| **PhaseSwitch** | Routes labels by training phase: D step gets fake=0.1, G step gets fake=0.9 |
+| **Constant** | Produces label tensors (0.1 = smoothed fake, 0.9 = smoothed real) |
+| **Weight tags** | `generator` / `discriminator` tags control which layers are frozen per phase |
+| **LayerNorm** | Normalizes G activations (MLP-GAN) — prevents mode collapse |
+| **BatchNorm** | Normalizes conv activations (DCGAN) — stabilizes deep conv training |
+| **LeakyReLU** | D activation (DCGAN) — allows gradient flow for negative inputs |
+| **Dropout** | D regularization (MLP-GAN) — prevents D from overpowering G |
 
-## Reference
+## Training Phases
 
-> **Generative Adversarial Nets** — Goodfellow et al., NeurIPS 2014. [arXiv:1406.2661](https://arxiv.org/abs/1406.2661)
+| Phase | What happens |
+|---|---|
+| **Discriminator** | D sees real images (label=0.9) + G output (label=0.1). G weights frozen via tag. |
+| **Generator** | PhaseSwitch flips fake label to 0.9. D weights frozen. Gradient flows through D to update G. |
+
+## How to Use
+
+1. Open `index.html` in a browser (Chrome/Edge recommended)
+2. Generate Fashion-MNIST dataset (T-shirt class, 6000 images)
+3. **Pre-trained**: Select "MLP-GAN (pre-trained)" generation card to generate immediately
+4. **Train from scratch**: Select a trainer, click Start Training, watch D/G loss curves
+5. **Generation tab**: Random sampling from latent z to generate new images
+
+## References
+
+1. Goodfellow, Pouget-Abadie, Mirza, Xu, Warde-Farley, Ozair, Courville, Bengio. **"Generative Adversarial Nets."** *NeurIPS 2014*. [arXiv:1406.2661](https://arxiv.org/abs/1406.2661)
+
+2. Radford, Metz, Chintala. **"Unsupervised Representation Learning with Deep Convolutional Generative Adversarial Networks."** *ICLR 2016*. [arXiv:1511.06434](https://arxiv.org/abs/1511.06434)

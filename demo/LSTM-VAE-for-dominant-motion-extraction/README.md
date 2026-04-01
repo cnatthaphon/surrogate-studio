@@ -2,7 +2,7 @@
 
 **A browser-based reproduction of the LSTM Variational Autoencoder for multi-particle trajectory reconstruction, built on [Surrogate Studio](../../).**
 
-This demo reproduces the core LSTM-VAE architecture from Jadhav & Barati Farimani (2021) and provides interactive training, visualization, and generation — entirely in the browser using TF.js, with optional PyTorch server backend.
+This demo reproduces the core LSTM-VAE architecture from Jadhav & Barati Farimani (2022) and provides interactive training, visualization, and generation — entirely in the browser using TF.js, with optional PyTorch server backend.
 
 ### Demo Workflow
 
@@ -74,12 +74,11 @@ This demo focuses on **Step 2** — the LSTM-VAE autoencoder for trajectory reco
 | **Reparameterization** | Linear(100→μ₂₀), Linear(100→logσ²₂₀) | Dense(100→μ₂₀), Dense(100→logσ²₂₀) | Yes |
 | **Decoder** | Linear(20→100), LSTM(100, depth=2), Linear(100→40) | Dense(20→100, relu), Dense(100→100, relu), Output(40) | Partial* |
 | **Params** | ~80,000 | 77,100 | Yes |
-| **Data** | 10,399 timesteps | 1,000 timesteps | 10% |
-| **KL weight β** | 1/1000 of reconstruction loss | 0.001 |
-| **Loss** | MSE + β·KL | MSE + β·KL |
-| **Data** | 20 ants, 10399 timesteps, 40 features | 20 ants, 1000 timesteps, 40 features |
-| **Normalization** | MinMax [0,1] | MinMax [0,1] |
-| **Framework** | PyTorch | TF.js (browser) or PyTorch (server) |
+| **Data** | 20 ants, 10,399 timesteps, 40 features | 20 ants, 10,399 timesteps, 40 features | Yes |
+| **KL weight β** | 1/1000 of reconstruction loss | 0.001 | Yes |
+| **Loss** | MSE + β·KL | MSE + β·KL | Yes |
+| **Normalization** | MinMax [0,1] | MinMax [0,1] | Yes |
+| **Framework** | PyTorch | TF.js (browser) or PyTorch (server) | — |
 
 ### Design Decisions
 
@@ -132,7 +131,7 @@ Headless benchmark: 50 epochs, batch=32, lr=5e-4, Adam, plateau scheduler, seed=
 ## How to Use
 
 1. Open `index.html` in a browser (Chrome/Edge recommended, works on `file://`)
-2. Dataset is pre-built at load — 800 train / 100 val / 100 test samples ready
+2. Dataset is pre-built at load — 8,319 train / 1,040 val / 1,040 test samples ready
 3. **Playground tab**: Visualize ant trajectories (x-y paths + time series)
 4. **Model tab**: LSTM-VAE and MLP-AE graphs visible in Drawflow editor
 5. **Trainer tab**: Select a trainer → click **Start Training**
@@ -209,11 +208,10 @@ This demonstrates the plugin architecture — any new paper reproduction can fol
 
 To reproduce additional results from the paper:
 
-1. **Full dataset**: Replace `ant_data.js` with all 10,399 timesteps from `ant_dataset_gt.mat`
-2. **Larger model**: Edit LSTM-VAE graph in Model tab → LSTM(100), latent(20), add second LSTM layer
-3. **Other species**: Add termite/fish data modules following the same `ant_trajectory_module.js` pattern
-4. **SINDy integration**: Export latent vectors from Generation tab → feed into SINDy (Python notebook via Export)
-5. **Latent filtering**: Apply Savitzky-Golay to the latent trajectory (post-processing in Generation tab)
+1. **Stacked LSTM**: Edit LSTM-VAE graph in Model tab → add second LSTM layer to match paper's depth=2
+2. **Other species**: Add termite/fish data modules following the same `ant_trajectory_module.js` pattern
+3. **SINDy integration**: Export latent vectors from Generation tab → feed into SINDy (Python notebook via Export)
+4. **Latent filtering**: Apply Savitzky-Golay to the latent trajectory (post-processing in Generation tab)
 
 ---
 

@@ -40,7 +40,7 @@
   function _mlpGan() {
     _nid = 0; var d = {};
 
-    // Generator (tagged "generator") — BatchNorm prevents mode collapse by forcing z-dependent statistics
+    // Generator (tagged "generator") — LayerNorm prevents mode collapse by forcing z-dependent statistics
     var z =    N(d, "sample_z",     { dim: 128, distribution: "normal" },         80, 60);
     var g1 =   N(d, "dense",        { units: 256, activation: "relu", weightTag: "generator", blockName: "G1" }, 200, 60);
     var gbn1 = N(d, "layernorm",    {},                                                                          280, 60);
