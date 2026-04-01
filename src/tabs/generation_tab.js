@@ -375,6 +375,25 @@
         if (!g.config.outputNodeId) g.config.outputNodeId = _genNodes.outputNodes[0].id;
       }
 
+      // Weight selection (last vs best) — only show if trainer has both
+      var _trainerForWeights = g.trainerId ? (store ? store.getTrainerCard(g.trainerId) : null) : null;
+      if (_trainerForWeights && _trainerForWeights.modelArtifactsLast && _trainerForWeights.modelArtifactsBest) {
+        var wsRow = el("div", { className: "osc-form-row" });
+        wsRow.appendChild(el("label", { style: "font-size:11px;color:#94a3b8;" }, "Weights"));
+        var wsSel = el("select", { style: "width:100%;padding:4px;background:#1e293b;color:#e2e8f0;border:1px solid #334155;border-radius:4px;font-size:11px;" });
+        [{ value: "last", label: "Last epoch" }, { value: "best", label: "Best loss" }].forEach(function (opt) {
+          var o = el("option", { value: opt.value }, opt.label);
+          if (opt.value === (g.config.weightSelection || "last")) o.selected = true;
+          wsSel.appendChild(o);
+        });
+        wsSel.addEventListener("change", function () {
+          g.config.weightSelection = wsSel.value;
+          _saveGen(g);
+        });
+        wsRow.appendChild(wsSel);
+        configCard.appendChild(wsRow);
+      }
+
       // numeric params — show relevant fields based on method
       var currentMethod = g.config.method || "";
       var fields = [
@@ -403,9 +422,9 @@
 
       rightEl.appendChild(configCard);
 
-      // check if selected trainer is ready
+      // check if selected trainer is ready — check both weight sets
       var selectedTrainer = g.trainerId ? (store ? store.getTrainerCard(g.trainerId) : null) : null;
-      var isReady = selectedTrainer && selectedTrainer.modelArtifacts;
+      var isReady = selectedTrainer && (selectedTrainer.modelArtifacts || selectedTrainer.modelArtifactsLast || selectedTrainer.modelArtifactsBest);
 
       if (g.trainerId && !isReady) {
         var statusMsg = !selectedTrainer ? "Trainer not found" : selectedTrainer.status === "training" ? "Model is still training..." : "Model not trained yet. Train it first in the Trainer tab.";
@@ -548,8 +567,11 @@
           allowedOutputKeys: allowedOutputKeys, defaultTarget: defaultTarget, numClasses: dsData.numClasses || dsData.classCount || 10,
         });
 
-        // load weights
-        _loadWeights(tf, built.model, trainer.modelArtifacts);
+        // load weights — select based on config (last vs best)
+        var _wSel = config.weightSelection || "last";
+        var _artifacts = _wSel === "best" && trainer.modelArtifactsBest ? trainer.modelArtifactsBest
+          : trainer.modelArtifactsLast || trainer.modelArtifacts;
+        _loadWeights(tf, built.model, _artifacts);
 
         // determine latent dim and model for generation
         var genModel = built.model;
