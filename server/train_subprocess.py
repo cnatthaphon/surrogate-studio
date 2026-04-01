@@ -815,10 +815,13 @@ def build_model_from_graph(graph, feature_size, target_size, num_classes=0):
                 elif t == "detach":
                     tensors[nid] = inp.detach()
                 elif t == "concat_batch":
-                    # concat along batch axis: [N, dim] + [N, dim] → [2N, dim]
-                    # D sees N real samples + N fake samples separately
+                    # concat along batch axis — auto-flatten if shapes differ
                     parent_tensors = [tensors[p["from"]] for p in parents_sorted if p["from"] in tensors]
                     if len(parent_tensors) >= 2:
+                        # flatten all to 2D if any are not matching
+                        shapes = [pt.shape[1:] for pt in parent_tensors]
+                        if any(s != shapes[0] for s in shapes):
+                            parent_tensors = [pt.view(pt.shape[0], -1) for pt in parent_tensors]
                         tensors[nid] = torch.cat(parent_tensors, dim=0)
                     else:
                         tensors[nid] = inp
