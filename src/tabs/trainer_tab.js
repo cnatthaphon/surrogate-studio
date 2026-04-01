@@ -31,6 +31,26 @@
     var _configFormApi = null;
     var _isTraining = false;
     var _activeModel = null; // reference to model during training (for weight save on stop)
+
+    function _extractWeightsFromModel(tfModel) {
+      var allW = tfModel.getWeights();
+      var totalBytes = 0;
+      var specs = allW.map(function (w, i) {
+        var shape = w.shape;
+        var size = shape.reduce(function (a, b) { return a * b; }, 1);
+        var spec = { name: "w" + i, shape: shape, dtype: "float32", offset: totalBytes };
+        totalBytes += size * 4;
+        return spec;
+      });
+      var buffer = new ArrayBuffer(totalBytes);
+      var offset = 0;
+      allW.forEach(function (w) {
+        var data = w.dataSync();
+        new Float32Array(buffer, offset, data.length).set(data);
+        offset += data.length * 4;
+      });
+      return { weightSpecs: specs, weightValues: Array.from(new Float32Array(buffer)) };
+    }
     var _activeTrainingId = ""; // which trainer is currently being trained
     var _lossChartDiv = null;
     var _epochTableBody = null;
@@ -1037,7 +1057,7 @@
         { key: "optimizerType", label: "Optimizer", type: "select", options: optTypes.map(function (t) { return { value: t, label: t }; }) },
         { key: "lrSchedulerType", label: "LR scheduler", type: "select", options: lrTypes.map(function (t) { return { value: t, label: t }; }) },
         { key: "earlyStoppingPatience", label: "Early stop patience", type: "number", min: 0 },
-        { key: "restoreBestWeights", label: "Restore best weights", type: "checkbox" },
+        { key: "weightSelection", label: "Weights for generation", type: "select", options: [{ value: "last", label: "Last epoch" }, { value: "best", label: "Best loss" }] },
         { key: "lrPatience", label: "LR patience", type: "number", min: 1 },
         { key: "lrFactor", label: "LR factor", type: "number", min: 0.05, max: 0.99, step: 0.05 },
         { key: "minLr", label: "Min LR", type: "number", min: 0.0000001, step: 0.0000001 },
@@ -1053,7 +1073,8 @@
         epochs: config.epochs || 20, batchSize: config.batchSize || 32, learningRate: config.learningRate || 0.001,
         optimizerType: config.optimizerType || "adam", lrSchedulerType: config.lrSchedulerType || "plateau",
         earlyStoppingPatience: config.earlyStoppingPatience != null ? config.earlyStoppingPatience : 5,
-        restoreBestWeights: config.restoreBestWeights !== false, lrPatience: config.lrPatience || 3,
+        weightSelection: config.weightSelection || (config.restoreBestWeights === false ? "last" : "best"),
+        restoreBestWeights: (config.weightSelection || "best") === "best", lrPatience: config.lrPatience || 3,
         lrFactor: config.lrFactor || 0.5, minLr: config.minLr || 0.000001,
         gradClipNorm: config.gradClipNorm || 0, gradClipValue: config.gradClipValue || 0,
       };
@@ -1086,6 +1107,10 @@
             // save ONLY the changed field (not all defaults which would overwrite preset values)
             if (ctx && ctx.key && t) {
               t.config[ctx.key] = ctx.value;
+              // Switch active weights when dropdown changes
+              if (ctx.key === "weightSelection" && t.modelArtifactsLast) {
+                t.modelArtifacts = ctx.value === "last" ? t.modelArtifactsLast : (t.modelArtifactsBest || t.modelArtifactsLast);
+              }
               if (store) store.upsertTrainerCard(t);
             }
             // auto-check server when "Use PyTorch Server" is toggled on
@@ -1236,15 +1261,13 @@
           var tc = store ? store.getTrainerCard(activeId) : null;
           if (tc) {
             tc.status = "stopped";
-            // Save current weights so generation works after stop
+            // Save current (last) weights — both last and best (best=last on stop)
             if (_activeModel) {
               try {
-                var allW = _activeModel.getWeights();
-                var tb = 0;
-                var sp = allW.map(function (w, i) { var s = w.shape; var sz = s.reduce(function (a, b) { return a * b; }, 1); var r = { name: "w" + i, shape: s, dtype: "float32", offset: tb }; tb += sz * 4; return r; });
-                var buf = new ArrayBuffer(tb); var off = 0;
-                allW.forEach(function (w) { var d = w.dataSync(); new Float32Array(buf, off, d.length).set(d); off += d.length * 4; });
-                tc.modelArtifacts = { weightSpecs: sp, weightValues: Array.from(new Float32Array(buf)) };
+                var lastW = _extractWeightsFromModel(_activeModel);
+                tc.modelArtifactsLast = lastW;
+                if (!tc.modelArtifactsBest) tc.modelArtifactsBest = lastW;
+                tc.modelArtifacts = lastW; // on stop, always use last
               } catch (e) {}
             }
             store.upsertTrainerCard(tc);
@@ -1264,6 +1287,57 @@
       btnRow.appendChild(exportBtn);
       rightEl.appendChild(btnRow);
 
+      // Export/Import trainer (config + weights)
+      var eiRow = el("div", { style: "display:flex;gap:4px;margin-top:4px;" });
+      var expTrainerBtn = el("button", { className: "osc-btn secondary", style: "flex:1;font-size:10px;" }, "Export Trainer");
+      expTrainerBtn.addEventListener("click", function () {
+        var exportData = {
+          id: t.id, name: t.name, schemaId: t.schemaId, status: t.status,
+          config: t.config, metrics: t.metrics, backend: t.backend,
+          modelArtifacts: t.modelArtifacts || null,
+          modelArtifactsLast: t.modelArtifactsLast || null,
+          modelArtifactsBest: t.modelArtifactsBest || null,
+          epochs: store ? store.getTrainerEpochs(activeId) : [],
+          exportedAt: new Date().toISOString(),
+        };
+        var blob = new Blob([JSON.stringify(exportData)], { type: "application/json" });
+        var url = URL.createObjectURL(blob);
+        var a = document.createElement("a"); a.href = url; a.download = (t.name || t.id).replace(/\s+/g, "_") + "_trainer.json";
+        a.click(); URL.revokeObjectURL(url);
+        onStatus("Trainer exported: " + a.download);
+      });
+      eiRow.appendChild(expTrainerBtn);
+
+      var impTrainerBtn = el("button", { className: "osc-btn secondary", style: "flex:1;font-size:10px;" }, "Import Trainer");
+      impTrainerBtn.addEventListener("click", function () {
+        var inp = document.createElement("input"); inp.type = "file"; inp.accept = ".json";
+        inp.addEventListener("change", function () {
+          var file = inp.files && inp.files[0];
+          if (!file) return;
+          var reader = new FileReader();
+          reader.onload = function () {
+            try {
+              var data = JSON.parse(reader.result);
+              if (data.config) t.config = Object.assign(t.config || {}, data.config);
+              if (data.metrics) t.metrics = data.metrics;
+              if (data.modelArtifacts) t.modelArtifacts = data.modelArtifacts;
+              if (data.modelArtifactsLast) t.modelArtifactsLast = data.modelArtifactsLast;
+              if (data.modelArtifactsBest) t.modelArtifactsBest = data.modelArtifactsBest;
+              if (data.status) t.status = data.status;
+              if (data.backend) t.backend = data.backend;
+              if (data.epochs && store) store.replaceTrainerEpochs(activeId, data.epochs);
+              if (store) store.upsertTrainerCard(t);
+              onStatus("Trainer imported: " + file.name);
+              _renderLeftPanel(); _renderMainPanel(); _renderRightPanel();
+            } catch (e) { onStatus("Import failed: " + e.message); }
+          };
+          reader.readAsText(file);
+        });
+        inp.click();
+      });
+      eiRow.appendChild(impTrainerBtn);
+      rightEl.appendChild(eiRow);
+
       // clear session button
       if (hasTrained) {
         var clearBtn = el("button", { className: "osc-btn secondary", style: "width:100%;margin-top:4px;border-color:#7c2d12;color:#fdba74;" }, "Reset Training (keep dataset/model)");
@@ -1272,6 +1346,8 @@
           t.status = "draft";
           t.metrics = null;
           t.modelArtifacts = null;
+          t.modelArtifactsLast = null;
+          t.modelArtifactsBest = null;
           t.backend = null;
           // keep t.datasetId and t.modelId — just unlock config
           if (store) { store.upsertTrainerCard(t); store.replaceTrainerEpochs(activeId, []); }
@@ -1456,7 +1532,7 @@
           learningRate: Number(config.learningRate || 0.001), optimizerType: String(config.optimizerType || "adam"),
           lrSchedulerType: String(config.lrSchedulerType || "plateau"),
           earlyStoppingPatience: config.earlyStoppingPatience != null ? Number(config.earlyStoppingPatience) : 5,
-          restoreBestWeights: config.restoreBestWeights !== false,
+          restoreBestWeights: (config.weightSelection || "best") === "best",
           gradClipNorm: Number(config.gradClipNorm || 0),
           trainingSchedule: config.trainingSchedule || null,
           rotateSchedule: config.rotateSchedule !== false,
@@ -1570,7 +1646,7 @@
             lrSchedulerType: String(config.lrSchedulerType || "plateau"),
             useLrScheduler: String(config.lrSchedulerType || "plateau") !== "none",
             earlyStoppingPatience: config.earlyStoppingPatience != null ? Number(config.earlyStoppingPatience) : 5,
-            restoreBestWeights: config.restoreBestWeights !== false,
+            restoreBestWeights: (config.weightSelection || "best") === "best",
             lrPatience: Number(config.lrPatience || 3),
             lrFactor: Number(config.lrFactor || 0.5),
             minLr: Number(config.minLr || 0.000001),
@@ -1643,7 +1719,7 @@
           optimizerType: String(config.optimizerType || "adam"),
           lrSchedulerType: String(config.lrSchedulerType || "plateau"),
           earlyStoppingPatience: config.earlyStoppingPatience != null ? Number(config.earlyStoppingPatience) : 5,
-          restoreBestWeights: config.restoreBestWeights !== false,
+          restoreBestWeights: (config.weightSelection || "best") === "best",
           lrPatience: Number(config.lrPatience || 3),
           lrFactor: Number(config.lrFactor || 0.5),
           minLr: Number(config.minLr || 0.000001),
@@ -1668,27 +1744,20 @@
           tCard.metrics = result;
           if (!tCard.metrics.paramCount) tCard.metrics.paramCount = buildResult.model.countParams();
           tCard.backend = (tf.getBackend && tf.getBackend()) || String(config.runtimeBackend || "auto");
-          // save model weights for test inference — extract manually
+          // Save both last and best weights
           try {
-            var allWeights = buildResult.model.getWeights();
-            var totalBytes = 0;
-            var specs = allWeights.map(function (w, i) {
-              var shape = w.shape;
-              var size = shape.reduce(function (a, b) { return a * b; }, 1);
-              var spec = { name: "w" + i, shape: shape, dtype: "float32", offset: totalBytes };
-              totalBytes += size * 4;
-              return spec;
-            });
-            var buffer = new ArrayBuffer(totalBytes);
-            var offset = 0;
-            allWeights.forEach(function (w) {
-              var data = w.dataSync();
-              new Float32Array(buffer, offset, data.length).set(data);
-              offset += data.length * 4;
-            });
-            // Store as Float32Array values (JSON-serializable) since ArrayBuffer is lost in JSON clone
-            var floatArr = Array.from(new Float32Array(buffer));
-            tCard.modelArtifacts = { weightSpecs: specs, weightValues: floatArr };
+            var lastArtifacts = _extractWeightsFromModel(buildResult.model);
+            tCard.modelArtifactsLast = lastArtifacts;
+            // Best weights: if restoreBestWeights was on, model already has best.
+            // If off, model has last. Best is stored separately during training via result.
+            if (result.bestWeightValues) {
+              tCard.modelArtifactsBest = { weightSpecs: lastArtifacts.weightSpecs, weightValues: result.bestWeightValues };
+            } else {
+              tCard.modelArtifactsBest = lastArtifacts; // fallback: last = best
+            }
+            // Active artifacts based on config selection
+            var sel = config.weightSelection || "best";
+            tCard.modelArtifacts = sel === "last" ? tCard.modelArtifactsLast : tCard.modelArtifactsBest;
           } catch (e) {
             console.warn("[trainer] Weight save failed:", e.message);
           }
