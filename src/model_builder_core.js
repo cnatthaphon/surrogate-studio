@@ -568,7 +568,7 @@
         var constVal = Number((node.data && node.data.value) != null ? node.data.value : 1);
         var constDim = Math.max(1, Number((node.data && node.data.dim) || 1));
         var constLayer = tf.layers.dense({
-          units: constDim, useBias: true, trainable: false,
+          units: constDim, useBias: true, trainable: false, name: _n,
           kernelInitializer: "zeros",
           biasInitializer: tf.initializers.constant({ value: constVal }),
         });
@@ -626,7 +626,7 @@
       }
       if (node.name === "latent_layer" || node.name === "latent_mu_layer" || node.name === "latent_logvar_layer") {
         var u = Math.max(2, Number((node.data && node.data.units) || 16));
-        return tf.layers.dense({ units: u, activation: "linear" }).apply(inTensor);
+        return tf.layers.dense({ units: u, activation: "linear", name: _n }).apply(inTensor);
       }
       if (node.name === "reparam_layer") {
         throw new Error("Reparam node is handled as a special two-input op.");
@@ -781,14 +781,14 @@
               outTensors.push(inForHead);
               generated.push(inForHead);
             } else {
-              var headT = tf.layers.dense({ units: units, activation: act }).apply(inForHead);
+              var headT = tf.layers.dense({ units: units, activation: act, name: "head_" + id }).apply(inForHead);
               outTensors.push(headT);
               generated.push(headT);
             }
           } else {
             units = targetUnitsFromMode(target, paramsSelect, odata, ht);
             act = (ht === "classification") ? "softmax" : "linear";
-            var headTensor = tf.layers.dense({ units: units, activation: act }).apply(inForHead);
+            var headTensor = tf.layers.dense({ units: units, activation: act, name: "head_" + id }).apply(inForHead);
             outTensors.push(headTensor);
             generated.push(headTensor);
           }
