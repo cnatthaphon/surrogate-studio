@@ -756,15 +756,16 @@
             nw.push(tf.tensor(fw.subarray(saved.offset, saved.offset + saved.size), mw.shape));
             matched++;
           } else {
-            // Fallback: keep current weight
             nw.push(mw.read());
           }
         });
-        if (matched > 0) {
+        if (matched === modelWeights.length) {
           model.setWeights(nw);
           console.log("[gen] Weights loaded by name (" + matched + "/" + modelWeights.length + " matched)");
+          return;
         }
-        return;
+        // Not all matched — fall through to positional
+        console.log("[gen] Name matching partial (" + matched + "/" + modelWeights.length + "), trying positional");
       }
 
       // Fallback: positional matching
