@@ -167,7 +167,7 @@
                     { epochs: 10, trainableTags: { discriminator: true, generator: false } },
                     { epochs: 1, trainableTags: { discriminator: false, generator: true } }
                   ], rotateSchedule: true },
-        metrics: { bestEpoch: 100, paramCount: 1102230 } },
+        metrics: { bestEpoch: 928, paramCount: 1102230 } },
       { id: "t-dcgan-trained", name: "DCGAN (pre-trained, server)", schemaId: sid, datasetId: DS, modelId: "m-dcgan", status: "draft",
         config: { epochs: 200, batchSize: 128, learningRate: 0.0005, optimizerType: "adam", useServer: true,
                   earlyStoppingPatience: 0, lrSchedulerType: "none", weightSelection: "last",
