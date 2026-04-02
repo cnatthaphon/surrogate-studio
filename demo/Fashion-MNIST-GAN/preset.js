@@ -134,6 +134,52 @@
     return graph(d);
   }
 
+  // ═══════════════════════════════════════════
+  // Model 3: MLP-WGAN (Arjovsky 2017)
+  // ═══════════════════════════════════════════
+  function _mlpWgan() {
+    _nid = 0; var d = {};
+
+    // Generator — same as MLP-GAN
+    var z =    N(d, "sample_z",     { dim: 128, distribution: "normal" },         80, 60);
+    var g1 =   N(d, "dense",        { units: 256, activation: "relu", weightTag: "generator", blockName: "G1" }, 200, 60);
+    var gbn1 = N(d, "layernorm",    {},                                                                          280, 60);
+    var g2 =   N(d, "dense",        { units: 512, activation: "relu", weightTag: "generator", blockName: "G2" }, 360, 60);
+    var gbn2 = N(d, "layernorm",    {},                                                                          440, 60);
+    var g3 =   N(d, "dense",        { units: 784, activation: "sigmoid", weightTag: "generator", blockName: "G3" }, 520, 60);
+    var gOut = N(d, "output",       { target: "none", targetType: "none", loss: "none", matchWeight: 0, phase: "generator", headType: "reconstruction" }, 640, 60);
+    C(d, z, g1); C(d, g1, gbn1); C(d, gbn1, g2); C(d, g2, gbn2); C(d, gbn2, g3); C(d, g3, gOut);
+
+    var img =  N(d, "image_source", { sourceKey: "pixel_values", featureSize: 784, imageShape: [28,28,1] }, 80, 240);
+    var cat =  N(d, "concat_batch", {},                                          400, 180);
+    C(d, gOut, cat, "output_1", "input_1");
+    C(d, img, cat, "output_1", "input_2");
+
+    // Critic (no sigmoid — linear output for Wasserstein distance)
+    var d1 =   N(d, "dense",        { units: 512, activation: "relu", weightTag: "discriminator" }, 560, 180);
+    var dr1 =  N(d, "dropout",      { rate: 0.3 },                                                 640, 180);
+    var d2 =   N(d, "dense",        { units: 256, activation: "relu", weightTag: "discriminator" }, 720, 180);
+    var dr2 =  N(d, "dropout",      { rate: 0.3 },                                                 800, 180);
+    var d3 =   N(d, "dense",        { units: 1, activation: "linear", weightTag: "discriminator" }, 880, 180);
+    var dOut = N(d, "output",       { target: "custom", targetType: "custom", loss: "wasserstein", matchWeight: 1, phase: "discriminator", headType: "classification" }, 1040, 180);
+    C(d, cat, d1); C(d, d1, dr1); C(d, dr1, d2); C(d, d2, dr2); C(d, dr2, d3); C(d, d3, dOut);
+
+    // Labels: Wasserstein uses +1 (real) and -1 (fake)
+    // D step: [fake=-1, real=1], G step: [fake=1, real=1]
+    var c0 =   N(d, "constant",     { value: -1, dim: 1 },                      560, 340);
+    var c1 =   N(d, "constant",     { value: 1, dim: 1 },                       560, 420);
+    var sw =   N(d, "phase_switch", { activePhase: "discriminator" },            720, 380);
+    C(d, c0, sw, "output_1", "input_1");
+    C(d, c1, sw, "output_1", "input_2");
+    var cR =   N(d, "constant",     { value: 1, dim: 1 },                       720, 460);
+    var lcat = N(d, "concat_batch", {},                                          880, 420);
+    C(d, sw, lcat, "output_1", "input_1");
+    C(d, cR, lcat, "output_1", "input_2");
+    C(d, lcat, dOut, "output_1", "input_2");
+
+    return graph(d);
+  }
+
   var DS = "demo-gan-ds";
   var sid = "fashion_mnist";
 
@@ -146,6 +192,7 @@
     models: [
       { id: "m-mlp-gan",  name: "1. MLP-GAN (Goodfellow 2014)", schemaId: sid, graph: _mlpGan(), createdAt: Date.now() },
       { id: "m-dcgan",    name: "2. DCGAN (Radford 2015)",       schemaId: sid, graph: _dcGan(),  createdAt: Date.now() },
+      { id: "m-mlp-wgan", name: "3. MLP-WGAN (Arjovsky 2017)",   schemaId: sid, graph: _mlpWgan(), createdAt: Date.now() },
     ],
     trainers: [
       // Untrained — user trains from scratch
@@ -180,12 +227,21 @@
                     { epochs: 1, trainableTags: { discriminator: true, generator: false } },
                     { epochs: 2, trainableTags: { discriminator: false, generator: true } }
                   ], rotateSchedule: true } },
+      // WGAN (Arjovsky 2017) — Wasserstein loss, linear critic output
+      { id: "t-mlp-wgan", name: "MLP-WGAN Trainer", schemaId: sid, datasetId: DS, modelId: "m-mlp-wgan", status: "draft",
+        config: { epochs: 1000, batchSize: 128, learningRate: 0.00005, optimizerType: "rmsprop", useServer: true,
+                  earlyStoppingPatience: 0, lrSchedulerType: "none", weightSelection: "last",
+                  trainingSchedule: [
+                    { epochs: 5, trainableTags: { discriminator: true, generator: false } },
+                    { epochs: 1, trainableTags: { discriminator: false, generator: true } }
+                  ], rotateSchedule: true } },
     ],
     generations: [
       { id: "g-mlp-gen",         name: "MLP-GAN Generate",              schemaId: sid, trainerId: "t-mlp-gan",         family: "gan", config: { method: "random", numSamples: 16, temperature: 1.0, seed: 42 }, status: "draft", runs: [], createdAt: Date.now() },
       { id: "g-dcgan-gen",       name: "DCGAN Generate",                schemaId: sid, trainerId: "t-dcgan",           family: "gan", config: { method: "random", numSamples: 16, temperature: 1.0, seed: 42 }, status: "draft", runs: [], createdAt: Date.now() },
       { id: "g-mlp-gen-trained", name: "MLP-GAN Generate (pre-trained)", schemaId: sid, trainerId: "t-mlp-gan-trained", family: "gan", config: { method: "random", numSamples: 16, temperature: 1.0, seed: 42 }, status: "draft", runs: [], createdAt: Date.now() },
       { id: "g-dcgan-gen-trained", name: "DCGAN Generate (pre-trained)", schemaId: sid, trainerId: "t-dcgan-trained",   family: "gan", config: { method: "random", numSamples: 16, temperature: 1.0, seed: 42 }, status: "draft", runs: [], createdAt: Date.now() },
+      { id: "g-mlp-wgan-gen",   name: "MLP-WGAN Generate",              schemaId: sid, trainerId: "t-mlp-wgan",        family: "gan", config: { method: "random", numSamples: 16, temperature: 1.0, seed: 42 }, status: "draft", runs: [], createdAt: Date.now() },
     ],
     evaluations: [],
   };

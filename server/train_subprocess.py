@@ -157,6 +157,9 @@ def main():
             head_losses.append({"fn": None, "weight": 0, "phase": hp, "cls": False, "skip": True})
         elif hl == "bce":
             head_losses.append({"fn": nn.BCELoss(), "weight": hw, "phase": hp, "cls": False, "bce_binary": True})
+        elif hl in ("wasserstein", "wgan"):
+            # Wasserstein loss: -mean(truth * pred)
+            head_losses.append({"fn": lambda p, t: -torch.mean(t * p), "weight": hw, "phase": hp, "cls": False, "bce_binary": True})
         elif hl in ("categoricalcrossentropy", "categorical_crossentropy", "cross_entropy", "sparsecategoricalcrossentropy"):
             head_losses.append({"fn": nn.CrossEntropyLoss(), "weight": hw, "phase": hp, "cls": True})
         elif hl == "mae":

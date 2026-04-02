@@ -1587,6 +1587,7 @@
             return;
           }
           onStatus("Server connected \u2014 training on PyTorch...");
+          _activeModel = buildResult.model;
           // server OK — proceed with server training
           serverAdapter.runTrainingOnServer({
           runId: activeId,
@@ -1654,10 +1655,12 @@
             tCard.modelArtifactsLast = result.modelArtifacts;
           }
           if (store) store.upsertTrainerCard(tCard);
-          onStatus("\u2713 Done (PyTorch): MAE=" + (result.mae != null ? Number(result.mae).toExponential(3) : "—"));
-          _renderLeftPanel(); _renderMainPanel(); _renderRightPanel();
+          onStatus(wasStopped ? "\u2713 Stopped (weights saved)" : "\u2713 Done (PyTorch): MAE=" + (result.mae != null ? Number(result.mae).toExponential(3) : "—"));
+          if (currentMountId === _mountId) { _renderLeftPanel(); _renderMainPanel(); _renderRightPanel(); }
+          _activeModel = null;
           buildResult.model.dispose();
         }).catch(function (err) {
+          _activeModel = null;
           var msg = String(err.message || "");
           // dataset too large for server → fallback to client training
           if (msg.indexOf("too large") >= 0 || msg.indexOf("transfer") >= 0) {

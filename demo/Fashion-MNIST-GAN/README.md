@@ -54,6 +54,28 @@ Labels:
 - LR = 0.0005, Adam, batch size 128
 - Note: DCGAN training is slow on browser WebGL; recommended to train on PyTorch server
 
+### 3. MLP-WGAN (Arjovsky 2017)
+
+```
+Generator:
+  Same as MLP-GAN (LayerNorm + Dense)
+
+Critic (not "discriminator" — WGAN terminology):
+  ConcatBatch(fake + real) → Dense(512, relu) → Dropout(0.3)
+    → Dense(256, relu) → Dropout(0.3) → Dense(1, linear) → Output(loss=wasserstein)
+
+Labels:
+  Wasserstein uses +1 (real) and -1 (fake) instead of smoothed 0.1/0.9
+  Constant(-1) → PhaseSwitch(activePhase=discriminator) ← Constant(1)
+  ConcatBatch([fake_label, real_label=1]) → D Output
+    D step: [-1, 1]  — maximize mean(D(real)) - mean(D(fake))
+    G step: [1, 1]   — minimize -mean(D(fake))
+```
+
+- Key difference: D has **linear output** (no sigmoid) — computes Wasserstein distance
+- LR = 0.00005, **RMSprop** (paper recommendation, not Adam), batch size 128
+- Training schedule: D:5 epochs, G:1 epoch (critic trains more per the paper)
+
 ## Building Blocks Used
 
 | Block | Purpose |
@@ -88,3 +110,5 @@ Labels:
 1. Goodfellow, Pouget-Abadie, Mirza, Xu, Warde-Farley, Ozair, Courville, Bengio. **"Generative Adversarial Nets."** *NeurIPS 2014*. [arXiv:1406.2661](https://arxiv.org/abs/1406.2661)
 
 2. Radford, Metz, Chintala. **"Unsupervised Representation Learning with Deep Convolutional Generative Adversarial Networks."** *ICLR 2016*. [arXiv:1511.06434](https://arxiv.org/abs/1511.06434)
+
+3. Arjovsky, Chintala, Bottou. **"Wasserstein Generative Adversarial Networks."** *ICML 2017*. [arXiv:1701.07875](https://arxiv.org/abs/1701.07875)

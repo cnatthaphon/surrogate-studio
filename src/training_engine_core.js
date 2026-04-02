@@ -45,6 +45,7 @@
     if (v === "mae") return "meanAbsoluteError";
     if (v === "huber") return "huberLoss";
     if (v === "bce" || v === "binarycrossentropy") return "binaryCrossentropy";
+    if (v === "wasserstein" || v === "wgan") return "wasserstein";
     if (v === "none") return "none";
     if (v === "use_global") return String(resolvedGlobal || "meanSquaredError");
     return String(resolvedGlobal || "meanSquaredError");
@@ -52,6 +53,10 @@
 
   function scalarLossByType(tf, pred, truth, type) {
     if (type === "meanAbsoluteError") return tf.mean(tf.abs(tf.sub(pred, truth)));
+    // Wasserstein: loss = -mean(truth * pred). truth=1 for real, truth=-1 for fake
+    // D wants to maximize mean(D(real)) - mean(D(fake)) → minimize -mean(truth * pred)
+    // G wants to minimize -mean(D(fake)) → truth=1 for G step
+    if (type === "wasserstein") return tf.neg(tf.mean(tf.mul(truth, pred)));
     if (type === "binaryCrossentropy") {
       var eps = 1e-7;
       var clipped = tf.clipByValue(pred, eps, 1 - eps);
@@ -92,6 +97,10 @@
         if (type === "binaryCrossentropy") {
           var bl = scalarLossByType(tf, yPred, yTrue, "binaryCrossentropy");
           return tf.mul(tf.scalar(headWeight), bl);
+        }
+        if (type === "wasserstein") {
+          var wl = scalarLossByType(tf, yPred, yTrue, "wasserstein");
+          return tf.mul(tf.scalar(headWeight), wl);
         }
         if (ht === "classification") {
           var ce = tf.losses.softmaxCrossEntropy(yTrue, yPred);
