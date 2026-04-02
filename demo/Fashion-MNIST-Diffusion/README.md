@@ -57,6 +57,33 @@ Standard supervised learning (MSE loss) — no adversarial dynamics:
 | **Reconstruct** | Pass test images through noise → denoise (shows quality) |
 | **DDPM** | Iterative: start from pure noise, denoise T steps → generates new images |
 
+### 3. NCSN (Song & Ermon 2019)
+
+```
+ImageSource → AddNoise(σ=0.5, linear) + TimeEmbed(64) → Concat
+  → Dense(512, relu) → LayerNorm → Dense(512, relu) → LayerNorm
+  → Dense(512, relu) → Dense(784, sigmoid) → Output(loss=MSE)
+```
+
+- Deeper score network (3×512 hidden layers)
+- Same training as DDPM (MSE on clean reconstruction)
+- Generation: Langevin dynamics (iterative gradient ascent on learned score)
+
+### 4. Score SDE (Song et al. 2021)
+
+```
+ImageSource → AddNoise(σ=0.5, cosine) + TimeEmbed(128) → Concat
+  → Dense(512, relu) → LayerNorm → Dense(256, relu)
+                                        ↓
+  Skip concat(encoder_mid + bottleneck) → Dense(512, relu) → LayerNorm
+    → Dense(784, sigmoid) → Output(loss=MSE)
+```
+
+- Cosine noise schedule (smoother than linear)
+- Larger timestep embedding (128-dim)
+- Skip connection from encoder to decoder (UNet-like)
+- Unified framework: DDPM and NCSN as discretizations of SDEs
+
 ## How to Use
 
 1. Open `index.html` in a browser
@@ -69,3 +96,5 @@ Standard supervised learning (MSE loss) — no adversarial dynamics:
 1. Ho, Jain, Abbeel. **"Denoising Diffusion Probabilistic Models."** *NeurIPS 2020*. [arXiv:2006.11239](https://arxiv.org/abs/2006.11239)
 
 2. Song, Ermon. **"Generative Modeling by Estimating Gradients of the Data Distribution."** *NeurIPS 2019*. [arXiv:1907.05600](https://arxiv.org/abs/1907.05600)
+
+3. Song, Sohl-Dickstein, Kingma, Kumar, Ermon, Poole. **"Score-Based Generative Modeling through Stochastic Differential Equations."** *ICLR 2021*. [arXiv:2011.13456](https://arxiv.org/abs/2011.13456)

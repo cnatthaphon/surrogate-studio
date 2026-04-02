@@ -86,6 +86,78 @@
     return graph(d);
   }
 
+  // ═══════════════════════════════════════════
+  // Model 3: NCSN — Noise Conditional Score Network (Song & Ermon 2019)
+  // Score matching: network estimates ∇_x log p(x) (score function)
+  // Same architecture as DDPM but trained to predict score (direction to clean data)
+  // ═══════════════════════════════════════════
+  function _ncsn() {
+    _nid = 0; var d = {};
+    var img = N(d, "image_source", { sourceKey: "pixel_values", featureSize: 784, imageShape: [28,28,1] }, 80, 80);
+    var noise = N(d, "noise_injection", { scale: 0.5, schedule: "linear" }, 240, 80);
+
+    var tEmb = N(d, "time_embed", { dim: 64 }, 80, 200);
+
+    _nid++; var _cid = String(_nid);
+    d[_cid] = { id: _nid, name: "concat_block", data: {}, class: "concat_block", html: "<div><div>Concat</div></div>", typenode: false, inputs: {}, outputs: {}, pos_x: 400, pos_y: 140 };
+    var cat = _cid;
+    C(d, noise, cat, "output_1", "input_1");
+    C(d, tEmb, cat, "output_1", "input_2");
+
+    // Deeper network for score estimation
+    var d1 = N(d, "dense", { units: 512, activation: "relu" }, 560, 140);
+    var ln1 = N(d, "layernorm", {}, 620, 140);
+    var d2 = N(d, "dense", { units: 512, activation: "relu" }, 680, 140);
+    var ln2 = N(d, "layernorm", {}, 740, 140);
+    var d3 = N(d, "dense", { units: 512, activation: "relu" }, 800, 140);
+    var d4 = N(d, "dense", { units: 784, activation: "sigmoid" }, 920, 140);
+    var out = N(d, "output", { target: "pixel_values", targetType: "pixel_values", loss: "mse", headType: "reconstruction" }, 1080, 140);
+    C(d, cat, d1); C(d, d1, ln1); C(d, ln1, d2); C(d, d2, ln2); C(d, ln2, d3); C(d, d3, d4); C(d, d4, out);
+
+    C(d, img, noise);
+    return graph(d);
+  }
+
+  // ═══════════════════════════════════════════
+  // Model 4: Score SDE — continuous-time score model (Song et al. 2021)
+  // Unified framework: DDPM and NCSN as discretizations of SDEs
+  // Uses wider network with skip-like connections via concat
+  // ═══════════════════════════════════════════
+  function _scoreSde() {
+    _nid = 0; var d = {};
+    var img = N(d, "image_source", { sourceKey: "pixel_values", featureSize: 784, imageShape: [28,28,1] }, 80, 80);
+    var noise = N(d, "noise_injection", { scale: 0.5, schedule: "cosine" }, 240, 80);
+
+    var tEmb = N(d, "time_embed", { dim: 128 }, 80, 220);
+
+    _nid++; var _cid1 = String(_nid);
+    d[_cid1] = { id: _nid, name: "concat_block", data: {}, class: "concat_block", html: "<div><div>Concat</div></div>", typenode: false, inputs: {}, outputs: {}, pos_x: 400, pos_y: 140 };
+    var cat1 = _cid1;
+    C(d, noise, cat1, "output_1", "input_1");
+    C(d, tEmb, cat1, "output_1", "input_2");
+
+    // Encoder
+    var e1 = N(d, "dense", { units: 512, activation: "relu" }, 560, 140);
+    var eln = N(d, "layernorm", {}, 620, 140);
+    var e2 = N(d, "dense", { units: 256, activation: "relu" }, 680, 140);
+
+    // Decoder with skip connection (concat encoder output)
+    _nid++; var _cid2 = String(_nid);
+    d[_cid2] = { id: _nid, name: "concat_block", data: {}, class: "concat_block", html: "<div><div>Concat</div></div>", typenode: false, inputs: {}, outputs: {}, pos_x: 800, pos_y: 140 };
+    var cat2 = _cid2;
+    C(d, e2, cat2, "output_1", "input_1");
+    C(d, eln, cat2, "output_1", "input_2");  // skip from encoder
+
+    var dec1 = N(d, "dense", { units: 512, activation: "relu" }, 880, 140);
+    var dln = N(d, "layernorm", {}, 940, 140);
+    var dec2 = N(d, "dense", { units: 784, activation: "sigmoid" }, 1000, 140);
+    var out = N(d, "output", { target: "pixel_values", targetType: "pixel_values", loss: "mse", headType: "reconstruction" }, 1160, 140);
+    C(d, cat1, e1); C(d, e1, eln); C(d, eln, e2); C(d, cat2, dec1); C(d, dec1, dln); C(d, dln, dec2); C(d, dec2, out);
+
+    C(d, img, noise);
+    return graph(d);
+  }
+
   var DS = "demo-diff-ds";
   var sid = "fashion_mnist";
 
@@ -96,8 +168,10 @@
       data: null, createdAt: Date.now(),
     },
     models: [
-      { id: "m-mlp-denoiser", name: "1. MLP Denoiser (baseline)",    schemaId: sid, graph: _mlpDenoiser(), createdAt: Date.now() },
-      { id: "m-mlp-ddpm",     name: "2. MLP DDPM (Ho 2020)",         schemaId: sid, graph: _mlpDdpm(),     createdAt: Date.now() },
+      { id: "m-mlp-denoiser", name: "1. MLP Denoiser (baseline)",         schemaId: sid, graph: _mlpDenoiser(), createdAt: Date.now() },
+      { id: "m-mlp-ddpm",     name: "2. MLP DDPM (Ho 2020)",            schemaId: sid, graph: _mlpDdpm(),     createdAt: Date.now() },
+      { id: "m-ncsn",         name: "3. NCSN (Song & Ermon 2019)",      schemaId: sid, graph: _ncsn(),        createdAt: Date.now() },
+      { id: "m-score-sde",    name: "4. Score SDE (Song et al. 2021)",  schemaId: sid, graph: _scoreSde(),    createdAt: Date.now() },
     ],
     trainers: [
       { id: "t-mlp-denoiser", name: "MLP Denoiser Trainer", schemaId: sid, datasetId: DS, modelId: "m-mlp-denoiser", status: "draft",
@@ -106,11 +180,21 @@
       { id: "t-mlp-ddpm", name: "MLP DDPM Trainer", schemaId: sid, datasetId: DS, modelId: "m-mlp-ddpm", status: "draft",
         config: { epochs: 100, batchSize: 128, learningRate: 0.001, optimizerType: "adam", useServer: true,
                   earlyStoppingPatience: 15, lrSchedulerType: "plateau", lrPatience: 5, lrFactor: 0.5 } },
+      { id: "t-ncsn", name: "NCSN Trainer", schemaId: sid, datasetId: DS, modelId: "m-ncsn", status: "draft",
+        config: { epochs: 100, batchSize: 128, learningRate: 0.001, optimizerType: "adam", useServer: true,
+                  earlyStoppingPatience: 15, lrSchedulerType: "plateau", lrPatience: 5, lrFactor: 0.5 } },
+      { id: "t-score-sde", name: "Score SDE Trainer", schemaId: sid, datasetId: DS, modelId: "m-score-sde", status: "draft",
+        config: { epochs: 100, batchSize: 128, learningRate: 0.001, optimizerType: "adam", useServer: true,
+                  earlyStoppingPatience: 15, lrSchedulerType: "plateau", lrPatience: 5, lrFactor: 0.5 } },
     ],
     generations: [
       { id: "g-denoiser-recon", name: "Denoiser Reconstruct", schemaId: sid, trainerId: "t-mlp-denoiser", family: "diffusion", config: { method: "reconstruct", numSamples: 16, temperature: 1.0, seed: 42 }, status: "draft", runs: [], createdAt: Date.now() },
       { id: "g-ddpm-gen",      name: "DDPM Generate",         schemaId: sid, trainerId: "t-mlp-ddpm",     family: "diffusion", config: { method: "ddpm", numSamples: 16, steps: 50, temperature: 1.0, seed: 42 }, status: "draft", runs: [], createdAt: Date.now() },
       { id: "g-ddpm-recon",    name: "DDPM Reconstruct",      schemaId: sid, trainerId: "t-mlp-ddpm",     family: "diffusion", config: { method: "reconstruct", numSamples: 16, temperature: 1.0, seed: 42 }, status: "draft", runs: [], createdAt: Date.now() },
+      { id: "g-ncsn-gen",      name: "NCSN Generate (Langevin)", schemaId: sid, trainerId: "t-ncsn",      family: "diffusion", config: { method: "langevin", numSamples: 16, steps: 100, lr: 0.01, temperature: 1.0, seed: 42 }, status: "draft", runs: [], createdAt: Date.now() },
+      { id: "g-ncsn-recon",    name: "NCSN Reconstruct",      schemaId: sid, trainerId: "t-ncsn",         family: "diffusion", config: { method: "reconstruct", numSamples: 16, temperature: 1.0, seed: 42 }, status: "draft", runs: [], createdAt: Date.now() },
+      { id: "g-sde-gen",       name: "Score SDE Generate",    schemaId: sid, trainerId: "t-score-sde",    family: "diffusion", config: { method: "ddpm", numSamples: 16, steps: 50, temperature: 1.0, seed: 42 }, status: "draft", runs: [], createdAt: Date.now() },
+      { id: "g-sde-recon",     name: "Score SDE Reconstruct", schemaId: sid, trainerId: "t-score-sde",    family: "diffusion", config: { method: "reconstruct", numSamples: 16, temperature: 1.0, seed: 42 }, status: "draft", runs: [], createdAt: Date.now() },
     ],
     evaluations: [],
   };
