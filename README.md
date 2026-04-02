@@ -4,7 +4,7 @@
 
 **A schema-driven ML experimentation platform that runs entirely in the browser.**
 
-**[Live Demo](https://cnatthaphon.github.io/surrogate-studio/)** | [Fashion-MNIST Benchmark](https://cnatthaphon.github.io/surrogate-studio/demo/Fashion-MNIST-Benchmark/) | [GAN Demo](https://cnatthaphon.github.io/surrogate-studio/demo/Fashion-MNIST-GAN/) | [Diffusion Demo](https://cnatthaphon.github.io/surrogate-studio/demo/Fashion-MNIST-Diffusion/)
+**[Live Demo](https://cnatthaphon.github.io/surrogate-studio/)** | [Fashion-MNIST Benchmark](https://cnatthaphon.github.io/surrogate-studio/demo/Fashion-MNIST-Benchmark/) | [GAN](https://cnatthaphon.github.io/surrogate-studio/demo/Fashion-MNIST-GAN/) | [Diffusion](https://cnatthaphon.github.io/surrogate-studio/demo/Fashion-MNIST-Diffusion/) | [LSTM-VAE](https://cnatthaphon.github.io/surrogate-studio/demo/LSTM-VAE-for-dominant-motion-extraction/) | [Oscillator](https://cnatthaphon.github.io/surrogate-studio/demo/Oscillator-Surrogate/)
 
 Build datasets, design neural network architectures visually, train models, generate samples, and benchmark results — all from a single page. No Python install, no GPU server, no Docker.
 
