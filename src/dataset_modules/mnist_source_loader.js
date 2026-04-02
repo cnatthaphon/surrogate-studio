@@ -31,6 +31,9 @@
       labelUrl: "https://storage.googleapis.com/learnjs-data/model-builder/fashion_mnist_labels_uint8",
       imageIdxUrl: "https://raw.githubusercontent.com/zalandoresearch/fashion-mnist/master/data/fashion/train-images-idx3-ubyte.gz",
       labelIdxUrl: "https://raw.githubusercontent.com/zalandoresearch/fashion-mnist/master/data/fashion/train-labels-idx1-ubyte.gz",
+      // Local fallback paths (relative to repo root — avoids GitHub CDN rate limits)
+      imageIdxLocal: "../../data/fashion-mnist/train-images-idx3-ubyte.gz",
+      labelIdxLocal: "../../data/fashion-mnist/train-labels-idx1-ubyte.gz",
       classNames: [
         "T-shirt/top", "Trouser", "Pullover", "Dress", "Coat",
         "Sandal", "Shirt", "Sneaker", "Bag", "Ankle boot",
@@ -324,11 +327,17 @@
     return Promise.resolve(decompressGzipToUint8(buffer));
   }
 
+  // Try local path first, fall back to CDN (avoids rate limits on GitHub raw)
+  function fetchWithFallback(localUrl, cdnUrl) {
+    if (!localUrl) return fetchArrayBuffer(cdnUrl);
+    return fetchArrayBuffer(localUrl).catch(function () { return fetchArrayBuffer(cdnUrl); });
+  }
+
   function fetchAndDecodeNodeVariant(variant) {
     var meta = getVariantMeta(variant);
     return Promise.all([
-      fetchArrayBuffer(meta.imageIdxUrl),
-      fetchArrayBuffer(meta.labelIdxUrl),
+      fetchWithFallback(meta.imageIdxLocal, meta.imageIdxUrl),
+      fetchWithFallback(meta.labelIdxLocal, meta.labelIdxUrl),
     ]).then(function (parts) {
       var img = parseIdxImages(decompressGzipToUint8(parts[0]), [IMAGE_W, IMAGE_H]);
       var lbl = parseIdxLabels(decompressGzipToUint8(parts[1]));
@@ -365,8 +374,8 @@
   function fetchAndDecodeBrowserWorkerVariant(variant) {
     var meta = getVariantMeta(variant);
     return Promise.all([
-      fetchArrayBuffer(meta.imageIdxUrl),
-      fetchArrayBuffer(meta.labelIdxUrl),
+      fetchWithFallback(meta.imageIdxLocal, meta.imageIdxUrl),
+      fetchWithFallback(meta.labelIdxLocal, meta.labelIdxUrl),
     ]).then(function (parts) {
       return Promise.all([
         decompressMaybeAsync(parts[0]),
