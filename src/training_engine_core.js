@@ -612,10 +612,15 @@
           }
         });
         if (!vars.length) return 0;
-        // Sample a random mini-batch (prevents GPU OOM on large models like DCGAN)
+        // Iterate through all mini-batches (same as server)
         var fullN = Array.isArray(xFull) ? xFull[0].shape[0] : xFull.shape[0];
         var bs = Math.min(batchSize, fullN);
-        var indices = tf.randomUniform([bs], 0, fullN, "int32");
+        var nBatches = Math.max(1, Math.ceil(fullN / bs));
+        var totalLoss = 0;
+        for (var bi = 0; bi < nBatches; bi++) {
+        var start = bi * bs;
+        var end = Math.min(start + bs, fullN);
+        var indices = tf.range(start, end, 1, "int32");
         var xBatch = Array.isArray(xFull) ? xFull.map(function (x) { return tf.gather(x, indices); }) : tf.gather(xFull, indices);
         var yArrays = Array.isArray(yFull) ? yFull.map(function (y) { return tf.gather(y, indices); }) : tf.gather(yFull, indices);
         var loss = tf.tidy(function () {
@@ -640,12 +645,13 @@
             return total;
           }, true, vars);
         });
-        var v = loss.dataSync()[0];
+        totalLoss += loss.dataSync()[0];
         loss.dispose();
         indices.dispose();
         if (Array.isArray(xBatch)) xBatch.forEach(function (t) { t.dispose(); }); else xBatch.dispose();
         if (Array.isArray(yArrays)) yArrays.forEach(function (t) { t.dispose(); }); else yArrays.dispose();
-        return v;
+        } // end batch loop
+        return totalLoss / nBatches;
       }
 
       // Per-step optimizers (preserves Adam state per step across epochs)
