@@ -432,6 +432,21 @@
     var s = session || {};
     var schemaId = String(s.schemaId || s.datasetSchemaId || s.modelSchemaId || "oscillator").trim().toLowerCase() || "oscillator";
     var graph = s.drawflowGraph || s.graph || s.drawflow || null;
+    var trainCfgRaw = Object.assign({},
+      (s.trainCfg && typeof s.trainCfg === "object") ? s.trainCfg : {},
+      (s.trainConfig && typeof s.trainConfig === "object") ? s.trainConfig : {}
+    );
+    if (s.epochs != null && trainCfgRaw.epochs == null) trainCfgRaw.epochs = s.epochs;
+    if (s.batchSize != null && trainCfgRaw.batchSize == null) trainCfgRaw.batchSize = s.batchSize;
+    if (s.learningRate != null && trainCfgRaw.learningRate == null) trainCfgRaw.learningRate = s.learningRate;
+    if (s.optimizerType != null && trainCfgRaw.optimizerType == null) trainCfgRaw.optimizerType = s.optimizerType;
+    if (s.lrSchedulerType != null && trainCfgRaw.lrSchedulerType == null) trainCfgRaw.lrSchedulerType = s.lrSchedulerType;
+    if (s.useLrScheduler != null && trainCfgRaw.useLrScheduler == null) trainCfgRaw.useLrScheduler = s.useLrScheduler;
+    if (s.lrPatience != null && trainCfgRaw.lrPatience == null) trainCfgRaw.lrPatience = s.lrPatience;
+    if (s.lrFactor != null && trainCfgRaw.lrFactor == null) trainCfgRaw.lrFactor = s.lrFactor;
+    if (s.minLr != null && trainCfgRaw.minLr == null) trainCfgRaw.minLr = s.minLr;
+    if (s.restoreBestWeights != null && trainCfgRaw.restoreBestWeights == null) trainCfgRaw.restoreBestWeights = s.restoreBestWeights;
+    if (s.earlyStoppingPatience != null && trainCfgRaw.earlyStoppingPatience == null) trainCfgRaw.earlyStoppingPatience = s.earlyStoppingPatience;
     if (!graph || typeof graph !== "object") {
       throw new Error("Session '" + String(s.id || s.name || idx + 1) + "' is missing drawflowGraph.");
     }
@@ -448,7 +463,7 @@
       seed: Number.isFinite(Number(s.seed)) ? Math.floor(Number(s.seed)) : commonSeed,
       samplePerSplit: Math.max(1, Math.min(9, Math.floor(Number(s.samplePerSplit || s.sample_per_split || 3) || 3))),
       includeModelGraph: includeModelGraph,
-      trainCfg: normalizeTrainCfg(s.trainCfg || {}),
+      trainCfg: normalizeTrainCfg(trainCfgRaw),
       drawflowGraph: jsonClone(graph),
       datasetData: s.datasetData || null,
     };
@@ -528,6 +543,9 @@
     var packageLabel = String(opts.packageLabel || "2-file package");
     var sessionsB64 = toBase64Utf8(JSON.stringify(opts.sessions || []));
     var pipelineB64 = toBase64Utf8(String(opts.pipelineSource || ""));
+    var embeddedDatasetB64 = (opts.embedDataset && opts.datasetCsvText)
+      ? toBase64Utf8(String(opts.datasetCsvText || ""))
+      : "";
     var modelList = (opts.sessions || []).map(function (s) { return String(s.modelName || "model"); }).join(", ");
 
     var cells = [];
@@ -563,6 +581,7 @@
       "RUN_ROOT = '.'\n" +
       "NOTEBOOKS_DIR_OVERRIDE = None\n" +
       "DATASET_PATH_OVERRIDE = None\n" +
+      "EMBEDDED_DATASET_CSV = base64.b64decode('" + embeddedDatasetB64 + "').decode('utf-8') if '" + embeddedDatasetB64 + "' else ''\n" +
       "\n" +
       "def _resolve_optional_path(base, p):\n" +
       "    if p is None:\n" +
@@ -591,6 +610,8 @@
       "    DATASET_PATH = resolved_dataset\n" +
       "else:\n" +
       "    DATASET_PATH = NB / 'dataset.csv'\n" +
+      "    if not DATASET_PATH.exists() and EMBEDDED_DATASET_CSV:\n" +
+      "        DATASET_PATH.write_text(EMBEDDED_DATASET_CSV, encoding='utf-8')\n" +
       "if not DATASET_PATH.exists():\n" +
       "    raise FileNotFoundError(f'dataset.csv not found: {DATASET_PATH}')\n\n" +
       "print('notebook runtime root:', RUN_ROOT)\n" +
@@ -606,6 +627,11 @@
       "    raise ValueError('SESSIONS payload is empty.')\n" +
       "for s in SESSIONS:\n" +
       "    sid = str(s.get('sessionId', s.get('name', 'session'))).strip()\n" +
+      "    embedded_graph = _extract_drawflow_graph(s.get('drawflowGraph', {}))\n" +
+      "    if embedded_graph is not None:\n" +
+      "        s['drawflowGraph'] = embedded_graph\n" +
+      "        s['modelGraphAbsPath'] = '(embedded)'\n" +
+      "        continue\n" +
       "    rel = str(s.get('modelGraphPath', '')).strip()\n" +
       "    if not rel:\n" +
       "        raise ValueError(f'[{sid}] missing modelGraphPath in session payload.')\n" +
@@ -619,9 +645,9 @@
       "    s['drawflowGraph'] = graph\n" +
       "    s['modelGraphAbsPath'] = str(gpath)\n" +
       "print('sessions:', len(SESSIONS))\n" +
-      "def _is_image_schema(schema_id):\n" +
-      "    sid = str(schema_id or '').strip().lower()\n" +
-      "    return sid in ('mnist', 'fashion_mnist')\n"
+      "def _looks_like_image_dataset(df):\n" +
+      "    cols = set([str(c) for c in list(df.columns)])\n" +
+      "    return 'pixel_values' in cols and 'label' in cols\n"
     ));
 
     cells.push(makeMarkdownCell("## 2) Session Overview"));
@@ -933,7 +959,7 @@
       "    active_schema = str(SESSIONS[0].get('datasetSchemaId', SESSIONS[0].get('schemaId', ''))).strip().lower()\n" +
       "split_counts = df['split'].value_counts().to_dict() if 'split' in df.columns else {}\n" +
       "display(pd.DataFrame([{'split_counts': split_counts, 'rows': int(len(df))}]))\n\n" +
-      "if _is_image_schema(active_schema) and 'pixel_values' in df.columns and 'label' in df.columns:\n" +
+      "if _looks_like_image_dataset(df):\n" +
       "    labels = sorted([int(x) for x in pd.Series(df['label']).dropna().unique().tolist() if str(x).strip() != ''])\n" +
       "    labels = labels[:10]\n" +
       "    for split in ['train', 'val', 'test']:\n" +
@@ -1119,7 +1145,7 @@
       "    result = pack['result']\n" +
       "    schema = str(s.get('datasetSchemaId', s.get('schemaId', ''))).strip().lower()\n" +
       "    print(f'=== validation plot: {sid} | schema={schema} ===')\n" +
-      "    if _is_image_schema(schema) and 'pixel_values' in df.columns and 'label' in df.columns:\n" +
+      "    if _looks_like_image_dataset(df):\n" +
       "        val_df = df[df['split'] == 'val'].reset_index(drop=True)\n" +
       "        if len(val_df) <= 0:\n" +
       "            print('no val rows')\n" +
@@ -1220,26 +1246,32 @@
 
     cells.push(makeMarkdownCell("## 10) Generation\n\nReconstruct test samples and sample from latent space."));
     cells.push(makeCodeCell(
-      "# Reconstruction from the best session\n" +
-      "best_sid = max(SESSION_RUNS, key=lambda s: -SESSION_RUNS[s]['result'].get('best_val_loss', float('inf')))\n" +
+      "# Prediction preview from the best session\n" +
+      "best_sid = min(SESSION_RUNS, key=lambda s: SESSION_RUNS[s]['result'].get('best_val_loss', float('inf')))\n" +
       "best_pack = SESSION_RUNS[best_sid]\n" +
-      "best_model = best_pack['model']\n" +
-      "best_model.eval()\n\n" +
-      "test_split = ctx.dataset_splits.get('test') or ctx.dataset_splits.get('val')\n" +
-      "x_t = test_split['x'][:16].to(ctx.device)\n" +
-      "with torch.no_grad():\n" +
-      "    recon = best_model(x_t).cpu().numpy()\n" +
-      "    orig = x_t.cpu().numpy()\n\n" +
-      "recon_mse = np.mean((orig - recon) ** 2)\n" +
-      "print(f'Reconstruction MSE (16 samples): {recon_mse:.6f}')\n\n" +
-      "# Feature profile comparison\n" +
-      "fig, axes = plt.subplots(4, 1, figsize=(10, 8))\n" +
-      "for i in range(4):\n" +
-      "    axes[i].plot(orig[i], label='Original', alpha=0.8)\n" +
-      "    axes[i].plot(recon[i], '--', label='Reconstructed', alpha=0.8)\n" +
-      "    axes[i].legend(fontsize=8)\n" +
-      "plt.suptitle(f'Reconstruction (MSE={recon_mse:.4f})')\n" +
-      "plt.tight_layout(); plt.show()\n"
+      "best_result = best_pack['result']\n" +
+      "y_true = np.asarray(best_result.get('y_true_test', []), dtype=np.float64)\n" +
+      "y_pred = np.asarray(best_result.get('y_pred_test', []), dtype=np.float64)\n" +
+      "if y_true.ndim == 1:\n" +
+      "    y_true = y_true.reshape(-1, 1)\n" +
+      "if y_pred.ndim == 1:\n" +
+      "    y_pred = y_pred.reshape(-1, 1)\n" +
+      "if y_true.size == 0 or y_pred.size == 0:\n" +
+      "    print('No held-out predictions available.')\n" +
+      "else:\n" +
+      "    n = int(min(len(y_true), len(y_pred), 240))\n" +
+      "    recon_mse = float(np.mean((y_true[:n] - y_pred[:n]) ** 2))\n" +
+      "    print(f'Best session: {best_sid} | preview samples={n} | mse={recon_mse:.6f}')\n" +
+      "    fig, axes = plt.subplots(min(4, y_true.shape[1]), 1, figsize=(10, 2.6 * min(4, y_true.shape[1])))\n" +
+      "    if not isinstance(axes, np.ndarray):\n" +
+      "        axes = np.asarray([axes])\n" +
+      "    for i in range(min(len(axes), y_true.shape[1])):\n" +
+      "        axes[i].plot(y_true[:n, i], label='groundtruth', alpha=0.9)\n" +
+      "        axes[i].plot(y_pred[:n, i], '--', label='predict', alpha=0.9)\n" +
+      "        axes[i].set_title(f'Output dim {i}')\n" +
+      "        axes[i].grid(alpha=0.25)\n" +
+      "        axes[i].legend(fontsize=8)\n" +
+      "    plt.tight_layout(); plt.show()\n"
     ));
 
     return {
@@ -1577,42 +1609,47 @@
       "Reconstruct test samples through the trained model, and sample from latent space if VAE."
     ));
     cells.push(makeCodeCell(
-      "# --- Reconstruction ---\n" +
+      "# --- Reconstruction / prediction preview ---\n" +
       "model.eval()\n" +
       "n_show = min(16, len(x_test))\n" +
       "with torch.no_grad():\n" +
       "    x_in = x_test[:n_show].to(device)\n" +
-      "    x_recon = model(x_in).cpu().numpy()\n" +
+      "    x_recon = model(x_in)\n" +
+      "    if isinstance(x_recon, (tuple, list)):\n" +
+      "        x_recon = x_recon[0]\n" +
+      "    x_recon = x_recon.cpu().numpy()\n" +
       "    x_orig = x_test[:n_show].numpy()\n\n" +
-      "# reconstruction MSE\n" +
-      "recon_mse = np.mean((x_orig - x_recon) ** 2)\n" +
-      "print(f'Reconstruction MSE ({n_show} samples): {recon_mse:.6f}')\n\n" +
-      "# --- Visualize ---\n" +
+      "can_sample_input_space = bool(x_recon.shape == x_orig.shape)\n" +
+      "recon_mse = float('nan')\n" +
       "dim = x_orig.shape[1]\n" +
-      "is_image = dim in (784, 1024, 3072)  # 28x28, 32x32, 32x32x3\n" +
+      "is_image = dim in (784, 1024, 3072)\n" +
       "img_h = {784: 28, 1024: 32, 3072: 32}.get(dim, int(dim**0.5))\n" +
       "img_w = dim // img_h if img_h > 0 else dim\n\n" +
-      "if is_image:\n" +
-      "    fig, axes = plt.subplots(2, n_show, figsize=(n_show * 1.5, 3))\n" +
-      "    for i in range(n_show):\n" +
-      "        axes[0, i].imshow(x_orig[i].reshape(img_h, img_w), cmap='gray', vmin=0, vmax=1)\n" +
-      "        axes[0, i].axis('off')\n" +
-      "        axes[1, i].imshow(x_recon[i].reshape(img_h, img_w), cmap='gray', vmin=0, vmax=1)\n" +
-      "        axes[1, i].axis('off')\n" +
-      "    axes[0, 0].set_ylabel('Original', fontsize=10)\n" +
-      "    axes[1, 0].set_ylabel('Reconstructed', fontsize=10)\n" +
-      "    plt.suptitle(f'Reconstruction (MSE={recon_mse:.4f})', fontsize=12)\n" +
-      "    plt.tight_layout(); plt.show()\n" +
+      "if can_sample_input_space:\n" +
+      "    recon_mse = np.mean((x_orig - x_recon) ** 2)\n" +
+      "    print(f'Reconstruction MSE ({n_show} samples): {recon_mse:.6f}')\n" +
+      "    if is_image:\n" +
+      "        fig, axes = plt.subplots(2, n_show, figsize=(n_show * 1.5, 3))\n" +
+      "        for i in range(n_show):\n" +
+      "            axes[0, i].imshow(x_orig[i].reshape(img_h, img_w), cmap='gray', vmin=0, vmax=1)\n" +
+      "            axes[0, i].axis('off')\n" +
+      "            axes[1, i].imshow(x_recon[i].reshape(img_h, img_w), cmap='gray', vmin=0, vmax=1)\n" +
+      "            axes[1, i].axis('off')\n" +
+      "        axes[0, 0].set_ylabel('Original', fontsize=10)\n" +
+      "        axes[1, 0].set_ylabel('Reconstructed', fontsize=10)\n" +
+      "        plt.suptitle(f'Reconstruction (MSE={recon_mse:.4f})', fontsize=12)\n" +
+      "        plt.tight_layout(); plt.show()\n" +
+      "    else:\n" +
+      "        fig, axes = plt.subplots(min(4, n_show), 1, figsize=(10, min(4, n_show) * 2))\n" +
+      "        if min(4, n_show) == 1: axes = [axes]\n" +
+      "        for i in range(min(4, n_show)):\n" +
+      "            axes[i].plot(x_orig[i], label='Original', alpha=0.8)\n" +
+      "            axes[i].plot(x_recon[i], label='Reconstructed', alpha=0.8, linestyle='--')\n" +
+      "            axes[i].legend(fontsize=8); axes[i].set_ylabel(f'Sample {i}')\n" +
+      "        plt.suptitle(f'Reconstruction (MSE={recon_mse:.4f})', fontsize=12)\n" +
+      "        plt.tight_layout(); plt.show()\n" +
       "else:\n" +
-      "    # trajectory/feature plot\n" +
-      "    fig, axes = plt.subplots(min(4, n_show), 1, figsize=(10, min(4, n_show) * 2))\n" +
-      "    if min(4, n_show) == 1: axes = [axes]\n" +
-      "    for i in range(min(4, n_show)):\n" +
-      "        axes[i].plot(x_orig[i], label='Original', alpha=0.8)\n" +
-      "        axes[i].plot(x_recon[i], label='Reconstructed', alpha=0.8, linestyle='--')\n" +
-      "        axes[i].legend(fontsize=8); axes[i].set_ylabel(f'Sample {i}')\n" +
-      "    plt.suptitle(f'Reconstruction (MSE={recon_mse:.4f})', fontsize=12)\n" +
-      "    plt.tight_layout(); plt.show()\n"
+      "    print(f'Reconstruction skipped: output shape {tuple(x_recon.shape)} does not match input shape {tuple(x_orig.shape)}.')\n"
     ));
 
     // Cell 9: Random sampling from latent (VAE)
@@ -1665,31 +1702,36 @@
       "# --- Langevin Dynamics Generation ---\n" +
       "# Start from random noise, iteratively denoise using model gradient\n" +
       "import torch.autograd as autograd\n\n" +
-      "model.eval()\n" +
-      "n_samples = 16\n" +
-      "n_steps = 50\n" +
-      "step_size = 0.01\n" +
-      "temperature = 0.5\n\n" +
-      "x = torch.randn(n_samples, x_train.shape[1], device=device, requires_grad=True)\n\n" +
-      "for step in range(n_steps):\n" +
-      "    pred = model(x)\n" +
-      "    score = (pred - x).mean()  # score estimate: direction toward data\n" +
-      "    grad = autograd.grad(score, x, create_graph=False)[0]\n" +
-      "    noise = torch.randn_like(x) * (step_size ** 0.5) * temperature\n" +
-      "    x = (x + step_size * grad + noise).detach().requires_grad_(True)\n\n" +
-      "samples = x.detach().cpu().numpy()\n" +
-      "print(f'Generated {n_samples} samples via Langevin dynamics ({n_steps} steps)')\n\n" +
-      "if is_image:\n" +
-      "    fig, axes = plt.subplots(2, 8, figsize=(12, 3))\n" +
-      "    for i in range(min(16, n_samples)):\n" +
-      "        axes[i//8, i%8].imshow(np.clip(samples[i].reshape(img_h, img_w), 0, 1), cmap='gray')\n" +
-      "        axes[i//8, i%8].axis('off')\n" +
-      "    plt.suptitle('Langevin Samples'); plt.tight_layout(); plt.show()\n" +
+      "if not bool(globals().get('can_sample_input_space', False)):\n" +
+      "    print('Langevin skipped: model output space does not match input space.')\n" +
       "else:\n" +
-      "    plt.figure(figsize=(10, 4))\n" +
-      "    for i in range(min(8, n_samples)):\n" +
-      "        plt.plot(samples[i], alpha=0.7, label=f'Sample {i}')\n" +
-      "    plt.title('Langevin Samples'); plt.legend(fontsize=8); plt.tight_layout(); plt.show()\n"
+      "    model.eval()\n" +
+      "    n_samples = 16\n" +
+      "    n_steps = 50\n" +
+      "    step_size = 0.01\n" +
+      "    temperature = 0.5\n\n" +
+      "    x = torch.randn(n_samples, x_train.shape[1], device=device, requires_grad=True)\n\n" +
+      "    for step in range(n_steps):\n" +
+      "        pred = model(x)\n" +
+      "        if isinstance(pred, (tuple, list)):\n" +
+      "            pred = pred[0]\n" +
+      "        score = (pred - x).mean()\n" +
+      "        grad = autograd.grad(score, x, create_graph=False)[0]\n" +
+      "        noise = torch.randn_like(x) * (step_size ** 0.5) * temperature\n" +
+      "        x = (x + step_size * grad + noise).detach().requires_grad_(True)\n\n" +
+      "    samples = x.detach().cpu().numpy()\n" +
+      "    print(f'Generated {n_samples} samples via Langevin dynamics ({n_steps} steps)')\n\n" +
+      "    if is_image:\n" +
+      "        fig, axes = plt.subplots(2, 8, figsize=(12, 3))\n" +
+      "        for i in range(min(16, n_samples)):\n" +
+      "            axes[i//8, i%8].imshow(np.clip(samples[i].reshape(img_h, img_w), 0, 1), cmap='gray')\n" +
+      "            axes[i//8, i%8].axis('off')\n" +
+      "        plt.suptitle('Langevin Samples'); plt.tight_layout(); plt.show()\n" +
+      "    else:\n" +
+      "        plt.figure(figsize=(10, 4))\n" +
+      "        for i in range(min(8, n_samples)):\n" +
+      "            plt.plot(samples[i], alpha=0.7, label=f'Sample {i}')\n" +
+      "        plt.title('Langevin Samples'); plt.legend(fontsize=8); plt.tight_layout(); plt.show()\n"
     ));
 
     // Cell 11: Latent optimization (optimize z for specific objective)
@@ -1810,39 +1852,38 @@
     cells.push(makeMarkdownCell("## 14) DDPM Iterative Denoising\n\nGenerate samples by iterative denoising from pure noise."));
     cells.push(makeCodeCell(
       "# --- DDPM-style iterative denoising ---\n" +
-      "model.eval()\n" +
-      "T = 50  # denoising steps\n" +
-      "n_ddpm = 16\n\n" +
-      "# linear beta schedule\n" +
-      "betas = np.linspace(0.0001, 0.02, T)\n" +
-      "alphas = 1 - betas\n" +
-      "alpha_bar = np.cumprod(alphas)\n\n" +
-      "# start from pure noise\n" +
-      "x_t = torch.randn(n_ddpm, x_train.shape[1], device=device)\n\n" +
-      "with torch.no_grad():\n" +
-      "    for t in reversed(range(T)):\n" +
-      "        # predict denoised image\n" +
-      "        pred = model(x_t)\n" +
-      "        if isinstance(pred, (tuple, list)): pred = pred[0]\n" +
-      "        # DDPM update: x_{t-1} = (x_t - noise_pred * (1-alpha)/sqrt(1-alpha_bar)) / sqrt(alpha) + sigma*z\n" +
-      "        noise_pred = (x_t - pred * alpha_bar[t]**0.5) / max((1 - alpha_bar[t])**0.5, 1e-8)\n" +
-      "        x_prev = (x_t - betas[t] / max((1 - alpha_bar[t])**0.5, 1e-8) * noise_pred) / alphas[t]**0.5\n" +
-      "        if t > 0:\n" +
-      "            sigma = betas[t]**0.5\n" +
-      "            x_prev = x_prev + sigma * torch.randn_like(x_prev)\n" +
-      "        x_t = x_prev\n\n" +
-      "ddpm_samples = x_t.cpu().numpy()\n" +
-      "print(f'Generated {n_ddpm} samples via DDPM ({T} steps)')\n\n" +
-      "if is_image:\n" +
-      "    fig, axes = plt.subplots(2, 8, figsize=(12, 3))\n" +
-      "    for i in range(min(16, n_ddpm)):\n" +
-      "        axes[i//8, i%8].imshow(np.clip(ddpm_samples[i].reshape(img_h, img_w), 0, 1), cmap='gray')\n" +
-      "        axes[i//8, i%8].axis('off')\n" +
-      "    plt.suptitle('DDPM Samples'); plt.tight_layout(); plt.show()\n" +
+      "if not bool(globals().get('can_sample_input_space', False)):\n" +
+      "    print('DDPM skipped: model output space does not match input space.')\n" +
       "else:\n" +
-      "    plt.figure(figsize=(10, 4))\n" +
-      "    for i in range(min(8, n_ddpm)): plt.plot(ddpm_samples[i], alpha=0.7)\n" +
-      "    plt.title('DDPM Samples'); plt.tight_layout(); plt.show()\n"
+      "    model.eval()\n" +
+      "    T = 50\n" +
+      "    n_ddpm = 16\n\n" +
+      "    betas = np.linspace(0.0001, 0.02, T)\n" +
+      "    alphas = 1 - betas\n" +
+      "    alpha_bar = np.cumprod(alphas)\n\n" +
+      "    x_t = torch.randn(n_ddpm, x_train.shape[1], device=device)\n\n" +
+      "    with torch.no_grad():\n" +
+      "        for t in reversed(range(T)):\n" +
+      "            pred = model(x_t)\n" +
+      "            if isinstance(pred, (tuple, list)): pred = pred[0]\n" +
+      "            noise_pred = (x_t - pred * alpha_bar[t]**0.5) / max((1 - alpha_bar[t])**0.5, 1e-8)\n" +
+      "            x_prev = (x_t - betas[t] / max((1 - alpha_bar[t])**0.5, 1e-8) * noise_pred) / alphas[t]**0.5\n" +
+      "            if t > 0:\n" +
+      "                sigma = betas[t]**0.5\n" +
+      "                x_prev = x_prev + sigma * torch.randn_like(x_prev)\n" +
+      "            x_t = x_prev\n\n" +
+      "    ddpm_samples = x_t.cpu().numpy()\n" +
+      "    print(f'Generated {n_ddpm} samples via DDPM ({T} steps)')\n\n" +
+      "    if is_image:\n" +
+      "        fig, axes = plt.subplots(2, 8, figsize=(12, 3))\n" +
+      "        for i in range(min(16, n_ddpm)):\n" +
+      "            axes[i//8, i%8].imshow(np.clip(ddpm_samples[i].reshape(img_h, img_w), 0, 1), cmap='gray')\n" +
+      "            axes[i//8, i%8].axis('off')\n" +
+      "        plt.suptitle('DDPM Samples'); plt.tight_layout(); plt.show()\n" +
+      "    else:\n" +
+      "        plt.figure(figsize=(10, 4))\n" +
+      "        for i in range(min(8, n_ddpm)): plt.plot(ddpm_samples[i], alpha=0.7)\n" +
+      "        plt.title('DDPM Samples'); plt.tight_layout(); plt.show()\n"
     ));
 
     // Cell 15: Final evaluation summary

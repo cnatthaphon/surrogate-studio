@@ -40,6 +40,25 @@ def complete(result):
 def error(msg):
     print(json.dumps({"kind": "error", "message": str(msg)}), flush=True)
 
+def _cfg_float(v, fallback):
+    try:
+        n = float(v)
+        return n if np.isfinite(n) else fallback
+    except Exception:
+        return fallback
+
+def _resolve_optimizer_config(config):
+    opt = config.get("optimizer", {}) or {}
+    betas = opt.get("betas", []) if isinstance(opt, dict) else []
+    return {
+        "type": str(config.get("optimizerType", opt.get("name", "adam"))).strip().lower() or "adam",
+        "beta1": min(0.999999, max(0.0, _cfg_float(config.get("optimizerBeta1", betas[0] if len(betas) > 0 else 0.9), 0.9))),
+        "beta2": min(0.999999, max(0.0, _cfg_float(config.get("optimizerBeta2", betas[1] if len(betas) > 1 else 0.999), 0.999))),
+        "momentum": max(0.0, _cfg_float(config.get("optimizerMomentum", opt.get("momentum", 0.0)), 0.0)),
+        "rho": min(0.999999, max(0.0, _cfg_float(config.get("optimizerRho", opt.get("rho", 0.9)), 0.9))),
+        "epsilon": max(1e-8, _cfg_float(config.get("optimizerEpsilon", opt.get("epsilon", 1e-8)), 1e-8)),
+    }
+
 def main():
     if len(sys.argv) < 2:
         error("Usage: train_subprocess.py <config.json>")
@@ -85,7 +104,9 @@ def main():
     head_configs = config.get("headConfigs", [])
     _head_types = [str(hc.get("headType", "regression")) for hc in head_configs] if head_configs else ["regression"]
     _is_all_cls = all(ht == "classification" for ht in _head_types)
-    target_size = 1 if _is_all_cls else feature_size
+    target_size = int(ds.get("targetSize", 0) or 0)
+    if target_size <= 0:
+        target_size = 1 if _is_all_cls else feature_size
     status(f"Data: {x_train.shape[0]} train, {x_val.shape[0]} val, features={feature_size}, targets={target_size}")
 
     # --- Build model from graph ---
@@ -99,7 +120,8 @@ def main():
     epochs = int(config.get("epochs", 20))
     batch_size = int(config.get("batchSize", 32))
     lr = float(config.get("learningRate", 1e-3))
-    optimizer_type = config.get("optimizerType", "adam")
+    optimizer_cfg = _resolve_optimizer_config(config)
+    optimizer_type = optimizer_cfg["type"]
     patience = int(config.get("earlyStoppingPatience", 5))
     # disable early stopping when no val set (GAN etc.)
     if x_val.size == 0 and patience > 0 and config.get("earlyStoppingPatience") is None:
@@ -108,11 +130,22 @@ def main():
 
     # --- Optimizer ---
     if optimizer_type == "sgd":
-        optimizer = torch.optim.SGD(model.parameters(), lr=lr)
+        optimizer = torch.optim.SGD(model.parameters(), lr=lr, momentum=optimizer_cfg["momentum"])
     elif optimizer_type == "rmsprop":
-        optimizer = torch.optim.RMSprop(model.parameters(), lr=lr)
+        optimizer = torch.optim.RMSprop(
+            model.parameters(),
+            lr=lr,
+            alpha=optimizer_cfg["rho"],
+            momentum=optimizer_cfg["momentum"],
+            eps=optimizer_cfg["epsilon"],
+        )
     else:
-        optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+        optimizer = torch.optim.Adam(
+            model.parameters(),
+            lr=lr,
+            betas=(optimizer_cfg["beta1"], optimizer_cfg["beta2"]),
+            eps=optimizer_cfg["epsilon"],
+        )
 
     # LR scheduler from config (not hardcoded)
     lr_scheduler_type = str(config.get("lrSchedulerType", "plateau")).lower()
@@ -301,7 +334,8 @@ def main():
                 phase_name = step.get("_phase", f"step{si+1}")
 
                 freeze_by_tags(trainable_tags)
-                model._phase_idx = si  # for PhaseSwitch
+                model._phase_idx = si  # legacy fallback for PhaseSwitch
+                model._phase_name = phase_name
                 model.train()
                 step_loss = 0.0
                 n_batches = 0
@@ -334,6 +368,7 @@ def main():
         # Validate (skip if no val data)
         val_loss = None
         if x_val.size > 0:
+            model._phase_name = ""
             model.eval()
             val_loss = 0.0
             n_val = 0
@@ -419,9 +454,11 @@ def main():
             i += 4
             continue
 
-        # Regular param: transpose 2D weights (Dense layers)
+        # Export in TF.js kernel layout based on tensor rank and layer type.
         if param.ndim == 2:
             param = param.T  # [out, in] → [in, out]
+        elif param.ndim == 4 and ".weight" in name and (name.startswith("conv2d_") or name.startswith("convt2d_")):
+            param = np.transpose(param, (2, 3, 1, 0))
 
         flat = param.astype(np.float32).flatten()
         shape = list(param.shape)
@@ -753,15 +790,21 @@ def build_model_from_graph(graph, feature_size, target_size, num_classes=0):
                     else:
                         dim_map[nid] = in_dim
                 elif t == "output":
+                    target_key = str(c.get("targetType", c.get("target", ""))).strip().lower()
                     htype = str(c.get("headType", "regression")).lower()
                     oloss = str(c.get("loss", "mse")).lower()
-                    if oloss == "bce":
+                    out_in = in_dim if isinstance(in_dim, int) else (in_dim[-1] if isinstance(in_dim, list) else in_dim)
+                    node_units = int(c.get("units", c.get("unitsHint", 0)) or 0)
+                    if node_units > 0:
+                        odim = node_units
+                    elif oloss == "bce":
                         odim = 1
-                    elif htype == "classification" and num_classes > 0:
+                    elif target_key in ("custom", "none", "") and out_in:
+                        odim = out_in
+                    elif htype == "classification" and num_classes > 0 and target_key in ("label", "logits"):
                         odim = num_classes
                     else:
                         odim = target_size
-                    out_in = in_dim if isinstance(in_dim, int) else (in_dim[-1] if isinstance(in_dim, list) else in_dim)
                     # skip linear projection if input dim already matches output dim
                     if out_in == odim:
                         setattr(self, f"out_{nid}", nn.Identity())
@@ -851,10 +894,17 @@ def build_model_from_graph(graph, feature_size, target_size, num_classes=0):
                         tensors[nid] = inp
                     continue
                 elif t == "phase_switch":
-                    # select input based on phase flag (set externally)
+                    # Select branch from graph-defined activePhase, not schedule position.
                     phase_idx = getattr(self, '_phase_idx', 0)
+                    current_phase = str(getattr(self, "_phase_name", "") or "").strip()
+                    active_phase = str(self.node_configs[nid].get("activePhase", "") or "").strip()
                     parent_tensors = [tensors[p["from"]] for p in parents_sorted if p["from"] in tensors]
-                    if phase_idx == 0 and len(parent_tensors) >= 1:
+                    use_first = False
+                    if active_phase and current_phase:
+                        use_first = active_phase == current_phase
+                    else:
+                        use_first = phase_idx == 0
+                    if use_first and len(parent_tensors) >= 1:
                         tensors[nid] = parent_tensors[0]
                     elif len(parent_tensors) >= 2:
                         tensors[nid] = parent_tensors[1]

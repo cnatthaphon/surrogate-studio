@@ -29,14 +29,39 @@
     return LR_SCHEDULER_TYPES.indexOf(v) >= 0 ? v : fb;
   }
 
-  function createOptimizerByType(tf, type, lr) {
-    var t = normalizeOptimizerType(type, "adam");
+  function _numOr(v, fallback) {
+    var n = Number(v);
+    return isFinite(n) ? n : fallback;
+  }
+
+  function resolveOptimizerConfig(raw) {
+    var cfg = raw || {};
+    var nested = cfg.optimizer && typeof cfg.optimizer === "object" ? cfg.optimizer : {};
+    var betas = Array.isArray(cfg.optimizerBetas) ? cfg.optimizerBetas : (Array.isArray(nested.betas) ? nested.betas : []);
+    return {
+      type: normalizeOptimizerType(cfg.optimizerType || nested.name, "adam"),
+      beta1: clamp(_numOr(cfg.optimizerBeta1 != null ? cfg.optimizerBeta1 : betas[0], 0.9), 0, 0.999999),
+      beta2: clamp(_numOr(cfg.optimizerBeta2 != null ? cfg.optimizerBeta2 : betas[1], 0.999), 0, 0.999999),
+      momentum: Math.max(0, _numOr(cfg.optimizerMomentum != null ? cfg.optimizerMomentum : nested.momentum, 0)),
+      rho: clamp(_numOr(cfg.optimizerRho != null ? cfg.optimizerRho : nested.rho, 0.9), 0, 0.999999),
+      epsilon: Math.max(1e-8, _numOr(cfg.optimizerEpsilon != null ? cfg.optimizerEpsilon : nested.epsilon, 1e-7)),
+    };
+  }
+
+  function createOptimizerByType(tf, type, lr, rawCfg) {
+    var optCfg = rawCfg && rawCfg.type ? rawCfg : resolveOptimizerConfig(Object.assign({}, rawCfg || {}, { optimizerType: type }));
+    var t = normalizeOptimizerType(optCfg.type || type, "adam");
     var r = Math.max(1e-8, Number(lr) || 1e-3);
-    if (t === "adam") return tf.train.adam(r);
-    if (t === "sgd") return tf.train.sgd(r);
-    if (t === "rmsprop") return tf.train.rmsprop(r);
+    if (t === "adam") return tf.train.adam(r, optCfg.beta1, optCfg.beta2, optCfg.epsilon);
+    if (t === "sgd") {
+      if (optCfg.momentum > 0 && tf.train && typeof tf.train.momentum === "function") {
+        return tf.train.momentum(r, optCfg.momentum, false);
+      }
+      return tf.train.sgd(r);
+    }
+    if (t === "rmsprop") return tf.train.rmsprop(r, optCfg.rho, optCfg.momentum, optCfg.epsilon, false);
     if (t === "adagrad") return tf.train.adagrad(r);
-    return tf.train.adam(r);
+    return tf.train.adam(r, optCfg.beta1, optCfg.beta2, optCfg.epsilon);
   }
 
   function mapLossAlias(lossName, resolvedGlobal) {
@@ -233,7 +258,8 @@
 
     // optimizer + scheduler config
     var requestedLr = Math.max(1e-8, Number(opts.learningRate) || 1e-3);
-    var optimizerType = normalizeOptimizerType(opts.optimizerType, "adam");
+    var optimizerCfg = resolveOptimizerConfig(opts);
+    var optimizerType = optimizerCfg.type;
     var lrSchedulerType = normalizeLrSchedulerType(opts.lrSchedulerType, opts.useLrScheduler === false ? "none" : "plateau");
     var useLrScheduler = lrSchedulerType !== "none";
     var lrPatience = Math.max(1, Number(opts.lrPatience) || 3);
@@ -247,7 +273,7 @@
       ? Math.max(1, Math.floor(earlyStoppingPatienceRaw)) : 0;
 
     var currentLr = requestedLr;
-    var optimizer = createOptimizerByType(tf, optimizerType, currentLr);
+    var optimizer = createOptimizerByType(tf, optimizerType, currentLr, optimizerCfg);
     applyGradientClipping(tf, optimizer, gradClipNorm, gradClipValue);
 
     var singleHead = headConfigs.length === 1;
@@ -481,6 +507,10 @@
     var epochs = Math.max(1, Number(opts.epochs) || 20);
     var batchSize = Math.max(1, Number(opts.batchSize) || 32);
     var lr = Math.max(1e-8, Number(opts.learningRate) || 1e-3);
+    var optimizerCfg = resolveOptimizerConfig(opts);
+    var optimizerType = optimizerCfg.type;
+    var gradClipNorm = Math.max(0, Number(opts.gradClipNorm) || 0);
+    var gradClipValue = Math.max(0, Number(opts.gradClipValue) || 0);
     var onEpochEnd = opts.onEpochEnd || opts.onEpoch || null;
     var shouldStop = typeof opts.shouldStop === "function" ? opts.shouldStop : function () { return false; };
 
@@ -601,9 +631,23 @@
       var _lossWts = headConfigs.map(function (h) { return h.matchWeight != null ? h.matchWeight : 1; });
       var _hasGraphLabels = headConfigs.some(function (h) { return h.graphLabelOutputIdx >= 0; });
 
+      function _clipTrainableWeights(clipVal) {
+        if (!(clipVal > 0) || !model.layers) return;
+        model.layers.forEach(function (l) {
+          if (l._weightTag && l.trainable && l.trainableWeights) {
+            l.trainableWeights.forEach(function (w) {
+              var v = w.read();
+              var clipped = tf.clipByValue(v, -clipVal, clipVal);
+              w.write(clipped);
+              clipped.dispose();
+            });
+          }
+        });
+      }
+
       // Training step: optimizer.minimize with model.apply.
       // Reads labels from model output when graphLabelOutputIdx is set.
-      function _trainStep(stepOpt, xFull, yFull) {
+      function _trainStep(stepOpt, xFull, yFull, clipVal) {
         // Collect trainable variables — only layers with weightTag (set by _freezeByStep)
         var vars = [];
         model.layers.forEach(function (l) {
@@ -650,6 +694,7 @@
         indices.dispose();
         if (Array.isArray(xBatch)) xBatch.forEach(function (t) { t.dispose(); }); else xBatch.dispose();
         if (Array.isArray(yArrays)) yArrays.forEach(function (t) { t.dispose(); }); else yArrays.dispose();
+        _clipTrainableWeights(clipVal);
         } // end batch loop
         return totalLoss / nBatches;
       }
@@ -657,7 +702,10 @@
       // Per-step optimizers (preserves Adam state per step across epochs)
       var _stepOpts = {};
       function _getOpt(key) {
-        if (!_stepOpts[key]) _stepOpts[key] = tf.train.adam(lr);
+        if (!_stepOpts[key]) {
+          _stepOpts[key] = createOptimizerByType(tf, optimizerType, lr, optimizerCfg);
+          applyGradientClipping(tf, _stepOpts[key], gradClipNorm, gradClipValue);
+        }
         return _stepOpts[key];
       }
 
@@ -749,31 +797,22 @@
           _regenNoise();
           // Update PhaseSwitch flag: 0 if step matches activePhase, 1 otherwise
           if (_phaseFlagIdx >= 0 && Array.isArray(xTrainInputs) && phaseSwitchConfigs.length) {
-            var ap = phaseSwitchConfigs[0].activePhase;
             var tags = step.trainableTags || {};
-            var flagVal = (ap && tags[ap]) ? 0 : 1;
+            var flagVal = phaseSwitchConfigs.some(function (cfg) {
+              var ap = String((cfg && cfg.activePhase) || "").trim();
+              if (!ap) return false;
+              if (step._phase) return String(step._phase) === ap;
+              return !!tags[ap];
+            }) ? 0 : 1;
             var old = xTrainInputs[_phaseFlagIdx];
             xTrainInputs[_phaseFlagIdx] = tf.fill([nSamples, 1], flagVal);
             old.dispose();
           }
 
           var stepLoss = 0;
-          for (var se = 0; se < stepEp; se++) {
-            stepLoss = _trainStep(_getOpt(label), xTrainInputs, yTrainArrays);
-          }
-          // Weight clipping (WGAN): clip trainable weights to [-c, c] after update
           var clipVal = Number(step.clipWeights || 0);
-          if (clipVal > 0) {
-            model.layers.forEach(function (l) {
-              if (l._weightTag && l.trainable && l.trainableWeights) {
-                l.trainableWeights.forEach(function (w) {
-                  var v = w.read();
-                  var clipped = tf.clipByValue(v, -clipVal, clipVal);
-                  w.write(clipped);
-                  clipped.dispose();
-                });
-              }
-            });
+          for (var se = 0; se < stepEp; se++) {
+            stepLoss = _trainStep(_getOpt(label), xTrainInputs, yTrainArrays, clipVal);
           }
           stepLosses[label] = stepLoss;
           stepIdx++;
@@ -795,6 +834,7 @@
     normalizeOptimizerType: normalizeOptimizerType,
     normalizeLrSchedulerType: normalizeLrSchedulerType,
     createOptimizerByType: createOptimizerByType,
+    resolveOptimizerConfig: resolveOptimizerConfig,
     extractHeadRows: extractHeadRows,
     detectPhases: detectPhases,
     needsPhasedTraining: needsPhasedTraining,

@@ -128,14 +128,21 @@
     return target ? [target] : [];
   }
 
-  // helper: look up headType for a target key from allowedOutputKeys
-  function _lookupHeadType(target, allowedOutputKeys) {
-    if (!Array.isArray(allowedOutputKeys)) return "regression";
+  function _lookupOutputSpec(target, allowedOutputKeys) {
+    var key = String(target || "").trim().toLowerCase();
+    if (!key || !Array.isArray(allowedOutputKeys)) return null;
     for (var i = 0; i < allowedOutputKeys.length; i++) {
       var ok = allowedOutputKeys[i];
-      if (typeof ok === "object" && ok !== null && ok.key === target) return String(ok.headType || "regression");
+      if (typeof ok === "object" && ok !== null && String(ok.key || "").trim().toLowerCase() === key) return ok;
+      if (typeof ok === "string" && String(ok).trim().toLowerCase() === key) return { key: key, headType: "regression" };
     }
-    return "regression";
+    return null;
+  }
+
+  // helper: look up headType for a target key from allowedOutputKeys
+  function _lookupHeadType(target, allowedOutputKeys) {
+    var spec = _lookupOutputSpec(target, allowedOutputKeys);
+    return spec ? String(spec.headType || "regression") : "regression";
   }
 
   function outputTargetsFromNodeData(data, allowedKeys, fallbackTarget) {
@@ -524,18 +531,44 @@
     // 1. Explicit units/unitsHint in the output node config
     // 2. Schema-defined output keys (with featureSize)
     // 3. Infer from target type + dataset metadata
-    var targetUnitsFromMode = function (target, paramsSelectRaw, nodeData, headType) {
+    var targetUnitsFromMode = function (target, paramsSelectRaw, nodeData, headType, upstreamUnits) {
       // 1. explicit units on the output node
       var nd = nodeData || {};
       if (nd.units && Number(nd.units) > 0) return Number(nd.units);
       if (nd.unitsHint && Number(nd.unitsHint) > 0) return Number(nd.unitsHint);
 
+      var targetKey = String(target || nd.targetType || nd.target || "").trim().toLowerCase();
+
+      if (targetKey === "x" || targetKey === "v") return 1;
+      if (targetKey === "xv") return 2;
+      if (targetKey === "label" || targetKey === "logits") {
+        return Math.max(1, Number(datasetMeta.numClasses || datasetMeta.classCount || 1));
+      }
+      if (targetKey === "params") {
+        var raw = String(paramsSelectRaw || nd.paramsSelect || "");
+        var picks = raw.split(",").map(function (s) { return String(s || "").trim(); }).filter(Boolean);
+        return Math.max(1, picks.length || Number(datasetMeta.paramSize || 1));
+      }
+      if (targetKey === "pixel_values") {
+        return Math.max(1, Number(datasetMeta.featureSize || upstreamUnits || 1));
+      }
+      if ((targetKey === "custom" || targetKey === "none") && Number(upstreamUnits) > 0) {
+        return Math.max(1, Number(upstreamUnits));
+      }
+
       // 2. from headType (set by schema, not hardcoded target names)
       var ht = String(headType || "regression");
       if (ht === "classification") {
-        return Math.max(1, Number(datasetMeta.numClasses || 10));
+        return Math.max(1, Number(datasetMeta.numClasses || datasetMeta.classCount || upstreamUnits || 1));
       }
-      // regression / reconstruction: output = input feature size
+
+      if (Number(datasetMeta.targetSize) > 0) {
+        return Math.max(1, Number(datasetMeta.targetSize));
+      }
+      if (Number(upstreamUnits) > 0) {
+        return Math.max(1, Number(upstreamUnits));
+      }
+      // regression / reconstruction fallback
       return Math.max(1, Number(datasetMeta.featureSize || 1));
     };
 
@@ -765,17 +798,19 @@
           // headType from node config or schema lookup — no string matching on target names
           var ht = String(odata.headType || "").trim().toLowerCase();
           if (!ht || ht === "auto") ht = _lookupHeadType(target, allowedOutputKeys);
+          var upstreamUnits = Number(inForHead.shape && inForHead.shape[inForHead.shape.length - 1] || 0);
+          var hasExplicitUnits = (Number(odata.units || 0) > 0) || (Number(odata.unitsHint || 0) > 0);
           var units, act;
           if (lossName === "none") {
             // loss=none: passthrough, no head Dense
-            units = inForHead.shape[inForHead.shape.length - 1] || 1;
+            units = upstreamUnits || 1;
             outTensors.push(inForHead);
             generated.push(inForHead);
           } else if (lossName === "bce") {
             // BCE: binary output (1 unit, sigmoid)
             units = Number(odata.units || 1);
             act = "sigmoid";
-            var upDim = inForHead.shape[inForHead.shape.length - 1];
+            var upDim = upstreamUnits;
             if (upDim === units) {
               // upstream already has matching shape — passthrough
               outTensors.push(inForHead);
@@ -786,11 +821,20 @@
               generated.push(headT);
             }
           } else {
-            units = targetUnitsFromMode(target, paramsSelect, odata, ht);
-            act = (ht === "classification") ? "softmax" : "linear";
-            var headTensor = tf.layers.dense({ units: units, activation: act, name: "head_" + id }).apply(inForHead);
-            outTensors.push(headTensor);
-            generated.push(headTensor);
+            units = targetUnitsFromMode(target, paramsSelect, odata, ht, upstreamUnits);
+            var normalizedLoss = String(lossName || "").trim().toLowerCase();
+            if (normalizedLoss === "wgan") normalizedLoss = "wasserstein";
+            act = (normalizedLoss === "wasserstein")
+              ? "linear"
+              : ((ht === "classification" && units > 1) ? "softmax" : "linear");
+            if (!hasExplicitUnits && upstreamUnits === units && act === "linear") {
+              outTensors.push(inForHead);
+              generated.push(inForHead);
+            } else {
+              var headTensor = tf.layers.dense({ units: units, activation: act, name: "head_" + id }).apply(inForHead);
+              outTensors.push(headTensor);
+              generated.push(headTensor);
+            }
           }
           var _labelIdx = -1;
           if (_headLabelTensors[String(id)]) {
