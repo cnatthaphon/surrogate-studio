@@ -30,6 +30,7 @@
     var _mountId = 0;
     var _configFormApi = null;
     var _isTraining = false;
+    var _trainingRunId = 0; // increments on each training start — old runs detect new run and stop
     var _activeModel = null; // reference to model during training (for weight save on stop)
 
     function _extractWeightsFromModel(tfModel) {
@@ -1563,6 +1564,7 @@
       tCard.config = config;
       if (store) { store.upsertTrainerCard(tCard); store.replaceTrainerEpochs(activeId, []); }
       _isTraining = true;
+      _trainingRunId++;
       _activeTrainingId = activeId;
       _subTab = "train";
       onStatus("Training... (serializing model)");
@@ -1796,10 +1798,11 @@
         var _isPhased = trainingEngine.needsPhasedTraining && trainingEngine.needsPhasedTraining(buildResult.headConfigs);
         var _trainFn = _isPhased && trainingEngine.trainModelPhased ? trainingEngine.trainModelPhased : trainingEngine.trainModel;
         _activeModel = buildResult.model;
+        var _myRunId = _trainingRunId; // capture for shouldStop closure
         onStatus("Training on TF.js (" + (_isPhased ? "phased" : "main thread") + ", " + (tf.getBackend ? tf.getBackend() : "cpu") + ") — train:" + (activeDs.xTrain ? activeDs.xTrain.length : 0) + " val:" + (activeDs.xVal ? activeDs.xVal.length : 0) + " test:" + (activeDs.xTest ? activeDs.xTest.length : 0));
         _trainFn(tf, {
           model: buildResult.model, isSequence: buildResult.isSequence, headConfigs: buildResult.headConfigs, inputNodes: buildResult.inputNodes || [], phaseSwitchConfigs: buildResult.phaseSwitchConfigs || [],
-          shouldStop: function () { return !_isTraining; },
+          shouldStop: function () { return !_isTraining || _trainingRunId !== _myRunId; },
           dataset: {
             xTrain: activeDs.xTrain, yTrain: activeDs.yTrain, seqTrain: activeDs.seqTrain,
             xVal: activeDs.xVal, yVal: activeDs.yVal, seqVal: activeDs.seqVal,
