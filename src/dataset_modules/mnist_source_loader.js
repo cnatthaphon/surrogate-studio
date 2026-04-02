@@ -198,13 +198,22 @@
   }
 
   function fetchArrayBuffer(url) {
-    if (typeof root.fetch !== "function") {
-      throw new Error("MNIST source loader requires fetch() in this environment.");
+    var u = String(url || "");
+    // Use XHR for file:// protocol (fetch blocked by CORS), fetch for http/https
+    if (u.indexOf("file:") === 0 || (typeof location !== "undefined" && location.protocol === "file:" && u.indexOf("http") !== 0)) {
+      return new Promise(function (resolve, reject) {
+        var xhr = new XMLHttpRequest();
+        xhr.open("GET", u, true);
+        xhr.responseType = "arraybuffer";
+        xhr.onload = function () { if (xhr.response) resolve(xhr.response); else reject(new Error("XHR empty: " + u)); };
+        xhr.onerror = function () { reject(new Error("XHR failed: " + u)); };
+        xhr.send();
+      });
     }
-    return root.fetch(String(url || ""))
+    return root.fetch(u)
       .then(function (res) {
         if (!res || !res.ok) {
-          throw new Error("Fetch failed: " + String(url || "") + " (status " + String(res && res.status) + ")");
+          throw new Error("Fetch failed: " + u + " (status " + String(res && res.status) + ")");
         }
         return res.arrayBuffer();
       });
