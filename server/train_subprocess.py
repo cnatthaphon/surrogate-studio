@@ -114,7 +114,15 @@ def main():
     else:
         optimizer = torch.optim.Adam(model.parameters(), lr=lr)
 
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=3, factor=0.5, min_lr=1e-6)
+    # LR scheduler from config (not hardcoded)
+    lr_scheduler_type = str(config.get("lrSchedulerType", "plateau")).lower()
+    lr_patience = int(config.get("lrPatience", 3))
+    lr_factor = float(config.get("lrFactor", 0.5))
+    lr_min = float(config.get("minLr", 1e-6))
+    if lr_scheduler_type == "none":
+        scheduler = None
+    else:
+        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=lr_patience, factor=lr_factor, min_lr=lr_min, threshold=1e-3)
 
     # --- Determine loss + prepare labels ---
     # head_configs already extracted above from config
@@ -350,7 +358,8 @@ def main():
             no_improve += 1
 
         current_lr = optimizer.param_groups[0]["lr"]
-        scheduler.step(check_loss)
+        if scheduler is not None:
+            scheduler.step(check_loss)
 
         epoch_log(ep, total_train_loss, val_loss, current_lr, improved, phase_losses)
 
@@ -358,8 +367,9 @@ def main():
             status(f"Early stopping at epoch {ep} (patience={patience})")
             break
 
-    # Restore best weights
-    if best_state:
+    # Restore best weights (from config — default true for supervised, false for GAN)
+    restore_best = config.get("restoreBestWeights", True)
+    if restore_best and best_state:
         model.load_state_dict(best_state)
 
     status("Training complete. Extracting weights...")

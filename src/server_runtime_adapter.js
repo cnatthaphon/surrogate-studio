@@ -147,6 +147,9 @@
       earlyStoppingPatience: spec.earlyStoppingPatience != null ? Number(spec.earlyStoppingPatience) : 5,
       restoreBestWeights: spec.restoreBestWeights !== false,
       gradClipNorm: Number(spec.gradClipNorm || 0),
+      lrPatience: Number(spec.lrPatience || 3),
+      lrFactor: Number(spec.lrFactor || 0.5),
+      minLr: Number(spec.minLr || 1e-6),
       trainingSchedule: spec.trainingSchedule || null,
       rotateSchedule: spec.rotateSchedule !== false,
     };

@@ -1618,6 +1618,9 @@
           earlyStoppingPatience: config.earlyStoppingPatience != null ? Number(config.earlyStoppingPatience) : 5,
           restoreBestWeights: config.restoreBestWeights !== false,
           gradClipNorm: Number(config.gradClipNorm || 0),
+          lrPatience: Number(config.lrPatience || 3),
+          lrFactor: Number(config.lrFactor || 0.5),
+          minLr: Number(config.minLr || 0.000001),
           trainingSchedule: config.trainingSchedule || null,
           rotateSchedule: config.rotateSchedule !== false,
           onEpochData: function (payload) {
