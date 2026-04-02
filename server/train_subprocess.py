@@ -671,7 +671,8 @@ def build_model_from_graph(graph, feature_size, target_size, num_classes=0):
                     ks = int(c.get("kernelSize", 3))
                     st = int(c.get("strides", 1))
                     pad_mode = str(c.get("padding", "same"))
-                    pad = ks // 2 if pad_mode == "same" else 0
+                    # match TF.js 'same' padding: output = ceil(input / stride)
+                    pad = (ks - 1) // 2 if pad_mode == "same" and st == 1 else (ks - st) // 2 if pad_mode == "same" else 0
                     in_ch = in_dim[-1] if isinstance(in_dim, list) else 1
                     setattr(self, f"conv2d_{nid}", nn.Conv2d(in_ch, filters, ks, st, pad))
                     act = str(c.get("activation", "relu"))
@@ -689,8 +690,9 @@ def build_model_from_graph(graph, feature_size, target_size, num_classes=0):
                     ks = int(c.get("kernelSize", 3))
                     st = int(c.get("strides", 2))
                     pad_mode = str(c.get("padding", "same"))
-                    pad = ks // 2 if pad_mode == "same" else 0
-                    out_pad = st - 1 if pad_mode == "same" else 0
+                    # match TF.js 'same' padding: output = input * stride
+                    pad = (ks - st) // 2 if pad_mode == "same" else 0
+                    out_pad = 0
                     in_ch = in_dim[-1] if isinstance(in_dim, list) else 1
                     setattr(self, f"convt2d_{nid}", nn.ConvTranspose2d(in_ch, filters, ks, st, pad, out_pad))
                     act = str(c.get("activation", "relu"))
