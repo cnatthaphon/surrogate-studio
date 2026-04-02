@@ -309,7 +309,7 @@ def main():
                                 torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
                             optimizer.step()
                             # Weight clipping (WGAN): clip to [-c, c]
-                            clip_val = float(sched_step.get("clipWeights", 0))
+                            clip_val = float(step.get("clipWeights", 0))
                             if clip_val > 0:
                                 for p in model.parameters():
                                     if p.requires_grad:
