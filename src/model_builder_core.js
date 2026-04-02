@@ -506,17 +506,16 @@
     var _reparamCount = 0;
     var ReparameterizeLayer = (function () {
       function RL() {}
-      RL.apply = function (muTensor, logvarTensor) {
+      RL.apply = function (muTensor, logvarTensor, nodeId) {
         _reparamCount++;
-        // use add layer: z = mu + noise_projection(logvar)
-        // noise_projection is a trainable dense that approximates std * eps
+        var nid = nodeId || _reparamCount;
         var latentDim = muTensor.shape[muTensor.shape.length - 1];
         var noiseProj = tf.layers.dense({
           units: latentDim, activation: "linear",
-          name: "reparam_noise_" + _reparamCount,
+          name: "reparam_noise_" + nid,
           kernelInitializer: "zeros", biasInitializer: "zeros",
         }).apply(logvarTensor);
-        return tf.layers.add({ name: "reparam_add_" + _reparamCount }).apply([muTensor, noiseProj]);
+        return tf.layers.add({ name: "reparam_add_" + nid }).apply([muTensor, noiseProj]);
       };
       return RL;
     })();
@@ -658,8 +657,9 @@
         var rnnIn = inTensor;
         if (inTensor.shape.length === 2) {
           var reshDim = inTensor.shape[inTensor.shape.length - 1];
-          rnnIn = tf.layers.reshape({ targetShape: [1, reshDim] }).apply(inTensor);
+          rnnIn = tf.layers.reshape({ targetShape: [1, reshDim], name: _n + "_reshape" }).apply(inTensor);
         }
+        rnnCfg.name = _n;
         if (node.name === "rnn_layer") return tf.layers.simpleRNN(rnnCfg).apply(rnnIn);
         if (node.name === "gru_layer") return tf.layers.gru(rnnCfg).apply(rnnIn);
         return tf.layers.lstm(rnnCfg).apply(rnnIn);
@@ -815,7 +815,7 @@
         var out;
         if (node.name === "reparam_layer") {
           if (incomingTensors.length !== 2) throw new Error("Reparam node requires exactly 2 inputs.");
-          out = ReparameterizeLayer.apply(incomingTensors[0], incomingTensors[1]);
+          out = ReparameterizeLayer.apply(incomingTensors[0], incomingTensors[1], id);
           var rd = node.data || {};
           var g = String(rd.group || "default").trim();
           var beta = Math.max(0, Number(rd.beta || 1e-3));
@@ -859,7 +859,7 @@
         outTensors.push(diff);
         headConfigs.push({
           id: "latent_diff:" + ref.group + ":" + ref.latentType + ":" + String(i),
-          target: "latent_diff", units: Number(ref.units), loss: "mse", wx: 1, wv: 1,
+          target: "latent_diff", headType: "latent_kl", units: Number(ref.units), loss: "mse", wx: 1, wv: 1,
           matchWeight: Math.max(0, Number((ref.matchWeight + it.matchWeight) / 2 || 1)),
         });
       }
@@ -873,7 +873,8 @@
         outTensors.push(klTensor);
         headConfigs.push({
           id: "latent_kl:" + g + ":" + String(i + 1),
-          target: "latent_kl", units: Math.max(2, Number(it.units || 2)) * 2,
+          target: "latent_kl", headType: "latent_kl",
+          units: Math.max(2, Number(it.units || 2)) * 2,
           loss: "mse", wx: 1, wv: 1,
           matchWeight: Math.max(0, Number(it.matchWeight || 1)),
           beta: Math.max(0, Number(it.beta || 1e-3)),

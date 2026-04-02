@@ -83,14 +83,18 @@ function nextDemo() {
     var isPhased = te.needsPhasedTraining && te.needsPhasedTraining(built.headConfigs);
     var trainFn = isPhased ? te.trainModelPhased : te.trainModel;
 
+    // Build y data matching each head's expected shape
+    var hasKlHead = built.headConfigs.some(function (h) { return String(h.headType || "").indexOf("latent_kl") >= 0; });
+    var yTrain = hasKlHead ? xTrain.map(function (r) { return r.slice(0, demo.featureSize); }) : xTrain;
+    var yVal = hasKlHead ? xTrain.slice(0, 10).map(function (r) { return r.slice(0, demo.featureSize); }) : xTrain.slice(0, 10);
+
     var trainOpts = {
       model: built.model, headConfigs: built.headConfigs, inputNodes: built.inputNodes || [],
       phaseSwitchConfigs: built.phaseSwitchConfigs || [],
       shouldStop: function () { return false; },
       dataset: {
-        xTrain: xTrain, yTrain: xTrain, xVal: xTrain.slice(0, 10), yVal: xTrain.slice(0, 10),
+        xTrain: xTrain, yTrain: yTrain, xVal: xTrain.slice(0, 10), yVal: yVal,
         targetMode: "xv", paramNames: [], paramSize: 0, numClasses: 10,
-        // classification heads need one-hot labels
         labelsTrain: xTrain.map(function () { var oh = new Array(10).fill(0); oh[Math.floor(Math.random() * 10)] = 1; return oh; }),
         labelsVal: xTrain.slice(0, 10).map(function () { var oh = new Array(10).fill(0); oh[Math.floor(Math.random() * 10)] = 1; return oh; }),
       },
