@@ -1,5 +1,7 @@
 # Surrogate Studio
 
+![Status](https://img.shields.io/badge/status-active%20development-brightgreen) ![Models](https://img.shields.io/badge/models-23-blue) ![Demos](https://img.shields.io/badge/demos-5-orange)
+
 **A schema-driven ML experimentation platform that runs entirely in the browser.**
 
 Build datasets, design neural network architectures visually, train models, generate samples, and benchmark results — all from a single page. No Python install, no GPU server, no Docker. Just open the HTML file.
@@ -32,21 +34,35 @@ A visual survey of 35 years of neural network research, trained and evaluated on
 | # | Architecture | Params | Paper |
 |---|---|---|---|
 | 1 | MLP Baseline | ~235K | Rumelhart et al. 1986 |
-| 2 | CNN (LeNet-5) | ~430K | LeCun et al. 1998 |
-| 3 | Dense Autoencoder | ~1.0M | Hinton & Salakhutdinov 2006 |
+| 2 | CNN (LeNet-5) | ~860K | LeCun et al. 1998 |
+| 3 | Dense Autoencoder | ~450K | Hinton & Salakhutdinov 2006 |
 | 4 | Conv Autoencoder | ~85K | Masci et al. 2011 |
-| 5 | VAE | ~1.0M | Kingma & Welling 2013 |
-| 6 | VAE+Classifier | ~1.0M | Multi-task learning |
-| 7 | Denoising AE | ~1.3M | Ho et al. 2020 |
+| 5 | VAE | ~414K | Kingma & Welling 2014 |
+| 6 | VAE+Classifier | ~414K | Multi-task learning |
+| 7 | Denoising AE | ~734K | Ho et al. 2020 |
 
-### [Fashion-MNIST GAN](demo/Fashion-MNIST-GAN/) — MLP-GAN vs DCGAN
+### [Fashion-MNIST GAN](demo/Fashion-MNIST-GAN/) — 3 Adversarial Architectures
 
-Phased adversarial training comparing the original GAN (Goodfellow 2014) with DCGAN (Radford 2015).
+Real adversarial training with no hardcoded GAN logic — everything from Drawflow graph blocks (ConcatBatch, PhaseSwitch, Constant, weight tags).
 
-| # | Generator | Discriminator |
-|---|---|---|
-| MLP-GAN | z(128) → Dense(256) → Dense(512) → Dense(784) | Dense(512) → Dense(256) → Dense(784) |
-| DCGAN | z(128) → Dense → Reshape → ConvT2D(64) → ConvT2D(1) | Reshape → Conv2D(64) → Conv2D(128) → Flatten → Dense |
+| # | Architecture | Loss | Paper |
+|---|---|---|---|
+| 1 | MLP-GAN (LayerNorm + Dropout) | BCE + label smoothing | Goodfellow 2014 |
+| 2 | DCGAN (BatchNorm + LeakyReLU) | BCE + label smoothing | Radford 2016 |
+| 3 | MLP-WGAN (linear critic) | Wasserstein | Arjovsky 2017 |
+
+Pre-trained MLP-GAN included — generate T-shirt images immediately.
+
+### [Fashion-MNIST Diffusion](demo/Fashion-MNIST-Diffusion/) — 4 Denoising Models
+
+Iterative denoising from noise to images. Standard supervised MSE training — no adversarial dynamics.
+
+| # | Architecture | Method | Paper |
+|---|---|---|---|
+| 1 | MLP Denoiser (baseline) | Single-step denoise | — |
+| 2 | MLP DDPM (timestep-conditioned) | Iterative DDPM | Ho 2020 |
+| 3 | NCSN (deep score network) | Langevin dynamics | Song & Ermon 2019 |
+| 4 | Score SDE (skip connections, cosine schedule) | SDE sampling | Song et al. 2021 |
 
 ### [LSTM-VAE for Dominant Motion Extraction](demo/LSTM-VAE-for-dominant-motion-extraction/)
 
