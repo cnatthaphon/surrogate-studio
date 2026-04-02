@@ -21,15 +21,18 @@ import numpy as np
 def status(msg):
     print(json.dumps({"kind": "status", "message": str(msg)}), flush=True)
 
-def epoch_log(epoch, loss, val_loss, current_lr, improved):
-    print(json.dumps({
+def epoch_log(epoch, loss, val_loss, current_lr, improved, phase_losses=None):
+    msg = {
         "kind": "epoch",
         "epoch": epoch,
         "loss": float(loss),
         "val_loss": float(val_loss) if val_loss is not None else None,
         "current_lr": float(current_lr),
         "improved": bool(improved),
-    }), flush=True)
+    }
+    if phase_losses:
+        msg["phaseLosses"] = {k: float(v) for k, v in phase_losses.items()}
+    print(json.dumps(msg), flush=True)
 
 def complete(result):
     print(json.dumps({"kind": "complete", "result": result}), flush=True)
@@ -340,7 +343,7 @@ def main():
         current_lr = optimizer.param_groups[0]["lr"]
         scheduler.step(check_loss)
 
-        epoch_log(ep, total_train_loss, val_loss, current_lr, improved)
+        epoch_log(ep, total_train_loss, val_loss, current_lr, improved, phase_losses)
 
         if patience > 0 and no_improve >= patience:
             status(f"Early stopping at epoch {ep} (patience={patience})")

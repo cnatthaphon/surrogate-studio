@@ -1625,9 +1625,10 @@
         }, {
           serverUrl: String(config.serverUrl || serverAdapter.DEFAULT_SERVER),
         }).then(function (result) {
+          var wasStopped = !_isTraining;
           _isTraining = false;
-          if (currentMountId !== _mountId) return;
-          tCard.status = "done";
+          // Always save weights even if tab changed or stopped
+          tCard.status = wasStopped ? "stopped" : "done";
           tCard.metrics = result;
           if (!tCard.metrics.paramCount) tCard.metrics.paramCount = buildResult.model.countParams();
           tCard.backend = result.resolvedBackend || result.backend || "pytorch";
@@ -1640,7 +1641,17 @@
               result.modelArtifacts.weightValues = result.modelArtifacts.weightData;
               delete result.modelArtifacts.weightData;
             }
+            // Save weight names from model for name-based loading
+            if (!result.modelArtifacts.weightSpecs || !result.modelArtifacts.weightSpecs[0] || !result.modelArtifacts.weightSpecs[0].name) {
+              try {
+                var wMeta = buildResult.model.weights || [];
+                if (result.modelArtifacts.weightSpecs) {
+                  result.modelArtifacts.weightSpecs.forEach(function(sp, i) { if (wMeta[i]) sp.name = wMeta[i].name; });
+                }
+              } catch(e) {}
+            }
             tCard.modelArtifacts = result.modelArtifacts;
+            tCard.modelArtifactsLast = result.modelArtifacts;
           }
           if (store) store.upsertTrainerCard(tCard);
           onStatus("\u2713 Done (PyTorch): MAE=" + (result.mae != null ? Number(result.mae).toExponential(3) : "—"));
