@@ -723,6 +723,7 @@
             { value: "mae", label: "MAE" },
             { value: "huber", label: "Huber" },
             { value: "bce", label: "Binary Cross-Entropy" },
+            { value: "wasserstein", label: "Wasserstein" },
             { value: "categoricalCrossentropy", label: "Categorical Cross-Entropy" },
             { value: "sparseCategoricalCrossentropy", label: "Sparse Cat. CE" }
           ]
