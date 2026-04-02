@@ -93,6 +93,15 @@ function startTraining(jobId) {
   });
   job.process = proc;
 
+  // Kill orphaned training if no clients connect within 30s
+  setTimeout(function () {
+    if (job.clients.length === 0 && !job.result && job.process) {
+      console.log("[server] No clients for job " + jobId + " after 30s — killing");
+      try { job.process.kill("SIGTERM"); } catch (e) {}
+      job.status = "killed";
+    }
+  }, 30000);
+
   broadcast(jobId, "status", "Python subprocess started (PID " + proc.pid + ")");
 
   // read stdout line by line (JSON-lines protocol)
@@ -356,6 +365,12 @@ var server = http.createServer(function (req, res) {
     job.clients.push(res);
     req.on("close", function () {
       job.clients = job.clients.filter(function (c) { return c !== res; });
+      // Kill training if no clients listening (all disconnected)
+      if (job.clients.length === 0 && job.process && !job.result) {
+        console.log("[server] All clients disconnected for job " + jobId + " — killing training");
+        try { job.process.kill("SIGTERM"); } catch (e) {}
+        job.status = "killed";
+      }
     });
     return;
   }
