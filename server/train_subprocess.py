@@ -308,6 +308,12 @@ def main():
                             if grad_clip > 0:
                                 torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
                             optimizer.step()
+                            # Weight clipping (WGAN): clip to [-c, c]
+                            clip_val = float(sched_step.get("clipWeights", 0))
+                            if clip_val > 0:
+                                for p in model.parameters():
+                                    if p.requires_grad:
+                                        p.data.clamp_(-clip_val, clip_val)
                         step_loss += loss.item()
                         n_batches += 1
                 phase_losses[phase_name] = step_loss / max(n_batches, 1)

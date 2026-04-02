@@ -755,6 +755,20 @@
           for (var se = 0; se < stepEp; se++) {
             stepLoss = _trainStep(_getOpt(label), xTrainInputs, yTrainArrays);
           }
+          // Weight clipping (WGAN): clip trainable weights to [-c, c] after update
+          var clipVal = Number(step.clipWeights || 0);
+          if (clipVal > 0) {
+            model.layers.forEach(function (l) {
+              if (l._weightTag && l.trainable && l.trainableWeights) {
+                l.trainableWeights.forEach(function (w) {
+                  var v = w.read();
+                  var clipped = tf.clipByValue(v, -clipVal, clipVal);
+                  w.write(clipped);
+                  clipped.dispose();
+                });
+              }
+            });
+          }
           stepLosses[label] = stepLoss;
           stepIdx++;
           setTimeout(nextStep, 0);

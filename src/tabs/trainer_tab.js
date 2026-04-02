@@ -1231,7 +1231,15 @@
                 (function (idx, tg) { cb.addEventListener("change", function () { if (!t.config.trainingSchedule[idx].trainableTags) t.config.trainingSchedule[idx].trainableTags = {}; t.config.trainingSchedule[idx].trainableTags[tg] = cb.checked; if (store) store.upsertTrainerCard(t); }); })(si, tag);
                 lb.appendChild(cb); lb.appendChild(document.createTextNode(tag)); tr.appendChild(lb);
               });
-              sc.appendChild(tr); schCard.appendChild(sc);
+              sc.appendChild(tr);
+              // clip weights input (WGAN)
+              var cwRow = el("div", { style: "display:flex;align-items:center;gap:3px;margin-top:2px;" });
+              cwRow.appendChild(el("span", { style: "font-size:9px;color:#64748b;" }, "clip weights:"));
+              var cwInp = el("input", { type: "number", value: String(step.clipWeights || 0), min: 0, step: 0.001, style: "width:50px;background:#0f172a;color:#e2e8f0;border:1px solid #334155;border-radius:3px;padding:1px 3px;font-size:10px;" });
+              (function (idx) { cwInp.addEventListener("change", function () { t.config.trainingSchedule[idx].clipWeights = Number(cwInp.value) || 0; if (store) store.upsertTrainerCard(t); }); })(si);
+              cwRow.appendChild(cwInp);
+              sc.appendChild(cwRow);
+              schCard.appendChild(sc);
             });
             // add step
             var addBtn = el("button", { style: "font-size:9px;padding:3px 8px;background:#1e293b;color:#67e8f9;border:1px solid #334155;border-radius:3px;cursor:pointer;margin-top:3px;" }, "+ Add Step");

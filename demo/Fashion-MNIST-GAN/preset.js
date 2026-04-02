@@ -232,7 +232,7 @@
         config: { epochs: 1000, batchSize: 128, learningRate: 0.00005, optimizerType: "rmsprop", useServer: true,
                   earlyStoppingPatience: 0, lrSchedulerType: "none", weightSelection: "last",
                   trainingSchedule: [
-                    { epochs: 5, trainableTags: { discriminator: true, generator: false } },
+                    { epochs: 5, trainableTags: { discriminator: true, generator: false }, clipWeights: 0.01 },
                     { epochs: 1, trainableTags: { discriminator: false, generator: true } }
                   ], rotateSchedule: true } },
     ],
