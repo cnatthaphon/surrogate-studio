@@ -109,6 +109,18 @@
       return out;
     }
 
+    function _getWorkerSupport() {
+      var W = typeof window !== "undefined" ? window : {};
+      var bridge = W.OSCTrainingWorkerBridge;
+      var hasBridge = !!(bridge && typeof bridge.runTrainingInWorker === "function");
+      var hasWorkerApi = typeof Worker !== "undefined";
+      return {
+        hasBridge: hasBridge,
+        hasWorkerApi: hasWorkerApi,
+        available: hasBridge && hasWorkerApi,
+      };
+    }
+
     function _getClientBackendAvailability(tf) {
       var out = { cpu: true, webgl: false, webgpu: false, wasm: false };
       if (!tf) return out;
@@ -165,6 +177,53 @@
           return current || "cpu";
         });
       });
+    }
+
+    function _setRuntimeDiagnostics(tCard, patch) {
+      if (!tCard) return null;
+      var tf = getTf();
+      var cfg = tCard.config || {};
+      var prev = (tCard.runtimeDiagnostics && typeof tCard.runtimeDiagnostics === "object") ? tCard.runtimeDiagnostics : {};
+      var worker = _getWorkerSupport();
+      tCard.runtimeDiagnostics = Object.assign({}, prev, patch || {}, {
+        requestedBackend: (patch && patch.requestedBackend != null) ? patch.requestedBackend : (prev.requestedBackend || String(cfg.runtimeBackend || "auto")),
+        autoOrder: (patch && patch.autoOrder) ? patch.autoOrder : (prev.autoOrder || _normalizeClientBackendOrder(cfg.runtimeBackendOrder)),
+        availableBackends: (patch && patch.availableBackends) ? patch.availableBackends : (prev.availableBackends || _getClientBackendAvailability(tf)),
+        currentTfBackend: (patch && patch.currentTfBackend != null) ? patch.currentTfBackend : ((tf && typeof tf.getBackend === "function") ? String(tf.getBackend() || "") : (prev.currentTfBackend || "")),
+        secureContext: (patch && patch.secureContext != null) ? patch.secureContext : (typeof window !== "undefined" ? !!window.isSecureContext : false),
+        navigatorGpu: (patch && patch.navigatorGpu != null) ? patch.navigatorGpu : (typeof navigator !== "undefined" && !!navigator.gpu),
+        workerAvailable: (patch && patch.workerAvailable != null) ? patch.workerAvailable : worker.available,
+        workerBridge: (patch && patch.workerBridge != null) ? patch.workerBridge : worker.hasBridge,
+        workerApi: (patch && patch.workerApi != null) ? patch.workerApi : worker.hasWorkerApi,
+        updatedAt: Date.now(),
+      });
+      return tCard.runtimeDiagnostics;
+    }
+
+    function _runtimeDiagForCard(tCard) {
+      var cfg = (tCard && tCard.config) || {};
+      var tf = getTf();
+      var avail = _getClientBackendAvailability(tf);
+      var worker = _getWorkerSupport();
+      var diag = _setRuntimeDiagnostics(tCard || {}, {});
+      var predictedMode = cfg.useServer ? "server" : (worker.available ? "worker" : "main-thread");
+      return {
+        requestedBackend: diag.requestedBackend || String(cfg.runtimeBackend || "auto"),
+        resolvedBackend: diag.resolvedBackend || String((tCard && tCard.backend) || diag.currentTfBackend || ""),
+        currentTfBackend: diag.currentTfBackend || ((tf && typeof tf.getBackend === "function") ? String(tf.getBackend() || "") : ""),
+        autoOrder: Array.isArray(diag.autoOrder) ? diag.autoOrder : _normalizeClientBackendOrder(cfg.runtimeBackendOrder),
+        availableBackends: diag.availableBackends || avail,
+        secureContext: !!diag.secureContext,
+        navigatorGpu: !!diag.navigatorGpu,
+        workerAvailable: !!diag.workerAvailable,
+        workerBridge: !!diag.workerBridge,
+        workerApi: !!diag.workerApi,
+        executionMode: diag.executionMode || ((_isTraining && _activeTrainingId === (tCard && tCard.id)) ? predictedMode : ""),
+        status: diag.status || ((_isTraining && _activeTrainingId === (tCard && tCard.id)) ? "running" : "idle"),
+        source: diag.source || (cfg.useServer ? "server" : "browser"),
+        note: diag.note || "",
+        updatedAt: diag.updatedAt || 0,
+      };
     }
 
     // Check server connection
@@ -1207,6 +1266,31 @@
         rightEl.appendChild(serverPanel);
       }
 
+      var runtimeDiag = _runtimeDiagForCard(t);
+      var runtimeCard = el("div", { style: "margin-top:8px;padding:6px 8px;border:1px solid #1e293b;border-radius:6px;background:#0f172a;" });
+      runtimeCard.appendChild(el("div", { style: "font-size:10px;color:#67e8f9;font-weight:600;margin-bottom:6px;" }, "Runtime Diagnostics"));
+      [
+        "requested_backend = " + String(runtimeDiag.requestedBackend || "auto"),
+        "resolved_backend = " + String(runtimeDiag.resolvedBackend || "unknown"),
+        "current_tf_backend = " + String(runtimeDiag.currentTfBackend || "unknown"),
+        "execution_mode = " + String(runtimeDiag.executionMode || "unknown"),
+        "runtime_source = " + String(runtimeDiag.source || "browser"),
+        "status = " + String(runtimeDiag.status || "idle"),
+        "auto_order = " + runtimeDiag.autoOrder.join(" -> "),
+        "available_backends = " + ["webgl", "webgpu", "wasm", "cpu"].map(function (k) { return k + ":" + (runtimeDiag.availableBackends && runtimeDiag.availableBackends[k] ? "yes" : "no"); }).join(" | "),
+        "secure_context = " + (runtimeDiag.secureContext ? "yes" : "no"),
+        "navigator_gpu = " + (runtimeDiag.navigatorGpu ? "yes" : "no"),
+        "worker_bridge = " + (runtimeDiag.workerBridge ? "yes" : "no"),
+        "worker_api = " + (runtimeDiag.workerApi ? "yes" : "no"),
+        "worker_available = " + (runtimeDiag.workerAvailable ? "yes" : "no"),
+      ].forEach(function (line) {
+        runtimeCard.appendChild(el("div", { style: "font-size:10px;color:#cbd5e1;line-height:1.45;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;" }, line));
+      });
+      if (runtimeDiag.note) {
+        runtimeCard.appendChild(el("div", { style: "font-size:10px;color:#fbbf24;line-height:1.45;margin-top:4px;" }, "note = " + runtimeDiag.note));
+      }
+      rightEl.appendChild(runtimeCard);
+
       // phase configuration (detected from model graph)
       if (t.modelId && modelBuilder) {
         var phModel = store ? store.getModel(t.modelId) : null;
@@ -1316,6 +1400,11 @@
           var tc = store ? store.getTrainerCard(activeId) : null;
           if (tc) {
             tc.status = "stopped";
+            _setRuntimeDiagnostics(tc, {
+              executionMode: tc.runtimeDiagnostics && tc.runtimeDiagnostics.executionMode ? tc.runtimeDiagnostics.executionMode : (tc.config && tc.config.useServer ? "server" : "browser"),
+              status: "stopped",
+              note: "Training stopped by user.",
+            });
             // Save current (last) weights — both last and best (best=last on stop)
             if (_activeModel) {
               try {
@@ -1349,7 +1438,7 @@
         // Export: metadata as JSON + weights as binary, compressed with gzip
         var meta = {
           id: t.id, name: t.name, schemaId: t.schemaId, status: t.status,
-          config: t.config, metrics: t.metrics, backend: t.backend,
+          config: t.config, metrics: t.metrics, backend: t.backend, runtimeDiagnostics: t.runtimeDiagnostics,
           epochs: store ? store.getTrainerEpochs(activeId) : [],
           exportedAt: new Date().toISOString(),
         };
@@ -1412,6 +1501,7 @@
             if (data.modelArtifactsBest) t.modelArtifactsBest = data.modelArtifactsBest;
             if (data.status) t.status = data.status;
             if (data.backend) t.backend = data.backend;
+            if (data.runtimeDiagnostics) t.runtimeDiagnostics = data.runtimeDiagnostics;
             if (data.epochs && store) store.replaceTrainerEpochs(activeId, data.epochs);
             if (store) store.upsertTrainerCard(t);
             onStatus("Trainer imported: " + file.name);
@@ -1605,6 +1695,13 @@
       tCard.modelId = config.modelId;
       tCard.status = "running";
       tCard.config = config;
+      _setRuntimeDiagnostics(tCard, {
+        requestedBackend: String(config.runtimeBackend || "auto"),
+        executionMode: Boolean(config.useServer) ? "server" : (_getWorkerSupport().available ? "worker" : "main-thread"),
+        source: Boolean(config.useServer) ? "server" : "browser",
+        status: "preparing",
+        note: "Preparing training session.",
+      });
       if (store) { store.upsertTrainerCard(tCard); store.replaceTrainerEpochs(activeId, []); }
       _isTraining = true;
       _trainingRunId++;
@@ -1623,22 +1720,47 @@
 
       // PyTorch Server: when useServer is checked — try server first, fallback to client
       if (useServer && serverAdapter) {
+        _setRuntimeDiagnostics(tCard, {
+          executionMode: "server",
+          source: "server",
+          status: "checking_server",
+          note: "Checking PyTorch server availability.",
+        });
         onStatus("Checking PyTorch Server...");
         _checkServerConnection(serverUrl, function (ok) {
           _renderRightPanel(); // update server status display with full info
           if (!ok) {
             // first training → fallback to client. Continue training of server model → need server.
             if (tCard.trainedOnServer) {
+              _setRuntimeDiagnostics(tCard, {
+                executionMode: "server",
+                source: "server",
+                status: "error",
+                note: "Server required for this trainer but is not reachable.",
+              });
               onStatus("Server not reachable. This model was trained on server \u2014 restart server to continue, or create new trainer for client.");
               _isTraining = false; tCard.status = tCard.status === "training" ? "done" : tCard.status;
               if (store) store.upsertTrainerCard(tCard);
               _renderLeftPanel(); _renderMainPanel(); _renderRightPanel();
               return;
             }
+            _setRuntimeDiagnostics(tCard, {
+              executionMode: _getWorkerSupport().available ? "worker" : "main-thread",
+              source: "browser",
+              status: "fallback_client",
+              note: "Server not reachable, falling back to browser training.",
+            });
             onStatus("Server not reachable \u2014 training on client (" + backend + ")");
             _runClientTraining();
             return;
           }
+          _setRuntimeDiagnostics(tCard, {
+            executionMode: "server",
+            source: "server",
+            resolvedBackend: String((_serverInfo && _serverInfo.backend) || "pytorch"),
+            status: "running",
+            note: "Training on PyTorch server.",
+          });
           onStatus("Server connected \u2014 training on PyTorch...");
           _activeModel = buildResult.model;
           // server OK — proceed with server training
@@ -1683,7 +1805,17 @@
             }
           },
           onStatus: function (msg) { onStatus(msg); },
-          onReady: function (msg) { onStatus("Server ready: " + (msg.backend || "pytorch")); },
+          onReady: function (msg) {
+            _setRuntimeDiagnostics(tCard, {
+              executionMode: "server",
+              source: "server",
+              resolvedBackend: String((msg && msg.backend) || "pytorch"),
+              status: "running",
+              note: "Server runtime initialized.",
+            });
+            if (currentMountId === _mountId) _renderRightPanel();
+            onStatus("Server ready: " + (msg.backend || "pytorch"));
+          },
         }, {
           serverUrl: String(config.serverUrl || serverAdapter.DEFAULT_SERVER),
         }).then(function (result) {
@@ -1694,6 +1826,13 @@
           tCard.metrics = result;
           if (!tCard.metrics.paramCount) tCard.metrics.paramCount = buildResult.model.countParams();
           tCard.backend = result.resolvedBackend || result.backend || "pytorch";
+          _setRuntimeDiagnostics(tCard, {
+            executionMode: "server",
+            source: "server",
+            resolvedBackend: String(result.resolvedBackend || result.backend || "pytorch"),
+            status: wasStopped ? "stopped" : "done",
+            note: wasStopped ? "Server training stopped." : "Server training completed.",
+          });
           tCard.trainedOnServer = true;
           if (!tCard.config) tCard.config = {};
           tCard.config.useServer = true;
@@ -1725,12 +1864,24 @@
           var msg = String(err.message || "");
           // dataset too large for server → fallback to client training
           if (msg.indexOf("too large") >= 0 || msg.indexOf("transfer") >= 0) {
+            _setRuntimeDiagnostics(tCard, {
+              executionMode: _getWorkerSupport().available ? "worker" : "main-thread",
+              source: "browser",
+              status: "fallback_client",
+              note: "Server transfer too large, falling back to browser training.",
+            });
             onStatus("Server: " + msg + " \u2014 training on client");
             _runClientTraining();
             return;
           }
           _isTraining = false;
           tCard.status = "error"; tCard.error = msg;
+          _setRuntimeDiagnostics(tCard, {
+            executionMode: "server",
+            source: "server",
+            status: "error",
+            note: msg || "Server training failed.",
+          });
           if (store) store.upsertTrainerCard(tCard);
           onStatus("Server error: " + msg);
           _renderLeftPanel(); _renderMainPanel(); _renderRightPanel();
@@ -1763,6 +1914,12 @@
       }
 
       if (useWorker) {
+        _setRuntimeDiagnostics(tCard, {
+          executionMode: "worker",
+          source: "browser",
+          status: "running",
+          note: "Training in TF.js worker.",
+        });
         // === WORKER PATH (non-blocking) ===
         buildResult.model.save(tf.io.withSaveHandler(function (artifacts) {
           onStatus("Training via TF.js Worker (" + (config.runtimeBackend || "auto") + ")...");
@@ -1821,6 +1978,14 @@
             },
             onReady: function (msg) {
               var resolved = String((msg && msg.backend) || config.runtimeBackend || "auto");
+              _setRuntimeDiagnostics(tCard, {
+                executionMode: "worker",
+                source: "browser",
+                resolvedBackend: resolved,
+                status: "running",
+                note: "Worker runtime initialized.",
+              });
+              if (currentMountId === _mountId) _renderRightPanel();
               onStatus("Worker ready: " + resolved);
             },
             onStatus: function (msg) { onStatus(msg); },
@@ -1832,6 +1997,13 @@
             tCard.status = "done";
             tCard.metrics = result;
             tCard.backend = result.resolvedBackend || String(config.runtimeBackend || "auto");
+            _setRuntimeDiagnostics(tCard, {
+              executionMode: "worker",
+              source: "browser",
+              resolvedBackend: String(result.resolvedBackend || config.runtimeBackend || "auto"),
+              status: "done",
+              note: "Worker training completed.",
+            });
             // convert worker's ArrayBuffer to JSON-safe array before store.upsert
             if (result.modelArtifacts) {
               var wa = result.modelArtifacts;
@@ -1848,6 +2020,12 @@
           }).catch(function (err) {
             _isTraining = false;
             tCard.status = "error"; tCard.error = err.message;
+            _setRuntimeDiagnostics(tCard, {
+              executionMode: "worker",
+              source: "browser",
+              status: "error",
+              note: err.message || "Worker training failed.",
+            });
             if (store) store.upsertTrainerCard(tCard);
             onStatus("Worker error: " + err.message);
             _renderLeftPanel(); _renderMainPanel(); _renderRightPanel();
@@ -1864,6 +2042,14 @@
         _activeModel = buildResult.model;
         var _myRunId = _trainingRunId; // capture for shouldStop closure
         _ensureClientBackend(tf, config.runtimeBackend, config.runtimeBackendOrder).then(function (resolvedBackend) {
+        _setRuntimeDiagnostics(tCard, {
+          executionMode: "main-thread",
+          source: "browser",
+          resolvedBackend: resolvedBackend,
+          status: "running",
+          note: "Training on browser main thread.",
+        });
+        if (currentMountId === _mountId) _renderRightPanel();
         onStatus("Training on TF.js (" + (_isPhased ? "phased" : "main thread") + ", " + resolvedBackend + ") — train:" + (activeDs.xTrain ? activeDs.xTrain.length : 0) + " val:" + (activeDs.xVal ? activeDs.xVal.length : 0) + " test:" + (activeDs.xTest ? activeDs.xTest.length : 0));
         return _trainFn(tf, {
           model: buildResult.model, isSequence: buildResult.isSequence, headConfigs: buildResult.headConfigs, inputNodes: buildResult.inputNodes || [], phaseSwitchConfigs: buildResult.phaseSwitchConfigs || [],
@@ -1912,6 +2098,13 @@
           tCard.metrics = result;
           if (!tCard.metrics.paramCount) tCard.metrics.paramCount = buildResult.model.countParams();
           tCard.backend = resolvedBackend || (tf.getBackend && tf.getBackend()) || String(config.runtimeBackend || "auto");
+          _setRuntimeDiagnostics(tCard, {
+            executionMode: "main-thread",
+            source: "browser",
+            resolvedBackend: String(resolvedBackend || (tf.getBackend && tf.getBackend()) || "cpu"),
+            status: "done",
+            note: "Main-thread training completed.",
+          });
           // Save both last and best weights
           try {
             var lastArtifacts = _extractWeightsFromModel(buildResult.model);
@@ -1938,6 +2131,12 @@
           _isTraining = false;
           _activeModel = null;
           tCard.status = "error"; tCard.error = err.message;
+          _setRuntimeDiagnostics(tCard, {
+            executionMode: "main-thread",
+            source: "browser",
+            status: "error",
+            note: err.message || "Main-thread training failed.",
+          });
           if (store) store.upsertTrainerCard(tCard);
           onStatus("Error: " + err.message);
           _renderLeftPanel(); _renderMainPanel(); _renderRightPanel();
@@ -1947,6 +2146,12 @@
           _isTraining = false;
           _activeModel = null;
           tCard.status = "error"; tCard.error = String(err && err.message ? err.message : err);
+          _setRuntimeDiagnostics(tCard, {
+            executionMode: "main-thread",
+            source: "browser",
+            status: "error",
+            note: tCard.error || "Backend initialization failed.",
+          });
           if (store) store.upsertTrainerCard(tCard);
           onStatus("Backend error: " + tCard.error);
           _renderLeftPanel(); _renderMainPanel(); _renderRightPanel();
