@@ -295,9 +295,26 @@
     };
   }
 
+  function normalizeBackendOrder(rawOrder) {
+    var parts = Array.isArray(rawOrder) ? rawOrder.slice() : String(rawOrder || "").split(/[,\s]+/);
+    var allowed = { webgl: true, webgpu: true, wasm: true, cpu: true };
+    var seen = {};
+    var out = [];
+    for (var i = 0; i < parts.length; i++) {
+      var key = String(parts[i] || "").trim().toLowerCase();
+      if (!allowed[key] || seen[key]) continue;
+      seen[key] = true;
+      out.push(key);
+    }
+    if (!out.length) return ["webgl", "webgpu", "wasm", "cpu"];
+    if (!seen.cpu) out.push("cpu");
+    return out;
+  }
+
   function ensureTfBackend(runtimeConfig) {
     const requestedRaw = String((runtimeConfig && runtimeConfig.backend) || "auto").toLowerCase();
-    const requested = requestedRaw === "gpu" ? "webgpu" : requestedRaw;
+    const requested = requestedRaw === "gpu" ? "auto" : requestedRaw;
+    const autoOrder = normalizeBackendOrder(runtimeConfig && runtimeConfig.backendOrder);
     const loadBackendScript = function (name) {
       try {
         if (name === "wasm") {
@@ -330,13 +347,12 @@
       await tf.ready();
     };
     if (requested !== "auto") return trySetBackend(requested);
-    // auto: try best available in order
+    // auto: use configured order, defaulting to WebGL first for browser TF.js training.
     return (async function () {
-      var order = ["webgpu", "webgl", "wasm", "cpu"];
-      for (var i = 0; i < order.length; i++) {
+      for (var i = 0; i < autoOrder.length; i++) {
         try {
-          if (order[i] !== "cpu") loadBackendScript(order[i]);
-          var ok = await tf.setBackend(order[i]);
+          if (autoOrder[i] !== "cpu") loadBackendScript(autoOrder[i]);
+          var ok = await tf.setBackend(autoOrder[i]);
           if (ok) { await tf.ready(); return; }
         } catch (_) {}
       }

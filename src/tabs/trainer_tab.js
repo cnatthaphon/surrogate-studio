@@ -83,9 +83,88 @@
       var tf = getTf();
       if (tf) {
         try { if (typeof tf.setBackend === "function") { backends.push({ value: "webgl", label: "WebGL (GPU)" }); } } catch (e) {}
+        try {
+          if (typeof window !== "undefined" && window.isSecureContext && typeof navigator !== "undefined" && navigator.gpu) {
+            backends.push({ value: "webgpu", label: "WebGPU (experimental)" });
+          }
+        } catch (e2) {}
         try { backends.push({ value: "wasm", label: "WASM" }); } catch (e) {}
       }
       return backends;
+    }
+
+    function _normalizeClientBackendOrder(rawOrder) {
+      var parts = Array.isArray(rawOrder) ? rawOrder.slice() : String(rawOrder || "").split(/[,\s]+/);
+      var allowed = { webgl: true, webgpu: true, wasm: true, cpu: true };
+      var seen = {};
+      var out = [];
+      for (var i = 0; i < parts.length; i++) {
+        var key = String(parts[i] || "").trim().toLowerCase();
+        if (!allowed[key] || seen[key]) continue;
+        seen[key] = true;
+        out.push(key);
+      }
+      if (!out.length) return ["webgl", "webgpu", "wasm", "cpu"];
+      if (!seen.cpu) out.push("cpu");
+      return out;
+    }
+
+    function _getClientBackendAvailability(tf) {
+      var out = { cpu: true, webgl: false, webgpu: false, wasm: false };
+      if (!tf) return out;
+      try {
+        if (typeof tf.findBackend === "function") {
+          out.webgl = !!tf.findBackend("webgl");
+          out.webgpu = !!tf.findBackend("webgpu");
+          out.wasm = !!tf.findBackend("wasm");
+        }
+      } catch (_) {}
+      try {
+        if (tf.engine && typeof tf.engine === "function") {
+          var eng = tf.engine();
+          var reg = eng && eng.registryFactory ? Object.keys(eng.registryFactory) : [];
+          reg.forEach(function (k) {
+            var key = String(k || "").toLowerCase();
+            if (Object.prototype.hasOwnProperty.call(out, key)) out[key] = true;
+          });
+        }
+      } catch (_) {}
+      if (!(typeof window !== "undefined" && window.isSecureContext && typeof navigator !== "undefined" && navigator.gpu)) {
+        out.webgpu = false;
+      }
+      return out;
+    }
+
+    function _ensureClientBackend(tf, runtimeBackend, runtimeBackendOrder) {
+      var requestedRaw = String(runtimeBackend || "auto").toLowerCase();
+      var requested = requestedRaw === "gpu" ? "auto" : requestedRaw;
+      var order = _normalizeClientBackendOrder(runtimeBackendOrder);
+      return Promise.resolve().then(function () {
+        return (tf && typeof tf.ready === "function") ? tf.ready() : null;
+      }).then(function () {
+        var avail = _getClientBackendAvailability(tf);
+        var current = (tf && typeof tf.getBackend === "function") ? String(tf.getBackend() || "cpu").toLowerCase() : "cpu";
+        if (requested !== "auto") {
+          if (requested === current) return current;
+          return Promise.resolve(tf.setBackend(requested)).then(function () {
+            return (typeof tf.ready === "function") ? tf.ready() : null;
+          }).then(function () {
+            return (typeof tf.getBackend === "function") ? String(tf.getBackend() || requested).toLowerCase() : requested;
+          });
+        }
+        var desired = "cpu";
+        for (var i = 0; i < order.length; i++) {
+          if (avail[order[i]]) { desired = order[i]; break; }
+        }
+        if (desired === current) return current;
+        return Promise.resolve(tf.setBackend(desired)).then(function () {
+          return (typeof tf.ready === "function") ? tf.ready() : null;
+        }).then(function () {
+          return (typeof tf.getBackend === "function") ? String(tf.getBackend() || desired).toLowerCase() : desired;
+        }).catch(function () {
+          return current || "cpu";
+        });
+      });
     }
 
     // Check server connection
@@ -1456,12 +1535,6 @@
       if (!modelBuilder) { onStatus("Model builder not available"); return; }
       if (!trainingEngine) { onStatus("Training engine not available"); return; }
 
-      // set backend
-      var backend = String(config.runtimeBackend || "auto");
-      if (backend !== "auto" && typeof tf.setBackend === "function") {
-        try { tf.setBackend(backend); } catch (e) { console.warn("Backend set failed:", e.message); }
-      }
-
       var schemaId = tCard.schemaId;
       var allowedOutputKeys = schemaRegistry ? schemaRegistry.getOutputKeys(schemaId) : [];
       // read target from model graph (not schema)
@@ -1713,7 +1786,11 @@
               xTest: activeDs.xTest || [], yTest: activeDs.yTest || [], seqTest: activeDs.seqTest || [],
               pTrain: activeDs.pTrain || [], pVal: activeDs.pVal || [], pTest: activeDs.pTest || [],
             },
-            runtimeConfig: { runtimeId: "js_client", backend: String(config.runtimeBackend || "auto") },
+            runtimeConfig: {
+              runtimeId: "js_client",
+              backend: String(config.runtimeBackend || "auto"),
+              backendOrder: _normalizeClientBackendOrder(config.runtimeBackendOrder),
+            },
             epochs: Number(config.epochs || 20),
             batchSize: Number(config.batchSize || 32),
             learningRate: Number(config.learningRate || 0.001),
@@ -1741,6 +1818,10 @@
                 if (_lossChartDiv) _plotLossChart(epochs);
                 _appendEpochRow(logEntry);
               }
+            },
+            onReady: function (msg) {
+              var resolved = String((msg && msg.backend) || config.runtimeBackend || "auto");
+              onStatus("Worker ready: " + resolved);
             },
             onStatus: function (msg) { onStatus(msg); },
           }, {
@@ -1782,8 +1863,9 @@
         var _trainFn = _isPhased && trainingEngine.trainModelPhased ? trainingEngine.trainModelPhased : trainingEngine.trainModel;
         _activeModel = buildResult.model;
         var _myRunId = _trainingRunId; // capture for shouldStop closure
-        onStatus("Training on TF.js (" + (_isPhased ? "phased" : "main thread") + ", " + (tf.getBackend ? tf.getBackend() : "cpu") + ") — train:" + (activeDs.xTrain ? activeDs.xTrain.length : 0) + " val:" + (activeDs.xVal ? activeDs.xVal.length : 0) + " test:" + (activeDs.xTest ? activeDs.xTest.length : 0));
-        _trainFn(tf, {
+        _ensureClientBackend(tf, config.runtimeBackend, config.runtimeBackendOrder).then(function (resolvedBackend) {
+        onStatus("Training on TF.js (" + (_isPhased ? "phased" : "main thread") + ", " + resolvedBackend + ") — train:" + (activeDs.xTrain ? activeDs.xTrain.length : 0) + " val:" + (activeDs.xVal ? activeDs.xVal.length : 0) + " test:" + (activeDs.xTest ? activeDs.xTest.length : 0));
+        return _trainFn(tf, {
           model: buildResult.model, isSequence: buildResult.isSequence, headConfigs: buildResult.headConfigs, inputNodes: buildResult.inputNodes || [], phaseSwitchConfigs: buildResult.phaseSwitchConfigs || [],
           shouldStop: function () { return !_isTraining || _trainingRunId !== _myRunId; },
           dataset: {
@@ -1829,7 +1911,7 @@
           tCard.status = "done";
           tCard.metrics = result;
           if (!tCard.metrics.paramCount) tCard.metrics.paramCount = buildResult.model.countParams();
-          tCard.backend = (tf.getBackend && tf.getBackend()) || String(config.runtimeBackend || "auto");
+          tCard.backend = resolvedBackend || (tf.getBackend && tf.getBackend()) || String(config.runtimeBackend || "auto");
           // Save both last and best weights
           try {
             var lastArtifacts = _extractWeightsFromModel(buildResult.model);
@@ -1858,6 +1940,15 @@
           tCard.status = "error"; tCard.error = err.message;
           if (store) store.upsertTrainerCard(tCard);
           onStatus("Error: " + err.message);
+          _renderLeftPanel(); _renderMainPanel(); _renderRightPanel();
+          buildResult.model.dispose();
+        });
+        }).catch(function (err) {
+          _isTraining = false;
+          _activeModel = null;
+          tCard.status = "error"; tCard.error = String(err && err.message ? err.message : err);
+          if (store) store.upsertTrainerCard(tCard);
+          onStatus("Backend error: " + tCard.error);
           _renderLeftPanel(); _renderMainPanel(); _renderRightPanel();
           buildResult.model.dispose();
         });

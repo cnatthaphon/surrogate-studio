@@ -10453,6 +10453,22 @@
     };
   }
 
+  function normalizeClientBackendOrder(rawOrder) {
+    const parts = Array.isArray(rawOrder) ? rawOrder.slice() : String(rawOrder || "").split(/[,\s]+/);
+    const allowed = { webgl: true, webgpu: true, wasm: true, cpu: true };
+    const seen = {};
+    const out = [];
+    for (let i = 0; i < parts.length; i += 1) {
+      const key = String(parts[i] || "").trim().toLowerCase();
+      if (!allowed[key] || seen[key]) continue;
+      seen[key] = true;
+      out.push(key);
+    }
+    if (!out.length) return ["webgl", "webgpu", "wasm", "cpu"];
+    if (!seen.cpu) out.push("cpu");
+    return out;
+  }
+
   function getClientTfjsBackendAvailability() {
     const out = { cpu: false, webgl: false, wasm: false, webgpu: false };
     if (!window.tf || typeof tf.getBackend !== "function") return out;
@@ -10477,11 +10493,12 @@
     return out;
   }
 
-  function preferredClientBackend(avail) {
+  function preferredClientBackend(avail, rawOrder) {
     const a = avail || getClientTfjsBackendAvailability();
-    if (a.webgpu) return "webgpu";
-    if (a.webgl) return "webgl";
-    if (a.wasm) return "wasm";
+    const order = normalizeClientBackendOrder(rawOrder);
+    for (let i = 0; i < order.length; i += 1) {
+      if (a[order[i]]) return order[i];
+    }
     return "cpu";
   }
 
@@ -10551,6 +10568,7 @@
         if (typeof tf.ready === "function") await tf.ready();
       } catch (_) {}
       const avail = getClientTfjsBackendAvailability();
+      const autoOrder = normalizeClientBackendOrder(runtimeConfig && runtimeConfig.backendOrder);
       const currentBackend = String(tf.getBackend ? tf.getBackend() : "cpu").toLowerCase() || "cpu";
       const requested = String(cfg.backend || "auto").toLowerCase();
       let negotiated = requested;
@@ -10558,13 +10576,13 @@
         negotiated =
           (Object.prototype.hasOwnProperty.call(avail, currentBackend) && avail[currentBackend])
             ? currentBackend
-            : preferredClientBackend(avail);
+            : preferredClientBackend(avail, autoOrder);
       }
       if (!Object.prototype.hasOwnProperty.call(avail, negotiated) || !avail[negotiated]) {
         const fallbackBackend =
           (Object.prototype.hasOwnProperty.call(avail, currentBackend) && avail[currentBackend])
             ? currentBackend
-            : (preferredClientBackend(avail) || "cpu");
+            : (preferredClientBackend(avail, autoOrder) || "cpu");
         if (Object.prototype.hasOwnProperty.call(avail, fallbackBackend) && avail[fallbackBackend]) {
           negotiated = fallbackBackend;
         } else {
@@ -10586,10 +10604,15 @@
       } catch (err) {
         const preferredError = String(err && err.message ? err.message : err);
         const fallbackOrder = [];
-        if (negotiated !== currentBackend && Object.prototype.hasOwnProperty.call(avail, currentBackend) && avail[currentBackend]) {
-          fallbackOrder.push(currentBackend);
+        if (requested === "auto") {
+          autoOrder.forEach(function (candidate) {
+            if (candidate !== negotiated) fallbackOrder.push(candidate);
+          });
         }
-        if (negotiated !== "cpu") fallbackOrder.push("cpu");
+        if (negotiated !== currentBackend && Object.prototype.hasOwnProperty.call(avail, currentBackend) && avail[currentBackend]) {
+          fallbackOrder.unshift(currentBackend);
+        }
+        if (fallbackOrder.indexOf("cpu") < 0) fallbackOrder.push("cpu");
         let fallbackBackend = "";
         let fallbackError = "";
         for (let i = 0; i < fallbackOrder.length; i += 1) {
@@ -10742,6 +10765,7 @@
         ? ("Detected runtimes: " + summarizeRuntimeCapabilities(caps) + (endpoint ? (" | endpoint: " + endpoint) : ""))
         : "No server detected. Default runtime: js_client.";
       ui.runtimeDetectInfo.textContent += " | client_backends: " + summarizeClientTfjsBackends();
+      ui.runtimeDetectInfo.textContent += " | auto_pref: " + preferredClientBackend();
       if (!window.isSecureContext) {
         ui.runtimeDetectInfo.textContent += " | webgpu_note: requires https or localhost secure context";
       } else if (!(typeof navigator !== "undefined" && navigator.gpu)) {
