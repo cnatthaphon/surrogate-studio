@@ -235,6 +235,14 @@
                     { epochs: 5, trainableTags: { discriminator: true, generator: false }, clipWeights: 0.01 },
                     { epochs: 1, trainableTags: { discriminator: false, generator: true } }
                   ], rotateSchedule: true } },
+      { id: "t-mlp-wgan-trained", name: "MLP-WGAN (pre-trained)", schemaId: sid, datasetId: DS, modelId: "m-mlp-wgan", status: "done",
+        _pretrainedVar: "MLP_WGAN_PRETRAINED_BIN_B64",
+        config: { epochs: 1000, batchSize: 128, learningRate: 0.00005, optimizerType: "rmsprop", useServer: true,
+                  earlyStoppingPatience: 0, lrSchedulerType: "none", weightSelection: "last",
+                  trainingSchedule: [
+                    { epochs: 5, trainableTags: { discriminator: true, generator: false }, clipWeights: 0.01 },
+                    { epochs: 1, trainableTags: { discriminator: false, generator: true } }
+                  ], rotateSchedule: true } },
     ],
     generations: [
       { id: "g-mlp-gen",         name: "MLP-GAN Generate",              schemaId: sid, trainerId: "t-mlp-gan",         family: "gan", config: { method: "random", numSamples: 16, temperature: 1.0, seed: 42 }, status: "draft", runs: [], createdAt: Date.now() },
@@ -242,6 +250,7 @@
       { id: "g-mlp-gen-trained", name: "MLP-GAN Generate (pre-trained)", schemaId: sid, trainerId: "t-mlp-gan-trained", family: "gan", config: { method: "random", numSamples: 16, temperature: 1.0, seed: 42 }, status: "draft", runs: [], createdAt: Date.now() },
       { id: "g-dcgan-gen-trained", name: "DCGAN Generate (pre-trained)", schemaId: sid, trainerId: "t-dcgan-trained",   family: "gan", config: { method: "random", numSamples: 16, temperature: 1.0, seed: 42 }, status: "draft", runs: [], createdAt: Date.now() },
       { id: "g-mlp-wgan-gen",   name: "MLP-WGAN Generate",              schemaId: sid, trainerId: "t-mlp-wgan",        family: "gan", config: { method: "random", numSamples: 16, temperature: 1.0, seed: 42 }, status: "draft", runs: [], createdAt: Date.now() },
+      { id: "g-mlp-wgan-gen-trained", name: "MLP-WGAN Generate (pre-trained)", schemaId: sid, trainerId: "t-mlp-wgan-trained", family: "gan", config: { method: "random", numSamples: 16, temperature: 1.0, seed: 42 }, status: "draft", runs: [], createdAt: Date.now() },
     ],
     evaluations: [],
   };

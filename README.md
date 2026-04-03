@@ -53,7 +53,7 @@ Real adversarial training with no hardcoded GAN logic — everything from Drawfl
 | 2 | DCGAN (BatchNorm + LeakyReLU) | BCE + label smoothing | Radford 2016 |
 | 3 | MLP-WGAN (linear critic) | Wasserstein | Arjovsky 2017 |
 
-Pre-trained MLP-GAN included — generate T-shirt images immediately.
+Pre-trained MLP-GAN and MLP-WGAN included — generate T-shirt images immediately.
 
 ### [Fashion-MNIST Diffusion](demo/Fashion-MNIST-Diffusion/) — 4 Denoising Models
 
