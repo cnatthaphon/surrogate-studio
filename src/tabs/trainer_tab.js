@@ -436,53 +436,13 @@
           (t.modelArtifacts.weightData || t.modelArtifacts.weightValues);
         if (hasWeights) {
           try {
-            // reconstruct flat float array from either ArrayBuffer or values array
-            var flatWeights;
-            if (t.modelArtifacts.weightValues && Array.isArray(t.modelArtifacts.weightValues)) {
-              flatWeights = new Float32Array(t.modelArtifacts.weightValues);
-            } else if (t.modelArtifacts.weightData && t.modelArtifacts.weightData.byteLength) {
-              flatWeights = new Float32Array(t.modelArtifacts.weightData);
-            } else {
-              throw new Error("No weight data available");
+            var converter = (typeof window !== "undefined" && window.OSCWeightConverter) ? window.OSCWeightConverter : null;
+            if (!converter || typeof converter.loadArtifactsIntoModel !== "function") {
+              throw new Error("Weight converter not available");
             }
-
-            // load by order: match saved specs to rebuilt model weights
-            // detect if weights come from PyTorch (transposed) by checking saved specs
-            var savedSpecs = t.modelArtifacts.weightSpecs || [];
-            var isPytorch = savedSpecs.length > 0 && savedSpecs[0].name && savedSpecs[0].name.match(/^\d+\./);
-            var modelWeights = rebuiltModel.model.getWeights();
-            var newWeights = [];
-            var readOffset = 0;
-            for (var wi = 0; wi < modelWeights.length; wi++) {
-              var wShape = modelWeights[wi].shape;
-              var wSize = wShape.reduce(function (a, b) { return a * b; }, 1);
-              if (readOffset + wSize <= flatWeights.length) {
-                var raw = flatWeights.subarray(readOffset, readOffset + wSize);
-                // PyTorch Dense weights are [out, in], TF.js expects [in, out] — transpose 2D matrices
-                if (isPytorch && wShape.length === 2 && savedSpecs[wi] && savedSpecs[wi].shape && savedSpecs[wi].shape.length === 2) {
-                  var pyShape = savedSpecs[wi].shape; // [out, in]
-                  if (pyShape[0] === wShape[1] && pyShape[1] === wShape[0]) {
-                    // needs transpose
-                    var transposed = new Float32Array(wSize);
-                    var rows = pyShape[0], cols = pyShape[1];
-                    for (var tr = 0; tr < rows; tr++) {
-                      for (var tc = 0; tc < cols; tc++) {
-                        transposed[tc * rows + tr] = raw[tr * cols + tc];
-                      }
-                    }
-                    newWeights.push(tf.tensor(transposed, wShape));
-                    readOffset += wSize;
-                    continue;
-                  }
-                }
-                newWeights.push(tf.tensor(raw, wShape));
-                readOffset += wSize;
-              }
-            }
-            if (newWeights.length === modelWeights.length) {
-              rebuiltModel.model.setWeights(newWeights);
-            } else {
-              console.warn("[test] Weight count mismatch: model=" + modelWeights.length + " loaded=" + newWeights.length);
+            var loadResult = converter.loadArtifactsIntoModel(tf, rebuiltModel.model, t.modelArtifacts);
+            if (!loadResult || !loadResult.loaded) {
+              throw new Error(loadResult && loadResult.reason ? loadResult.reason : "weight_load_failed");
             }
           } catch (e) {
             console.warn("[test] Weight load failed:", e.message);

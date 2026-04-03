@@ -92,6 +92,135 @@
     return out;
   }
 
+  function _stripSuffix(name) {
+    return String(name || "").replace(/_\d+$/, "");
+  }
+
+  function _sameShape(a, b) {
+    if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false;
+    for (var i = 0; i < a.length; i++) if (Number(a[i]) !== Number(b[i])) return false;
+    return true;
+  }
+
+  function canonicalizeWeightName(rawName) {
+    var name = _stripSuffix(rawName);
+    if (!name) return "";
+    if (name.indexOf("tfjs_") === 0) name = name.slice(5);
+    if (name.indexOf("/") >= 0) return _stripSuffix(name);
+
+    var m = name.match(/^(dense|conv1d|conv2d|convt2d|embed)_(\d+)\.(weight|bias)$/);
+    if (m) return "n" + m[2] + "/" + (m[3] === "weight" ? "kernel" : "bias");
+
+    m = name.match(/^(bn|ln)_(\d+)\.(weight|bias|running_mean|running_var)$/);
+    if (m) {
+      var tailMap = {
+        weight: "gamma",
+        bias: "beta",
+        running_mean: "moving_mean",
+        running_var: "moving_variance",
+      };
+      return "n" + m[2] + "/" + tailMap[m[3]];
+    }
+
+    m = name.match(/^(rnn|gru|lstm)_(\d+)\.(kernel|recurrent_kernel|bias)$/);
+    if (m) return "n" + m[2] + "/" + m[3];
+
+    return name;
+  }
+
+  function extractWeightValues(artifacts) {
+    if (!artifacts) return null;
+    if (artifacts.weightValues && Array.isArray(artifacts.weightValues)) return new Float32Array(artifacts.weightValues);
+    if (artifacts.weightData && artifacts.weightData.byteLength) return new Float32Array(artifacts.weightData);
+    return null;
+  }
+
+  function loadArtifactsIntoModel(tf, model, artifacts) {
+    if (!tf || !model || !artifacts) return { loaded: false, reason: "missing_inputs" };
+    var values = extractWeightValues(artifacts);
+    if (!values) return { loaded: false, reason: "missing_weight_values" };
+    var specs = Array.isArray(artifacts.weightSpecs) ? artifacts.weightSpecs.slice() : [];
+
+    if (isPytorchWeights(specs)) {
+      var converted = pytorchToTfjs(specs, values);
+      specs = converted.specs || [];
+      values = converted.values || values;
+    }
+
+    var modelWeights = model.weights || [];
+    var current = model.getWeights();
+    var matched = 0;
+    var namedSpecs = 0;
+    var offset = 0;
+    var savedMap = {};
+    var matchedSpecKeys = {};
+
+    specs.forEach(function (sp, idx) {
+      var shape = Array.isArray(sp.shape) ? sp.shape.slice() : [];
+      var size = shape.reduce(function (a, b) { return a * b; }, 1);
+      var key = canonicalizeWeightName(sp.name || "");
+      if (key) {
+        namedSpecs++;
+        savedMap[key] = { offset: offset, size: size, shape: shape, rawName: sp.name || "", index: idx };
+      }
+      offset += size;
+    });
+
+    if (namedSpecs > 0 && modelWeights.length) {
+      for (var i = 0; i < modelWeights.length; i++) {
+        var mw = modelWeights[i];
+        var key = canonicalizeWeightName(mw.name);
+        var saved = savedMap[key];
+        if (!saved) continue;
+        var expectedSize = mw.shape.reduce(function (a, b) { return a * b; }, 1);
+        if (saved.size !== expectedSize) continue;
+        if (saved.shape.length && !_sameShape(saved.shape, mw.shape)) continue;
+        current[i] = tf.tensor(values.subarray(saved.offset, saved.offset + saved.size), mw.shape);
+        matched++;
+        matchedSpecKeys[key] = true;
+      }
+      var matchedNamedSpecs = Object.keys(matchedSpecKeys).length;
+      if (matchedNamedSpecs === namedSpecs && matched > 0) {
+        model.setWeights(current);
+        return {
+          loaded: true,
+          mode: "name",
+          matched: matched,
+          namedSpecs: namedSpecs,
+          totalModelWeights: modelWeights.length,
+        };
+      }
+    }
+
+    // Fallback: positional slice copy for legacy artifacts without usable names.
+    var mwVals = model.getWeights();
+    var out = [];
+    var off2 = 0;
+    for (var wi = 0; wi < mwVals.length; wi++) {
+      var sz = mwVals[wi].shape.reduce(function (a, b) { return a * b; }, 1);
+      if (off2 + sz > values.length) break;
+      out.push(tf.tensor(values.subarray(off2, off2 + sz), mwVals[wi].shape));
+      off2 += sz;
+    }
+    if (out.length === mwVals.length) {
+      model.setWeights(out);
+      return {
+        loaded: true,
+        mode: "positional",
+        matched: out.length,
+        namedSpecs: namedSpecs,
+        totalModelWeights: mwVals.length,
+      };
+    }
+    return {
+      loaded: false,
+      reason: "weight_count_mismatch",
+      matched: matched,
+      namedSpecs: namedSpecs,
+      totalModelWeights: modelWeights.length || mwVals.length || 0,
+    };
+  }
+
   /**
    * Convert PyTorch weight specs to TF.js format.
    *
@@ -242,13 +371,17 @@
     if (!specs || !specs.length) return false;
     return specs.some(function (s) {
       var n = s.name || "";
-      return n.match(/^\d+\./) || n.indexOf("weight_ih") >= 0 || n.indexOf("rnn_") >= 0 || n.indexOf("dense_") >= 0 && n.indexOf("Dense") < 0;
+      if (n.indexOf("tfjs_") === 0 || n.indexOf("/") >= 0) return false;
+      return n.match(/^\d+\./) || n.indexOf("weight_ih") >= 0 || n.indexOf("weight_hh") >= 0 || n.indexOf("rnn_") >= 0;
     });
   }
 
   return {
     pytorchToTfjs: pytorchToTfjs,
     isPytorchWeights: isPytorchWeights,
+    canonicalizeWeightName: canonicalizeWeightName,
+    extractWeightValues: extractWeightValues,
+    loadArtifactsIntoModel: loadArtifactsIntoModel,
     _transpose2D: _transpose2D,
     _lstmGatesPyToTf: _lstmGatesPyToTf,
     _lstmGatesTfToPy: _lstmGatesTfToPy,

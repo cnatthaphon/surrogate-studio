@@ -704,33 +704,9 @@
     }
 
     function _loadWeights(tf, model, artifacts) {
-      var fw;
-      if (artifacts.weightValues && Array.isArray(artifacts.weightValues)) {
-        fw = new Float32Array(artifacts.weightValues);
-      } else if (artifacts.weightData && artifacts.weightData.byteLength) {
-        fw = new Float32Array(artifacts.weightData);
-      }
-      if (!fw) return;
-      var savedSpecs = artifacts.weightSpecs || [];
-      var isPy = savedSpecs.length > 0 && savedSpecs[0].name && savedSpecs[0].name.match(/^\d+\./);
-      var mw = model.getWeights();
-      var nw = []; var off = 0;
-      for (var i = 0; i < mw.length; i++) {
-        var sz = mw[i].shape.reduce(function (a, b) { return a * b; }, 1);
-        if (off + sz > fw.length) break;
-        var raw = fw.subarray(off, off + sz);
-        if (isPy && mw[i].shape.length === 2 && savedSpecs[i] && savedSpecs[i].shape && savedSpecs[i].shape.length === 2 &&
-            savedSpecs[i].shape[0] === mw[i].shape[1] && savedSpecs[i].shape[1] === mw[i].shape[0]) {
-          var tr = new Float32Array(sz);
-          var rows = savedSpecs[i].shape[0], cols = savedSpecs[i].shape[1];
-          for (var ti = 0; ti < rows; ti++) for (var tj = 0; tj < cols; tj++) tr[tj * rows + ti] = raw[ti * cols + tj];
-          nw.push(tf.tensor(tr, mw[i].shape));
-        } else {
-          nw.push(tf.tensor(raw, mw[i].shape));
-        }
-        off += sz;
-      }
-      if (nw.length === mw.length) model.setWeights(nw);
+      var converter = (typeof window !== "undefined" && window.OSCWeightConverter) ? window.OSCWeightConverter : null;
+      if (!converter || typeof converter.loadArtifactsIntoModel !== "function") return;
+      converter.loadArtifactsIntoModel(tf, model, artifacts);
     }
 
     function _computeDiversity(samples) {
