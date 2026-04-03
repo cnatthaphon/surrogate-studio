@@ -7,6 +7,18 @@
     return null;
   }
 
+  function resolveRestoreBestWeights(spec) {
+    const cfg = spec && typeof spec === "object" ? spec : {};
+    if (typeof cfg.restoreBestWeights === "boolean") return cfg.restoreBestWeights;
+    const weightSelection = String(cfg.weightSelection || "").trim().toLowerCase();
+    if (weightSelection === "last") return false;
+    if (weightSelection === "best") return true;
+    if (Array.isArray(cfg.trainingSchedule) && cfg.trainingSchedule.length) return false;
+    const heads = Array.isArray(cfg.headConfigs) ? cfg.headConfigs : [];
+    if (heads.some(h => String((h && h.phase) || "").trim() !== "")) return false;
+    return true;
+  }
+
   function runTrainingInWorker(rawSpec, rawDeps) {
     const spec = rawSpec && typeof rawSpec === "object" ? rawSpec : {};
     const deps = rawDeps && typeof rawDeps === "object" ? rawDeps : {};
@@ -64,7 +76,7 @@
       minLr: Number(spec.minLr || 1e-6),
       gradClipNorm: Number(spec.gradClipNorm || 0),
       gradClipValue: Number(spec.gradClipValue || 0),
-      restoreBestWeights: spec.restoreBestWeights !== false,
+      restoreBestWeights: resolveRestoreBestWeights(spec),
       earlyStoppingPatience: Number(spec.earlyStoppingPatience || 0),
       useTfvis: false,
     };

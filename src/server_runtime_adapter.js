@@ -26,6 +26,18 @@
 
   var DEFAULT_SERVER = "http://localhost:3777";
 
+  function resolveRestoreBestWeights(spec) {
+    var cfg = spec && typeof spec === "object" ? spec : {};
+    if (typeof cfg.restoreBestWeights === "boolean") return cfg.restoreBestWeights;
+    var weightSelection = String(cfg.weightSelection || "").trim().toLowerCase();
+    if (weightSelection === "last") return false;
+    if (weightSelection === "best") return true;
+    if (Array.isArray(cfg.trainingSchedule) && cfg.trainingSchedule.length) return false;
+    var heads = Array.isArray(cfg.headConfigs) ? cfg.headConfigs : [];
+    if (heads.some(function (h) { return String((h && h.phase) || "").trim() !== ""; })) return false;
+    return true;
+  }
+
   /**
    * POST JSON to server — gzip compressed if payload is large.
    * Uses CompressionStream (native browser API) to avoid V8 string limit.
@@ -150,7 +162,8 @@
       optimizerEpsilon: spec.optimizerEpsilon != null ? Number(spec.optimizerEpsilon) : undefined,
       lrSchedulerType: String(spec.lrSchedulerType || "plateau"),
       earlyStoppingPatience: spec.earlyStoppingPatience != null ? Number(spec.earlyStoppingPatience) : 5,
-      restoreBestWeights: spec.restoreBestWeights !== false,
+      restoreBestWeights: resolveRestoreBestWeights(spec),
+      weightSelection: String(spec.weightSelection || ""),
       gradClipNorm: Number(spec.gradClipNorm || 0),
       lrPatience: Number(spec.lrPatience || 3),
       lrFactor: Number(spec.lrFactor || 0.5),

@@ -48,6 +48,18 @@
     };
   }
 
+  function resolveRestoreBestWeights(raw, headConfigs) {
+    var cfg = raw && typeof raw === "object" ? raw : {};
+    if (typeof cfg.restoreBestWeights === "boolean") return cfg.restoreBestWeights;
+    var weightSelection = String(cfg.weightSelection || "").trim().toLowerCase();
+    if (weightSelection === "last") return false;
+    if (weightSelection === "best") return true;
+    if (Array.isArray(cfg.trainingSchedule) && cfg.trainingSchedule.length) return false;
+    var heads = Array.isArray(headConfigs) ? headConfigs : [];
+    if (heads.some(function (h) { return String((h && h.phase) || "").trim() !== ""; })) return false;
+    return true;
+  }
+
   function createOptimizerByType(tf, type, lr, rawCfg) {
     var optCfg = rawCfg && rawCfg.type ? rawCfg : resolveOptimizerConfig(Object.assign({}, rawCfg || {}, { optimizerType: type }));
     var t = normalizeOptimizerType(optCfg.type || type, "adam");
@@ -267,10 +279,11 @@
     var minLr = Math.max(1e-8, Number(opts.minLr) || 1e-6);
     var gradClipNorm = Math.max(0, Number(opts.gradClipNorm) || 0);
     var gradClipValue = Math.max(0, Number(opts.gradClipValue) || 0);
-    var restoreBestWeights = opts.restoreBestWeights !== false;
+    var restoreBestWeights = resolveRestoreBestWeights(opts, headConfigs);
     var earlyStoppingPatienceRaw = Number(opts.earlyStoppingPatience);
     var earlyStoppingPatience = Number.isFinite(earlyStoppingPatienceRaw) && earlyStoppingPatienceRaw > 0
       ? Math.max(1, Math.floor(earlyStoppingPatienceRaw)) : 0;
+    var restoreBestWeights = resolveRestoreBestWeights(opts, headConfigs);
 
     var currentLr = requestedLr;
     var optimizer = createOptimizerByType(tf, optimizerType, currentLr, optimizerCfg);

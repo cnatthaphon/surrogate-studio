@@ -121,6 +121,18 @@
       };
     }
 
+    function _resolveRestoreBestWeights(config, headConfigs) {
+      var cfg = config && typeof config === "object" ? config : {};
+      if (typeof cfg.restoreBestWeights === "boolean") return cfg.restoreBestWeights;
+      var weightSelection = String(cfg.weightSelection || "").trim().toLowerCase();
+      if (weightSelection === "last") return false;
+      if (weightSelection === "best") return true;
+      if (Array.isArray(cfg.trainingSchedule) && cfg.trainingSchedule.length) return false;
+      var heads = Array.isArray(headConfigs) ? headConfigs : [];
+      if (heads.some(function (h) { return String((h && h.phase) || "").trim() !== ""; })) return false;
+      return true;
+    }
+
     function _getClientBackendAvailability(tf) {
       var out = { cpu: true, webgl: false, webgpu: false, wasm: false };
       if (!tf) return out;
@@ -1184,7 +1196,7 @@
         optimizerRho: config.optimizerRho != null ? config.optimizerRho : 0.9,
         optimizerEpsilon: config.optimizerEpsilon != null ? config.optimizerEpsilon : 0.0000001,
         earlyStoppingPatience: config.earlyStoppingPatience != null ? config.earlyStoppingPatience : 5,
-        restoreBestWeights: config.restoreBestWeights !== false, lrPatience: config.lrPatience || 3,
+        restoreBestWeights: _resolveRestoreBestWeights(config), lrPatience: config.lrPatience || 3,
         lrFactor: config.lrFactor || 0.5, minLr: config.minLr || 0.000001,
         gradClipNorm: config.gradClipNorm || 0, gradClipValue: config.gradClipValue || 0,
       };
@@ -1786,7 +1798,8 @@
           optimizerEpsilon: config.optimizerEpsilon != null ? Number(config.optimizerEpsilon) : undefined,
           lrSchedulerType: String(config.lrSchedulerType || "plateau"),
           earlyStoppingPatience: config.earlyStoppingPatience != null ? Number(config.earlyStoppingPatience) : 5,
-          restoreBestWeights: config.restoreBestWeights !== false,
+          restoreBestWeights: _resolveRestoreBestWeights(config, buildResult.headConfigs),
+          weightSelection: String(config.weightSelection || ""),
           gradClipNorm: Number(config.gradClipNorm || 0),
           lrPatience: Number(config.lrPatience || 3),
           lrFactor: Number(config.lrFactor || 0.5),
@@ -1960,7 +1973,7 @@
             lrSchedulerType: String(config.lrSchedulerType || "plateau"),
             useLrScheduler: String(config.lrSchedulerType || "plateau") !== "none",
             earlyStoppingPatience: config.earlyStoppingPatience != null ? Number(config.earlyStoppingPatience) : 5,
-            restoreBestWeights: config.restoreBestWeights !== false,
+            restoreBestWeights: _resolveRestoreBestWeights(config, buildResult.headConfigs),
             lrPatience: Number(config.lrPatience || 3),
             lrFactor: Number(config.lrFactor || 0.5),
             minLr: Number(config.minLr || 0.000001),
@@ -2073,7 +2086,7 @@
           optimizerEpsilon: config.optimizerEpsilon != null ? Number(config.optimizerEpsilon) : undefined,
           lrSchedulerType: String(config.lrSchedulerType || "plateau"),
           earlyStoppingPatience: config.earlyStoppingPatience != null ? Number(config.earlyStoppingPatience) : 5,
-          restoreBestWeights: config.restoreBestWeights !== false,
+          restoreBestWeights: _resolveRestoreBestWeights(config, buildResult.headConfigs),
           lrPatience: Number(config.lrPatience || 3),
           lrFactor: Number(config.lrFactor || 0.5),
           minLr: Number(config.minLr || 0.000001),

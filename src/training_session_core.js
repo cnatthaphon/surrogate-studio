@@ -23,6 +23,18 @@
     return "run-" + Date.now().toString(36) + "-" + Math.floor(Math.random() * 1e6).toString(36);
   }
 
+  function resolveRestoreBestWeights(rawSpec) {
+    const spec = rawSpec && typeof rawSpec === "object" ? rawSpec : {};
+    if (typeof spec.restoreBestWeights === "boolean") return spec.restoreBestWeights;
+    const weightSelection = String(spec.weightSelection || "").trim().toLowerCase();
+    if (weightSelection === "last") return false;
+    if (weightSelection === "best") return true;
+    if (Array.isArray(spec.trainingSchedule) && spec.trainingSchedule.length) return false;
+    const heads = Array.isArray(spec.headConfigs) ? spec.headConfigs : [];
+    if (heads.some(function (h) { return String((h && h.phase) || "").trim() !== ""; })) return false;
+    return true;
+  }
+
   function createWorkerTrainSpec(rawSpec) {
     const spec = rawSpec && typeof rawSpec === "object" ? rawSpec : {};
     const runtimeConfig = spec.runtimeConfig || { runtimeId: "js_client", backend: "auto", transport: "inproc", endpoint: "" };
@@ -48,7 +60,7 @@
       minLr: Math.max(1e-10, toNum(spec.minLr, 1e-6)),
       gradClipNorm: Math.max(0, toNum(spec.gradClipNorm, 0)),
       gradClipValue: Math.max(0, toNum(spec.gradClipValue, 0)),
-      restoreBestWeights: toBool(spec.restoreBestWeights, true),
+      restoreBestWeights: resolveRestoreBestWeights(spec),
       earlyStoppingPatience: Math.max(0, Math.floor(toNum(spec.earlyStoppingPatience, 0))),
       onEpochData: typeof spec.onEpochData === "function" ? spec.onEpochData : null,
       onStatus: typeof spec.onStatus === "function" ? spec.onStatus : null,

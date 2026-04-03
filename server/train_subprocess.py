@@ -59,6 +59,21 @@ def _resolve_optimizer_config(config):
         "epsilon": max(1e-8, _cfg_float(config.get("optimizerEpsilon", opt.get("epsilon", 1e-8)), 1e-8)),
     }
 
+def _resolve_restore_best_weights(config, head_configs):
+    if isinstance(config.get("restoreBestWeights"), bool):
+        return bool(config.get("restoreBestWeights"))
+    weight_selection = str(config.get("weightSelection", "") or "").strip().lower()
+    if weight_selection == "last":
+        return False
+    if weight_selection == "best":
+        return True
+    schedule = config.get("trainingSchedule")
+    if isinstance(schedule, list) and len(schedule) > 0:
+        return False
+    if any(str((hc or {}).get("phase", "") or "").strip() for hc in (head_configs or [])):
+        return False
+    return True
+
 def main():
     if len(sys.argv) < 2:
         error("Usage: train_subprocess.py <config.json>")
@@ -442,7 +457,7 @@ def main():
             break
 
     # Restore best weights (from config — default true for supervised, false for GAN)
-    restore_best = config.get("restoreBestWeights", True)
+    restore_best = _resolve_restore_best_weights(config, head_configs)
     if restore_best and best_state:
         model.load_state_dict(best_state)
 

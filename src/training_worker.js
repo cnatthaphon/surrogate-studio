@@ -83,6 +83,18 @@
     };
   }
 
+  function resolveRestoreBestWeights(raw, headConfigs) {
+    const cfg = raw && typeof raw === "object" ? raw : {};
+    if (typeof cfg.restoreBestWeights === "boolean") return cfg.restoreBestWeights;
+    const weightSelection = String(cfg.weightSelection || "").trim().toLowerCase();
+    if (weightSelection === "last") return false;
+    if (weightSelection === "best") return true;
+    if (Array.isArray(cfg.trainingSchedule) && cfg.trainingSchedule.length) return false;
+    const heads = Array.isArray(headConfigs) ? headConfigs : [];
+    if (heads.some(h => String((h && h.phase) || "").trim() !== "")) return false;
+    return true;
+  }
+
   function createOptimizerByType(type, lr, rawCfg) {
     const optCfg = rawCfg && rawCfg.type ? rawCfg : resolveOptimizerConfig(Object.assign({}, rawCfg || {}, { optimizerType: type }));
     const v = normalizeOptimizerType(optCfg.type || type, "adam");
@@ -446,7 +458,7 @@
     const minLr = Math.max(1e-8, Number(message.minLr || 1e-6));
     const gradClipNorm = Math.max(0, Number(message.gradClipNorm || 0));
     const gradClipValue = Math.max(0, Number(message.gradClipValue || 0));
-    const restoreBestWeights = message.restoreBestWeights !== false;
+    const restoreBestWeights = resolveRestoreBestWeights(message, headConfigs);
     const earlyStoppingPatienceRaw = Number(message.earlyStoppingPatience);
     const earlyStoppingPatience = Number.isFinite(earlyStoppingPatienceRaw) && earlyStoppingPatienceRaw > 0
       ? Math.max(1, Math.floor(earlyStoppingPatienceRaw))
