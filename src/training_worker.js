@@ -66,17 +66,35 @@
     return String(fallback || "adam");
   }
 
-  function createOptimizerByType(type, lr) {
-    const v = normalizeOptimizerType(type, "adam");
+  function numOr(v, fallback) {
+    const n = Number(v);
+    return Number.isFinite(n) ? n : fallback;
+  }
+
+  function resolveOptimizerConfig(raw) {
+    const cfg = raw || {};
+    return {
+      type: normalizeOptimizerType(cfg.optimizerType, "adam"),
+      beta1: Math.max(0, Math.min(0.999999, numOr(cfg.optimizerBeta1, 0.9))),
+      beta2: Math.max(0, Math.min(0.999999, numOr(cfg.optimizerBeta2, 0.999))),
+      momentum: Math.max(0, numOr(cfg.optimizerMomentum, 0)),
+      rho: Math.max(0, Math.min(0.999999, numOr(cfg.optimizerRho, 0.9))),
+      epsilon: Math.max(1e-8, numOr(cfg.optimizerEpsilon, 1e-7)),
+    };
+  }
+
+  function createOptimizerByType(type, lr, rawCfg) {
+    const optCfg = rawCfg && rawCfg.type ? rawCfg : resolveOptimizerConfig(Object.assign({}, rawCfg || {}, { optimizerType: type }));
+    const v = normalizeOptimizerType(optCfg.type || type, "adam");
     const learningRate = Math.max(1e-8, Number(lr) || 1e-3);
-    if (v === "sgd") return tf.train.sgd(learningRate);
-    if (v === "momentum") return tf.train.momentum(learningRate, 0.9, true);
-    if (v === "nesterov") return tf.train.momentum(learningRate, 0.9, true);
-    if (v === "rmsprop") return tf.train.rmsprop(learningRate);
+    if (v === "sgd") return optCfg.momentum > 0 ? tf.train.momentum(learningRate, optCfg.momentum, false) : tf.train.sgd(learningRate);
+    if (v === "momentum") return tf.train.momentum(learningRate, optCfg.momentum || 0.9, false);
+    if (v === "nesterov") return tf.train.momentum(learningRate, optCfg.momentum || 0.9, true);
+    if (v === "rmsprop") return tf.train.rmsprop(learningRate, optCfg.rho, optCfg.momentum, optCfg.epsilon, false);
     if (v === "adadelta") return tf.train.adadelta(learningRate);
     if (v === "adagrad") return tf.train.adagrad(learningRate);
     if (v === "adamax") return tf.train.adamax(learningRate);
-    return tf.train.adam(learningRate);
+    return tf.train.adam(learningRate, optCfg.beta1, optCfg.beta2, optCfg.epsilon);
   }
 
   function mapLossAlias(lossName, fallback) {
@@ -402,7 +420,8 @@
       metrics.push("mae");
     });
 
-    const optimizerType = normalizeOptimizerType(message.optimizerType, "adam");
+    const optimizerCfg = resolveOptimizerConfig(message);
+    const optimizerType = optimizerCfg.type;
     const requestedLr = Math.max(1e-8, Number(message.learningRate || 1e-3));
     const lrSchedulerType = normalizeLrSchedulerType(message.lrSchedulerType, message.useLrScheduler === false ? "none" : "plateau");
     const useLrScheduler = lrSchedulerType !== "none";
@@ -418,7 +437,7 @@
       : 0;
 
     let currentLr = requestedLr;
-    const optimizer = createOptimizerByType(optimizerType, currentLr);
+    const optimizer = createOptimizerByType(optimizerType, currentLr, optimizerCfg);
     applyGradClip(optimizer, gradClipNorm, gradClipValue);
 
     const trySetLearningRate = function (nextLr) {

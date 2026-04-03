@@ -634,7 +634,7 @@
       function _clipTrainableWeights(clipVal) {
         if (!(clipVal > 0) || !model.layers) return;
         model.layers.forEach(function (l) {
-          if (l._weightTag && l.trainable && l.trainableWeights) {
+          if (l.trainable && l.trainableWeights) {
             l.trainableWeights.forEach(function (w) {
               var v = w.read();
               var clipped = tf.clipByValue(v, -clipVal, clipVal);
@@ -648,10 +648,11 @@
       // Training step: optimizer.minimize with model.apply.
       // Reads labels from model output when graphLabelOutputIdx is set.
       function _trainStep(stepOpt, xFull, yFull, clipVal) {
-        // Collect trainable variables — only layers with weightTag (set by _freezeByStep)
+        // Collect all currently trainable variables. Phased freeze logic controls tags;
+        // untagged layers keep their declared trainable state.
         var vars = [];
         model.layers.forEach(function (l) {
-          if (l._weightTag && l.trainable && l.trainableWeights) {
+          if (l.trainable && l.trainableWeights) {
             l.trainableWeights.forEach(function (w) { vars.push(w.read()); });
           }
         });

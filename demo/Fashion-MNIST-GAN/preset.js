@@ -43,9 +43,9 @@
     // Generator (tagged "generator") — LayerNorm prevents mode collapse by forcing z-dependent statistics
     var z =    N(d, "sample_z",     { dim: 128, distribution: "normal" },         80, 60);
     var g1 =   N(d, "dense",        { units: 256, activation: "relu", weightTag: "generator", blockName: "G1" }, 200, 60);
-    var gbn1 = N(d, "layernorm",    {},                                                                          280, 60);
+    var gbn1 = N(d, "layernorm",    { weightTag: "generator", blockName: "G1_norm" },                           280, 60);
     var g2 =   N(d, "dense",        { units: 512, activation: "relu", weightTag: "generator", blockName: "G2" }, 360, 60);
-    var gbn2 = N(d, "layernorm",    {},                                                                          440, 60);
+    var gbn2 = N(d, "layernorm",    { weightTag: "generator", blockName: "G2_norm" },                           440, 60);
     var g3 =   N(d, "dense",        { units: 784, activation: "sigmoid", weightTag: "generator", blockName: "G3" }, 520, 60);
     var gOut = N(d, "output",       { target: "none", targetType: "none", loss: "none", matchWeight: 0, phase: "generator", headType: "reconstruction" }, 640, 60);
     C(d, z, g1); C(d, g1, gbn1); C(d, gbn1, g2); C(d, g2, gbn2); C(d, gbn2, g3); C(d, g3, gOut);
@@ -92,10 +92,10 @@
     // Conv Generator (Radford 2015) — BatchNorm + ReLU
     var z =    N(d, "sample_z",          { dim: 128, distribution: "normal" },    80, 60);
     var gd =   N(d, "dense",             { units: 6272, activation: "relu", weightTag: "generator" }, 200, 60);
-    var gbn1 = N(d, "batchnorm",         {},                                     300, 60);
+    var gbn1 = N(d, "batchnorm",         { weightTag: "generator", blockName: "G_bn1" }, 300, 60);
     var gr =   N(d, "reshape",           { targetShape: "7,7,128" },             400, 60);
     var gc1 =  N(d, "conv2d_transpose",  { filters: 64, kernelSize: 4, strides: 2, padding: "same", activation: "relu", weightTag: "generator" }, 560, 60);
-    var gbn2 = N(d, "batchnorm",         {},                                     640, 60);
+    var gbn2 = N(d, "batchnorm",         { weightTag: "generator", blockName: "G_bn2" }, 640, 60);
     var gc2 =  N(d, "conv2d_transpose",  { filters: 1, kernelSize: 4, strides: 2, padding: "same", activation: "sigmoid", weightTag: "generator" }, 720, 60);
     var gf =   N(d, "flatten",           {},                                     880, 60);
     var gOut = N(d, "output",            { target: "none", targetType: "none", loss: "none", matchWeight: 0, phase: "generator", headType: "reconstruction" }, 1040, 60);
@@ -112,7 +112,7 @@
     var dc1 =  N(d, "conv2d",            { filters: 64, kernelSize: 4, strides: 2, padding: "same", activation: "linear", weightTag: "discriminator" }, 820, 200);
     var dlr1 = N(d, "leaky_relu",        { alpha: 0.2 },                         880, 200);
     var dc2 =  N(d, "conv2d",            { filters: 128, kernelSize: 4, strides: 2, padding: "same", activation: "linear", weightTag: "discriminator" }, 940, 200);
-    var dbn1 = N(d, "batchnorm",         {},                                     1000, 200);
+    var dbn1 = N(d, "batchnorm",         { weightTag: "discriminator", blockName: "D_bn1" }, 1000, 200);
     var dlr2 = N(d, "leaky_relu",        { alpha: 0.2 },                         1060, 200);
     var df =   N(d, "flatten",           {},                                     1140, 200);
     var dd =   N(d, "dense",             { units: 1, activation: "sigmoid", weightTag: "discriminator" }, 1300, 200);
@@ -143,9 +143,9 @@
     // Generator — same as MLP-GAN
     var z =    N(d, "sample_z",     { dim: 128, distribution: "normal" },         80, 60);
     var g1 =   N(d, "dense",        { units: 256, activation: "relu", weightTag: "generator", blockName: "G1" }, 200, 60);
-    var gbn1 = N(d, "layernorm",    {},                                                                          280, 60);
+    var gbn1 = N(d, "layernorm",    { weightTag: "generator", blockName: "G1_norm" },                           280, 60);
     var g2 =   N(d, "dense",        { units: 512, activation: "relu", weightTag: "generator", blockName: "G2" }, 360, 60);
-    var gbn2 = N(d, "layernorm",    {},                                                                          440, 60);
+    var gbn2 = N(d, "layernorm",    { weightTag: "generator", blockName: "G2_norm" },                           440, 60);
     var g3 =   N(d, "dense",        { units: 784, activation: "sigmoid", weightTag: "generator", blockName: "G3" }, 520, 60);
     var gOut = N(d, "output",       { target: "none", targetType: "none", loss: "none", matchWeight: 0, phase: "generator", headType: "reconstruction" }, 640, 60);
     C(d, z, g1); C(d, g1, gbn1); C(d, gbn1, g2); C(d, g2, gbn2); C(d, gbn2, g3); C(d, g3, gOut);

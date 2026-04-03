@@ -415,6 +415,12 @@
       epochs: Math.max(1, Math.floor(Number(c.epochs) || 40)),
       batchSize: Math.max(1, Math.floor(Number(c.batchSize) || 256)),
       learningRate: Number.isFinite(Number(c.learningRate)) ? Number(c.learningRate) : 1e-3,
+      optimizerType: String(c.optimizerType || "adam"),
+      optimizerBeta1: Number.isFinite(Number(c.optimizerBeta1)) ? Number(c.optimizerBeta1) : undefined,
+      optimizerBeta2: Number.isFinite(Number(c.optimizerBeta2)) ? Number(c.optimizerBeta2) : undefined,
+      optimizerMomentum: Number.isFinite(Number(c.optimizerMomentum)) ? Number(c.optimizerMomentum) : undefined,
+      optimizerRho: Number.isFinite(Number(c.optimizerRho)) ? Number(c.optimizerRho) : undefined,
+      optimizerEpsilon: Number.isFinite(Number(c.optimizerEpsilon)) ? Number(c.optimizerEpsilon) : undefined,
       useLrScheduler: c.useLrScheduler !== false,
       lrPatience: Math.max(1, Math.floor(Number(c.lrPatience) || 3)),
       lrFactor: Number.isFinite(Number(c.lrFactor)) ? Number(c.lrFactor) : 0.5,
@@ -440,6 +446,11 @@
     if (s.batchSize != null && trainCfgRaw.batchSize == null) trainCfgRaw.batchSize = s.batchSize;
     if (s.learningRate != null && trainCfgRaw.learningRate == null) trainCfgRaw.learningRate = s.learningRate;
     if (s.optimizerType != null && trainCfgRaw.optimizerType == null) trainCfgRaw.optimizerType = s.optimizerType;
+    if (s.optimizerBeta1 != null && trainCfgRaw.optimizerBeta1 == null) trainCfgRaw.optimizerBeta1 = s.optimizerBeta1;
+    if (s.optimizerBeta2 != null && trainCfgRaw.optimizerBeta2 == null) trainCfgRaw.optimizerBeta2 = s.optimizerBeta2;
+    if (s.optimizerMomentum != null && trainCfgRaw.optimizerMomentum == null) trainCfgRaw.optimizerMomentum = s.optimizerMomentum;
+    if (s.optimizerRho != null && trainCfgRaw.optimizerRho == null) trainCfgRaw.optimizerRho = s.optimizerRho;
+    if (s.optimizerEpsilon != null && trainCfgRaw.optimizerEpsilon == null) trainCfgRaw.optimizerEpsilon = s.optimizerEpsilon;
     if (s.lrSchedulerType != null && trainCfgRaw.lrSchedulerType == null) trainCfgRaw.lrSchedulerType = s.lrSchedulerType;
     if (s.useLrScheduler != null && trainCfgRaw.useLrScheduler == null) trainCfgRaw.useLrScheduler = s.useLrScheduler;
     if (s.lrPatience != null && trainCfgRaw.lrPatience == null) trainCfgRaw.lrPatience = s.lrPatience;

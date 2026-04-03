@@ -21,24 +21,28 @@
     }
 
     function addDenseNode(editor, x, y, cfg) {
+      function _layerTagMeta(rawCfg) {
+        var weightTag = String((rawCfg && rawCfg.weightTag) || "");
+        var blockName = String((rawCfg && rawCfg.blockName) || "");
+        var tagHtml = "";
+        if (weightTag || blockName) {
+          var parts = [];
+          if (blockName) parts.push(blockName);
+          if (weightTag) parts.push("[" + weightTag + "]");
+          tagHtml = "<div style='font-size:9px;color:#38bdf8;'>" + parts.join(" ") + "</div>";
+        }
+        return { weightTag: weightTag, blockName: blockName, tagHtml: tagHtml };
+      }
       var units = Math.max(1, Number((cfg && cfg.units) || 32));
       var activation = String((cfg && cfg.activation) || "relu");
-      var weightTag = String((cfg && cfg.weightTag) || "");
-      var blockName = String((cfg && cfg.blockName) || "");
-      var tagHtml = "";
-      if (weightTag || blockName) {
-        var parts = [];
-        if (blockName) parts.push(blockName);
-        if (weightTag) parts.push("[" + weightTag + "]");
-        tagHtml = "<div style='font-size:9px;color:#38bdf8;'>" + parts.join(" ") + "</div>";
-      }
+      var tagMeta = _layerTagMeta(cfg);
       var html =
-        "<div><div style='font-weight:700'>Dense</div>" + tagHtml + "<div style='display:grid;gap:4px'>" +
+        "<div><div style='font-weight:700'>Dense</div>" + tagMeta.tagHtml + "<div style='display:grid;gap:4px'>" +
         "<input type='number' df-units value='" + units + "' min='1' style='width:80px'>" +
         "<select df-activation style='width:120px'>" +
         "<option value='relu'>relu</option><option value='tanh'>tanh</option><option value='sigmoid'>sigmoid</option><option value='linear'>linear</option>" +
         "</select><div class='node-summary' style='font-size:11px;color:#94a3b8;'>u=" + units + ", act=" + activation + "</div></div></div>";
-      return editor.addNode("dense_layer", 1, 1, x, y, "dense_layer", { units: units, activation: activation, weightTag: weightTag, blockName: blockName }, html);
+      return editor.addNode("dense_layer", 1, 1, x, y, "dense_layer", { units: units, activation: activation, weightTag: tagMeta.weightTag, blockName: tagMeta.blockName }, html);
     }
 
     function addDropoutNode(editor, x, y, cfg) {
@@ -60,20 +64,44 @@
     }
 
     function addBatchNormNode(editor, x, y, cfg) {
+      var tagMeta = (function (rawCfg) {
+        var weightTag = String((rawCfg && rawCfg.weightTag) || "");
+        var blockName = String((rawCfg && rawCfg.blockName) || "");
+        var tagHtml = "";
+        if (weightTag || blockName) {
+          var parts = [];
+          if (blockName) parts.push(blockName);
+          if (weightTag) parts.push("[" + weightTag + "]");
+          tagHtml = "<div style='font-size:9px;color:#38bdf8;'>" + parts.join(" ") + "</div>";
+        }
+        return { weightTag: weightTag, blockName: blockName, tagHtml: tagHtml };
+      })(cfg);
       var momentum = api.clamp(Number((cfg && cfg.momentum) || 0.99), 0.1, 0.999);
       var epsilon = Math.max(1e-6, Number((cfg && cfg.epsilon) || 1e-3));
       var html =
-        "<div><div style='font-weight:700'>BatchNorm</div>" +
+        "<div><div style='font-weight:700'>BatchNorm</div>" + tagMeta.tagHtml +
         "<div class='node-summary' style='font-size:11px;color:#94a3b8;'>m=" + momentum.toFixed(3) + ", ε=" + epsilon.toExponential(1) + "</div></div>";
-      return editor.addNode("batchnorm_layer", 1, 1, x, y, "batchnorm_layer", { momentum: momentum, epsilon: epsilon }, html);
+      return editor.addNode("batchnorm_layer", 1, 1, x, y, "batchnorm_layer", { momentum: momentum, epsilon: epsilon, weightTag: tagMeta.weightTag, blockName: tagMeta.blockName }, html);
     }
 
     function addLayerNormNode(editor, x, y, cfg) {
+      var tagMeta = (function (rawCfg) {
+        var weightTag = String((rawCfg && rawCfg.weightTag) || "");
+        var blockName = String((rawCfg && rawCfg.blockName) || "");
+        var tagHtml = "";
+        if (weightTag || blockName) {
+          var parts = [];
+          if (blockName) parts.push(blockName);
+          if (weightTag) parts.push("[" + weightTag + "]");
+          tagHtml = "<div style='font-size:9px;color:#38bdf8;'>" + parts.join(" ") + "</div>";
+        }
+        return { weightTag: weightTag, blockName: blockName, tagHtml: tagHtml };
+      })(cfg);
       var epsilon = Math.max(1e-6, Number((cfg && cfg.epsilon) || 1e-3));
       var html =
-        "<div><div style='font-weight:700'>LayerNorm</div>" +
+        "<div><div style='font-weight:700'>LayerNorm</div>" + tagMeta.tagHtml +
         "<div class='node-summary' style='font-size:11px;color:#94a3b8;'>ε=" + epsilon.toExponential(1) + "</div></div>";
-      return editor.addNode("layernorm_layer", 1, 1, x, y, "layernorm_layer", { epsilon: epsilon }, html);
+      return editor.addNode("layernorm_layer", 1, 1, x, y, "layernorm_layer", { epsilon: epsilon, weightTag: tagMeta.weightTag, blockName: tagMeta.blockName }, html);
     }
 
     function addLatentNode(editor, x, y, cfg) {
@@ -220,18 +248,27 @@
     }
 
     function addConv1dNode(editor, x, y, cfg) {
+      var weightTag = String((cfg && cfg.weightTag) || "");
+      var blockName = String((cfg && cfg.blockName) || "");
+      var tagHtml = "";
+      if (weightTag || blockName) {
+        var parts = [];
+        if (blockName) parts.push(blockName);
+        if (weightTag) parts.push("[" + weightTag + "]");
+        tagHtml = "<div style='font-size:9px;color:#38bdf8;'>" + parts.join(" ") + "</div>";
+      }
       var filters = Math.max(1, Number((cfg && cfg.filters) || 64));
       var kernelSize = Math.max(1, Number((cfg && cfg.kernelSize) || 3));
       var stride = Math.max(1, Number((cfg && cfg.stride) || 1));
       var activation = String((cfg && cfg.activation) || "relu");
       var html =
-        "<div><div style='font-weight:700'>Conv1D</div><div style='display:grid;gap:4px'>" +
+        "<div><div style='font-weight:700'>Conv1D</div>" + tagHtml + "<div style='display:grid;gap:4px'>" +
         "<input type='number' df-filters value='" + filters + "' min='1' style='width:80px'>" +
         "<input type='number' df-kernelSize value='" + kernelSize + "' min='1' style='width:80px'>" +
         "<input type='number' df-stride value='" + stride + "' min='1' style='width:80px'>" +
         "<select df-activation style='width:120px'><option value='relu'>relu</option><option value='tanh'>tanh</option><option value='sigmoid'>sigmoid</option><option value='linear'>linear</option></select>" +
         "<div class='node-summary' style='font-size:11px;color:#94a3b8;'>f=" + filters + ", k=" + kernelSize + ", s=" + stride + ", act=" + activation + "</div></div></div>";
-      return editor.addNode("conv1d_layer", 1, 1, x, y, "conv1d_layer", { filters: filters, kernelSize: kernelSize, stride: stride, activation: activation }, html);
+      return editor.addNode("conv1d_layer", 1, 1, x, y, "conv1d_layer", { filters: filters, kernelSize: kernelSize, stride: stride, activation: activation, weightTag: weightTag, blockName: blockName }, html);
     }
 
     function addConcatNode(editor, x, y, cfg) {
@@ -241,45 +278,72 @@
     }
 
     function addRnnNode(editor, x, y, cfg) {
+      var weightTag = String((cfg && cfg.weightTag) || "");
+      var blockName = String((cfg && cfg.blockName) || "");
+      var tagHtml = "";
+      if (weightTag || blockName) {
+        var parts = [];
+        if (blockName) parts.push(blockName);
+        if (weightTag) parts.push("[" + weightTag + "]");
+        tagHtml = "<div style='font-size:9px;color:#38bdf8;'>" + parts.join(" ") + "</div>";
+      }
       var units = Math.max(1, Number((cfg && cfg.units) || 48));
       var dropout = api.clamp(Number((cfg && cfg.dropout) || 0.1), 0, 0.8);
       var returnseq = String((cfg && cfg.returnseq) || "auto");
       var html =
-        "<div><div style='font-weight:700'>SimpleRNN</div><div style='display:grid;gap:4px'>" +
+        "<div><div style='font-weight:700'>SimpleRNN</div>" + tagHtml + "<div style='display:grid;gap:4px'>" +
         "<input type='number' df-units value='" + units + "' min='1' style='width:80px'>" +
         "<input type='number' df-dropout value='" + dropout.toFixed(2) + "' min='0' max='0.8' step='0.05' style='width:80px'>" +
         "<select df-returnseq style='width:120px'><option value='auto'>returnSeq:auto</option><option value='false'>returnSeq:false</option><option value='true'>returnSeq:true</option></select>" +
         "<div class='node-summary' style='font-size:11px;color:#94a3b8;'>u=" + units + ", d=" + dropout.toFixed(2) + ", rs=" + returnseq + "</div>" +
         "</div></div>";
-      return editor.addNode("rnn_layer", 1, 1, x, y, "rnn_layer", { units: units, dropout: dropout, returnseq: returnseq }, html);
+      return editor.addNode("rnn_layer", 1, 1, x, y, "rnn_layer", { units: units, dropout: dropout, returnseq: returnseq, weightTag: weightTag, blockName: blockName }, html);
     }
 
     function addGruNode(editor, x, y, cfg) {
+      var weightTag = String((cfg && cfg.weightTag) || "");
+      var blockName = String((cfg && cfg.blockName) || "");
+      var tagHtml = "";
+      if (weightTag || blockName) {
+        var parts = [];
+        if (blockName) parts.push(blockName);
+        if (weightTag) parts.push("[" + weightTag + "]");
+        tagHtml = "<div style='font-size:9px;color:#38bdf8;'>" + parts.join(" ") + "</div>";
+      }
       var units = Math.max(1, Number((cfg && cfg.units) || 64));
       var dropout = api.clamp(Number((cfg && cfg.dropout) || 0.1), 0, 0.8);
       var returnseq = String((cfg && cfg.returnseq) || "auto");
       var html =
-        "<div><div style='font-weight:700'>GRU</div><div style='display:grid;gap:4px'>" +
+        "<div><div style='font-weight:700'>GRU</div>" + tagHtml + "<div style='display:grid;gap:4px'>" +
         "<input type='number' df-units value='" + units + "' min='1' style='width:80px'>" +
         "<input type='number' df-dropout value='" + dropout.toFixed(2) + "' min='0' max='0.8' step='0.05' style='width:80px'>" +
         "<select df-returnseq style='width:120px'><option value='auto'>returnSeq:auto</option><option value='false'>returnSeq:false</option><option value='true'>returnSeq:true</option></select>" +
         "<div class='node-summary' style='font-size:11px;color:#94a3b8;'>u=" + units + ", d=" + dropout.toFixed(2) + ", rs=" + returnseq + "</div>" +
         "</div></div>";
-      return editor.addNode("gru_layer", 1, 1, x, y, "gru_layer", { units: units, dropout: dropout, returnseq: returnseq }, html);
+      return editor.addNode("gru_layer", 1, 1, x, y, "gru_layer", { units: units, dropout: dropout, returnseq: returnseq, weightTag: weightTag, blockName: blockName }, html);
     }
 
     function addLstmNode(editor, x, y, cfg) {
+      var weightTag = String((cfg && cfg.weightTag) || "");
+      var blockName = String((cfg && cfg.blockName) || "");
+      var tagHtml = "";
+      if (weightTag || blockName) {
+        var parts = [];
+        if (blockName) parts.push(blockName);
+        if (weightTag) parts.push("[" + weightTag + "]");
+        tagHtml = "<div style='font-size:9px;color:#38bdf8;'>" + parts.join(" ") + "</div>";
+      }
       var units = Math.max(1, Number((cfg && cfg.units) || 64));
       var dropout = api.clamp(Number((cfg && cfg.dropout) || 0.1), 0, 0.8);
       var returnseq = String((cfg && cfg.returnseq) || "auto");
       var html =
-        "<div><div style='font-weight:700'>LSTM</div><div style='display:grid;gap:4px'>" +
+        "<div><div style='font-weight:700'>LSTM</div>" + tagHtml + "<div style='display:grid;gap:4px'>" +
         "<input type='number' df-units value='" + units + "' min='1' style='width:80px'>" +
         "<input type='number' df-dropout value='" + dropout.toFixed(2) + "' min='0' max='0.8' step='0.05' style='width:80px'>" +
         "<select df-returnseq style='width:120px'><option value='auto'>returnSeq:auto</option><option value='false'>returnSeq:false</option><option value='true'>returnSeq:true</option></select>" +
         "<div class='node-summary' style='font-size:11px;color:#94a3b8;'>u=" + units + ", d=" + dropout.toFixed(2) + ", rs=" + returnseq + "</div>" +
         "</div></div>";
-      return editor.addNode("lstm_layer", 1, 1, x, y, "lstm_layer", { units: units, dropout: dropout, returnseq: returnseq }, html);
+      return editor.addNode("lstm_layer", 1, 1, x, y, "lstm_layer", { units: units, dropout: dropout, returnseq: returnseq, weightTag: weightTag, blockName: blockName }, html);
     }
 
     // === New building blocks for GAN/Diffusion ===
@@ -319,11 +383,20 @@
 
     // --- Embedding node ---
     function addEmbeddingNode(editor, x, y, cfg) {
+      var weightTag = String((cfg && cfg.weightTag) || "");
+      var blockName = String((cfg && cfg.blockName) || "");
+      var tagHtml = "";
+      if (weightTag || blockName) {
+        var parts = [];
+        if (blockName) parts.push(blockName);
+        if (weightTag) parts.push("[" + weightTag + "]");
+        tagHtml = "<div style='font-size:9px;color:#38bdf8;'>" + parts.join(" ") + "</div>";
+      }
       var inputDim = Math.max(1, Number((cfg && cfg.inputDim) || 10000));
       var outputDim = Math.max(1, Number((cfg && cfg.outputDim) || 256));
       var html =
-        "<div><div style='font-weight:700'>Embedding</div><div class='node-summary' style='font-size:11px;color:#94a3b8;'>vocab=" + inputDim + ", dim=" + outputDim + "</div></div>";
-      return editor.addNode("embedding_layer", 1, 1, x, y, "embedding_layer", { inputDim: inputDim, outputDim: outputDim }, html);
+        "<div><div style='font-weight:700'>Embedding</div>" + tagHtml + "<div class='node-summary' style='font-size:11px;color:#94a3b8;'>vocab=" + inputDim + ", dim=" + outputDim + "</div></div>";
+      return editor.addNode("embedding_layer", 1, 1, x, y, "embedding_layer", { inputDim: inputDim, outputDim: outputDim, weightTag: weightTag, blockName: blockName }, html);
     }
 
     // --- GAN building blocks ---
@@ -348,14 +421,23 @@
 
     // --- Conv2D building blocks ---
     function addConv2dNode(editor, x, y, cfg) {
+      var weightTag = String((cfg && cfg.weightTag) || "");
+      var blockName = String((cfg && cfg.blockName) || "");
+      var tagHtml = "";
+      if (weightTag || blockName) {
+        var parts = [];
+        if (blockName) parts.push(blockName);
+        if (weightTag) parts.push("[" + weightTag + "]");
+        tagHtml = "<div style='font-size:9px;color:#38bdf8;'>" + parts.join(" ") + "</div>";
+      }
       var filters = Math.max(1, Number((cfg && cfg.filters) || 32));
       var kernelSize = Math.max(1, Number((cfg && cfg.kernelSize) || 3));
       var strides = Math.max(1, Number((cfg && cfg.strides) || 1));
       var padding = String((cfg && cfg.padding) || "same");
       var activation = String((cfg && cfg.activation) || "relu");
       var html =
-        "<div><div style='font-weight:700'>Conv2D</div><div class='node-summary' style='font-size:11px;color:#94a3b8;'>f=" + filters + ", k=" + kernelSize + ", s=" + strides + ", " + padding + "</div></div>";
-      return editor.addNode("conv2d_layer", 1, 1, x, y, "conv2d_layer", { filters: filters, kernelSize: kernelSize, strides: strides, padding: padding, activation: activation }, html);
+        "<div><div style='font-weight:700'>Conv2D</div>" + tagHtml + "<div class='node-summary' style='font-size:11px;color:#94a3b8;'>f=" + filters + ", k=" + kernelSize + ", s=" + strides + ", " + padding + "</div></div>";
+      return editor.addNode("conv2d_layer", 1, 1, x, y, "conv2d_layer", { filters: filters, kernelSize: kernelSize, strides: strides, padding: padding, activation: activation, weightTag: weightTag, blockName: blockName }, html);
     }
     function addMaxPool2dNode(editor, x, y, cfg) {
       var poolSize = Math.max(1, Number((cfg && cfg.poolSize) || 2));
@@ -369,14 +451,23 @@
       return editor.addNode("flatten_layer", 1, 1, x, y, "flatten_layer", {}, html);
     }
     function addConv2dTransposeNode(editor, x, y, cfg) {
+      var weightTag = String((cfg && cfg.weightTag) || "");
+      var blockName = String((cfg && cfg.blockName) || "");
+      var tagHtml = "";
+      if (weightTag || blockName) {
+        var parts = [];
+        if (blockName) parts.push(blockName);
+        if (weightTag) parts.push("[" + weightTag + "]");
+        tagHtml = "<div style='font-size:9px;color:#38bdf8;'>" + parts.join(" ") + "</div>";
+      }
       var filters = Math.max(1, Number((cfg && cfg.filters) || 32));
       var kernelSize = Math.max(1, Number((cfg && cfg.kernelSize) || 3));
       var strides = Math.max(1, Number((cfg && cfg.strides) || 2));
       var padding = String((cfg && cfg.padding) || "same");
       var activation = String((cfg && cfg.activation) || "relu");
       var html =
-        "<div><div style='font-weight:700'>ConvT2D</div><div class='node-summary' style='font-size:11px;color:#94a3b8;'>f=" + filters + ", k=" + kernelSize + ", s=" + strides + "</div></div>";
-      return editor.addNode("conv2d_transpose_layer", 1, 1, x, y, "conv2d_transpose_layer", { filters: filters, kernelSize: kernelSize, strides: strides, padding: padding, activation: activation }, html);
+        "<div><div style='font-weight:700'>ConvT2D</div>" + tagHtml + "<div class='node-summary' style='font-size:11px;color:#94a3b8;'>f=" + filters + ", k=" + kernelSize + ", s=" + strides + "</div></div>";
+      return editor.addNode("conv2d_transpose_layer", 1, 1, x, y, "conv2d_transpose_layer", { filters: filters, kernelSize: kernelSize, strides: strides, padding: padding, activation: activation, weightTag: weightTag, blockName: blockName }, html);
     }
     function addUpSampling2dNode(editor, x, y, cfg) {
       var size = Math.max(1, Number((cfg && cfg.size) || 2));
@@ -904,6 +995,8 @@
             { value: "linear", label: "linear" }
           ]
         });
+        addField({ kind: "text", key: "weightTag", label: "Weight tag (for freeze)", value: String(d.weightTag || ""), placeholder: "e.g. generator, discriminator" });
+        addField({ kind: "text", key: "blockName", label: "Block name", value: String(d.blockName || ""), placeholder: "e.g. encoder_conv1" });
         addMessage("Conv1D expects sequence input. For direct mode, keep graph flat.");
         return spec;
       }
@@ -925,6 +1018,8 @@
       if (node.name === "embedding_layer") {
         addField({ kind: "number", key: "inputDim", label: "Vocab size", value: Math.max(1, Number(d.inputDim || 10000)), min: 1, step: 1 });
         addField({ kind: "number", key: "outputDim", label: "Embed dim", value: Math.max(1, Number(d.outputDim || 256)), min: 1, step: 1 });
+        addField({ kind: "text", key: "weightTag", label: "Weight tag (for freeze)", value: String(d.weightTag || ""), placeholder: "e.g. generator, discriminator" });
+        addField({ kind: "text", key: "blockName", label: "Block name", value: String(d.blockName || ""), placeholder: "e.g. token_embed" });
         addMessage("Maps integer token IDs → dense vectors. Input must be integer sequences.");
         return spec;
       }
@@ -937,6 +1032,7 @@
         addField({ kind: "select", key: "padding", label: "Padding", value: String(d.padding || "same"), options: [{ value: "same", label: "same" }, { value: "valid", label: "valid" }] });
         addField({ kind: "select", key: "activation", label: "Activation", value: String(d.activation || "relu"), options: [{ value: "relu", label: "relu" }, { value: "tanh", label: "tanh" }, { value: "sigmoid", label: "sigmoid" }, { value: "linear", label: "linear" }] });
         addField({ kind: "text", key: "weightTag", label: "Weight tag (for freeze)", value: String(d.weightTag || ""), placeholder: "e.g. generator, discriminator" });
+        addField({ kind: "text", key: "blockName", label: "Block name", value: String(d.blockName || ""), placeholder: "e.g. G_conv1, D_conv2" });
         if (isTranspose) addMessage("Upsampling convolution (decoder). Strides=2 doubles spatial dims.");
         return spec;
       }
@@ -961,11 +1057,15 @@
       if (node.name === "batchnorm_layer") {
         addField({ kind: "number", key: "momentum", label: "Momentum", value: api.clamp(Number(d.momentum || 0.99), 0.1, 0.999).toFixed(3), min: 0.1, max: 0.999, step: 0.001 });
         addField({ kind: "number", key: "epsilon", label: "Epsilon", value: Math.max(1e-6, Number(d.epsilon || 1e-3)).toFixed(6), min: 0.000001, step: 0.000001 });
+        addField({ kind: "text", key: "weightTag", label: "Weight tag (for freeze)", value: String(d.weightTag || ""), placeholder: "e.g. generator, discriminator" });
+        addField({ kind: "text", key: "blockName", label: "Block name", value: String(d.blockName || ""), placeholder: "e.g. G_bn1, D_bn2" });
         addMessage("BatchNorm after Dense/Conv1D can improve training stability.");
         return spec;
       }
       if (node.name === "layernorm_layer") {
         addField({ kind: "number", key: "epsilon", label: "Epsilon", value: Math.max(1e-6, Number(d.epsilon || 1e-3)).toFixed(6), min: 0.000001, step: 0.000001 });
+        addField({ kind: "text", key: "weightTag", label: "Weight tag (for freeze)", value: String(d.weightTag || ""), placeholder: "e.g. generator, discriminator" });
+        addField({ kind: "text", key: "blockName", label: "Block name", value: String(d.blockName || ""), placeholder: "e.g. G_ln1" });
         addMessage("LayerNorm is sequence-safe and often robust for RNN/GRU/LSTM stacks.");
         return spec;
       }
@@ -983,6 +1083,8 @@
             { value: "true", label: "true" }
           ]
         });
+        addField({ kind: "text", key: "weightTag", label: "Weight tag (for freeze)", value: String(d.weightTag || ""), placeholder: "e.g. encoder, decoder" });
+        addField({ kind: "text", key: "blockName", label: "Block name", value: String(d.blockName || ""), placeholder: "e.g. enc_gru1" });
         return spec;
       }
       if (node.name === "concat_block") {

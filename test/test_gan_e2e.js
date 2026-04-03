@@ -54,7 +54,7 @@ assert(built.headConfigs[1].graphLabelOutputIdx === 2, "D head graphLabelOutputI
 // Check layer tags
 var gLayers = model.layers.filter(function(l) { return l._weightTag === "generator"; });
 var dLayers = model.layers.filter(function(l) { return l._weightTag === "discriminator"; });
-assert(gLayers.length === 3, "3 G layers, got " + gLayers.length);
+assert(gLayers.length === 5, "5 G layers (dense + norms), got " + gLayers.length);
 assert(dLayers.length === 3, "3 D layers, got " + dLayers.length);
 
 console.log("\n=== 2. PhaseSwitch Labels ===");

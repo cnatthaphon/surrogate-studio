@@ -280,7 +280,17 @@ def main():
     weight_tags = {}
     for name, param in model.named_parameters():
         for nid, tag in _node_tags.items():
-            if f"_{nid}" in name or f".{nid}." in name or name.startswith(f"dense_{nid}") or name.startswith(f"conv2d_{nid}") or name.startswith(f"convt2d_{nid}") or name.startswith(f"embed_{nid}") or name.startswith(f"act_{nid}"):
+            if (
+                f"_{nid}" in name or f".{nid}." in name or
+                name.startswith(f"dense_{nid}") or
+                name.startswith(f"conv2d_{nid}") or
+                name.startswith(f"convt2d_{nid}") or
+                name.startswith(f"embed_{nid}") or
+                name.startswith(f"bn_{nid}") or
+                name.startswith(f"ln_{nid}") or
+                name.startswith(f"rnn_{nid}") or
+                name.startswith(f"act_{nid}")
+            ):
                 weight_tags[name] = tag
                 break
 
