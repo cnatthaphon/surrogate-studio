@@ -27,10 +27,15 @@ function snapshotTagged(model) {
     if (!l._weightTag) return;
     var w = l.getWeights();
     if (!w || !w.length) return;
+    var stateHead = [];
+    if (typeof l.getClassName === "function" && l.getClassName() === "BatchNormalization" && w.length >= 4) {
+      stateHead = Array.from(w[2].dataSync().slice(0, 8)).concat(Array.from(w[3].dataSync().slice(0, 8)));
+    }
     out[l.name] = {
       tag: l._weightTag,
       cls: typeof l.getClassName === "function" ? l.getClassName() : "",
       head: Array.from(w[0].dataSync().slice(0, 8)),
+      stateHead: stateHead,
     };
   });
   return out;
@@ -41,6 +46,14 @@ function diff(before, after, name) {
   if (!a || !b) return NaN;
   var d = 0;
   for (var i = 0; i < a.head.length; i++) d += Math.abs(a.head[i] - b.head[i]);
+  return d;
+}
+
+function diffState(before, after, name) {
+  var a = before[name], b = after[name];
+  if (!a || !b || !a.stateHead || !b.stateHead) return NaN;
+  var d = 0;
+  for (var i = 0; i < Math.min(a.stateHead.length, b.stateHead.length); i++) d += Math.abs(a.stateHead[i] - b.stateHead[i]);
   return d;
 }
 
@@ -103,6 +116,10 @@ te.trainModelPhased(tf, {
     var d = diff(snap1, snap2, l.name);
     assert(d < 1e-8, "G block " + l.name + " frozen during D step (d=" + d + ")");
   });
+  gBn.forEach(function (l) {
+    var ds = diffState(snap1, snap2, l.name);
+    assert(ds < 1e-8, "G BatchNorm state " + l.name + " frozen during D step (d=" + ds + ")");
+  });
   dLayers.forEach(function (l) {
     var d = diff(snap1, snap2, l.name);
     assert(d > 1e-7, "D block " + l.name + " updated during D step (d=" + d + ")");
@@ -130,6 +147,10 @@ te.trainModelPhased(tf, {
     dLayers.forEach(function (l) {
       var d = diff(snap3, snap4, l.name);
       assert(d < 1e-8, "D block " + l.name + " frozen during G step (d=" + d + ")");
+    });
+    dBn.forEach(function (l) {
+      var ds = diffState(snap3, snap4, l.name);
+      assert(ds < 1e-8, "D BatchNorm state " + l.name + " frozen during G step (d=" + ds + ")");
     });
     gLayers.forEach(function (l) {
       var d = diff(snap3, snap4, l.name);

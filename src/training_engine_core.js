@@ -610,21 +610,59 @@
 
       function _freezeByStep(step) {
         if (!model.layers) return;
+        function _setLayerTrainingOverride(layer, forcedTraining) {
+          if (!layer || typeof layer.call !== "function") return;
+          if (forcedTraining == null) {
+            if (layer._origCallForTrainingOverride) {
+              layer.call = layer._origCallForTrainingOverride;
+              delete layer._origCallForTrainingOverride;
+            }
+            delete layer._forcedTrainingOverride;
+            return;
+          }
+          layer._forcedTrainingOverride = !!forcedTraining;
+          if (!layer._origCallForTrainingOverride) {
+            layer._origCallForTrainingOverride = layer.call;
+            layer.call = function (inputs, kwargs) {
+              var base = (kwargs && typeof kwargs === "object") ? Object.assign({}, kwargs) : {};
+              if (this._forcedTrainingOverride != null) base.training = this._forcedTrainingOverride;
+              return this._origCallForTrainingOverride.call(this, inputs, base);
+            };
+          }
+        }
         if (step.trainableTags) {
           model.layers.forEach(function (l) {
-            if (l._weightTag) { l.trainable = !!step.trainableTags[l._weightTag]; }
+            if (l._weightTag) {
+              var enabled = !!step.trainableTags[l._weightTag];
+              l.trainable = enabled;
+              _setLayerTrainingOverride(l, enabled ? null : false);
+            }
             // leave layers without weightTag at their original trainable state
             // (e.g., Constant layers created with trainable=false stay frozen)
           });
         } else if (step._phase) {
           model.layers.forEach(function (l) {
-            if (l._weightTag) { l.trainable = (l._weightTag === step._phase); }
+            if (l._weightTag) {
+              var active = (l._weightTag === step._phase);
+              l.trainable = active;
+              _setLayerTrainingOverride(l, active ? null : false);
+            }
           });
         }
       }
 
       function _unfreezeAll() {
-        if (model.layers) model.layers.forEach(function (l) { if (l._weightTag) l.trainable = true; });
+        if (model.layers) {
+          model.layers.forEach(function (l) {
+            if (!l._weightTag) return;
+            l.trainable = true;
+            if (l._origCallForTrainingOverride) {
+              l.call = l._origCallForTrainingOverride;
+              delete l._origCallForTrainingOverride;
+            }
+            delete l._forcedTrainingOverride;
+          });
+        }
       }
 
       var _lossFns = headConfigs.map(function (h) { return makeHeadLoss(tf, h, "meanSquaredError"); });

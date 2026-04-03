@@ -294,16 +294,44 @@ def main():
                 weight_tags[name] = tag
                 break
 
-    def freeze_by_tags(trainable_tags):
+    module_tags = {}
+    for name, module in model.named_modules():
+        if not name:
+            continue
+        for nid, tag in _node_tags.items():
+            if name.endswith(f"_{nid}"):
+                module_tags[name] = tag
+                break
+
+    def freeze_by_tags(trainable_tags, phase_name=""):
         """Freeze/unfreeze params by weight tag"""
-        if not trainable_tags and not weight_tags:
+        if trainable_tags is None and not phase_name and not weight_tags:
             return
         for name, param in model.named_parameters():
             tag = weight_tags.get(name, "")
-            if tag and trainable_tags:
+            if tag and trainable_tags is not None:
                 param.requires_grad = bool(trainable_tags.get(tag, True))
+            elif tag and phase_name:
+                param.requires_grad = (tag == phase_name)
             else:
                 param.requires_grad = True
+
+    def apply_module_modes(trainable_tags=None, phase_name=""):
+        """Frozen tagged modules run in eval mode so internal state stops updating."""
+        if not module_tags:
+            return
+        for name, module in model.named_modules():
+            if not name:
+                continue
+            tag = module_tags.get(name, "")
+            if not tag:
+                continue
+            enabled = True
+            if trainable_tags is not None:
+                enabled = bool(trainable_tags.get(tag, True))
+            elif phase_name:
+                enabled = (tag == phase_name)
+            module.train(enabled)
 
     def unfreeze_all():
         for param in model.parameters():
@@ -343,10 +371,11 @@ def main():
                 trainable_tags = step.get("trainableTags", None)
                 phase_name = step.get("_phase", f"step{si+1}")
 
-                freeze_by_tags(trainable_tags)
+                freeze_by_tags(trainable_tags, phase_name)
                 model._phase_idx = si  # legacy fallback for PhaseSwitch
                 model._phase_name = phase_name
                 model.train()
+                apply_module_modes(trainable_tags, phase_name)
                 step_loss = 0.0
                 n_batches = 0
                 for _ in range(step_epochs):
