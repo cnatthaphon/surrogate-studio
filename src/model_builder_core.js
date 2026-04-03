@@ -255,6 +255,49 @@
     return { sampleNodes: sampleNodes, outputNodes: outputNodes };
   }
 
+  function extractGenerationCapabilities(graphData) {
+    var data = extractGraphData(graphData);
+    var ids = Object.keys(data || {});
+    var names = ids.map(function (id) { return String((data[id] && data[id].name) || ""); });
+    var genNodes = extractGenerationNodes(graphData);
+    var hasNoiseSchedule = names.some(function (n) { return n.indexOf("noise_schedule") >= 0 || n.indexOf("noise_injection") >= 0; });
+    var hasReparam = names.some(function (n) { return n.indexOf("reparam") >= 0; });
+    var hasLatentStats = names.some(function (n) { return n.indexOf("latent_mu") >= 0 || n.indexOf("latent_logvar") >= 0 || n === "latent_layer"; });
+    var hasSampleNodes = genNodes.sampleNodes.length > 0;
+    var hasPassthroughOutput = genNodes.outputNodes.some(function (o) { return String(o.loss || "").toLowerCase() === "none"; });
+    var hasStructuredOutput = genNodes.outputNodes.some(function (o) {
+      var target = String(o.target || "").toLowerCase();
+      return target && target !== "none";
+    });
+    var canRandomSample = hasSampleNodes || hasReparam || hasLatentStats;
+    var canReconstruct = !hasSampleNodes || hasReparam || hasLatentStats || hasNoiseSchedule;
+    var canOptimize = hasReparam || hasLatentStats;
+    var canClassifierGuide = hasReparam || hasLatentStats;
+    var canLangevin = hasNoiseSchedule;
+    var canDDPM = hasNoiseSchedule;
+    var canInverse = !hasSampleNodes && hasStructuredOutput;
+    var defaultMethod = canReconstruct ? "reconstruct" : (canRandomSample ? "random" : (canInverse ? "inverse" : "reconstruct"));
+    if (hasSampleNodes && hasPassthroughOutput && !hasReparam && !hasLatentStats && !hasNoiseSchedule) defaultMethod = "random";
+    return {
+      family: inferModelFamily(graphData),
+      sampleNodes: genNodes.sampleNodes,
+      outputNodes: genNodes.outputNodes,
+      hasSampleNodes: hasSampleNodes,
+      hasPassthroughOutput: hasPassthroughOutput,
+      hasStructuredOutput: hasStructuredOutput,
+      hasNoiseSchedule: hasNoiseSchedule,
+      hasLatentDecoder: hasReparam || hasLatentStats,
+      canReconstruct: canReconstruct,
+      canRandomSample: canRandomSample,
+      canClassifierGuide: canClassifierGuide,
+      canLangevin: canLangevin,
+      canOptimize: canOptimize,
+      canInverse: canInverse,
+      canDDPM: canDDPM,
+      defaultMethod: defaultMethod,
+    };
+  }
+
   function inferModelFamily(graphData) {
     var data = extractGraphData(graphData);
     var ids = Object.keys(data || {});
@@ -1180,5 +1223,6 @@
     extractLatentInfo: extractLatentInfo,
     extractDecoder: extractDecoder,
     extractGenerationNodes: extractGenerationNodes,
+    extractGenerationCapabilities: extractGenerationCapabilities,
   };
 });

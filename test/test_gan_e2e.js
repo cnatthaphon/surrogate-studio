@@ -145,8 +145,8 @@ te.trainModelPhased(tf, {
       dataset: { xTrain: xTrain, yTrain: xTrain, targetMode: "xv", paramNames: [], paramSize: 0 },
       epochs: 10, batchSize: 128, learningRate: 0.0002, optimizerType: "adam",
       trainingSchedule: [
-        { epochs: 1, trainableTags: { discriminator: true, generator: false } },
-        { epochs: 1, trainableTags: { discriminator: false, generator: true } },
+        { unit: "batch", batches: 1, trainableTags: { discriminator: true, generator: false } },
+        { unit: "batch", batches: 1, trainableTags: { discriminator: false, generator: true } },
       ],
       rotateSchedule: true,
       onEpochEnd: function(e, l) {

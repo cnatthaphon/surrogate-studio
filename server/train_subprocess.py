@@ -290,10 +290,26 @@ def main():
     raw_schedule = config.get("trainingSchedule", None)
     rotate_schedule = config.get("rotateSchedule", True)
     _use_schedule = raw_schedule is not None
+    def _schedule_step_unit(step):
+        unit = str((step or {}).get("unit", (step or {}).get("intervalUnit", "epoch"))).strip().lower()
+        return "batch" if unit == "batch" else "epoch"
+
+    def _schedule_step_count(step, unit):
+        raw = None
+        if step is not None:
+            raw = step.get("count", step.get("repeat", None))
+            if raw is None:
+                raw = step.get("batches" if unit == "batch" else "epochs", 1)
+        try:
+            return max(1, int(raw))
+        except Exception:
+            return 1
+
     if raw_schedule and isinstance(raw_schedule, list) and len(raw_schedule) > 0:
         schedule = raw_schedule
     else:
         schedule = [{"epochs": 1, "trainableTags": None, "_phase": p} for p in phases]
+    schedule_uses_batch_unit = len(schedule) > 0 and all(_schedule_step_unit(step) == "batch" for step in schedule)
 
     # collect weight tags from graph nodes → map to model param names
     _gd = graph.get("drawflow", {}).get("Home", {}).get("data", graph)
@@ -393,20 +409,31 @@ def main():
                 n_batches += 1
             phase_losses["all"] = train_loss / max(n_batches, 1)
         else:
-            for si, step in enumerate(schedule):
-                step_epochs = max(1, int(step.get("epochs", 1)))
-                trainable_tags = step.get("trainableTags", None)
-                phase_name = step.get("_phase", f"step{si+1}")
+            if schedule_uses_batch_unit:
+                step_sums = {}
+                step_counts = {}
+                train_iter = iter(train_dl)
+                n_total_batches = len(train_dl)
+                batch_idx = 0
+                schedule_idx = 0
+                while batch_idx < n_total_batches:
+                    si = schedule_idx % len(schedule)
+                    step = schedule[si]
+                    repeat_batches = _schedule_step_count(step, "batch")
+                    trainable_tags = step.get("trainableTags", None)
+                    phase_name = step.get("_phase", f"step{si+1}")
+                    clip_val = float(step.get("clipWeights", 0))
 
-                freeze_by_tags(trainable_tags, phase_name)
-                model._phase_idx = si  # legacy fallback for PhaseSwitch
-                model._phase_name = phase_name
-                model.train()
-                apply_module_modes(trainable_tags, phase_name)
-                step_loss = 0.0
-                n_batches = 0
-                for _ in range(step_epochs):
-                    for xb, yb in train_dl:
+                    freeze_by_tags(trainable_tags, phase_name)
+                    model._phase_idx = si
+                    model._phase_name = phase_name
+                    model.train()
+                    apply_module_modes(trainable_tags, phase_name)
+
+                    for _ in range(repeat_batches):
+                        if batch_idx >= n_total_batches:
+                            break
+                        xb, yb = next(train_iter)
                         xb, yb = xb.to(device), yb.to(device)
                         optimizer.zero_grad()
                         pred = model(xb)
@@ -416,15 +443,49 @@ def main():
                             if grad_clip > 0:
                                 torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
                             optimizer.step()
-                            # Weight clipping (WGAN): clip to [-c, c]
-                            clip_val = float(step.get("clipWeights", 0))
                             if clip_val > 0:
                                 for p in model.parameters():
                                     if p.requires_grad:
                                         p.data.clamp_(-clip_val, clip_val)
-                        step_loss += loss.item()
-                        n_batches += 1
-                phase_losses[phase_name] = step_loss / max(n_batches, 1)
+                        step_sums[phase_name] = step_sums.get(phase_name, 0.0) + float(loss.item())
+                        step_counts[phase_name] = step_counts.get(phase_name, 0) + 1
+                        batch_idx += 1
+                    schedule_idx += 1
+                for phase_name, total in step_sums.items():
+                    phase_losses[phase_name] = total / max(step_counts.get(phase_name, 1), 1)
+            else:
+                for si, step in enumerate(schedule):
+                    step_epochs = _schedule_step_count(step, "epoch")
+                    trainable_tags = step.get("trainableTags", None)
+                    phase_name = step.get("_phase", f"step{si+1}")
+
+                    freeze_by_tags(trainable_tags, phase_name)
+                    model._phase_idx = si  # legacy fallback for PhaseSwitch
+                    model._phase_name = phase_name
+                    model.train()
+                    apply_module_modes(trainable_tags, phase_name)
+                    step_loss = 0.0
+                    n_batches = 0
+                    for _ in range(step_epochs):
+                        for xb, yb in train_dl:
+                            xb, yb = xb.to(device), yb.to(device)
+                            optimizer.zero_grad()
+                            pred = model(xb)
+                            loss = compute_loss(pred, xb, yb, phase_name)
+                            if loss.requires_grad:
+                                loss.backward()
+                                if grad_clip > 0:
+                                    torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
+                                optimizer.step()
+                                # Weight clipping (WGAN): clip to [-c, c]
+                                clip_val = float(step.get("clipWeights", 0))
+                                if clip_val > 0:
+                                    for p in model.parameters():
+                                        if p.requires_grad:
+                                            p.data.clamp_(-clip_val, clip_val)
+                            step_loss += loss.item()
+                            n_batches += 1
+                    phase_losses[phase_name] = step_loss / max(n_batches, 1)
 
             if not rotate_schedule:
                 schedule_done = True

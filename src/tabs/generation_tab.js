@@ -68,6 +68,39 @@
         .filter(function (t) { return t.modelId && (!schemaId || t.schemaId === schemaId); });
     }
 
+    function _resolveGenerationInfo(modelRec) {
+      if (!modelRec || !modelRec.graph || !modelBuilder) {
+        return {
+          family: "",
+          sampleNodes: [],
+          outputNodes: [],
+          hasLatentDecoder: false,
+          canReconstruct: true,
+          canRandomSample: false,
+          canClassifierGuide: false,
+          canLangevin: false,
+          canOptimize: false,
+          canInverse: true,
+          canDDPM: false,
+          defaultMethod: "reconstruct",
+        };
+      }
+      if (typeof modelBuilder.extractGenerationCapabilities === "function") {
+        return modelBuilder.extractGenerationCapabilities(modelRec.graph);
+      }
+      var family = typeof modelBuilder.inferModelFamily === "function" ? modelBuilder.inferModelFamily(modelRec.graph) : "";
+      return { family: family, sampleNodes: [], outputNodes: [], hasLatentDecoder: family === "vae", defaultMethod: family === "gan" ? "random" : "reconstruct" };
+    }
+
+    function _resolveGenerationMeta(modelRec) {
+      var engine = getGenerationEngine();
+      var info = _resolveGenerationInfo(modelRec);
+      var caps = engine && typeof engine.detectCapabilities === "function"
+        ? engine.detectCapabilities(info)
+        : { availableMethods: [{ id: "inverse", label: "Inverse / Transfer Learning" }], defaultMethod: "inverse" };
+      return { info: info, caps: caps };
+    }
+
     // ─── LEFT PANEL ───
     function _renderLeftPanel() {
       var leftEl = layout.leftEl;
@@ -153,12 +186,9 @@
             if (_trained.length) {
               _autoTrainerId = _trained[0].id;
               var _tm = _trained[0].modelId ? store.getModel(_trained[0].modelId) : null;
-              _autoFamily = _tm && _tm.graph && modelBuilder ? modelBuilder.inferModelFamily(_tm.graph) : "";
-              var _eng = getGenerationEngine();
-              if (_eng && _autoFamily) {
-                var _caps = _eng.detectCapabilities(_autoFamily);
-                _autoMethod = _caps.defaultMethod || "reconstruct";
-              }
+              var _meta = _resolveGenerationMeta(_tm);
+              _autoFamily = _meta.info.family || "";
+              _autoMethod = _meta.caps.defaultMethod || "reconstruct";
             }
           }
           var rec = { id: id, name: name, schemaId: sid, trainerId: _autoTrainerId, family: _autoFamily, config: { method: _autoMethod, numSamples: 16, steps: 100, lr: 0.01, temperature: 1.0, seed: 42 }, status: "draft", runs: [], createdAt: Date.now() };
@@ -278,13 +308,16 @@
 
       // trainer/model selector (filtered by schema, shows status)
       var trainers = _listTrainersForSchema(g.schemaId);
+      var selectedTrainer = g.trainerId ? (store ? store.getTrainerCard(g.trainerId) : null) : null;
+      var selectedModel = selectedTrainer && selectedTrainer.modelId ? (store ? store.getModel(selectedTrainer.modelId) : null) : null;
+      var selectedMeta = _resolveGenerationMeta(selectedModel);
       var trainerRow = el("div", { className: "osc-form-row" });
       trainerRow.appendChild(el("label", {}, "Model"));
       var trainerSel = el("select", { style: "width:100%;padding:4px;background:#1e293b;color:#e2e8f0;border:1px solid #334155;border-radius:4px;font-size:11px;" });
       trainerSel.appendChild(el("option", { value: "" }, "-- select model --"));
       trainers.forEach(function (t) {
         var model = store ? store.getModel(t.modelId) : null;
-        var family = model && model.graph && modelBuilder ? modelBuilder.inferModelFamily(model.graph) : "supervised";
+        var family = _resolveGenerationInfo(model).family || "supervised";
         var statusTag = t.status === "done" ? "\u2713" : t.status === "training" ? "\u23f3" : "\u25cb";
         var opt = el("option", { value: t.id }, statusTag + " " + (t.name || t.id) + " (" + family + ")");
         if (t.id === g.trainerId) opt.selected = true;
@@ -295,21 +328,20 @@
         // detect family
         var t = g.trainerId ? (store ? store.getTrainerCard(g.trainerId) : null) : null;
         var m = t ? (store ? store.getModel(t.modelId) : null) : null;
-        g.family = m && m.graph && modelBuilder ? modelBuilder.inferModelFamily(m.graph) : "";
-        // set default method based on family
-        var engine = getGenerationEngine();
-        if (engine && g.family) {
-          var caps = engine.detectCapabilities(g.family);
-          g.config.method = caps.defaultMethod;
-        }
+        var meta = _resolveGenerationMeta(m);
+        g.family = meta.info.family || "";
+        g.config.method = meta.caps.defaultMethod;
         _saveGen(g); _renderRightPanel(); _renderMainPanel(); _renderLeftPanel();
       });
       trainerRow.appendChild(trainerSel);
       configCard.appendChild(trainerRow);
 
-      // method selector (based on model family)
-      var engine = getGenerationEngine();
-      var caps = engine && g.family ? engine.detectCapabilities(g.family) : { availableMethods: [{ id: "inverse", label: "Inverse" }], defaultMethod: "inverse" };
+      // method selector (resolved from graph capabilities)
+      var caps = selectedMeta.caps;
+      var availableMethodIds = caps.availableMethods.map(function (m) { return m.id; });
+      if (availableMethodIds.length && availableMethodIds.indexOf(g.config.method || "") < 0) {
+        g.config.method = caps.defaultMethod;
+      }
 
       var methodRow = el("div", { className: "osc-form-row" });
       methodRow.appendChild(el("label", {}, "Method"));
@@ -324,10 +356,7 @@
       configCard.appendChild(methodRow);
 
       // --- Sample node / Output node selectors (from graph) ---
-      var _selectedTrainerForNodes = g.trainerId ? (store ? store.getTrainerCard(g.trainerId) : null) : null;
-      var _modelForNodes = _selectedTrainerForNodes && _selectedTrainerForNodes.modelId ? (store ? store.getModel(_selectedTrainerForNodes.modelId) : null) : null;
-      var _genNodes = _modelForNodes && _modelForNodes.graph && modelBuilder && modelBuilder.extractGenerationNodes
-        ? modelBuilder.extractGenerationNodes(_modelForNodes.graph) : { sampleNodes: [], outputNodes: [] };
+      var _genNodes = { sampleNodes: selectedMeta.info.sampleNodes || [], outputNodes: selectedMeta.info.outputNodes || [] };
 
       if (_genNodes.sampleNodes.length > 0) {
         var sampleRow = el("div", { className: "osc-form-row" });
@@ -423,7 +452,6 @@
       rightEl.appendChild(configCard);
 
       // check if selected trainer is ready — check both weight sets
-      var selectedTrainer = g.trainerId ? (store ? store.getTrainerCard(g.trainerId) : null) : null;
       var isReady = selectedTrainer && (selectedTrainer.modelArtifacts || selectedTrainer.modelArtifactsLast || selectedTrainer.modelArtifactsBest);
 
       if (g.trainerId && !isReady) {
@@ -467,7 +495,7 @@
           trainer = trained[0];
           g.trainerId = trainer.id;
           var m2 = store ? store.getModel(trainer.modelId) : null;
-          g.family = m2 && m2.graph && modelBuilder ? modelBuilder.inferModelFamily(m2.graph) : g.family;
+          g.family = _resolveGenerationInfo(m2).family || g.family;
           _saveGen(g);
           onStatus("Auto-selected trained model: " + trainer.name);
         }
@@ -575,12 +603,13 @@
 
         // determine latent dim and model for generation
         var genModel = built.model;
-        var family = g.family || modelBuilder.inferModelFamily(modelRec.graph);
+        var genMeta = _resolveGenerationMeta(modelRec);
+        g.family = genMeta.info.family || g.family;
 
         // --- resolve sampleNodeId → latentDim + sampleInputIndex ---
         var genLatentDim = featureSize;
         var sampleInputIndex = -1; // -1 = auto-detect by dim matching
-        var genNodes = modelBuilder.extractGenerationNodes ? modelBuilder.extractGenerationNodes(modelRec.graph) : { sampleNodes: [], outputNodes: [] };
+        var genNodes = { sampleNodes: genMeta.info.sampleNodes || [], outputNodes: genMeta.info.outputNodes || [] };
 
         if (config.sampleNodeId && genNodes.sampleNodes.length) {
           var selSample = genNodes.sampleNodes.find(function (s) { return s.id === config.sampleNodeId; });
@@ -593,7 +622,7 @@
               }
             }
           }
-        } else if (family === "gan" && genNodes.sampleNodes.length) {
+        } else if (genNodes.sampleNodes.length) {
           genLatentDim = genNodes.sampleNodes[0].dim;
         } else if (latentDim > 0) {
           genLatentDim = latentDim;
@@ -619,7 +648,7 @@
           }
         }
 
-        if (family === "vae" && method !== "inverse" && method !== "reconstruct") {
+        if (genMeta.info.hasLatentDecoder && method !== "inverse" && method !== "reconstruct") {
           try {
             var decoder = modelBuilder.extractDecoder(tf, built.model, latentDim);
             if (decoder && decoder.model) { genModel = decoder.model; genLatentDim = decoder.latentDim || latentDim; outputIndex = 0; }

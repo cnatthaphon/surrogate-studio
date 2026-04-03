@@ -94,6 +94,7 @@ assert(graphGeneratorBn.every(function (n) {
     Math.abs(Number(n.data.gammaInitMean || 0) - 1) < 1e-9 &&
     Math.abs(Number(n.data.gammaInitStddev || 0) - 0.02) < 1e-9;
 }), "Generator BatchNorm uses DCGAN-style momentum/epsilon/gamma init");
+assert((trainerCfg.trainingSchedule || []).every(function (step) { return String(step.unit || "epoch") === "batch" && Number(step.batches || 0) === 1; }), "DCGAN trainer uses per-batch phase rotation");
 assert(model.outputs.length === 3, "Model has 3 outputs");
 assert(model.outputs[0].shape[1] === 784, "G output shape [null,784]");
 assert(model.outputs[1].shape[1] === 1, "D output shape [null,1]");

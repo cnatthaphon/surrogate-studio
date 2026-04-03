@@ -237,8 +237,8 @@
         config: { epochs: 200, batchSize: 128, learningRate: 0.0002, optimizerType: "adam", optimizerBeta1: 0.5, optimizerBeta2: 0.999, useServer: true,
                   earlyStoppingPatience: 0, lrSchedulerType: "none", weightSelection: "last",
                   trainingSchedule: [
-                    { epochs: 1, trainableTags: { discriminator: true, generator: false } },
-                    { epochs: 1, trainableTags: { discriminator: false, generator: true } }
+                    { unit: "batch", batches: 1, trainableTags: { discriminator: true, generator: false } },
+                    { unit: "batch", batches: 1, trainableTags: { discriminator: false, generator: true } }
                   ], rotateSchedule: true } },
       // Pre-trained — generate immediately (weights loaded on init)
       { id: "t-mlp-gan-trained", name: "MLP-GAN (pre-trained)", schemaId: sid, datasetId: DS, modelId: "m-mlp-gan", status: "done",
@@ -254,8 +254,8 @@
         config: { epochs: 200, batchSize: 128, learningRate: 0.0002, optimizerType: "adam", optimizerBeta1: 0.5, optimizerBeta2: 0.999, useServer: true,
                   earlyStoppingPatience: 0, lrSchedulerType: "none", weightSelection: "last",
                   trainingSchedule: [
-                    { epochs: 1, trainableTags: { discriminator: true, generator: false } },
-                    { epochs: 1, trainableTags: { discriminator: false, generator: true } }
+                    { unit: "batch", batches: 1, trainableTags: { discriminator: true, generator: false } },
+                    { unit: "batch", batches: 1, trainableTags: { discriminator: false, generator: true } }
                   ], rotateSchedule: true } },
       // WGAN (Arjovsky 2017) — Wasserstein loss, linear critic output
       { id: "t-mlp-wgan", name: "MLP-WGAN Trainer", schemaId: sid, datasetId: DS, modelId: "m-mlp-wgan", status: "draft",

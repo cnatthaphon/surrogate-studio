@@ -508,10 +508,34 @@
     },
   };
 
-  // === Detect generation capabilities from model family ===
-  function detectCapabilities(modelFamily) {
-    var family = String(modelFamily || "supervised").toLowerCase();
-    var caps = {
+  function _availableMethodsFromCaps(caps) {
+    var methods = [];
+    if (caps.canReconstruct) methods.push({ id: "reconstruct", label: "Reconstruct (input → model → output)" });
+    if (caps.canRandomSample) methods.push({ id: "random", label: "Random Sampling (z ~ N(0,1))" });
+    if (caps.canClassifierGuide) methods.push({ id: "classifier_guided", label: "Classifier-Guided Sampling" });
+    if (caps.canOptimize) methods.push({ id: "optimize", label: "Latent Optimization" });
+    if (caps.canLangevin) methods.push({ id: "langevin", label: "Langevin Dynamics" });
+    if (caps.canDDPM) methods.push({ id: "ddpm", label: "DDPM Denoising" });
+    if (caps.canInverse) methods.push({ id: "inverse", label: "Inverse / Transfer Learning" });
+    return methods;
+  }
+
+  // === Detect generation capabilities from graph-derived info or legacy family label ===
+  function detectCapabilities(modelInfo) {
+    var isInfoObject = modelInfo && typeof modelInfo === "object" && !Array.isArray(modelInfo);
+    var family = String((isInfoObject && modelInfo.family) || modelInfo || "supervised").toLowerCase();
+    var caps = isInfoObject ? {
+      family: family,
+      canReconstruct: !!modelInfo.canReconstruct,
+      canRandomSample: !!modelInfo.canRandomSample,
+      canClassifierGuide: !!modelInfo.canClassifierGuide,
+      canLangevin: !!modelInfo.canLangevin,
+      canOptimize: !!modelInfo.canOptimize,
+      canInverse: !!modelInfo.canInverse,
+      canDDPM: !!modelInfo.canDDPM,
+      defaultMethod: String(modelInfo.defaultMethod || "reconstruct").toLowerCase(),
+      availableMethods: [],
+    } : {
       family: family,
       canReconstruct: family === "vae" || family === "supervised" || family === "diffusion",
       canRandomSample: family === "vae" || family === "gan",
@@ -523,13 +547,7 @@
       defaultMethod: family === "vae" ? "reconstruct" : family === "diffusion" ? "langevin" : family === "gan" ? "random" : "reconstruct",
       availableMethods: [],
     };
-    if (caps.canReconstruct) caps.availableMethods.push({ id: "reconstruct", label: "Reconstruct (input → model → output)" });
-    if (caps.canRandomSample) caps.availableMethods.push({ id: "random", label: "Random Sampling (z ~ N(0,1))" });
-    if (caps.canClassifierGuide) caps.availableMethods.push({ id: "classifier_guided", label: "Classifier-Guided Sampling" });
-    if (caps.canOptimize) caps.availableMethods.push({ id: "optimize", label: "Latent Optimization" });
-    if (caps.canLangevin) caps.availableMethods.push({ id: "langevin", label: "Langevin Dynamics" });
-    if (caps.canDDPM) caps.availableMethods.push({ id: "ddpm", label: "DDPM Denoising" });
-    if (caps.canInverse) caps.availableMethods.push({ id: "inverse", label: "Inverse / Transfer Learning" });
+    caps.availableMethods = _availableMethodsFromCaps(caps);
     return caps;
   }
 

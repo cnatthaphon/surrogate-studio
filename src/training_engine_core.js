@@ -540,11 +540,22 @@
     // training schedule: [{epochs: N, trainableTags: {tag: bool}}]
     var schedule = Array.isArray(opts.trainingSchedule) && opts.trainingSchedule.length ? opts.trainingSchedule : null;
     var rotateSchedule = opts.rotateSchedule !== false;
+    function _scheduleStepUnit(step) {
+      var unit = String((step && (step.unit || step.intervalUnit)) || "epoch").trim().toLowerCase();
+      return unit === "batch" ? "batch" : "epoch";
+    }
+    function _scheduleStepCount(step, unit) {
+      var raw = step && (step.count != null ? step.count : step.repeat);
+      if (raw == null) raw = unit === "batch" ? step && step.batches : step && step.epochs;
+      var n = Math.max(1, Number(raw) || 1);
+      return Math.floor(n);
+    }
     // backward compat
     if (!schedule) {
       var detectedPhases = detectPhases(headConfigs);
       schedule = detectedPhases.map(function (p) { return { epochs: 1, trainableTags: null, _phase: p }; });
     }
+    var scheduleUsesBatchUnit = !!schedule.length && schedule.every(function (step) { return _scheduleStepUnit(step) === "batch"; });
 
     // group heads by phase (for backward compat)
     var headsByPhase = {};
@@ -696,9 +707,24 @@
         });
       }
 
+      function _setPhaseFlagForStep(step, stepIdx) {
+        if (model._phaseFlag) model._phaseFlag.assign(tf.scalar(stepIdx, "int32"));
+        if (_phaseFlagIdx < 0 || !Array.isArray(xTrainInputs) || !phaseSwitchConfigs.length) return;
+        var tags = step.trainableTags || {};
+        var flagVal = phaseSwitchConfigs.some(function (cfg) {
+          var ap = String((cfg && cfg.activePhase) || "").trim();
+          if (!ap) return false;
+          if (step._phase) return String(step._phase) === ap;
+          return !!tags[ap];
+        }) ? 0 : 1;
+        var old = xTrainInputs[_phaseFlagIdx];
+        xTrainInputs[_phaseFlagIdx] = tf.fill([nSamples, 1], flagVal);
+        old.dispose();
+      }
+
       // Training step: optimizer.minimize with model.apply.
       // Reads labels from model output when graphLabelOutputIdx is set.
-      function _trainStep(stepOpt, xFull, yFull, clipVal) {
+      function _trainBatch(stepOpt, xFull, yFull, start, end, clipVal) {
         // Collect all currently trainable variables. Phased freeze logic controls tags;
         // untagged layers keep their declared trainable state.
         var vars = [];
@@ -708,14 +734,6 @@
           }
         });
         if (!vars.length) return 0;
-        // Iterate through all mini-batches (same as server)
-        var fullN = Array.isArray(xFull) ? xFull[0].shape[0] : xFull.shape[0];
-        var bs = Math.min(batchSize, fullN);
-        var nBatches = Math.max(1, Math.ceil(fullN / bs));
-        var totalLoss = 0;
-        for (var bi = 0; bi < nBatches; bi++) {
-        var start = bi * bs;
-        var end = Math.min(start + bs, fullN);
         var indices = tf.range(start, end, 1, "int32");
         var xBatch = Array.isArray(xFull) ? xFull.map(function (x) { return tf.gather(x, indices); }) : tf.gather(xFull, indices);
         var yArrays = Array.isArray(yFull) ? yFull.map(function (y) { return tf.gather(y, indices); }) : tf.gather(yFull, indices);
@@ -741,13 +759,25 @@
             return total;
           }, true, vars);
         });
-        totalLoss += loss.dataSync()[0];
+        var totalLoss = loss.dataSync()[0];
         loss.dispose();
         indices.dispose();
         if (Array.isArray(xBatch)) xBatch.forEach(function (t) { t.dispose(); }); else xBatch.dispose();
         if (Array.isArray(yArrays)) yArrays.forEach(function (t) { t.dispose(); }); else yArrays.dispose();
         _clipTrainableWeights(clipVal);
-        } // end batch loop
+        return totalLoss;
+      }
+
+      function _trainStep(stepOpt, xFull, yFull, clipVal) {
+        var fullN = Array.isArray(xFull) ? xFull[0].shape[0] : xFull.shape[0];
+        var bs = Math.min(batchSize, fullN);
+        var nBatches = Math.max(1, Math.ceil(fullN / bs));
+        var totalLoss = 0;
+        for (var bi = 0; bi < nBatches; bi++) {
+          var start = bi * bs;
+          var end = Math.min(start + bs, fullN);
+          totalLoss += _trainBatch(stepOpt, xFull, yFull, start, end, clipVal);
+        }
         return totalLoss / nBatches;
       }
 
@@ -823,6 +853,52 @@
         var stepLosses = {};
         var stepIdx = 0;
 
+        if (scheduleUsesBatchUnit) {
+          var fullN = Array.isArray(xTrainInputs) ? xTrainInputs[0].shape[0] : xTrainInputs.shape[0];
+          var bs = Math.min(batchSize, fullN);
+          var nBatches = Math.max(1, Math.ceil(fullN / bs));
+          var batchIdx = 0;
+          while (batchIdx < nBatches) {
+            var cycleStepIdx = stepIdx % schedule.length;
+            var batchStep = schedule[cycleStepIdx];
+            var batchLabel = batchStep._phase || ("step" + (cycleStepIdx + 1));
+            var batchRepeats = _scheduleStepCount(batchStep, "batch");
+            _freezeByStep(batchStep);
+            _setPhaseFlagForStep(batchStep, cycleStepIdx);
+            var batchClipVal = Number(batchStep.clipWeights || 0);
+            for (var rep = 0; rep < batchRepeats && batchIdx < nBatches; rep++, batchIdx++) {
+              _regenNoise();
+              var start = batchIdx * bs;
+              var end = Math.min(start + bs, fullN);
+              var batchLoss = _trainBatch(_getOpt(batchLabel), xTrainInputs, yTrainArrays, start, end, batchClipVal);
+              stepLosses[batchLabel] = (stepLosses[batchLabel] || 0) + batchLoss;
+              if (!stepLosses[batchLabel + "::__count"]) stepLosses[batchLabel + "::__count"] = 0;
+              stepLosses[batchLabel + "::__count"] += 1;
+            }
+            stepIdx++;
+          }
+          Object.keys(stepLosses).forEach(function (k) {
+            if (k.indexOf("::__count") >= 0) return;
+            var c = stepLosses[k + "::__count"] || 1;
+            stepLosses[k] = stepLosses[k] / c;
+            delete stepLosses[k + "::__count"];
+          });
+          if (!rotateSchedule) scheduleComplete = true;
+          var batchTotalLoss = 0;
+          Object.keys(stepLosses).forEach(function (k) { batchTotalLoss += (stepLosses[k] || 0); });
+          epochHistory.push({ epoch: epoch + 1, loss: batchTotalLoss, phaseLosses: stepLosses });
+          var batchImproved = batchTotalLoss < bestValLoss * (1 - 1e-4);
+          if (batchImproved) { bestValLoss = batchTotalLoss; bestEpoch = epoch + 1; }
+          _applyLrSchedule(batchImproved);
+          if (typeof onEpochEnd === "function") {
+            var batchPhaseStr = Object.keys(stepLosses).map(function (k) { return k + "=" + (stepLosses[k] != null ? stepLosses[k].toExponential(3) : "?"); }).join(" | ");
+            onEpochEnd(epoch, { loss: batchTotalLoss, val_loss: null, current_lr: lr, improved: batchImproved, phaseLosses: stepLosses, phaseStr: batchPhaseStr });
+          }
+          epoch++;
+          setTimeout(nextEpoch, 0);
+          return;
+        }
+
         function nextStep() {
           if (stepIdx >= schedule.length) {
             if (!rotateSchedule) scheduleComplete = true;
@@ -841,25 +917,12 @@
           }
 
           var step = schedule[stepIdx];
-          var stepEp = Math.max(1, Number(step.epochs) || 1);
+          var stepEp = _scheduleStepCount(step, "epoch");
           var label = step._phase || ("step" + (stepIdx + 1));
 
-          if (model._phaseFlag) model._phaseFlag.assign(tf.scalar(stepIdx, "int32"));
           _freezeByStep(step);
           _regenNoise();
-          // Update PhaseSwitch flag: 0 if step matches activePhase, 1 otherwise
-          if (_phaseFlagIdx >= 0 && Array.isArray(xTrainInputs) && phaseSwitchConfigs.length) {
-            var tags = step.trainableTags || {};
-            var flagVal = phaseSwitchConfigs.some(function (cfg) {
-              var ap = String((cfg && cfg.activePhase) || "").trim();
-              if (!ap) return false;
-              if (step._phase) return String(step._phase) === ap;
-              return !!tags[ap];
-            }) ? 0 : 1;
-            var old = xTrainInputs[_phaseFlagIdx];
-            xTrainInputs[_phaseFlagIdx] = tf.fill([nSamples, 1], flagVal);
-            old.dispose();
-          }
+          _setPhaseFlagForStep(step, stepIdx);
 
           var stepLoss = 0;
           var clipVal = Number(step.clipWeights || 0);
