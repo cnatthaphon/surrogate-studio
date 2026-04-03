@@ -12,6 +12,18 @@
       throw new Error("OSCModelGraphCore.createRuntime requires api.");
     }
 
+    function _cfgUseBias(rawCfg) {
+      if (!rawCfg || !Object.prototype.hasOwnProperty.call(rawCfg, "useBias")) return true;
+      if (rawCfg.useBias === false) return false;
+      var raw = String(rawCfg.useBias == null ? "" : rawCfg.useBias).trim().toLowerCase();
+      if (!raw) return true;
+      return !(raw === "false" || raw === "0" || raw === "no" || raw === "off");
+    }
+
+    function _useBiasLabel(v) {
+      return v ? "on" : "off";
+    }
+
     function addInputNode(editor, x, y) {
       var html =
         "<div><div style='font-weight:700'>Input</div><div style='display:grid;gap:4px'>" +
@@ -35,14 +47,15 @@
       }
       var units = Math.max(1, Number((cfg && cfg.units) || 32));
       var activation = String((cfg && cfg.activation) || "relu");
+      var useBias = _cfgUseBias(cfg);
       var tagMeta = _layerTagMeta(cfg);
       var html =
         "<div><div style='font-weight:700'>Dense</div>" + tagMeta.tagHtml + "<div style='display:grid;gap:4px'>" +
         "<input type='number' df-units value='" + units + "' min='1' style='width:80px'>" +
         "<select df-activation style='width:120px'>" +
         "<option value='relu'>relu</option><option value='tanh'>tanh</option><option value='sigmoid'>sigmoid</option><option value='linear'>linear</option>" +
-        "</select><div class='node-summary' style='font-size:11px;color:#94a3b8;'>u=" + units + ", act=" + activation + "</div></div></div>";
-      return editor.addNode("dense_layer", 1, 1, x, y, "dense_layer", { units: units, activation: activation, weightTag: tagMeta.weightTag, blockName: tagMeta.blockName }, html);
+        "</select><div class='node-summary' style='font-size:11px;color:#94a3b8;'>u=" + units + ", act=" + activation + ", bias=" + _useBiasLabel(useBias) + "</div></div></div>";
+      return editor.addNode("dense_layer", 1, 1, x, y, "dense_layer", { units: units, activation: activation, useBias: useBias, weightTag: tagMeta.weightTag, blockName: tagMeta.blockName }, html);
     }
 
     function addDropoutNode(editor, x, y, cfg) {
@@ -268,14 +281,15 @@
       var kernelSize = Math.max(1, Number((cfg && cfg.kernelSize) || 3));
       var stride = Math.max(1, Number((cfg && cfg.stride) || 1));
       var activation = String((cfg && cfg.activation) || "relu");
+      var useBias = _cfgUseBias(cfg);
       var html =
         "<div><div style='font-weight:700'>Conv1D</div>" + tagHtml + "<div style='display:grid;gap:4px'>" +
         "<input type='number' df-filters value='" + filters + "' min='1' style='width:80px'>" +
         "<input type='number' df-kernelSize value='" + kernelSize + "' min='1' style='width:80px'>" +
         "<input type='number' df-stride value='" + stride + "' min='1' style='width:80px'>" +
         "<select df-activation style='width:120px'><option value='relu'>relu</option><option value='tanh'>tanh</option><option value='sigmoid'>sigmoid</option><option value='linear'>linear</option></select>" +
-        "<div class='node-summary' style='font-size:11px;color:#94a3b8;'>f=" + filters + ", k=" + kernelSize + ", s=" + stride + ", act=" + activation + "</div></div></div>";
-      return editor.addNode("conv1d_layer", 1, 1, x, y, "conv1d_layer", { filters: filters, kernelSize: kernelSize, stride: stride, activation: activation, weightTag: weightTag, blockName: blockName }, html);
+        "<div class='node-summary' style='font-size:11px;color:#94a3b8;'>f=" + filters + ", k=" + kernelSize + ", s=" + stride + ", act=" + activation + ", bias=" + _useBiasLabel(useBias) + "</div></div></div>";
+      return editor.addNode("conv1d_layer", 1, 1, x, y, "conv1d_layer", { filters: filters, kernelSize: kernelSize, stride: stride, activation: activation, useBias: useBias, weightTag: weightTag, blockName: blockName }, html);
     }
 
     function addConcatNode(editor, x, y, cfg) {
@@ -297,14 +311,15 @@
       var units = Math.max(1, Number((cfg && cfg.units) || 48));
       var dropout = api.clamp(Number((cfg && cfg.dropout) || 0.1), 0, 0.8);
       var returnseq = String((cfg && cfg.returnseq) || "auto");
+      var useBias = _cfgUseBias(cfg);
       var html =
         "<div><div style='font-weight:700'>SimpleRNN</div>" + tagHtml + "<div style='display:grid;gap:4px'>" +
         "<input type='number' df-units value='" + units + "' min='1' style='width:80px'>" +
         "<input type='number' df-dropout value='" + dropout.toFixed(2) + "' min='0' max='0.8' step='0.05' style='width:80px'>" +
         "<select df-returnseq style='width:120px'><option value='auto'>returnSeq:auto</option><option value='false'>returnSeq:false</option><option value='true'>returnSeq:true</option></select>" +
-        "<div class='node-summary' style='font-size:11px;color:#94a3b8;'>u=" + units + ", d=" + dropout.toFixed(2) + ", rs=" + returnseq + "</div>" +
+        "<div class='node-summary' style='font-size:11px;color:#94a3b8;'>u=" + units + ", d=" + dropout.toFixed(2) + ", rs=" + returnseq + ", bias=" + _useBiasLabel(useBias) + "</div>" +
         "</div></div>";
-      return editor.addNode("rnn_layer", 1, 1, x, y, "rnn_layer", { units: units, dropout: dropout, returnseq: returnseq, weightTag: weightTag, blockName: blockName }, html);
+      return editor.addNode("rnn_layer", 1, 1, x, y, "rnn_layer", { units: units, dropout: dropout, returnseq: returnseq, useBias: useBias, weightTag: weightTag, blockName: blockName }, html);
     }
 
     function addGruNode(editor, x, y, cfg) {
@@ -320,14 +335,15 @@
       var units = Math.max(1, Number((cfg && cfg.units) || 64));
       var dropout = api.clamp(Number((cfg && cfg.dropout) || 0.1), 0, 0.8);
       var returnseq = String((cfg && cfg.returnseq) || "auto");
+      var useBias = _cfgUseBias(cfg);
       var html =
         "<div><div style='font-weight:700'>GRU</div>" + tagHtml + "<div style='display:grid;gap:4px'>" +
         "<input type='number' df-units value='" + units + "' min='1' style='width:80px'>" +
         "<input type='number' df-dropout value='" + dropout.toFixed(2) + "' min='0' max='0.8' step='0.05' style='width:80px'>" +
         "<select df-returnseq style='width:120px'><option value='auto'>returnSeq:auto</option><option value='false'>returnSeq:false</option><option value='true'>returnSeq:true</option></select>" +
-        "<div class='node-summary' style='font-size:11px;color:#94a3b8;'>u=" + units + ", d=" + dropout.toFixed(2) + ", rs=" + returnseq + "</div>" +
+        "<div class='node-summary' style='font-size:11px;color:#94a3b8;'>u=" + units + ", d=" + dropout.toFixed(2) + ", rs=" + returnseq + ", bias=" + _useBiasLabel(useBias) + "</div>" +
         "</div></div>";
-      return editor.addNode("gru_layer", 1, 1, x, y, "gru_layer", { units: units, dropout: dropout, returnseq: returnseq, weightTag: weightTag, blockName: blockName }, html);
+      return editor.addNode("gru_layer", 1, 1, x, y, "gru_layer", { units: units, dropout: dropout, returnseq: returnseq, useBias: useBias, weightTag: weightTag, blockName: blockName }, html);
     }
 
     function addLstmNode(editor, x, y, cfg) {
@@ -343,14 +359,15 @@
       var units = Math.max(1, Number((cfg && cfg.units) || 64));
       var dropout = api.clamp(Number((cfg && cfg.dropout) || 0.1), 0, 0.8);
       var returnseq = String((cfg && cfg.returnseq) || "auto");
+      var useBias = _cfgUseBias(cfg);
       var html =
         "<div><div style='font-weight:700'>LSTM</div>" + tagHtml + "<div style='display:grid;gap:4px'>" +
         "<input type='number' df-units value='" + units + "' min='1' style='width:80px'>" +
         "<input type='number' df-dropout value='" + dropout.toFixed(2) + "' min='0' max='0.8' step='0.05' style='width:80px'>" +
         "<select df-returnseq style='width:120px'><option value='auto'>returnSeq:auto</option><option value='false'>returnSeq:false</option><option value='true'>returnSeq:true</option></select>" +
-        "<div class='node-summary' style='font-size:11px;color:#94a3b8;'>u=" + units + ", d=" + dropout.toFixed(2) + ", rs=" + returnseq + "</div>" +
+        "<div class='node-summary' style='font-size:11px;color:#94a3b8;'>u=" + units + ", d=" + dropout.toFixed(2) + ", rs=" + returnseq + ", bias=" + _useBiasLabel(useBias) + "</div>" +
         "</div></div>";
-      return editor.addNode("lstm_layer", 1, 1, x, y, "lstm_layer", { units: units, dropout: dropout, returnseq: returnseq, weightTag: weightTag, blockName: blockName }, html);
+      return editor.addNode("lstm_layer", 1, 1, x, y, "lstm_layer", { units: units, dropout: dropout, returnseq: returnseq, useBias: useBias, weightTag: weightTag, blockName: blockName }, html);
     }
 
     // === New building blocks for GAN/Diffusion ===
@@ -442,9 +459,10 @@
       var strides = Math.max(1, Number((cfg && cfg.strides) || 1));
       var padding = String((cfg && cfg.padding) || "same");
       var activation = String((cfg && cfg.activation) || "relu");
+      var useBias = _cfgUseBias(cfg);
       var html =
-        "<div><div style='font-weight:700'>Conv2D</div>" + tagHtml + "<div class='node-summary' style='font-size:11px;color:#94a3b8;'>f=" + filters + ", k=" + kernelSize + ", s=" + strides + ", " + padding + "</div></div>";
-      return editor.addNode("conv2d_layer", 1, 1, x, y, "conv2d_layer", { filters: filters, kernelSize: kernelSize, strides: strides, padding: padding, activation: activation, weightTag: weightTag, blockName: blockName }, html);
+        "<div><div style='font-weight:700'>Conv2D</div>" + tagHtml + "<div class='node-summary' style='font-size:11px;color:#94a3b8;'>f=" + filters + ", k=" + kernelSize + ", s=" + strides + ", " + padding + ", bias=" + _useBiasLabel(useBias) + "</div></div>";
+      return editor.addNode("conv2d_layer", 1, 1, x, y, "conv2d_layer", { filters: filters, kernelSize: kernelSize, strides: strides, padding: padding, activation: activation, useBias: useBias, weightTag: weightTag, blockName: blockName }, html);
     }
     function addMaxPool2dNode(editor, x, y, cfg) {
       var poolSize = Math.max(1, Number((cfg && cfg.poolSize) || 2));
@@ -472,9 +490,10 @@
       var strides = Math.max(1, Number((cfg && cfg.strides) || 2));
       var padding = String((cfg && cfg.padding) || "same");
       var activation = String((cfg && cfg.activation) || "relu");
+      var useBias = _cfgUseBias(cfg);
       var html =
-        "<div><div style='font-weight:700'>ConvT2D</div>" + tagHtml + "<div class='node-summary' style='font-size:11px;color:#94a3b8;'>f=" + filters + ", k=" + kernelSize + ", s=" + strides + "</div></div>";
-      return editor.addNode("conv2d_transpose_layer", 1, 1, x, y, "conv2d_transpose_layer", { filters: filters, kernelSize: kernelSize, strides: strides, padding: padding, activation: activation, weightTag: weightTag, blockName: blockName }, html);
+        "<div><div style='font-weight:700'>ConvT2D</div>" + tagHtml + "<div class='node-summary' style='font-size:11px;color:#94a3b8;'>f=" + filters + ", k=" + kernelSize + ", s=" + strides + ", bias=" + _useBiasLabel(useBias) + "</div></div>";
+      return editor.addNode("conv2d_transpose_layer", 1, 1, x, y, "conv2d_transpose_layer", { filters: filters, kernelSize: kernelSize, strides: strides, padding: padding, activation: activation, useBias: useBias, weightTag: weightTag, blockName: blockName }, html);
     }
     function addUpSampling2dNode(editor, x, y, cfg) {
       var size = Math.max(1, Number((cfg && cfg.size) || 2));
@@ -681,7 +700,7 @@
     }
     function _getNodeMainSummary(node, nodeId, moduleData, sid, d) {
       if (node.name === "input_layer") return "mode=" + String(d.mode || "auto");
-      if (node.name === "dense_layer") return "u=" + Number(d.units || 32) + ", act=" + String(d.activation || "relu");
+      if (node.name === "dense_layer") return "u=" + Number(d.units || 32) + ", act=" + String(d.activation || "relu") + ", bias=" + _useBiasLabel(_cfgUseBias(d));
       if (node.name === "latent_layer") return "u=" + Number(d.units || 16) + ", g=" + String(d.group || "z_shared") + ", w=" + Number(d.matchWeight || 1).toFixed(2);
       if (node.name === "latent_mu_layer") return "u=" + Number(d.units || 16) + ", g=" + String(d.group || "z_shared");
       if (node.name === "latent_logvar_layer") return "u=" + Number(d.units || 16) + ", g=" + String(d.group || "z_shared");
@@ -691,7 +710,7 @@
       if (node.name === "batchnorm_layer") return "m=" + Number(d.momentum || 0.99).toFixed(3) + ", \u03b5=" + Number(d.epsilon || 1e-3).toExponential(1);
       if (node.name === "layernorm_layer") return "\u03b5=" + Number(d.epsilon || 1e-3).toExponential(1);
       if (node.name === "rnn_layer" || node.name === "gru_layer" || node.name === "lstm_layer") {
-        return "u=" + Number(d.units || 64) + ", d=" + Number(d.dropout || 0).toFixed(2) + ", rs=" + String(d.returnseq || "auto");
+        return "u=" + Number(d.units || 64) + ", d=" + Number(d.dropout || 0).toFixed(2) + ", rs=" + String(d.returnseq || "auto") + ", bias=" + _useBiasLabel(_cfgUseBias(d));
       }
       if (node.name === "image_source_block") {
         return "feature=" + String(d.sourceKey || "pixel_values") + ", shape=" + Number(d.imageWidth || 28) + "x" + Number(d.imageHeight || 28) + "x" + Number(d.imageChannels || 1);
@@ -729,7 +748,7 @@
       if (node.name === "cos_norm_block") return "cos(2\u03c0\u00b7t/T)";
       if (node.name === "noise_schedule_block") return "\u03b2(t), \u03b1\u0304(t), \u03c3(t)";
       if (node.name === "conv1d_layer") {
-        return "f=" + Number(d.filters || 64) + ", k=" + Number(d.kernelSize || 3) + ", s=" + Number(d.stride || 1) + ", act=" + String(d.activation || "relu");
+        return "f=" + Number(d.filters || 64) + ", k=" + Number(d.kernelSize || 3) + ", s=" + Number(d.stride || 1) + ", act=" + String(d.activation || "relu") + ", bias=" + _useBiasLabel(_cfgUseBias(d));
       }
       if (node.name === "constant_layer") { return "const=" + Number(d.value != null ? d.value : 1) + ", dim=" + Number(d.dim || 1); }
       if (node.name === "concat_batch_layer") { return "concat batches (2 inputs)"; }
@@ -739,10 +758,10 @@
         return "vocab=" + Number(d.inputDim || 10000) + ", dim=" + Number(d.outputDim || 256);
       }
       if (node.name === "conv2d_layer") {
-        return "f=" + Number(d.filters || 32) + ", k=" + Number(d.kernelSize || 3) + ", s=" + Number(d.strides || 1) + ", " + String(d.padding || "same");
+        return "f=" + Number(d.filters || 32) + ", k=" + Number(d.kernelSize || 3) + ", s=" + Number(d.strides || 1) + ", " + String(d.padding || "same") + ", bias=" + _useBiasLabel(_cfgUseBias(d));
       }
       if (node.name === "conv2d_transpose_layer") {
-        return "f=" + Number(d.filters || 32) + ", k=" + Number(d.kernelSize || 3) + ", s=" + Number(d.strides || 2) + " (deconv)";
+        return "f=" + Number(d.filters || 32) + ", k=" + Number(d.kernelSize || 3) + ", s=" + Number(d.strides || 2) + " (deconv), bias=" + _useBiasLabel(_cfgUseBias(d));
       }
       if (node.name === "maxpool2d_layer") { return "pool=" + Number(d.poolSize || 2) + ", s=" + Number(d.strides || d.poolSize || 2); }
       if (node.name === "flatten_layer") { return "flatten ND\u21921D"; }
@@ -1013,6 +1032,7 @@
             { value: "linear", label: "linear" }
           ]
         });
+        addField({ kind: "select", key: "useBias", label: "Use bias", value: _cfgUseBias(d) ? "true" : "false", options: [{ value: "true", label: "true" }, { value: "false", label: "false" }] });
         addInitializerFields("kernel", "Kernel");
         addInitializerFields("bias", "Bias", { value: 0 });
         addField({ kind: "text", key: "weightTag", label: "Weight tag (for freeze)", value: String(d.weightTag || ""), placeholder: "e.g. generator, discriminator" });
@@ -1035,6 +1055,7 @@
             { value: "linear", label: "linear" }
           ]
         });
+        addField({ kind: "select", key: "useBias", label: "Use bias", value: _cfgUseBias(d) ? "true" : "false", options: [{ value: "true", label: "true" }, { value: "false", label: "false" }] });
         addInitializerFields("kernel", "Kernel");
         addInitializerFields("bias", "Bias", { value: 0 });
         addField({ kind: "text", key: "weightTag", label: "Weight tag (for freeze)", value: String(d.weightTag || ""), placeholder: "e.g. generator, discriminator" });
@@ -1074,6 +1095,7 @@
         addField({ kind: "number", key: "strides", label: "Strides", value: Math.max(1, Number(d.strides || (isTranspose ? 2 : 1))), min: 1, step: 1 });
         addField({ kind: "select", key: "padding", label: "Padding", value: String(d.padding || "same"), options: [{ value: "same", label: "same" }, { value: "valid", label: "valid" }] });
         addField({ kind: "select", key: "activation", label: "Activation", value: String(d.activation || "relu"), options: [{ value: "relu", label: "relu" }, { value: "tanh", label: "tanh" }, { value: "sigmoid", label: "sigmoid" }, { value: "linear", label: "linear" }] });
+        addField({ kind: "select", key: "useBias", label: "Use bias", value: _cfgUseBias(d) ? "true" : "false", options: [{ value: "true", label: "true" }, { value: "false", label: "false" }] });
         addInitializerFields("kernel", "Kernel");
         addInitializerFields("bias", "Bias", { value: 0 });
         addField({ kind: "text", key: "weightTag", label: "Weight tag (for freeze)", value: String(d.weightTag || ""), placeholder: "e.g. generator, discriminator" });
@@ -1134,6 +1156,7 @@
             { value: "true", label: "true" }
           ]
         });
+        addField({ kind: "select", key: "useBias", label: "Use bias", value: _cfgUseBias(d) ? "true" : "false", options: [{ value: "true", label: "true" }, { value: "false", label: "false" }] });
         addInitializerFields("kernel", "Kernel");
         addInitializerFields("recurrent", "Recurrent");
         addInitializerFields("bias", "Bias", { value: 0 });
@@ -1235,6 +1258,9 @@
       } else if (k === "activation") {
         var act = String(rawValue || "relu");
         data.activation = ["relu", "tanh", "sigmoid", "linear"].indexOf(act) >= 0 ? act : "relu";
+      } else if (k === "useBias") {
+        var useBiasRaw = String(rawValue == null ? "true" : rawValue).trim().toLowerCase();
+        data.useBias = !(useBiasRaw === "false" || useBiasRaw === "0" || useBiasRaw === "no" || useBiasRaw === "off");
       } else if (k === "filters") {
         data.filters = Math.max(1, Math.round(Number(rawValue) || 64));
       } else if (k === "kernelSize") {

@@ -37,6 +37,7 @@
   function _dcWeightCfg(tag, blockName, extra) {
     return Object.assign({
       activation: "linear",
+      useBias: false,
       weightTag: tag,
       blockName: blockName,
       kernelInitializer: "randomNormal",
@@ -148,13 +149,13 @@
     var dOut = N(d, "output",            { target: "custom", targetType: "custom", loss: "bce", matchWeight: 1, phase: "discriminator", headType: "classification" }, 1460, 200);
     C(d, cat, dr); C(d, dr, dc1); C(d, dc1, dlr1); C(d, dlr1, dc2); C(d, dc2, dbn1); C(d, dbn1, dlr2); C(d, dlr2, df); C(d, df, dd); C(d, dd, dOut);
 
-    // Labels: [fake_label, real_label] via ConcatBatch (label smoothing 0.1/0.9)
-    var c0 =   N(d, "constant",          { value: 0.1, dim: 1 },                1140, 360);
-    var c1 =   N(d, "constant",          { value: 0.9, dim: 1 },                1140, 440);
+    // Labels: [fake_label, real_label] via ConcatBatch (paper-faithful 0/1 targets)
+    var c0 =   N(d, "constant",          { value: 0, dim: 1 },                  1140, 360);
+    var c1 =   N(d, "constant",          { value: 1, dim: 1 },                  1140, 440);
     var sw =   N(d, "phase_switch",      { activePhase: "discriminator" },       1300, 400);
     C(d, c0, sw, "output_1", "input_1");
     C(d, c1, sw, "output_1", "input_2");
-    var cR =   N(d, "constant",          { value: 0.9, dim: 1 },                1300, 480);
+    var cR =   N(d, "constant",          { value: 1, dim: 1 },                  1300, 480);
     var lcat = N(d, "concat_batch",      {},                                    1460, 440);
     C(d, sw, lcat, "output_1", "input_1");
     C(d, cR, lcat, "output_1", "input_2");

@@ -47,6 +47,18 @@ def _cfg_float(v, fallback):
     except Exception:
         return fallback
 
+def _cfg_bool(v, fallback=True):
+    if v is None:
+        return bool(fallback)
+    if isinstance(v, bool):
+        return v
+    s = str(v).strip().lower()
+    if s in ("false", "0", "no", "off"):
+        return False
+    if s in ("true", "1", "yes", "on"):
+        return True
+    return bool(fallback)
+
 def _resolve_optimizer_config(config):
     opt = config.get("optimizer", {}) or {}
     betas = opt.get("betas", []) if isinstance(opt, dict) else []
@@ -797,9 +809,10 @@ def build_model_from_graph(graph, feature_size, target_size, num_classes=0):
                     dim_map[nid] = feature_size
                 elif t == "dense":
                     units = int(c.get("units", 32))
+                    use_bias = _cfg_bool(c.get("useBias", True), True)
                     # auto-flatten spatial dims: [H,W,C] → H*W*C
                     flat_dim = in_dim if isinstance(in_dim, int) else int(in_dim[0]) * int(in_dim[1]) * int(in_dim[2]) if isinstance(in_dim, list) and len(in_dim) == 3 else int(in_dim[0]) if isinstance(in_dim, list) else in_dim
-                    dense_mod = nn.Linear(flat_dim, units)
+                    dense_mod = nn.Linear(flat_dim, units, bias=use_bias)
                     _apply_module_initializers(dense_mod, c, t)
                     setattr(self, f"dense_{nid}", dense_mod)
                     act = str(c.get("activation", "relu"))
@@ -809,8 +822,9 @@ def build_model_from_graph(graph, feature_size, target_size, num_classes=0):
                     dim_map[nid] = units
                 elif t in ("latent_mu", "latent_logvar", "latent"):
                     units = int(c.get("units", 8))
+                    use_bias = _cfg_bool(c.get("useBias", True), True)
                     flat_dim = in_dim if isinstance(in_dim, int) else int(in_dim[0]) * int(in_dim[1]) * int(in_dim[2]) if isinstance(in_dim, list) and len(in_dim) == 3 else int(in_dim[0]) if isinstance(in_dim, list) else in_dim
-                    latent_mod = nn.Linear(flat_dim, units)
+                    latent_mod = nn.Linear(flat_dim, units, bias=use_bias)
                     _apply_module_initializers(latent_mod, c, "dense")
                     setattr(self, f"dense_{nid}", latent_mod)
                     dim_map[nid] = units
@@ -824,9 +838,10 @@ def build_model_from_graph(graph, feature_size, target_size, num_classes=0):
                     dim_map[nid] = in_dim
                 elif t in ("lstm", "gru", "rnn"):
                     units = int(c.get("units", 32))
+                    use_bias = _cfg_bool(c.get("useBias", True), True)
                     rnn_cls = {"lstm": nn.LSTM, "gru": nn.GRU, "rnn": nn.RNN}[t]
                     rnn_mod = rnn_cls(
-                        input_size=in_dim, hidden_size=units, num_layers=1, batch_first=True)
+                        input_size=in_dim, hidden_size=units, num_layers=1, batch_first=True, bias=use_bias)
                     _apply_module_initializers(rnn_mod, c, t)
                     setattr(self, f"rnn_{nid}", rnn_mod)
                     dim_map[nid] = units
@@ -898,10 +913,11 @@ def build_model_from_graph(graph, feature_size, target_size, num_classes=0):
                     ks = int(c.get("kernelSize", 3))
                     st = int(c.get("strides", 1))
                     pad_mode = str(c.get("padding", "same"))
+                    use_bias = _cfg_bool(c.get("useBias", True), True)
                     # match TF.js 'same' padding: output = ceil(input / stride)
                     pad = (ks - 1) // 2 if pad_mode == "same" and st == 1 else (ks - st) // 2 if pad_mode == "same" else 0
                     in_ch = in_dim[-1] if isinstance(in_dim, list) else 1
-                    conv_mod = nn.Conv2d(in_ch, filters, ks, st, pad)
+                    conv_mod = nn.Conv2d(in_ch, filters, ks, st, pad, bias=use_bias)
                     _apply_module_initializers(conv_mod, c, t)
                     setattr(self, f"conv2d_{nid}", conv_mod)
                     act = str(c.get("activation", "relu"))
@@ -919,11 +935,12 @@ def build_model_from_graph(graph, feature_size, target_size, num_classes=0):
                     ks = int(c.get("kernelSize", 3))
                     st = int(c.get("strides", 2))
                     pad_mode = str(c.get("padding", "same"))
+                    use_bias = _cfg_bool(c.get("useBias", True), True)
                     # match TF.js 'same' padding: output = input * stride
                     pad = (ks - st) // 2 if pad_mode == "same" else 0
                     out_pad = 0
                     in_ch = in_dim[-1] if isinstance(in_dim, list) else 1
-                    convt_mod = nn.ConvTranspose2d(in_ch, filters, ks, st, pad, out_pad)
+                    convt_mod = nn.ConvTranspose2d(in_ch, filters, ks, st, pad, out_pad, bias=use_bias)
                     _apply_module_initializers(convt_mod, c, t)
                     setattr(self, f"convt2d_{nid}", convt_mod)
                     act = str(c.get("activation", "relu"))
@@ -981,7 +998,7 @@ def build_model_from_graph(graph, feature_size, target_size, num_classes=0):
                     if out_in == odim:
                         setattr(self, f"out_{nid}", nn.Identity())
                     else:
-                        out_mod = nn.Linear(out_in, odim)
+                        out_mod = nn.Linear(out_in, odim, bias=_cfg_bool(c.get("useBias", True), True))
                         _apply_module_initializers(out_mod, c, "dense")
                         setattr(self, f"out_{nid}", out_mod)
                     dim_map[nid] = odim

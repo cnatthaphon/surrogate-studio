@@ -348,11 +348,23 @@ function buildModelFromDrawflowGraph(rawGraph, datasetMeta, schemaId) {
     return v;
   }
 
+  function resolveUseBias(data, fallback) {
+    const fb = fallback !== false;
+    if (!data || !Object.prototype.hasOwnProperty.call(data, "useBias")) return fb;
+    if (data.useBias === false) return false;
+    const raw = String(data.useBias == null ? "" : data.useBias).trim().toLowerCase();
+    if (!raw) return fb;
+    if (raw === "false" || raw === "0" || raw === "no" || raw === "off") return false;
+    if (raw === "true" || raw === "1" || raw === "yes" || raw === "on") return true;
+    return fb;
+  }
+
   function applyNodeOp(node, inTensor, laterHasRecurrent) {
     if (node.name === "dense_layer") {
       const units = Math.max(1, Number(node.data && node.data.units || 32));
       const activation = String(node.data && node.data.activation || "relu");
-      return tf.layers.dense({ units: units, activation: activation }).apply(inTensor);
+      const useBias = resolveUseBias(node.data, true);
+      return tf.layers.dense({ units: units, activation: activation, useBias: useBias }).apply(inTensor);
     }
     if (node.name === "dropout_layer") {
       const rate = clamp(node.data && node.data.rate || 0.1, 0, 0.9);
@@ -376,12 +388,14 @@ function buildModelFromDrawflowGraph(rawGraph, datasetMeta, schemaId) {
       const kernelSize = Math.max(1, Number(node.data && node.data.kernelSize || 3));
       const strides = Math.max(1, Number(node.data && node.data.stride || 1));
       const activation = String(node.data && node.data.activation || "relu");
+      const useBias = resolveUseBias(node.data, true);
       return tf.layers.conv1d({
         filters: filters,
         kernelSize: kernelSize,
         strides: strides,
         padding: "same",
         activation: activation,
+        useBias: useBias,
       }).apply(inTensor);
     }
     if (node.name === "rnn_layer" || node.name === "gru_layer" || node.name === "lstm_layer") {
@@ -390,11 +404,13 @@ function buildModelFromDrawflowGraph(rawGraph, datasetMeta, schemaId) {
       const dropout = clamp(node.data && node.data.dropout || 0, 0, 0.8);
       const rsSetting = String(node.data && node.data.returnseq || "auto");
       const returnSeq = rsSetting === "true" ? true : (rsSetting === "false" ? false : laterHasRecurrent);
+      const useBias = resolveUseBias(node.data, true);
       if (node.name === "rnn_layer") {
         return tf.layers.simpleRNN({
           units: units,
           returnSequences: returnSeq,
           dropout: dropout,
+          useBias: useBias,
           recurrentInitializer: "glorotUniform",
         }).apply(inTensor);
       }
@@ -403,6 +419,7 @@ function buildModelFromDrawflowGraph(rawGraph, datasetMeta, schemaId) {
           units: units,
           returnSequences: returnSeq,
           dropout: dropout,
+          useBias: useBias,
           recurrentInitializer: "glorotUniform",
         }).apply(inTensor);
       }
@@ -410,12 +427,14 @@ function buildModelFromDrawflowGraph(rawGraph, datasetMeta, schemaId) {
         units: units,
         returnSequences: returnSeq,
         dropout: dropout,
+        useBias: useBias,
         recurrentInitializer: "glorotUniform",
       }).apply(inTensor);
     }
     if (node.name === "latent_layer" || node.name === "latent_mu_layer" || node.name === "latent_logvar_layer") {
       const units = Math.max(2, Number(node.data && node.data.units || 16));
-      return tf.layers.dense({ units: units, activation: "linear" }).apply(inTensor);
+      const useBias = resolveUseBias(node.data, true);
+      return tf.layers.dense({ units: units, activation: "linear", useBias: useBias }).apply(inTensor);
     }
     if (node.name === "reparam_layer") {
       throw new Error("Reparam node is handled as a special two-input op.");

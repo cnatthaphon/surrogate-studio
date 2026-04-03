@@ -77,11 +77,16 @@ var graphGeneratorAffine = Object.keys(graphNodes).map(function (id) { return gr
   var blockName = String(n.data && n.data.blockName || "");
   return n.data && n.data.weightTag === "generator" && (n.name === "dense_layer" || n.name === "conv2d_transpose_layer") && blockName !== "G_out";
 });
+var graphDcAffine = Object.keys(graphNodes).map(function (id) { return graphNodes[id]; }).filter(function (n) {
+  return n.data && (n.name === "dense_layer" || n.name === "conv2d_layer" || n.name === "conv2d_transpose_layer") &&
+    (n.data.weightTag === "generator" || n.data.weightTag === "discriminator");
+});
 var graphGeneratorBn = Object.keys(graphNodes).map(function (id) { return graphNodes[id]; }).filter(function (n) {
   return n.name === "batchnorm_layer" && n.data && n.data.weightTag === "generator";
 });
 assert(graphReluNodes.length >= 2, "Generator graph has explicit ReLU nodes, got " + graphReluNodes.length);
 assert(graphGeneratorAffine.every(function (n) { return String(n.data.activation || "linear") === "linear"; }), "Generator affine blocks stay linear before BatchNorm/ReLU");
+assert(graphDcAffine.every(function (n) { return n.data.useBias === false; }), "DCGAN graph disables bias on affine blocks");
 assert(graphGeneratorBn.every(function (n) {
   return Math.abs(Number(n.data.momentum || 0) - 0.9) < 1e-9 &&
     Math.abs(Number(n.data.epsilon || 0) - 0.00001) < 1e-12 &&
@@ -93,6 +98,10 @@ assert(model.outputs.length === 3, "Model has 3 outputs");
 assert(model.outputs[0].shape[1] === 784, "G output shape [null,784]");
 assert(model.outputs[1].shape[1] === 1, "D output shape [null,1]");
 assert(model.outputs[2].shape[1] === 1, "Label output shape [null,1]");
+var dcAffineLayers = model.layers.filter(function (l) {
+  return l._blockName && (l._weightTag === "generator" || l._weightTag === "discriminator") &&
+    (typeof l.useBias === "boolean");
+});
 
 var taggedLayers = model.layers.filter(function (l) { return !!l._weightTag && l.trainableWeights && l.trainableWeights.length; });
 var gLayers = taggedLayers.filter(function (l) { return l._weightTag === "generator"; });
@@ -102,6 +111,7 @@ var gBn = gLayers.filter(function (l) { return typeof l.getClassName === "functi
 var dBn = dLayers.filter(function (l) { return typeof l.getClassName === "function" && l.getClassName() === "BatchNormalization"; });
 assert(gLayers.length >= 5, "Generator has tagged weight-bearing blocks, got " + gLayers.length);
 assert(dLayers.length >= 4, "Discriminator has tagged weight-bearing blocks, got " + dLayers.length);
+assert(dcAffineLayers.every(function (l) { return l.useBias === false; }), "Built DCGAN affine layers disable bias");
 assert(gRelu.length >= 2, "Built generator has explicit ReLU layers, got " + gRelu.length);
 assert(gBn.length >= 2, "Generator BatchNorm blocks are tagged, got " + gBn.length);
 assert(dBn.length >= 1, "Discriminator BatchNorm blocks are tagged, got " + dBn.length);
