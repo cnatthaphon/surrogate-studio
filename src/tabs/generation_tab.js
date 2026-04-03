@@ -544,6 +544,8 @@
               method: method, numSamples: config.numSamples || 16,
               latentDim: modelBuilder.extractLatentInfo ? (modelBuilder.extractLatentInfo(modelRec.graph).latentDim || 20) : 20,
               temperature: config.temperature || 1.0, seed: config.seed || 42,
+              sampleNodeId: config.sampleNodeId || "",
+              outputNodeId: config.outputNodeId || "",
               originals: method === "reconstruct" ? sTestX.slice(0, config.numSamples || 16) : undefined,
             };
             serverAdapter.generateOnServer(serverConfig, serverUrl).then(function (result) {

@@ -108,6 +108,11 @@ def main():
             if param.dim() == 2:
                 # Un-transpose: TF.js [in, out] → PyTorch [out, in]
                 new_state[name] = torch.tensor(vals.reshape(param.shape[1], param.shape[0]).T, dtype=torch.float32)
+            elif param.dim() == 3 and name.startswith("conv1d_"):
+                new_state[name] = torch.tensor(vals.reshape(param.shape[2], param.shape[1], param.shape[0]).transpose(2, 1, 0), dtype=torch.float32)
+            elif param.dim() == 4 and (name.startswith("conv2d_") or name.startswith("convt2d_")):
+                tf_shape = (param.shape[2], param.shape[3], param.shape[1], param.shape[0])
+                new_state[name] = torch.tensor(vals.reshape(tf_shape).transpose(3, 2, 0, 1), dtype=torch.float32)
             else:
                 new_state[name] = torch.tensor(vals.reshape(param.shape), dtype=torch.float32)
             i += 1

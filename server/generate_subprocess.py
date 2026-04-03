@@ -11,6 +11,65 @@ import json
 import sys
 import numpy as np
 
+def _extract_graph_data(graph):
+    if not isinstance(graph, dict):
+        return {}
+    if "drawflow" in graph and isinstance(graph.get("drawflow"), dict):
+        if "Home" in graph["drawflow"]:
+            return graph["drawflow"]["Home"].get("data", {})
+        if "drawflow" in graph["drawflow"]:
+            return graph["drawflow"]["drawflow"].get("Home", {}).get("data", {})
+    if "Home" in graph and isinstance(graph.get("Home"), dict):
+        return graph["Home"].get("data", {})
+    if "nodes" in graph and isinstance(graph.get("nodes"), dict):
+        return graph["nodes"]
+    return graph
+
+def _extract_generation_nodes(graph):
+    data = _extract_graph_data(graph)
+    sample_nodes = []
+    output_nodes = []
+    def _sort_key(item):
+        try:
+            return int(item[0])
+        except Exception:
+            return 10**9
+    for nid, nd in sorted((data or {}).items(), key=_sort_key):
+        name = str((nd or {}).get("name", "") or "")
+        cfg = (nd or {}).get("data", {}) or {}
+        if name == "sample_z_layer":
+            sample_nodes.append({
+                "id": str(nid),
+                "dim": int(cfg.get("dim", 128) or 128),
+                "distribution": str(cfg.get("distribution", "normal") or "normal"),
+            })
+        elif name == "output_layer":
+            output_nodes.append({
+                "id": str(nid),
+                "loss": str(cfg.get("loss", "mse") or "mse").lower(),
+                "target": str(cfg.get("targetType", cfg.get("target", "")) or "").lower(),
+            })
+    return {"sampleNodes": sample_nodes, "outputNodes": output_nodes}
+
+def _pick_output(pred, output_index):
+    if isinstance(pred, list):
+        idx = max(0, min(int(output_index or 0), len(pred) - 1))
+        return pred[idx]
+    return pred
+
+def _resolve_output_index(model, graph, output_node_id=""):
+    output_ids = [str(x) for x in getattr(model, "output_ids", []) or []]
+    if not output_ids:
+        return 0
+    wanted = str(output_node_id or "").strip()
+    if wanted and wanted in output_ids:
+        return output_ids.index(wanted)
+    gen_nodes = _extract_generation_nodes(graph)
+    for node in gen_nodes["outputNodes"]:
+        if node["loss"] == "none" and node["id"] in output_ids:
+            return output_ids.index(node["id"])
+    return 0
+
 
 def main():
     if len(sys.argv) < 2:
@@ -38,12 +97,15 @@ def main():
     latent_dim = int(config.get("latentDim", 20))
     temperature = float(config.get("temperature", 1.0))
     seed = int(config.get("seed", 42))
+    output_node_id = str(config.get("outputNodeId", "") or "").strip()
 
     # Build + load weights
     model = build_model_from_graph(graph, feature_size, target_size, num_classes)
     model = model.to(device)
     _load_weights(model, config)
     model.eval()
+    output_index = _resolve_output_index(model, graph, output_node_id)
+    gen_nodes = _extract_generation_nodes(graph)
 
     torch.manual_seed(seed)
 
@@ -55,7 +117,7 @@ def main():
         n = min(num_samples, len(originals))
         x = torch.tensor(originals[:n], dtype=torch.float32).to(device)
         with torch.no_grad():
-            pred = model(x).cpu().numpy()
+            pred = _pick_output(model(x), output_index).cpu().numpy()
         # per-sample MSE
         metrics = []
         for i in range(n):
@@ -68,25 +130,42 @@ def main():
         }}))
 
     elif method == "random":
-        # Extract decoder: find reparam layer, build decoder from there
-        decoder, actual_latent_dim = _extract_decoder(model, latent_dim)
-        if decoder is None:
-            # no decoder found — use full model with random input
-            z = torch.randn(num_samples, feature_size, device=device) * temperature
+        # For graph-defined sample nodes (GAN-style), run the full graph and select the configured output head.
+        if gen_nodes["sampleNodes"]:
+            selected = gen_nodes["sampleNodes"][0]
+            sample_node_id = str(config.get("sampleNodeId", "") or "").strip()
+            for node in gen_nodes["sampleNodes"]:
+                if node["id"] == sample_node_id:
+                    selected = node
+                    break
+            dummy = torch.zeros(num_samples, feature_size, device=device)
             with torch.no_grad():
-                samples = model(z).cpu().numpy()
+                samples = _pick_output(model(dummy), output_index).cpu().numpy()
             print(json.dumps({"kind": "result", "result": {
                 "method": "random", "samples": samples.tolist(), "numSamples": num_samples,
-                "latentDim": feature_size, "latents": z.cpu().numpy().tolist(), "lossHistory": [],
+                "latentDim": int(selected.get("dim", latent_dim)),
+                "latents": [],
+                "lossHistory": [],
             }}))
         else:
-            z = torch.randn(num_samples, actual_latent_dim, device=device) * temperature
-            with torch.no_grad():
-                samples = decoder(z).cpu().numpy()
-            print(json.dumps({"kind": "result", "result": {
-                "method": "random", "samples": samples.tolist(), "numSamples": num_samples,
-                "latentDim": actual_latent_dim, "latents": z.cpu().numpy().tolist(), "lossHistory": [],
-            }}))
+            # Extract decoder: find reparam layer, build decoder from there
+            decoder, actual_latent_dim = _extract_decoder(model, latent_dim)
+            if decoder is None:
+                z = torch.randn(num_samples, feature_size, device=device) * temperature
+                with torch.no_grad():
+                    samples = _pick_output(model(z), output_index).cpu().numpy()
+                print(json.dumps({"kind": "result", "result": {
+                    "method": "random", "samples": samples.tolist(), "numSamples": num_samples,
+                    "latentDim": feature_size, "latents": z.cpu().numpy().tolist(), "lossHistory": [],
+                }}))
+            else:
+                z = torch.randn(num_samples, actual_latent_dim, device=device) * temperature
+                with torch.no_grad():
+                    samples = decoder(z).cpu().numpy()
+                print(json.dumps({"kind": "result", "result": {
+                    "method": "random", "samples": samples.tolist(), "numSamples": num_samples,
+                    "latentDim": actual_latent_dim, "latents": z.cpu().numpy().tolist(), "lossHistory": [],
+                }}))
 
     elif method == "classifier_guided":
         # optimize z so decoded output is classified as target class
@@ -132,6 +211,8 @@ def main():
         for step in range(int(config.get("steps", 100))):
             opt.zero_grad()
             out = dec(z)
+            if dec is model:
+                out = _pick_output(out, output_index)
             if target is not None:
                 loss = torch.nn.MSELoss()(out, target)
             else:
@@ -139,7 +220,10 @@ def main():
             loss.backward()
             opt.step()
             loss_history.append({"step": step, "loss": float(loss.item())})
-        samples = dec(z).detach().cpu().numpy()
+        final_out = dec(z)
+        if dec is model:
+            final_out = _pick_output(final_out, output_index)
+        samples = final_out.detach().cpu().numpy()
         print(json.dumps({"kind": "result", "result": {
             "method": "optimize", "samples": samples.tolist(), "numSamples": num_samples,
             "latentDim": actual_dim, "latents": z.detach().cpu().numpy().tolist(), "lossHistory": loss_history,
@@ -152,7 +236,7 @@ def main():
         x = torch.randn(num_samples, feature_size, device=device, requires_grad=True)
         loss_history = []
         for step in range(steps):
-            pred = model(x)
+            pred = _pick_output(model(x), output_index)
             score = (pred - x).mean()
             grad = torch.autograd.grad(score, x, create_graph=False)[0]
             noise = torch.randn_like(x) * (lr ** 0.5) * temperature
@@ -176,12 +260,12 @@ def main():
         loss_history = []
         for step in range(int(config.get("steps", 100))):
             opt.zero_grad()
-            pred = model(x_opt)
+            pred = _pick_output(model(x_opt), output_index)
             loss = torch.nn.MSELoss()(pred, target_t)
             loss.backward()
             opt.step()
             loss_history.append({"step": step, "loss": float(loss.item())})
-        samples = model(x_opt).detach().cpu().numpy()
+        samples = _pick_output(model(x_opt), output_index).detach().cpu().numpy()
         print(json.dumps({"kind": "result", "result": {
             "method": "inverse", "samples": samples.tolist(), "numSamples": n,
             "latentDim": feature_size, "latents": x_opt.detach().cpu().numpy().tolist(), "lossHistory": loss_history,
@@ -196,7 +280,7 @@ def main():
         x_t = torch.randn(num_samples, feature_size, device=device)
         with torch.no_grad():
             for t in reversed(range(T)):
-                pred = model(x_t)
+                pred = _pick_output(model(x_t), output_index)
                 noise_pred = (x_t - pred * alpha_bar[t]**0.5) / max((1 - alpha_bar[t])**0.5, 1e-8)
                 x_prev = (x_t - betas[t] / max((1 - alpha_bar[t])**0.5, 1e-8) * noise_pred) / alphas[t]**0.5
                 if t > 0:

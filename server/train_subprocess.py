@@ -155,24 +155,44 @@ def main():
         patience = 0
     grad_clip = float(config.get("gradClipNorm", 0))
 
-    # --- Optimizer ---
-    if optimizer_type == "sgd":
-        optimizer = torch.optim.SGD(model.parameters(), lr=lr, momentum=optimizer_cfg["momentum"])
-    elif optimizer_type == "rmsprop":
-        optimizer = torch.optim.RMSprop(
-            model.parameters(),
-            lr=lr,
-            alpha=optimizer_cfg["rho"],
-            momentum=optimizer_cfg["momentum"],
-            eps=optimizer_cfg["epsilon"],
-        )
-    else:
-        optimizer = torch.optim.Adam(
+    # --- Optimizers ---
+    # Match the client phased trainer: each schedule step keeps its own optimizer state.
+    def _make_optimizer():
+        if optimizer_type == "sgd":
+            return torch.optim.SGD(model.parameters(), lr=lr, momentum=optimizer_cfg["momentum"])
+        if optimizer_type == "rmsprop":
+            return torch.optim.RMSprop(
+                model.parameters(),
+                lr=lr,
+                alpha=optimizer_cfg["rho"],
+                momentum=optimizer_cfg["momentum"],
+                eps=optimizer_cfg["epsilon"],
+            )
+        return torch.optim.Adam(
             model.parameters(),
             lr=lr,
             betas=(optimizer_cfg["beta1"], optimizer_cfg["beta2"]),
             eps=optimizer_cfg["epsilon"],
         )
+
+    optimizer = _make_optimizer()
+    _step_optimizers = {"all": optimizer}
+
+    def _get_optimizer(key):
+        k = str(key or "all")
+        if k not in _step_optimizers:
+            opt = _make_optimizer()
+            base_lr = optimizer.param_groups[0]["lr"]
+            for pg in opt.param_groups:
+                pg["lr"] = base_lr
+            _step_optimizers[k] = opt
+        return _step_optimizers[k]
+
+    def _sync_optimizer_lrs():
+        base_lr = optimizer.param_groups[0]["lr"]
+        for opt in _step_optimizers.values():
+            for pg in opt.param_groups:
+                pg["lr"] = base_lr
 
     # LR scheduler from config (not hardcoded)
     lr_scheduler_type = str(config.get("lrSchedulerType", "plateau")).lower()
@@ -396,15 +416,16 @@ def main():
             model.train()
             train_loss = 0.0
             n_batches = 0
+            opt_all = _get_optimizer("all")
             for xb, yb in train_dl:
                 xb, yb = xb.to(device), yb.to(device)
-                optimizer.zero_grad()
+                opt_all.zero_grad()
                 pred = model(xb)
                 loss = compute_loss(pred, xb, yb, "")
                 loss.backward()
                 if grad_clip > 0:
                     torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
-                optimizer.step()
+                opt_all.step()
                 train_loss += loss.item()
                 n_batches += 1
             phase_losses["all"] = train_loss / max(n_batches, 1)
@@ -429,20 +450,21 @@ def main():
                     model._phase_name = phase_name
                     model.train()
                     apply_module_modes(trainable_tags, phase_name)
+                    step_opt = _get_optimizer(phase_name)
 
                     for _ in range(repeat_batches):
                         if batch_idx >= n_total_batches:
                             break
                         xb, yb = next(train_iter)
                         xb, yb = xb.to(device), yb.to(device)
-                        optimizer.zero_grad()
+                        step_opt.zero_grad()
                         pred = model(xb)
                         loss = compute_loss(pred, xb, yb, phase_name)
                         if loss.requires_grad:
                             loss.backward()
                             if grad_clip > 0:
                                 torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
-                            optimizer.step()
+                            step_opt.step()
                             if clip_val > 0:
                                 for p in model.parameters():
                                     if p.requires_grad:
@@ -464,19 +486,20 @@ def main():
                     model._phase_name = phase_name
                     model.train()
                     apply_module_modes(trainable_tags, phase_name)
+                    step_opt = _get_optimizer(phase_name)
                     step_loss = 0.0
                     n_batches = 0
                     for _ in range(step_epochs):
                         for xb, yb in train_dl:
                             xb, yb = xb.to(device), yb.to(device)
-                            optimizer.zero_grad()
+                            step_opt.zero_grad()
                             pred = model(xb)
                             loss = compute_loss(pred, xb, yb, phase_name)
                             if loss.requires_grad:
                                 loss.backward()
                                 if grad_clip > 0:
                                     torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
-                                optimizer.step()
+                                step_opt.step()
                                 # Weight clipping (WGAN): clip to [-c, c]
                                 clip_val = float(step.get("clipWeights", 0))
                                 if clip_val > 0:
@@ -522,6 +545,7 @@ def main():
         current_lr = optimizer.param_groups[0]["lr"]
         if scheduler is not None:
             scheduler.step(check_loss)
+            _sync_optimizer_lrs()
 
         epoch_log(ep, total_train_loss, val_loss, current_lr, improved, phase_losses)
 
@@ -997,13 +1021,17 @@ def build_model_from_graph(graph, feature_size, target_size, num_classes=0):
                     st = int(c.get("strides", 2))
                     pad_mode = str(c.get("padding", "same"))
                     use_bias = _cfg_bool(c.get("useBias", True), True)
-                    # match TF.js 'same' padding: output = input * stride
-                    pad = (ks - st) // 2 if pad_mode == "same" else 0
+                    # Match TF.js conv2dTranspose "same" by running the full transposed conv
+                    # and cropping the extra bottom/right border down to input * stride.
+                    pad = 0
                     out_pad = 0
                     in_ch = in_dim[-1] if isinstance(in_dim, list) else 1
                     convt_mod = nn.ConvTranspose2d(in_ch, filters, ks, st, pad, out_pad, bias=use_bias)
                     _apply_module_initializers(convt_mod, c, t)
                     setattr(self, f"convt2d_{nid}", convt_mod)
+                    if pad_mode == "same" and isinstance(in_dim, list):
+                        self._convt_crop = getattr(self, "_convt_crop", {})
+                        self._convt_crop[nid] = [in_dim[0] * st, in_dim[1] * st]
                     act = str(c.get("activation", "relu"))
                     if act == "relu": setattr(self, f"act_{nid}", nn.ReLU())
                     elif act == "tanh": setattr(self, f"act_{nid}", nn.Tanh())
@@ -1068,6 +1096,13 @@ def build_model_from_graph(graph, feature_size, target_size, num_classes=0):
                     dim_map[nid] = in_dim
 
         def forward(self, x):
+            def _flatten_tf_layout(tensor):
+                if tensor.dim() == 4:
+                    return tensor.permute(0, 2, 3, 1).contiguous().view(tensor.shape[0], -1)
+                if tensor.dim() > 2:
+                    return tensor.contiguous().view(tensor.shape[0], -1)
+                return tensor
+
             tensors = {}
             for nid in self.topo:
                 t = self.node_types[nid]
@@ -1090,9 +1125,9 @@ def build_model_from_graph(graph, feature_size, target_size, num_classes=0):
                 inp = tensors[parents_sorted[0]["from"]] if parents_sorted else x
 
                 if t == "dense" or t in ("latent_mu", "latent_logvar", "latent"):
-                    # auto-flatten 4D conv output for linear layer
+                    # auto-flatten conv output using TF.js NHWC ordering
                     if inp.dim() > 2:
-                        inp = inp.view(inp.shape[0], -1)
+                        inp = _flatten_tf_layout(inp)
                     out = getattr(self, f"dense_{nid}")(inp)
                     act = getattr(self, f"act_{nid}", None)
                     if act is not None:
@@ -1119,10 +1154,13 @@ def build_model_from_graph(graph, feature_size, target_size, num_classes=0):
                 elif t == "batchnorm":
                     tensors[nid] = getattr(self, f"bn_{nid}")(inp)
                 elif t == "layernorm":
-                    # flatten 4D for LayerNorm, then reshape back
+                    # flatten 4D for LayerNorm using TF.js ordering, then reshape back
                     if inp.dim() > 2:
                         shape = inp.shape
-                        tensors[nid] = getattr(self, f"ln_{nid}")(inp.view(shape[0], -1)).view(shape)
+                        flat = _flatten_tf_layout(inp)
+                        ln_out = getattr(self, f"ln_{nid}")(flat)
+                        nhwc = ln_out.view(shape[0], shape[2], shape[3], shape[1])
+                        tensors[nid] = nhwc.permute(0, 3, 1, 2).contiguous()
                     else:
                         tensors[nid] = getattr(self, f"ln_{nid}")(inp)
                 elif t == "leaky_relu":
@@ -1142,7 +1180,7 @@ def build_model_from_graph(graph, feature_size, target_size, num_classes=0):
                         # flatten all to 2D if any are not matching
                         shapes = [pt.shape[1:] for pt in parent_tensors]
                         if any(s != shapes[0] for s in shapes):
-                            parent_tensors = [pt.view(pt.shape[0], -1) for pt in parent_tensors]
+                            parent_tensors = [_flatten_tf_layout(pt) for pt in parent_tensors]
                         tensors[nid] = torch.cat(parent_tensors, dim=0)
                     else:
                         tensors[nid] = inp
@@ -1176,8 +1214,9 @@ def build_model_from_graph(graph, feature_size, target_size, num_classes=0):
                 elif t == "reshape":
                     shapes = getattr(self, '_reshape_shapes', {})
                     shape = shapes.get(nid, [28, 28, 1])
-                    # TF.js: [batch, H, W, C] → PyTorch: [batch, C, H, W]
-                    tensors[nid] = inp.view(inp.shape[0], shape[2], shape[0], shape[1])
+                    # TF.js reshape is NHWC-contiguous; convert explicitly to PyTorch NCHW.
+                    nhwc = inp.contiguous().view(inp.shape[0], shape[0], shape[1], shape[2])
+                    tensors[nid] = nhwc.permute(0, 3, 1, 2).contiguous()
                     continue
                 elif t == "conv2d":
                     out = getattr(self, f"conv2d_{nid}")(inp)
@@ -1185,6 +1224,9 @@ def build_model_from_graph(graph, feature_size, target_size, num_classes=0):
                     tensors[nid] = act(out) if act else out
                 elif t == "conv2d_transpose":
                     out = getattr(self, f"convt2d_{nid}")(inp)
+                    crop = getattr(self, "_convt_crop", {}).get(nid)
+                    if crop and out.dim() == 4:
+                        out = out[:, :, :crop[0], :crop[1]]
                     act = getattr(self, f"act_{nid}", None)
                     tensors[nid] = act(out) if act else out
                 elif t == "maxpool2d":
@@ -1192,13 +1234,13 @@ def build_model_from_graph(graph, feature_size, target_size, num_classes=0):
                 elif t == "upsample2d":
                     tensors[nid] = getattr(self, f"up_{nid}")(inp)
                 elif t == "flatten":
-                    tensors[nid] = inp.view(inp.shape[0], -1)
+                    tensors[nid] = _flatten_tf_layout(inp)
                 elif t == "global_avg_pool2d":
                     # [batch, C, H, W] → [batch, C]
                     tensors[nid] = inp.mean(dim=[2, 3]) if inp.dim() == 4 else inp
                 elif t == "output":
-                    # flatten conv output if needed before linear
-                    out_inp = inp.view(inp.shape[0], -1) if inp.dim() > 2 else inp
+                    # flatten conv output if needed before linear using TF.js NHWC ordering
+                    out_inp = _flatten_tf_layout(inp) if inp.dim() > 2 else inp
                     tensors[nid] = getattr(self, f"out_{nid}")(out_inp)
                     # if target=custom, store input_2 as label (from PhaseSwitch/Constant)
                     if len(parents_sorted) >= 2:
