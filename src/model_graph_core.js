@@ -54,6 +54,13 @@
       return editor.addNode("dropout_layer", 1, 1, x, y, "dropout_layer", { rate: rate }, html);
     }
 
+    function addReLUNode(editor, x, y) {
+      var html =
+        "<div><div style='font-weight:700'>ReLU</div>" +
+        "<div class='node-summary' style='font-size:11px;color:#94a3b8;'>max(0, x)</div></div>";
+      return editor.addNode("relu_layer", 1, 1, x, y, "relu_layer", {}, html);
+    }
+
     function addLeakyReLUNode(editor, x, y, cfg) {
       var alpha = api.clamp(Number((cfg && cfg.alpha) || 0.2), 0.01, 0.5);
       var html =
@@ -491,6 +498,7 @@
         input: addInputNode,
         dense: addDenseNode,
         dropout: addDropoutNode,
+        relu: addReLUNode,
         leaky_relu: addLeakyReLUNode,
         batchnorm: addBatchNormNode,
         layernorm: addLayerNormNode,
@@ -627,6 +635,7 @@
         latent_logvar_layer: "Latent log\u03c3\u00b2",
         reparam_layer: "Reparam z",
         dropout_layer: "Dropout",
+        relu_layer: "ReLU",
         leaky_relu_layer: "LeakyReLU",
         batchnorm_layer: "BatchNorm",
         layernorm_layer: "LayerNorm",
@@ -678,6 +687,7 @@
       if (node.name === "latent_logvar_layer") return "u=" + Number(d.units || 16) + ", g=" + String(d.group || "z_shared");
       if (node.name === "reparam_layer") return "g=" + String(d.group || "z_shared") + ", \u03b2=" + Number(d.beta || 1e-3).toExponential(1);
       if (node.name === "dropout_layer") return "rate=" + Number(d.rate || 0.1).toFixed(2);
+      if (node.name === "relu_layer") return "max(0, x)";
       if (node.name === "batchnorm_layer") return "m=" + Number(d.momentum || 0.99).toFixed(3) + ", \u03b5=" + Number(d.epsilon || 1e-3).toExponential(1);
       if (node.name === "layernorm_layer") return "\u03b5=" + Number(d.epsilon || 1e-3).toExponential(1);
       if (node.name === "rnn_layer" || node.name === "gru_layer" || node.name === "lstm_layer") {
@@ -770,6 +780,34 @@
       }
       function addMessage(text) {
         spec.push({ kind: "message", text: String(text || "") });
+      }
+      function addInitializerFields(prefix, labelPrefix, defaults) {
+        var opts = defaults || {};
+        addField({
+          kind: "select",
+          key: prefix + "Initializer",
+          label: labelPrefix + " init",
+          value: String(d[prefix + "Initializer"] || "default"),
+          options: [
+            { value: "default", label: "default" },
+            { value: "glorotUniform", label: "glorotUniform" },
+            { value: "glorotNormal", label: "glorotNormal" },
+            { value: "heUniform", label: "heUniform" },
+            { value: "heNormal", label: "heNormal" },
+            { value: "lecunUniform", label: "lecunUniform" },
+            { value: "lecunNormal", label: "lecunNormal" },
+            { value: "randomNormal", label: "randomNormal" },
+            { value: "randomUniform", label: "randomUniform" },
+            { value: "zeros", label: "zeros" },
+            { value: "ones", label: "ones" },
+            { value: "constant", label: "constant" }
+          ]
+        });
+        addField({ kind: "number", key: prefix + "InitMean", label: labelPrefix + " mean", value: _numOr(d[prefix + "InitMean"], opts.mean != null ? opts.mean : 0), step: 0.01 });
+        addField({ kind: "number", key: prefix + "InitStddev", label: labelPrefix + " stddev", value: Math.max(1e-8, _numOr(d[prefix + "InitStddev"], opts.stddev != null ? opts.stddev : 0.05)), min: 0.00000001, step: 0.01 });
+        addField({ kind: "number", key: prefix + "InitValue", label: labelPrefix + " constant", value: _numOr(d[prefix + "InitValue"], opts.value != null ? opts.value : 0), step: 0.01 });
+        addField({ kind: "number", key: prefix + "InitMin", label: labelPrefix + " min", value: _numOr(d[prefix + "InitMin"], opts.min != null ? opts.min : -0.05), step: 0.01 });
+        addField({ kind: "number", key: prefix + "InitMax", label: labelPrefix + " max", value: _numOr(d[prefix + "InitMax"], opts.max != null ? opts.max : 0.05), step: 0.01 });
       }
       // weightTag: common field for all trainable layer nodes
       var _trainableNodes = { "dense_layer": 1, "conv1d_layer": 1, "conv2d_layer": 1, "conv2d_transpose_layer": 1, "lstm_layer": 1, "gru_layer": 1, "rnn_layer": 1, "embedding_layer": 1, "batchnorm_layer": 1 };
@@ -975,6 +1013,8 @@
             { value: "linear", label: "linear" }
           ]
         });
+        addInitializerFields("kernel", "Kernel");
+        addInitializerFields("bias", "Bias", { value: 0 });
         addField({ kind: "text", key: "weightTag", label: "Weight tag (for freeze)", value: String(d.weightTag || ""), placeholder: "e.g. generator, discriminator" });
         addField({ kind: "text", key: "blockName", label: "Block name", value: String(d.blockName || ""), placeholder: "e.g. G_dense1, D_fc2" });
         return spec;
@@ -995,6 +1035,8 @@
             { value: "linear", label: "linear" }
           ]
         });
+        addInitializerFields("kernel", "Kernel");
+        addInitializerFields("bias", "Bias", { value: 0 });
         addField({ kind: "text", key: "weightTag", label: "Weight tag (for freeze)", value: String(d.weightTag || ""), placeholder: "e.g. generator, discriminator" });
         addField({ kind: "text", key: "blockName", label: "Block name", value: String(d.blockName || ""), placeholder: "e.g. encoder_conv1" });
         addMessage("Conv1D expects sequence input. For direct mode, keep graph flat.");
@@ -1018,6 +1060,7 @@
       if (node.name === "embedding_layer") {
         addField({ kind: "number", key: "inputDim", label: "Vocab size", value: Math.max(1, Number(d.inputDim || 10000)), min: 1, step: 1 });
         addField({ kind: "number", key: "outputDim", label: "Embed dim", value: Math.max(1, Number(d.outputDim || 256)), min: 1, step: 1 });
+        addInitializerFields("kernel", "Embedding");
         addField({ kind: "text", key: "weightTag", label: "Weight tag (for freeze)", value: String(d.weightTag || ""), placeholder: "e.g. generator, discriminator" });
         addField({ kind: "text", key: "blockName", label: "Block name", value: String(d.blockName || ""), placeholder: "e.g. token_embed" });
         addMessage("Maps integer token IDs → dense vectors. Input must be integer sequences.");
@@ -1031,6 +1074,8 @@
         addField({ kind: "number", key: "strides", label: "Strides", value: Math.max(1, Number(d.strides || (isTranspose ? 2 : 1))), min: 1, step: 1 });
         addField({ kind: "select", key: "padding", label: "Padding", value: String(d.padding || "same"), options: [{ value: "same", label: "same" }, { value: "valid", label: "valid" }] });
         addField({ kind: "select", key: "activation", label: "Activation", value: String(d.activation || "relu"), options: [{ value: "relu", label: "relu" }, { value: "tanh", label: "tanh" }, { value: "sigmoid", label: "sigmoid" }, { value: "linear", label: "linear" }] });
+        addInitializerFields("kernel", "Kernel");
+        addInitializerFields("bias", "Bias", { value: 0 });
         addField({ kind: "text", key: "weightTag", label: "Weight tag (for freeze)", value: String(d.weightTag || ""), placeholder: "e.g. generator, discriminator" });
         addField({ kind: "text", key: "blockName", label: "Block name", value: String(d.blockName || ""), placeholder: "e.g. G_conv1, D_conv2" });
         if (isTranspose) addMessage("Upsampling convolution (decoder). Strides=2 doubles spatial dims.");
@@ -1057,6 +1102,10 @@
       if (node.name === "batchnorm_layer") {
         addField({ kind: "number", key: "momentum", label: "Momentum", value: api.clamp(Number(d.momentum || 0.99), 0.1, 0.999).toFixed(3), min: 0.1, max: 0.999, step: 0.001 });
         addField({ kind: "number", key: "epsilon", label: "Epsilon", value: Math.max(1e-6, Number(d.epsilon || 1e-3)).toFixed(6), min: 0.000001, step: 0.000001 });
+        addInitializerFields("gamma", "Gamma", { mean: 1, value: 1 });
+        addInitializerFields("beta", "Beta", { value: 0 });
+        addInitializerFields("movingMean", "Moving mean", { value: 0 });
+        addInitializerFields("movingVariance", "Moving variance", { mean: 1, value: 1, min: 0.95, max: 1.05 });
         addField({ kind: "text", key: "weightTag", label: "Weight tag (for freeze)", value: String(d.weightTag || ""), placeholder: "e.g. generator, discriminator" });
         addField({ kind: "text", key: "blockName", label: "Block name", value: String(d.blockName || ""), placeholder: "e.g. G_bn1, D_bn2" });
         addMessage("BatchNorm after Dense/Conv1D can improve training stability.");
@@ -1064,6 +1113,8 @@
       }
       if (node.name === "layernorm_layer") {
         addField({ kind: "number", key: "epsilon", label: "Epsilon", value: Math.max(1e-6, Number(d.epsilon || 1e-3)).toFixed(6), min: 0.000001, step: 0.000001 });
+        addInitializerFields("gamma", "Gamma", { mean: 1, value: 1 });
+        addInitializerFields("beta", "Beta", { value: 0 });
         addField({ kind: "text", key: "weightTag", label: "Weight tag (for freeze)", value: String(d.weightTag || ""), placeholder: "e.g. generator, discriminator" });
         addField({ kind: "text", key: "blockName", label: "Block name", value: String(d.blockName || ""), placeholder: "e.g. G_ln1" });
         addMessage("LayerNorm is sequence-safe and often robust for RNN/GRU/LSTM stacks.");
@@ -1083,6 +1134,9 @@
             { value: "true", label: "true" }
           ]
         });
+        addInitializerFields("kernel", "Kernel");
+        addInitializerFields("recurrent", "Recurrent");
+        addInitializerFields("bias", "Bias", { value: 0 });
         addField({ kind: "text", key: "weightTag", label: "Weight tag (for freeze)", value: String(d.weightTag || ""), placeholder: "e.g. encoder, decoder" });
         addField({ kind: "text", key: "blockName", label: "Block name", value: String(d.blockName || ""), placeholder: "e.g. enc_gru1" });
         return spec;
@@ -1131,6 +1185,10 @@
         data.weightTag = String(rawValue || "").trim();
       } else if (k === "blockName") {
         data.blockName = String(rawValue || "").trim();
+      } else if (/(Initializer)$/.test(k)) {
+        data[k] = String(rawValue || "default").trim() || "default";
+      } else if (/(InitMean|InitStddev|InitMin|InitMax|InitValue)$/.test(k)) {
+        data[k] = Number(rawValue);
       } else if (k === "matchWeight") {
         data.matchWeight = Math.max(0, Number(rawValue) || 1);
       } else if (k === "wx") {

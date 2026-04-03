@@ -159,6 +159,57 @@
     return layer;
   }
 
+  function _normalizeInitializerName(raw, fallback) {
+    var fb = String(fallback == null ? "default" : fallback).trim().toLowerCase() || "default";
+    var v = String(raw == null ? "" : raw).trim().toLowerCase().replace(/[\s_\-]/g, "");
+    var aliases = {
+      "": fb,
+      "default": "default",
+      "auto": "default",
+      "inherit": "default",
+      "xavieruniform": "glorotuniform",
+      "xaviernormal": "glorotnormal",
+      "kaiminguniform": "heuniform",
+      "kaimingnormal": "henormal",
+      "normal": "randomnormal",
+      "uniform": "randomuniform"
+    };
+    return aliases[v] || v || fb;
+  }
+
+  function _numOr(value, fallback) {
+    var n = Number(value);
+    return Number.isFinite(n) ? n : Number(fallback);
+  }
+
+  function _buildInitializer(tf, nodeData, prefix, fallbackName) {
+    var d = nodeData || {};
+    var initName = _normalizeInitializerName(d[prefix + "Initializer"], fallbackName);
+    var mean = _numOr(d[prefix + "InitMean"], prefix === "gamma" ? 1 : 0);
+    var stddev = Math.max(1e-8, _numOr(d[prefix + "InitStddev"], 0.05));
+    var minval = _numOr(d[prefix + "InitMin"], -0.05);
+    var maxval = _numOr(d[prefix + "InitMax"], 0.05);
+    var value = _numOr(d[prefix + "InitValue"], prefix === "movingVariance" ? 1 : 0);
+    if (initName === "default") return null;
+    if (initName === "zeros") return tf.initializers.zeros();
+    if (initName === "ones") return tf.initializers.ones();
+    if (initName === "constant") return tf.initializers.constant({ value: value });
+    if (initName === "randomnormal") return tf.initializers.randomNormal({ mean: mean, stddev: stddev });
+    if (initName === "randomuniform") return tf.initializers.randomUniform({ minval: minval, maxval: maxval });
+    if (initName === "glorotuniform") return tf.initializers.glorotUniform({});
+    if (initName === "glorotnormal") return tf.initializers.glorotNormal({});
+    if (initName === "heuniform") return tf.initializers.heUniform({});
+    if (initName === "henormal") return tf.initializers.heNormal({});
+    if (initName === "lecununiform") return tf.initializers.varianceScaling({ scale: 1, mode: "fanIn", distribution: "uniform" });
+    if (initName === "lecunnormal") return tf.initializers.varianceScaling({ scale: 1, mode: "fanIn", distribution: "truncatedNormal" });
+    return null;
+  }
+
+  function _assignInitializer(layerCfg, layerKey, tf, nodeData, prefix, fallbackName) {
+    var init = _buildInitializer(tf, nodeData, prefix, fallbackName);
+    if (init) layerCfg[layerKey] = init;
+  }
+
   // --- graph inference (pure, no DOM, no state) ---
 
   function inferGraphMode(graphData, fallbackMode) {
@@ -588,7 +639,10 @@
       if (node.name === "dense_layer") {
         var units = Math.max(1, Number(node.data.units || 32));
         var activation = String(node.data.activation || "relu");
-        var denseLayer = _applyLayerMetadata(tf.layers.dense({ units: units, activation: activation, name: _n }), node);
+        var denseCfg = { units: units, activation: activation, name: _n };
+        _assignInitializer(denseCfg, "kernelInitializer", tf, node.data, "kernel", "default");
+        _assignInitializer(denseCfg, "biasInitializer", tf, node.data, "bias", "default");
+        var denseLayer = _applyLayerMetadata(tf.layers.dense(denseCfg), node);
         return denseLayer.apply(inTensor);
       }
       if (node.name === "conv1d_layer") {
@@ -597,7 +651,10 @@
         var kernelSize = Math.max(1, Number((node.data && node.data.kernelSize) || 3));
         var strides = Math.max(1, Number((node.data && node.data.stride) || 1));
         var activ = String((node.data && node.data.activation) || "relu");
-        return _applyLayerMetadata(tf.layers.conv1d({ filters: filters, kernelSize: kernelSize, strides: strides, padding: "same", activation: activ, name: _n }), node).apply(inTensor);
+        var conv1dCfg = { filters: filters, kernelSize: kernelSize, strides: strides, padding: "same", activation: activ, name: _n };
+        _assignInitializer(conv1dCfg, "kernelInitializer", tf, node.data, "kernel", "default");
+        _assignInitializer(conv1dCfg, "biasInitializer", tf, node.data, "bias", "default");
+        return _applyLayerMetadata(tf.layers.conv1d(conv1dCfg), node).apply(inTensor);
       }
       // --- GAN building blocks ---
       if (node.name === "constant_layer") {
@@ -623,7 +680,9 @@
       if (node.name === "embedding_layer") {
         var vocabSize = Math.max(1, Number((node.data && node.data.inputDim) || 10000));
         var embedDim = Math.max(1, Number((node.data && node.data.outputDim) || 256));
-        return _applyLayerMetadata(tf.layers.embedding({ inputDim: vocabSize, outputDim: embedDim, name: _n }), node).apply(inTensor);
+        var embedCfg = { inputDim: vocabSize, outputDim: embedDim, name: _n };
+        _assignInitializer(embedCfg, "embeddingsInitializer", tf, node.data, "kernel", "default");
+        return _applyLayerMetadata(tf.layers.embedding(embedCfg), node).apply(inTensor);
       }
       // --- Conv2D family ---
       if (node.name === "reshape_layer") {
@@ -637,7 +696,10 @@
         var s2 = Math.max(1, Number((node.data && node.data.strides) || 1));
         var p2 = String((node.data && node.data.padding) || "same");
         var a2 = String((node.data && node.data.activation) || "relu");
-        return _applyLayerMetadata(tf.layers.conv2d({ filters: f2, kernelSize: k2, strides: s2, padding: p2, activation: a2, name: _n }), node).apply(inTensor);
+        var conv2dCfg = { filters: f2, kernelSize: k2, strides: s2, padding: p2, activation: a2, name: _n };
+        _assignInitializer(conv2dCfg, "kernelInitializer", tf, node.data, "kernel", "default");
+        _assignInitializer(conv2dCfg, "biasInitializer", tf, node.data, "bias", "default");
+        return _applyLayerMetadata(tf.layers.conv2d(conv2dCfg), node).apply(inTensor);
       }
       if (node.name === "conv2d_transpose_layer") {
         var ft = Math.max(1, Number((node.data && node.data.filters) || 32));
@@ -645,7 +707,10 @@
         var st = Math.max(1, Number((node.data && node.data.strides) || 2));
         var pt = String((node.data && node.data.padding) || "same");
         var at = String((node.data && node.data.activation) || "relu");
-        return _applyLayerMetadata(tf.layers.conv2dTranspose({ filters: ft, kernelSize: kt, strides: st, padding: pt, activation: at, name: _n }), node).apply(inTensor);
+        var conv2dTransposeCfg = { filters: ft, kernelSize: kt, strides: st, padding: pt, activation: at, name: _n };
+        _assignInitializer(conv2dTransposeCfg, "kernelInitializer", tf, node.data, "kernel", "default");
+        _assignInitializer(conv2dTransposeCfg, "biasInitializer", tf, node.data, "bias", "default");
+        return _applyLayerMetadata(tf.layers.conv2dTranspose(conv2dTransposeCfg), node).apply(inTensor);
       }
       if (node.name === "maxpool2d_layer") {
         var ps = Math.max(1, Number((node.data && node.data.poolSize) || 2));
@@ -664,7 +729,10 @@
       }
       if (node.name === "latent_layer" || node.name === "latent_mu_layer" || node.name === "latent_logvar_layer") {
         var u = Math.max(2, Number((node.data && node.data.units) || 16));
-        return tf.layers.dense({ units: u, activation: "linear", name: _n }).apply(inTensor);
+        var latentCfg = { units: u, activation: "linear", name: _n };
+        _assignInitializer(latentCfg, "kernelInitializer", tf, node.data, "kernel", "default");
+        _assignInitializer(latentCfg, "biasInitializer", tf, node.data, "bias", "default");
+        return tf.layers.dense(latentCfg).apply(inTensor);
       }
       if (node.name === "reparam_layer") {
         throw new Error("Reparam node is handled as a special two-input op.");
@@ -676,11 +744,22 @@
       if (node.name === "batchnorm_layer") {
         var momentum = clamp(Number((node.data && node.data.momentum) || 0.99), 0.1, 0.999);
         var epsilon = Math.max(1e-6, Number((node.data && node.data.epsilon) || 1e-3));
-        return _applyLayerMetadata(tf.layers.batchNormalization({ momentum: momentum, epsilon: epsilon, name: _n }), node).apply(inTensor);
+        var bnCfg = { momentum: momentum, epsilon: epsilon, name: _n };
+        _assignInitializer(bnCfg, "gammaInitializer", tf, node.data, "gamma", "default");
+        _assignInitializer(bnCfg, "betaInitializer", tf, node.data, "beta", "default");
+        _assignInitializer(bnCfg, "movingMeanInitializer", tf, node.data, "movingMean", "default");
+        _assignInitializer(bnCfg, "movingVarianceInitializer", tf, node.data, "movingVariance", "default");
+        return _applyLayerMetadata(tf.layers.batchNormalization(bnCfg), node).apply(inTensor);
       }
       if (node.name === "layernorm_layer") {
         var eps = Math.max(1e-6, Number((node.data && node.data.epsilon) || 1e-3));
-        return _applyLayerMetadata(tf.layers.layerNormalization({ axis: -1, epsilon: eps, name: _n }), node).apply(inTensor);
+        var lnCfg = { axis: -1, epsilon: eps, name: _n };
+        _assignInitializer(lnCfg, "gammaInitializer", tf, node.data, "gamma", "default");
+        _assignInitializer(lnCfg, "betaInitializer", tf, node.data, "beta", "default");
+        return _applyLayerMetadata(tf.layers.layerNormalization(lnCfg), node).apply(inTensor);
+      }
+      if (node.name === "relu_layer") {
+        return tf.layers.reLU({ name: _n }).apply(inTensor);
       }
       if (node.name === "leaky_relu_layer") {
         var alpha = clamp(Number((node.data && node.data.alpha) || 0.2), 0.01, 0.5);
@@ -692,6 +771,9 @@
         var rsSetting = String(node.data.returnseq || "auto");
         var returnSeq = rsSetting === "true" ? true : (rsSetting === "false" ? false : laterHasRecurrent);
         var rnnCfg = { units: rnnUnits, returnSequences: returnSeq, dropout: dropout, recurrentInitializer: "glorotUniform" };
+        _assignInitializer(rnnCfg, "kernelInitializer", tf, node.data, "kernel", "default");
+        _assignInitializer(rnnCfg, "recurrentInitializer", tf, node.data, "recurrent", "glorotUniform");
+        _assignInitializer(rnnCfg, "biasInitializer", tf, node.data, "bias", "default");
         // auto-reshape 2D → 3D if needed (e.g., Dense output → LSTM in decoder)
         var rnnIn = inTensor;
         if (inTensor.shape.length === 2) {
@@ -822,7 +904,10 @@
               outTensors.push(inForHead);
               generated.push(inForHead);
             } else {
-              var headT = tf.layers.dense({ units: units, activation: act, name: "head_" + id }).apply(inForHead);
+              var headCfg = { units: units, activation: act, name: "head_" + id };
+              _assignInitializer(headCfg, "kernelInitializer", tf, odata, "kernel", "default");
+              _assignInitializer(headCfg, "biasInitializer", tf, odata, "bias", "default");
+              var headT = tf.layers.dense(headCfg).apply(inForHead);
               outTensors.push(headT);
               generated.push(headT);
             }
@@ -837,7 +922,10 @@
               outTensors.push(inForHead);
               generated.push(inForHead);
             } else {
-              var headTensor = tf.layers.dense({ units: units, activation: act, name: "head_" + id }).apply(inForHead);
+              var headCfg2 = { units: units, activation: act, name: "head_" + id };
+              _assignInitializer(headCfg2, "kernelInitializer", tf, odata, "kernel", "default");
+              _assignInitializer(headCfg2, "biasInitializer", tf, odata, "bias", "default");
+              var headTensor = tf.layers.dense(headCfg2).apply(inForHead);
               outTensors.push(headTensor);
               generated.push(headTensor);
             }

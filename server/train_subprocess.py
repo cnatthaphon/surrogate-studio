@@ -642,6 +642,102 @@ def build_model_from_graph(graph, feature_size, target_size, num_classes=0):
     else:
         raw = graph
 
+    def _normalize_init_name(raw_name, fallback="default"):
+        fb = str(fallback or "default").strip().lower() or "default"
+        v = str(raw_name or "").strip().lower().replace("_", "").replace("-", "").replace(" ", "")
+        aliases = {
+            "": fb,
+            "default": "default",
+            "auto": "default",
+            "inherit": "default",
+            "xavieruniform": "glorotuniform",
+            "xaviernormal": "glorotnormal",
+            "kaiminguniform": "heuniform",
+            "kaimingnormal": "henormal",
+            "normal": "randomnormal",
+            "uniform": "randomuniform",
+        }
+        return aliases.get(v, v or fb)
+
+    def _fan_in_out(tensor):
+        shape = list(getattr(tensor, "shape", []) or [])
+        if not shape:
+            return 1, 1
+        if len(shape) == 2:
+            return max(1, int(shape[1])), max(1, int(shape[0]))
+        if len(shape) > 2:
+            receptive = 1
+            for dim in shape[2:]:
+                receptive *= max(1, int(dim))
+            fan_in = max(1, int(shape[1]) * receptive)
+            fan_out = max(1, int(shape[0]) * receptive)
+            return fan_in, fan_out
+        return max(1, int(shape[0])), max(1, int(shape[0]))
+
+    def _apply_tensor_initializer(tensor, cfg, prefix, fallback="default"):
+        if tensor is None:
+            return
+        init_name = _normalize_init_name(cfg.get(f"{prefix}Initializer"), fallback)
+        mean = _cfg_float(cfg.get(f"{prefix}InitMean", 1.0 if prefix == "gamma" else 0.0), 1.0 if prefix == "gamma" else 0.0)
+        std = max(1e-8, _cfg_float(cfg.get(f"{prefix}InitStddev", 0.05), 0.05))
+        minv = _cfg_float(cfg.get(f"{prefix}InitMin", -0.05), -0.05)
+        maxv = _cfg_float(cfg.get(f"{prefix}InitMax", 0.05), 0.05)
+        value = _cfg_float(cfg.get(f"{prefix}InitValue", 1.0 if prefix == "movingVariance" else 0.0), 1.0 if prefix == "movingVariance" else 0.0)
+        if init_name == "default":
+            return
+        with torch.no_grad():
+            if init_name == "zeros":
+                nn.init.zeros_(tensor); return
+            if init_name == "ones":
+                nn.init.ones_(tensor); return
+            if init_name == "constant":
+                nn.init.constant_(tensor, value); return
+            if init_name == "randomnormal":
+                nn.init.normal_(tensor, mean=mean, std=std); return
+            if init_name == "randomuniform":
+                nn.init.uniform_(tensor, a=minv, b=maxv); return
+            if init_name == "glorotuniform":
+                nn.init.xavier_uniform_(tensor); return
+            if init_name == "glorotnormal":
+                nn.init.xavier_normal_(tensor); return
+            if init_name == "heuniform":
+                nn.init.kaiming_uniform_(tensor, a=0.0, mode="fan_in", nonlinearity="relu"); return
+            if init_name == "henormal":
+                nn.init.kaiming_normal_(tensor, a=0.0, mode="fan_in", nonlinearity="relu"); return
+            fan_in, _ = _fan_in_out(tensor)
+            if init_name == "lecununiform":
+                bound = np.sqrt(3.0 / max(1.0, float(fan_in)))
+                nn.init.uniform_(tensor, a=-bound, b=bound); return
+            if init_name == "lecunnormal":
+                nn.init.normal_(tensor, mean=0.0, std=np.sqrt(1.0 / max(1.0, float(fan_in)))); return
+
+    def _apply_module_initializers(module, cfg, layer_type):
+        if module is None or not isinstance(cfg, dict):
+            return
+        t = str(layer_type or "")
+        if t in ("dense", "conv1d", "conv2d", "conv2d_transpose", "embedding"):
+            _apply_tensor_initializer(getattr(module, "weight", None), cfg, "kernel")
+            _apply_tensor_initializer(getattr(module, "bias", None), cfg, "bias")
+            return
+        if t == "batchnorm":
+            _apply_tensor_initializer(getattr(module, "weight", None), cfg, "gamma")
+            _apply_tensor_initializer(getattr(module, "bias", None), cfg, "beta")
+            _apply_tensor_initializer(getattr(module, "running_mean", None), cfg, "movingMean")
+            _apply_tensor_initializer(getattr(module, "running_var", None), cfg, "movingVariance")
+            return
+        if t == "layernorm":
+            _apply_tensor_initializer(getattr(module, "weight", None), cfg, "gamma")
+            _apply_tensor_initializer(getattr(module, "bias", None), cfg, "beta")
+            return
+        if t in ("lstm", "gru", "rnn"):
+            for name, param in module.named_parameters():
+                if name.startswith("weight_hh"):
+                    _apply_tensor_initializer(param, cfg, "recurrent", "default")
+                elif name.startswith("weight_ih") or name.startswith("weight"):
+                    _apply_tensor_initializer(param, cfg, "kernel", "default")
+                elif name.startswith("bias"):
+                    _apply_tensor_initializer(param, cfg, "bias", "default")
+
     # Parse nodes + edges
     nodes = {}
     edges_out = {}  # nid → [{ to, from_port, to_port }]
@@ -703,7 +799,9 @@ def build_model_from_graph(graph, feature_size, target_size, num_classes=0):
                     units = int(c.get("units", 32))
                     # auto-flatten spatial dims: [H,W,C] → H*W*C
                     flat_dim = in_dim if isinstance(in_dim, int) else int(in_dim[0]) * int(in_dim[1]) * int(in_dim[2]) if isinstance(in_dim, list) and len(in_dim) == 3 else int(in_dim[0]) if isinstance(in_dim, list) else in_dim
-                    setattr(self, f"dense_{nid}", nn.Linear(flat_dim, units))
+                    dense_mod = nn.Linear(flat_dim, units)
+                    _apply_module_initializers(dense_mod, c, t)
+                    setattr(self, f"dense_{nid}", dense_mod)
                     act = str(c.get("activation", "relu"))
                     if act == "relu": setattr(self, f"act_{nid}", nn.ReLU())
                     elif act == "tanh": setattr(self, f"act_{nid}", nn.Tanh())
@@ -712,7 +810,9 @@ def build_model_from_graph(graph, feature_size, target_size, num_classes=0):
                 elif t in ("latent_mu", "latent_logvar", "latent"):
                     units = int(c.get("units", 8))
                     flat_dim = in_dim if isinstance(in_dim, int) else int(in_dim[0]) * int(in_dim[1]) * int(in_dim[2]) if isinstance(in_dim, list) and len(in_dim) == 3 else int(in_dim[0]) if isinstance(in_dim, list) else in_dim
-                    setattr(self, f"dense_{nid}", nn.Linear(flat_dim, units))
+                    latent_mod = nn.Linear(flat_dim, units)
+                    _apply_module_initializers(latent_mod, c, "dense")
+                    setattr(self, f"dense_{nid}", latent_mod)
                     dim_map[nid] = units
                 elif t == "reparam":
                     # TF.js: dense(logvar → noise, init=zeros) + add(mu, noise)
@@ -725,22 +825,34 @@ def build_model_from_graph(graph, feature_size, target_size, num_classes=0):
                 elif t in ("lstm", "gru", "rnn"):
                     units = int(c.get("units", 32))
                     rnn_cls = {"lstm": nn.LSTM, "gru": nn.GRU, "rnn": nn.RNN}[t]
-                    setattr(self, f"rnn_{nid}", rnn_cls(
-                        input_size=in_dim, hidden_size=units, num_layers=1, batch_first=True))
+                    rnn_mod = rnn_cls(
+                        input_size=in_dim, hidden_size=units, num_layers=1, batch_first=True)
+                    _apply_module_initializers(rnn_mod, c, t)
+                    setattr(self, f"rnn_{nid}", rnn_mod)
                     dim_map[nid] = units
                 elif t == "dropout":
                     setattr(self, f"drop_{nid}", nn.Dropout(float(c.get("rate", 0.1))))
                     dim_map[nid] = in_dim
+                elif t == "relu":
+                    setattr(self, f"relu_{nid}", nn.ReLU())
+                    dim_map[nid] = in_dim
                 elif t == "batchnorm":
                     # Use BatchNorm2d for spatial dims, BatchNorm1d for flat
+                    tfjs_momentum = min(0.999999, max(0.0, _cfg_float(c.get("momentum", 0.99), 0.99)))
+                    bn_eps = max(1e-6, _cfg_float(c.get("epsilon", 1e-3), 1e-3))
+                    torch_momentum = min(0.999999, max(1e-6, 1.0 - tfjs_momentum))
                     if isinstance(in_dim, list) and len(in_dim) == 3:
-                        setattr(self, f"bn_{nid}", nn.BatchNorm2d(in_dim[2]))
+                        bn_mod = nn.BatchNorm2d(in_dim[2], eps=bn_eps, momentum=torch_momentum)
                     else:
-                        setattr(self, f"bn_{nid}", nn.BatchNorm1d(in_dim if isinstance(in_dim, int) else in_dim[0]))
+                        bn_mod = nn.BatchNorm1d(in_dim if isinstance(in_dim, int) else in_dim[0], eps=bn_eps, momentum=torch_momentum)
+                    _apply_module_initializers(bn_mod, c, t)
+                    setattr(self, f"bn_{nid}", bn_mod)
                     dim_map[nid] = in_dim
                 elif t == "layernorm":
                     flat_dim = in_dim if isinstance(in_dim, int) else int(in_dim[0]) * int(in_dim[1]) * int(in_dim[2]) if isinstance(in_dim, list) and len(in_dim) == 3 else in_dim
-                    setattr(self, f"ln_{nid}", nn.LayerNorm(flat_dim))
+                    ln_mod = nn.LayerNorm(flat_dim, eps=max(1e-6, _cfg_float(c.get("epsilon", 1e-3), 1e-3)))
+                    _apply_module_initializers(ln_mod, c, t)
+                    setattr(self, f"ln_{nid}", ln_mod)
                     dim_map[nid] = in_dim
                 elif t == "leaky_relu":
                     alpha = float(c.get("alpha", 0.2))
@@ -771,7 +883,9 @@ def build_model_from_graph(graph, feature_size, target_size, num_classes=0):
                 elif t == "embedding":
                     vocab_size = int(c.get("inputDim", 10000))
                     embed_dim = int(c.get("outputDim", 256))
-                    setattr(self, f"embed_{nid}", nn.Embedding(vocab_size, embed_dim))
+                    emb_mod = nn.Embedding(vocab_size, embed_dim)
+                    _apply_module_initializers(emb_mod, c, t)
+                    setattr(self, f"embed_{nid}", emb_mod)
                     dim_map[nid] = embed_dim
                 elif t == "reshape":
                     shape_str = str(c.get("targetShape", "28,28,1"))
@@ -787,7 +901,9 @@ def build_model_from_graph(graph, feature_size, target_size, num_classes=0):
                     # match TF.js 'same' padding: output = ceil(input / stride)
                     pad = (ks - 1) // 2 if pad_mode == "same" and st == 1 else (ks - st) // 2 if pad_mode == "same" else 0
                     in_ch = in_dim[-1] if isinstance(in_dim, list) else 1
-                    setattr(self, f"conv2d_{nid}", nn.Conv2d(in_ch, filters, ks, st, pad))
+                    conv_mod = nn.Conv2d(in_ch, filters, ks, st, pad)
+                    _apply_module_initializers(conv_mod, c, t)
+                    setattr(self, f"conv2d_{nid}", conv_mod)
                     act = str(c.get("activation", "relu"))
                     if act == "relu": setattr(self, f"act_{nid}", nn.ReLU())
                     elif act == "tanh": setattr(self, f"act_{nid}", nn.Tanh())
@@ -807,7 +923,9 @@ def build_model_from_graph(graph, feature_size, target_size, num_classes=0):
                     pad = (ks - st) // 2 if pad_mode == "same" else 0
                     out_pad = 0
                     in_ch = in_dim[-1] if isinstance(in_dim, list) else 1
-                    setattr(self, f"convt2d_{nid}", nn.ConvTranspose2d(in_ch, filters, ks, st, pad, out_pad))
+                    convt_mod = nn.ConvTranspose2d(in_ch, filters, ks, st, pad, out_pad)
+                    _apply_module_initializers(convt_mod, c, t)
+                    setattr(self, f"convt2d_{nid}", convt_mod)
                     act = str(c.get("activation", "relu"))
                     if act == "relu": setattr(self, f"act_{nid}", nn.ReLU())
                     elif act == "tanh": setattr(self, f"act_{nid}", nn.Tanh())
@@ -863,7 +981,9 @@ def build_model_from_graph(graph, feature_size, target_size, num_classes=0):
                     if out_in == odim:
                         setattr(self, f"out_{nid}", nn.Identity())
                     else:
-                        setattr(self, f"out_{nid}", nn.Linear(out_in, odim))
+                        out_mod = nn.Linear(out_in, odim)
+                        _apply_module_initializers(out_mod, c, "dense")
+                        setattr(self, f"out_{nid}", out_mod)
                     dim_map[nid] = odim
                     self.output_ids.append(nid)
                 else:
@@ -916,6 +1036,8 @@ def build_model_from_graph(graph, feature_size, target_size, num_classes=0):
                     tensors[nid] = out[:, -1, :]
                 elif t == "dropout":
                     tensors[nid] = getattr(self, f"drop_{nid}")(inp)
+                elif t == "relu":
+                    tensors[nid] = getattr(self, f"relu_{nid}")(inp)
                 elif t == "batchnorm":
                     tensors[nid] = getattr(self, f"bn_{nid}")(inp)
                 elif t == "layernorm":

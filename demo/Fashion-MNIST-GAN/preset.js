@@ -34,6 +34,33 @@
   }
   function graph(d) { return { drawflow: { Home: { data: d } } }; }
 
+  function _dcWeightCfg(tag, blockName, extra) {
+    return Object.assign({
+      activation: "linear",
+      weightTag: tag,
+      blockName: blockName,
+      kernelInitializer: "randomNormal",
+      kernelInitMean: 0,
+      kernelInitStddev: 0.02,
+      biasInitializer: "zeros"
+    }, extra || {});
+  }
+
+  function _dcBatchNormCfg(tag, blockName, extra) {
+    return Object.assign({
+      weightTag: tag,
+      blockName: blockName,
+      momentum: 0.9,
+      epsilon: 0.00001,
+      gammaInitializer: "randomNormal",
+      gammaInitMean: 1,
+      gammaInitStddev: 0.02,
+      betaInitializer: "zeros",
+      movingMeanInitializer: "zeros",
+      movingVarianceInitializer: "ones"
+    }, extra || {});
+  }
+
   // ═══════════════════════════════════════════
   // Model 1: MLP-GAN (Goodfellow 2014)
   // ═══════════════════════════════════════════
@@ -89,17 +116,19 @@
   function _dcGan() {
     _nid = 0; var d = {};
 
-    // Conv Generator (Radford 2015) — BatchNorm + ReLU
+    // Conv Generator (Radford 2015) — affine -> BatchNorm -> ReLU
     var z =    N(d, "sample_z",          { dim: 128, distribution: "normal" },    80, 60);
-    var gd =   N(d, "dense",             { units: 6272, activation: "relu", weightTag: "generator" }, 200, 60);
-    var gbn1 = N(d, "batchnorm",         { weightTag: "generator", blockName: "G_bn1" }, 300, 60);
-    var gr =   N(d, "reshape",           { targetShape: "7,7,128" },             400, 60);
-    var gc1 =  N(d, "conv2d_transpose",  { filters: 64, kernelSize: 4, strides: 2, padding: "same", activation: "relu", weightTag: "generator" }, 560, 60);
-    var gbn2 = N(d, "batchnorm",         { weightTag: "generator", blockName: "G_bn2" }, 640, 60);
-    var gc2 =  N(d, "conv2d_transpose",  { filters: 1, kernelSize: 4, strides: 2, padding: "same", activation: "sigmoid", weightTag: "generator" }, 720, 60);
-    var gf =   N(d, "flatten",           {},                                     880, 60);
-    var gOut = N(d, "output",            { target: "none", targetType: "none", loss: "none", matchWeight: 0, phase: "generator", headType: "reconstruction" }, 1040, 60);
-    C(d, z, gd); C(d, gd, gbn1); C(d, gbn1, gr); C(d, gr, gc1); C(d, gc1, gbn2); C(d, gbn2, gc2); C(d, gc2, gf); C(d, gf, gOut);
+    var gd =   N(d, "dense",             _dcWeightCfg("generator", "G_dense", { units: 6272 }), 200, 60);
+    var gbn1 = N(d, "batchnorm",         _dcBatchNormCfg("generator", "G_bn1"), 300, 60);
+    var grelu1 = N(d, "relu",            {},                                    380, 60);
+    var gr =   N(d, "reshape",           { targetShape: "7,7,128" },            460, 60);
+    var gc1 =  N(d, "conv2d_transpose",  _dcWeightCfg("generator", "G_conv_t1", { filters: 64, kernelSize: 4, strides: 2, padding: "same" }), 620, 60);
+    var gbn2 = N(d, "batchnorm",         _dcBatchNormCfg("generator", "G_bn2"), 720, 60);
+    var grelu2 = N(d, "relu",            {},                                    800, 60);
+    var gc2 =  N(d, "conv2d_transpose",  _dcWeightCfg("generator", "G_out", { filters: 1, kernelSize: 4, strides: 2, padding: "same", activation: "sigmoid" }), 900, 60);
+    var gf =   N(d, "flatten",           {},                                    1060, 60);
+    var gOut = N(d, "output",            { target: "none", targetType: "none", loss: "none", matchWeight: 0, phase: "generator", headType: "reconstruction" }, 1220, 60);
+    C(d, z, gd); C(d, gd, gbn1); C(d, gbn1, grelu1); C(d, grelu1, gr); C(d, gr, gc1); C(d, gc1, gbn2); C(d, gbn2, grelu2); C(d, grelu2, gc2); C(d, gc2, gf); C(d, gf, gOut);
 
     // G output → ConcatBatch with real
     var img =  N(d, "image_source",      { sourceKey: "pixel_values", featureSize: 784, imageShape: [28,28,1] }, 80, 260);
@@ -109,13 +138,13 @@
 
     // Conv Discriminator (Radford 2015) — LeakyReLU(0.2) + BatchNorm
     var dr =   N(d, "reshape",           { targetShape: "28,28,1" },             660, 200);
-    var dc1 =  N(d, "conv2d",            { filters: 64, kernelSize: 4, strides: 2, padding: "same", activation: "linear", weightTag: "discriminator" }, 820, 200);
+    var dc1 =  N(d, "conv2d",            _dcWeightCfg("discriminator", "D_conv1", { filters: 64, kernelSize: 4, strides: 2, padding: "same" }), 820, 200);
     var dlr1 = N(d, "leaky_relu",        { alpha: 0.2 },                         880, 200);
-    var dc2 =  N(d, "conv2d",            { filters: 128, kernelSize: 4, strides: 2, padding: "same", activation: "linear", weightTag: "discriminator" }, 940, 200);
-    var dbn1 = N(d, "batchnorm",         { weightTag: "discriminator", blockName: "D_bn1" }, 1000, 200);
+    var dc2 =  N(d, "conv2d",            _dcWeightCfg("discriminator", "D_conv2", { filters: 128, kernelSize: 4, strides: 2, padding: "same" }), 940, 200);
+    var dbn1 = N(d, "batchnorm",         _dcBatchNormCfg("discriminator", "D_bn1"), 1000, 200);
     var dlr2 = N(d, "leaky_relu",        { alpha: 0.2 },                         1060, 200);
     var df =   N(d, "flatten",           {},                                     1140, 200);
-    var dd =   N(d, "dense",             { units: 1, activation: "sigmoid", weightTag: "discriminator" }, 1300, 200);
+    var dd =   N(d, "dense",             _dcWeightCfg("discriminator", "D_out", { units: 1, activation: "sigmoid" }), 1300, 200);
     var dOut = N(d, "output",            { target: "custom", targetType: "custom", loss: "bce", matchWeight: 1, phase: "discriminator", headType: "classification" }, 1460, 200);
     C(d, cat, dr); C(d, dr, dc1); C(d, dc1, dlr1); C(d, dlr1, dc2); C(d, dc2, dbn1); C(d, dbn1, dlr2); C(d, dlr2, df); C(d, df, dd); C(d, dd, dOut);
 

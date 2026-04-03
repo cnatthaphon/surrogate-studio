@@ -358,6 +358,9 @@ function buildModelFromDrawflowGraph(rawGraph, datasetMeta, schemaId) {
       const rate = clamp(node.data && node.data.rate || 0.1, 0, 0.9);
       return tf.layers.dropout({ rate: rate }).apply(inTensor);
     }
+    if (node.name === "relu_layer") {
+      return tf.layers.reLU({}).apply(inTensor);
+    }
     if (node.name === "batchnorm_layer") {
       const momentum = clamp(node.data && node.data.momentum || 0.99, 0.1, 0.999);
       const epsilon = Math.max(1e-6, Number(node.data && node.data.epsilon || 1e-3));
