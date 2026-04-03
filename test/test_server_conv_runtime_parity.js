@@ -116,7 +116,8 @@ async function runCase(name, graph, featureSize, xInput) {
   if (!result || !result.predictions) throw new Error(name + " missing predictions");
 
   var maxDiff = flattenMaxDiff(tfArr, result.predictions);
-  assert(maxDiff < 1e-6, name + " matches server reload path (maxDiff=" + maxDiff + ")");
+  var tol = /dcgan/.test(name) ? 5e-5 : 1e-6;
+  assert(maxDiff < tol, name + " matches server reload path (maxDiff=" + maxDiff + ")");
 
   built.model.dispose();
   x.dispose();
@@ -153,6 +154,22 @@ async function runCase(name, graph, featureSize, xInput) {
     8,
     Array.from({ length: 3 }, function (_, r) {
       return Array.from({ length: 8 }, function (_, c) { return ((r + 2) * (c + 1)) / 30; });
+    })
+  );
+
+  console.log("\n=== 3. DCGAN Conv2DTranspose Parity ===");
+  await runCase(
+    "convt2d_dcgan_shape",
+    G([
+      ["input", { mode: "flat" }],
+      ["reshape", { targetShape: "7,7,128" }],
+      ["conv2d_transpose", { filters: 64, kernelSize: 4, strides: 2, padding: "same", activation: "linear", useBias: false }],
+      ["flatten", {}],
+      ["output", { target: "custom", targetType: "custom", loss: "none" }],
+    ]),
+    7 * 7 * 128,
+    Array.from({ length: 2 }, function (_, r) {
+      return Array.from({ length: 7 * 7 * 128 }, function (_, c) { return ((r + 1) * ((c % 17) + 1)) / 1000; });
     })
   );
 

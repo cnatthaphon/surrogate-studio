@@ -1031,7 +1031,9 @@ def build_model_from_graph(graph, feature_size, target_size, num_classes=0):
                     setattr(self, f"convt2d_{nid}", convt_mod)
                     if pad_mode == "same" and isinstance(in_dim, list):
                         self._convt_crop = getattr(self, "_convt_crop", {})
-                        self._convt_crop[nid] = [in_dim[0] * st, in_dim[1] * st]
+                        crop_y = max(0, (ks - st) // 2)
+                        crop_x = max(0, (ks - st) // 2)
+                        self._convt_crop[nid] = [crop_y, crop_x, in_dim[0] * st, in_dim[1] * st]
                     act = str(c.get("activation", "relu"))
                     if act == "relu": setattr(self, f"act_{nid}", nn.ReLU())
                     elif act == "tanh": setattr(self, f"act_{nid}", nn.Tanh())
@@ -1226,7 +1228,7 @@ def build_model_from_graph(graph, feature_size, target_size, num_classes=0):
                     out = getattr(self, f"convt2d_{nid}")(inp)
                     crop = getattr(self, "_convt_crop", {}).get(nid)
                     if crop and out.dim() == 4:
-                        out = out[:, :, :crop[0], :crop[1]]
+                        out = out[:, :, crop[0]:crop[0] + crop[2], crop[1]:crop[1] + crop[3]]
                     act = getattr(self, f"act_{nid}", None)
                     tensors[nid] = act(out) if act else out
                 elif t == "maxpool2d":
