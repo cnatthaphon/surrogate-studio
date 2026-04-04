@@ -239,7 +239,25 @@
               _autoMethod = _meta.caps.defaultMethod || "reconstruct";
             }
           }
-          var rec = { id: id, name: name, schemaId: sid, trainerId: _autoTrainerId, family: _autoFamily, config: { method: _autoMethod, numSamples: 16, steps: 100, lr: 0.01, temperature: 1.0, seed: 42 }, status: "draft", runs: [], createdAt: Date.now() };
+          var rec = {
+            id: id,
+            name: name,
+            schemaId: sid,
+            trainerId: _autoTrainerId,
+            family: _autoFamily,
+            config: {
+              method: _autoMethod,
+              generationRuntime: "client",
+              numSamples: 16,
+              steps: 100,
+              lr: 0.01,
+              temperature: 1.0,
+              seed: 42,
+            },
+            status: "draft",
+            runs: [],
+            createdAt: Date.now(),
+          };
           _saveGen(rec);
           _activeGenId = id;
           onStatus("Created: " + name);
@@ -294,8 +312,9 @@
       runs.forEach(function (result, idx) {
         var card = el("div", { className: "osc-card", style: "margin-top:8px;" });
         var statusColor = result.status === "done" ? "#4ade80" : result.status === "error" ? "#f43f5e" : "#fbbf24";
+        var runtimeLabel = result.runtime ? " | " + result.runtime : "";
         card.appendChild(el("div", { style: "font-size:12px;color:" + statusColor + ";font-weight:600;" },
-          "#" + (idx + 1) + " " + (result.method || "?") + " | " + (result.numSamples || 0) + " samples | " + (result.status || "?")));
+          "#" + (idx + 1) + " " + (result.method || "?") + " | " + (result.numSamples || 0) + " samples | " + (result.status || "?") + runtimeLabel));
 
         if (result.error) {
           card.appendChild(el("div", { style: "font-size:10px;color:#f43f5e;margin-top:4px;" }, "Error: " + result.error));
@@ -347,6 +366,8 @@
 
       var g = _getGen(_activeGenId);
       if (!g) return;
+      if (!g.config) g.config = {};
+      if (!g.config.generationRuntime) g.config.generationRuntime = "client";
 
       var configCard = el("div", { className: "osc-card" });
 
@@ -402,6 +423,27 @@
       methodSel.addEventListener("change", function () { g.config.method = methodSel.value; _saveGen(g); _renderRightPanel(); });
       methodRow.appendChild(methodSel);
       configCard.appendChild(methodRow);
+
+      var runtimeRow = el("div", { className: "osc-form-row" });
+      runtimeRow.appendChild(el("label", {}, "Generation Runtime"));
+      var runtimeSel = el("select", { style: "width:100%;padding:4px;background:#1e293b;color:#e2e8f0;border:1px solid #334155;border-radius:4px;font-size:11px;" });
+      [{ value: "client", label: "Client (TF.js)" }, { value: "server", label: "Server (PyTorch)" }].forEach(function (opt) {
+        var o = el("option", { value: opt.value }, opt.label);
+        if (opt.value === (g.config.generationRuntime || "client")) o.selected = true;
+        runtimeSel.appendChild(o);
+      });
+      runtimeSel.addEventListener("change", function () {
+        g.config.generationRuntime = runtimeSel.value;
+        _saveGen(g);
+        _renderRightPanel();
+      });
+      runtimeRow.appendChild(runtimeSel);
+      configCard.appendChild(runtimeRow);
+
+      var runtimeHelp = String(g.config.generationRuntime || "client") === "server"
+        ? "Runs generation on the PyTorch server using the current checkpoint."
+        : "Runs generation locally in TF.js using the saved checkpoint.";
+      configCard.appendChild(el("div", { style: "font-size:10px;color:#64748b;margin-top:-2px;margin-bottom:6px;" }, runtimeHelp));
 
       // --- Sample node / Output node selectors (from graph) ---
       var _genNodes = { sampleNodes: selectedMeta.info.sampleNodes || [], outputNodes: selectedMeta.info.outputNodes || [] };
@@ -559,62 +601,80 @@
       var method = config.method || "random";
       var trainerBackend = (trainer.config && trainer.config.runtimeBackend) || "auto";
       var trainerArtifacts = _getTrainerArtifacts(trainer, config.weightSelection);
+      var generationRuntime = String(config.generationRuntime || "client").trim().toLowerCase();
 
-      // Generation always runs on client — model weights are already downloaded locally,
-      // and methods like reconstruct/langevin need local data or produce small outputs.
-      // Server generation is only useful for very large batch generation.
-      var useServerForGen = false;
+      var useServerForGen = generationRuntime === "server";
       if (useServerForGen) {
         var serverAdapter = _getServerAdapter();
-        if (serverAdapter) {
-          var serverUrl = (trainer.config && trainer.config.serverUrl) || "";
-          _isGenerating = true; g.status = "generating"; _saveGen(g);
-          onStatus("Checking server for generation...");
-          serverAdapter.checkServer(serverUrl).then(function (ok) {
-            if (!ok) {
-              _isGenerating = false; g.status = "draft"; _saveGen(g);
-              onStatus("Server not reachable. This model was trained on server \u2014 retrain on client or start the server.");
-              _renderLeftPanel(); _renderRightPanel();
-              return;
-            }
-            onStatus("Generating on server (" + method + ")...");
-            var dataset = trainer.datasetId ? store.getDataset(trainer.datasetId) : null;
-            var dsData2 = dataset && dataset.data ? dataset.data : {};
-            var activeDs2 = dsData2.kind === "dataset_bundle" && dsData2.datasets ? dsData2.datasets[dsData2.activeVariantId || Object.keys(dsData2.datasets)[0]] : dsData2;
-            // resolve test data via source registry (zero-copy) or fallback
-            var W2 = typeof window !== "undefined" ? window : {};
-            var srcReg2 = W2.OSCDatasetSourceRegistry || null;
-            var sTestSplit = null;
-            if (srcReg2 && typeof srcReg2.resolveDatasetSplit === "function") sTestSplit = srcReg2.resolveDatasetSplit(activeDs2, "test");
-            var sTestX = (sTestSplit && sTestSplit.x) ? sTestSplit.x : ((activeDs2.records && activeDs2.records.test && activeDs2.records.test.x) || (activeDs2.xTest || []));
-            var sFeatureSize = (srcReg2 && typeof srcReg2.getFeatureSize === "function") ? srcReg2.getFeatureSize(activeDs2) : 0;
-            if (!sFeatureSize && sTestX.length && sTestX[0]) sFeatureSize = sTestX[0].length;
-            var serverConfig = {
-              graph: modelRec.graph, weightValues: trainerArtifacts && trainerArtifacts.weightValues,
-              featureSize: Number(sFeatureSize || dsData2.featureSize || 40),
-              targetSize: Number(sFeatureSize || dsData2.featureSize || 40), numClasses: dsData2.numClasses || dsData2.classCount || 0,
-              method: method, numSamples: config.numSamples || 16,
-              latentDim: modelBuilder.extractLatentInfo ? (modelBuilder.extractLatentInfo(modelRec.graph).latentDim || 20) : 20,
-              temperature: config.temperature || 1.0, seed: config.seed || 42,
-              sampleNodeId: config.sampleNodeId || "",
-              outputNodeId: config.outputNodeId || "",
-              originals: method === "reconstruct" ? sTestX.slice(0, config.numSamples || 16) : undefined,
-            };
-            serverAdapter.generateOnServer(serverConfig, serverUrl).then(function (result) {
-              _isGenerating = false;
-              result.status = "done";
-              if (!g.runs) g.runs = [];
-              g.runs.push(result); g.status = "done"; _saveGen(g);
-              onStatus("Generation done (server): " + (result.numSamples || 0) + " samples");
-              _renderLeftPanel(); _renderMainPanel(); _renderRightPanel();
-            }).catch(function (err) {
-              _isGenerating = false; g.status = "draft"; _saveGen(g);
-              onStatus("Server error: " + err.message + " \u2014 retrain on client or restart server.");
-              _renderLeftPanel(); _renderRightPanel();
-            });
-          });
+        if (!serverAdapter) {
+          onStatus("Server generation adapter unavailable in this build.");
           return;
         }
+        var serverUrl = (trainer.config && trainer.config.serverUrl) || "";
+        _isGenerating = true; g.status = "generating"; _saveGen(g);
+        onStatus("Checking server for generation...");
+        serverAdapter.checkServer(serverUrl).then(function (ok) {
+          if (!ok) {
+            _isGenerating = false; g.status = "draft"; _saveGen(g);
+            onStatus("Server not reachable. Start the server or switch generation runtime to client.");
+            _renderLeftPanel(); _renderRightPanel();
+            return;
+          }
+          onStatus("Generating on server (" + method + ")...");
+          var dataset = trainer.datasetId ? store.getDataset(trainer.datasetId) : null;
+          var dsData2 = dataset && dataset.data ? dataset.data : {};
+          var activeDs2 = dsData2.kind === "dataset_bundle" && dsData2.datasets ? dsData2.datasets[dsData2.activeVariantId || Object.keys(dsData2.datasets)[0]] : dsData2;
+          // resolve test data via source registry (zero-copy) or fallback
+          var W2 = typeof window !== "undefined" ? window : {};
+          var srcReg2 = W2.OSCDatasetSourceRegistry || null;
+          var sTestSplit = null;
+          if (srcReg2 && typeof srcReg2.resolveDatasetSplit === "function") sTestSplit = srcReg2.resolveDatasetSplit(activeDs2, "test");
+          var sTestX = (sTestSplit && sTestSplit.x) ? sTestSplit.x : ((activeDs2.records && activeDs2.records.test && activeDs2.records.test.x) || (activeDs2.xTest || []));
+          var sFeatureSize = (srcReg2 && typeof srcReg2.getFeatureSize === "function") ? srcReg2.getFeatureSize(activeDs2) : 0;
+          if (!sFeatureSize && sTestX.length && sTestX[0]) sFeatureSize = sTestX[0].length;
+          var serverConfig = {
+            graph: modelRec.graph,
+            weightValues: trainerArtifacts && trainerArtifacts.weightValues,
+            weightSpecs: trainerArtifacts && trainerArtifacts.weightSpecs,
+            featureSize: Number(sFeatureSize || dsData2.featureSize || 40),
+            targetSize: Number(sFeatureSize || dsData2.featureSize || 40), numClasses: dsData2.numClasses || dsData2.classCount || 0,
+            method: method,
+            numSamples: config.numSamples || 16,
+            steps: config.steps || 100,
+            lr: config.lr || 0.01,
+            latentDim: modelBuilder.extractLatentInfo ? (modelBuilder.extractLatentInfo(modelRec.graph).latentDim || 20) : 20,
+            temperature: config.temperature || 1.0,
+            seed: config.seed || 42,
+            targetClass: Number(config.targetClass || 0),
+            guidanceWeight: Number(config.guidanceWeight || 1.0),
+            sampleNodeId: config.sampleNodeId || "",
+            outputNodeId: config.outputNodeId || "",
+            originals: method === "reconstruct" ? sTestX.slice(0, config.numSamples || 16) : undefined,
+          };
+          if (method === "inverse") {
+            var sTestY = (sTestSplit && sTestSplit.y) ? sTestSplit.y : ((activeDs2.records && activeDs2.records.test && activeDs2.records.test.y) || (activeDs2.yTest || []));
+            if (sTestY && sTestY.length) {
+              var sTargetCount = Math.min(config.numSamples || 1, sTestY.length);
+              var sTargets = [];
+              for (var sti = 0; sti < sTargetCount; sti++) sTargets.push(Array.isArray(sTestY[sti]) ? sTestY[sti] : [sTestY[sti]]);
+              serverConfig.target = sTargets;
+            }
+          }
+          serverAdapter.generateOnServer(serverConfig, serverUrl).then(function (result) {
+            _isGenerating = false;
+            result.runtime = "server";
+            result.status = "done";
+            if (!g.runs) g.runs = [];
+            g.runs.push(result); g.status = "done"; _saveGen(g);
+            onStatus("Generation done (server): " + (result.numSamples || 0) + " samples");
+            _renderLeftPanel(); _renderMainPanel(); _renderRightPanel();
+          }).catch(function (err) {
+            _isGenerating = false; g.status = "draft"; _saveGen(g);
+            onStatus("Server error: " + err.message + " \u2014 retrain on client or restart server.");
+            _renderLeftPanel(); _renderRightPanel();
+          });
+        });
+        return;
       }
 
       _generateOnClient();
@@ -772,6 +832,7 @@
         engine.generate(tf, genConfig).then(function (result) {
           _isGenerating = false;
           if (currentMountId !== _mountId) return;
+          result.runtime = "client";
           result.status = "done";
           if (!g.runs) g.runs = [];
           g.runs.push(result);
