@@ -108,7 +108,7 @@
     if (name.indexOf("tfjs_") === 0) name = name.slice(5);
     if (name.indexOf("/") >= 0) return _stripSuffix(name);
 
-    var m = name.match(/^(dense|conv1d|conv2d|convt2d|embed)_(\d+)\.(weight|bias)$/);
+    var m = name.match(/^(dense|conv1d|conv2d|convt2d|embed|out)_(\d+)\.(weight|bias)$/);
     if (m) return "n" + m[2] + "/" + (m[3] === "weight" ? "kernel" : "bias");
 
     m = name.match(/^(bn|ln)_(\d+)\.(weight|bias|running_mean|running_var)$/);

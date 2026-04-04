@@ -54,8 +54,11 @@ assert(built.headConfigs[1].graphLabelOutputIdx === 2, "D head graphLabelOutputI
 // Check layer tags
 var gLayers = model.layers.filter(function(l) { return l._weightTag === "generator"; });
 var dLayers = model.layers.filter(function(l) { return l._weightTag === "discriminator"; });
+var dDropoutLayers = dLayers.filter(function (l) { return l.getClassName && l.getClassName() === "Dropout"; });
+var dWeightedLayers = dLayers.filter(function (l) { return !dDropoutLayers.includes(l); });
 assert(gLayers.length === 5, "5 G layers (dense + norms), got " + gLayers.length);
-assert(dLayers.length === 3, "3 D layers, got " + dLayers.length);
+assert(dLayers.length === 5, "5 D tagged layers (dense + dropout), got " + dLayers.length);
+assert(dDropoutLayers.length === 2, "2 D dropout layers are tagged, got " + dDropoutLayers.length);
 
 console.log("\n=== 2. PhaseSwitch Labels ===");
 var z = tf.randomNormal([4, 128]);
@@ -114,7 +117,10 @@ te.trainModelPhased(tf, {
 
   // D should update, G should be frozen
   gLayers.forEach(function(l) { assert(diff(snap1, snap2, l.name) < 1e-10, "G layer " + l.name + " FROZEN during D step"); });
-  dLayers.forEach(function(l) { assert(diff(snap1, snap2, l.name) > 1e-6, "D layer " + l.name + " UPDATED during D step"); });
+  dWeightedLayers.forEach(function(l) { assert(diff(snap1, snap2, l.name) > 1e-6, "D layer " + l.name + " UPDATED during D step"); });
+  dDropoutLayers.forEach(function (l) {
+    assert(l._forcedTrainingOverride == null, "Tagged dropout " + l.name + " stays in training mode during D step");
+  });
 
   // Constants should NEVER update
   Object.keys(snap1).forEach(function(name) {
@@ -141,8 +147,11 @@ te.trainModelPhased(tf, {
     var snap4 = snapshot();
 
     console.log("\n=== 4. G Step — Weight Updates ===");
-    dLayers.forEach(function(l) { assert(diff(snap3, snap4, l.name) < 1e-10, "D layer " + l.name + " FROZEN during G step"); });
+    dWeightedLayers.forEach(function(l) { assert(diff(snap3, snap4, l.name) < 1e-10, "D layer " + l.name + " FROZEN during G step"); });
     gLayers.forEach(function(l) { assert(diff(snap3, snap4, l.name) > 1e-6, "G layer " + l.name + " UPDATED during G step, d=" + diff(snap3, snap4, l.name).toFixed(6)); });
+    dDropoutLayers.forEach(function (l) {
+      assert(l._forcedTrainingOverride === false, "Tagged dropout " + l.name + " forced inactive during G step");
+    });
 
     console.log("\n=== 5. Full Training (10 epochs D:1 G:1) ===");
     return te.trainModelPhased(tf, {

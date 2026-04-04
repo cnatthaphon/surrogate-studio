@@ -86,9 +86,9 @@
 
     // Discriminator (tagged "discriminator") — Dropout stabilizes GAN training (DCGAN paper)
     var d1 =   N(d, "dense",        { units: 512, activation: "relu", weightTag: "discriminator" }, 560, 180);
-    var dr1 =  N(d, "dropout",      { rate: 0.3 },                                                 640, 180);
+    var dr1 =  N(d, "dropout",      { rate: 0.3, weightTag: "discriminator", blockName: "D1_drop" }, 640, 180);
     var d2 =   N(d, "dense",        { units: 256, activation: "relu", weightTag: "discriminator" }, 720, 180);
-    var dr2 =  N(d, "dropout",      { rate: 0.3 },                                                 800, 180);
+    var dr2 =  N(d, "dropout",      { rate: 0.3, weightTag: "discriminator", blockName: "D2_drop" }, 800, 180);
     var d3 =   N(d, "dense",        { units: 1, activation: "sigmoid", weightTag: "discriminator" }, 880, 180);
     var dOut = N(d, "output",       { target: "custom", targetType: "custom", loss: "bce", matchWeight: 1, phase: "discriminator", headType: "classification" }, 1040, 180);
     C(d, cat, d1); C(d, d1, dr1); C(d, dr1, d2); C(d, d2, dr2); C(d, dr2, d3); C(d, d3, dOut);
@@ -187,9 +187,9 @@
 
     // Critic (no sigmoid — linear output for Wasserstein distance)
     var d1 =   N(d, "dense",        { units: 512, activation: "relu", weightTag: "discriminator" }, 560, 180);
-    var dr1 =  N(d, "dropout",      { rate: 0.3 },                                                 640, 180);
+    var dr1 =  N(d, "dropout",      { rate: 0.3, weightTag: "discriminator", blockName: "D1_drop" }, 640, 180);
     var d2 =   N(d, "dense",        { units: 256, activation: "relu", weightTag: "discriminator" }, 720, 180);
-    var dr2 =  N(d, "dropout",      { rate: 0.3 },                                                 800, 180);
+    var dr2 =  N(d, "dropout",      { rate: 0.3, weightTag: "discriminator", blockName: "D2_drop" }, 800, 180);
     var d3 =   N(d, "dense",        { units: 1, activation: "linear", weightTag: "discriminator" }, 880, 180);
     var dOut = N(d, "output",       { target: "custom", targetType: "custom", loss: "wasserstein", matchWeight: 1, phase: "discriminator", headType: "classification" }, 1040, 180);
     C(d, cat, d1); C(d, d1, dr1); C(d, dr1, d2); C(d, d2, dr2); C(d, dr2, d3); C(d, d3, dOut);

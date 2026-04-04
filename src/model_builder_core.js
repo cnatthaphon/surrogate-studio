@@ -794,7 +794,7 @@
       }
       if (node.name === "dropout_layer") {
         var rate = clamp(Number(node.data.rate || 0.1), 0, 0.9);
-        return tf.layers.dropout({ rate: rate, name: _n }).apply(inTensor);
+        return _applyLayerMetadata(tf.layers.dropout({ rate: rate, name: _n }), node).apply(inTensor);
       }
       if (node.name === "batchnorm_layer") {
         var momentum = clamp(Number((node.data && node.data.momentum) || 0.99), 0.1, 0.999);
@@ -856,7 +856,7 @@
       // NoiseInjection: add Gaussian noise (training only)
       if (node.name === "noise_injection_layer") {
         var noiseScale = Number((node.data && node.data.scale) || 0.1);
-        return tf.layers.gaussianNoise({ stddev: noiseScale, name: _n }).apply(inTensor);
+        return _applyLayerMetadata(tf.layers.gaussianNoise({ stddev: noiseScale, name: _n }), node).apply(inTensor);
       }
       throw new Error("Unsupported node type: " + node.name);
     };
