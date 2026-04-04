@@ -419,9 +419,11 @@ def main():
             i += 4
             continue
 
-        # Regular param: transpose 2D weights (Dense layers)
+        # Regular param: transpose for TF.js format
         if param.ndim == 2:
-            param = param.T  # [out, in] → [in, out]
+            param = param.T  # Dense: [out, in] → [in, out]
+        elif param.ndim == 4:
+            param = param.transpose(2, 3, 1, 0)  # Conv2D: [out_ch, in_ch, H, W] → [H, W, in_ch, out_ch]
 
         flat = param.astype(np.float32).flatten()
         shape = list(param.shape)
