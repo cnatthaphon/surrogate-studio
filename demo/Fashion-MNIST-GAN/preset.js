@@ -250,13 +250,15 @@
                     { epochs: 1, trainableTags: { discriminator: false, generator: true } }
                   ], rotateSchedule: true },
         metrics: { bestEpoch: 928, paramCount: 1102230 } },
-      { id: "t-dcgan-trained", name: "DCGAN (pre-trained, server)", schemaId: sid, datasetId: DS, modelId: "m-dcgan", status: "draft",
-        config: { epochs: 200, batchSize: 128, learningRate: 0.0002, optimizerType: "adam", optimizerBeta1: 0.5, optimizerBeta2: 0.999, useServer: true,
+      { id: "t-dcgan-trained", name: "DCGAN (pre-trained)", schemaId: sid, datasetId: DS, modelId: "m-dcgan", status: "done",
+        _pretrainedVar: "DCGAN_PRETRAINED_BIN_B64",
+        config: { epochs: 200, batchSize: 128, learningRate: 0.0002, optimizerType: "adam", optimizerBeta1: 0.5, optimizerBeta2: 0.999, useServer: false,
                   earlyStoppingPatience: 0, lrSchedulerType: "none", weightSelection: "last",
                   trainingSchedule: [
                     { unit: "batch", batches: 1, trainableTags: { discriminator: true, generator: false } },
                     { unit: "batch", batches: 1, trainableTags: { discriminator: false, generator: true } }
-                  ], rotateSchedule: true } },
+                  ], rotateSchedule: true },
+        metrics: { bestEpoch: 3, paramCount: 1099525 } },
       // WGAN (Arjovsky 2017) — Wasserstein loss, linear critic output
       { id: "t-mlp-wgan", name: "MLP-WGAN Trainer", schemaId: sid, datasetId: DS, modelId: "m-mlp-wgan", status: "draft",
         config: { epochs: 1000, batchSize: 128, learningRate: 0.00005, optimizerType: "rmsprop", useServer: true,
