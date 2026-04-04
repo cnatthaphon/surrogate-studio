@@ -550,6 +550,18 @@
       var n = Math.max(1, Number(raw) || 1);
       return Math.floor(n);
     }
+    function _scheduleStepPhaseName(step, idx) {
+      var explicit = String((step && step._phase) || "").trim();
+      if (explicit) return explicit;
+      var tags = step && step.trainableTags;
+      if (tags && typeof tags === "object") {
+        var enabled = Object.keys(tags).filter(function (k) {
+          return !!tags[k] && String(k || "").trim();
+        }).map(function (k) { return String(k).trim(); });
+        if (enabled.length === 1) return enabled[0];
+      }
+      return "step" + (idx + 1);
+    }
     // backward compat
     if (!schedule) {
       var detectedPhases = detectPhases(headConfigs);
@@ -861,7 +873,7 @@
           while (batchIdx < nBatches) {
             var cycleStepIdx = stepIdx % schedule.length;
             var batchStep = schedule[cycleStepIdx];
-            var batchLabel = batchStep._phase || ("step" + (cycleStepIdx + 1));
+            var batchLabel = _scheduleStepPhaseName(batchStep, cycleStepIdx);
             var batchRepeats = _scheduleStepCount(batchStep, "batch");
             _freezeByStep(batchStep);
             _setPhaseFlagForStep(batchStep, cycleStepIdx);
@@ -918,7 +930,7 @@
 
           var step = schedule[stepIdx];
           var stepEp = _scheduleStepCount(step, "epoch");
-          var label = step._phase || ("step" + (stepIdx + 1));
+          var label = _scheduleStepPhaseName(step, stepIdx);
 
           _freezeByStep(step);
           _regenNoise();

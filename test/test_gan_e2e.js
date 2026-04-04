@@ -105,7 +105,10 @@ te.trainModelPhased(tf, {
   epochs: 1, batchSize: 128, learningRate: 0.001, optimizerType: "adam",
   trainingSchedule: [{ epochs: 1, trainableTags: { discriminator: true, generator: false } }],
   rotateSchedule: false,
-  onEpochEnd: function(e, l) { console.log("  D-only epoch: D=" + l.phaseLosses.step1.toFixed(4)); },
+  onEpochEnd: function(e, l) {
+    assert(l.phaseLosses.discriminator != null, "D-only epoch uses discriminator phase name");
+    console.log("  D-only epoch: D=" + l.phaseLosses.discriminator.toFixed(4));
+  },
 }).then(function() {
   var snap2 = snapshot();
 
@@ -130,7 +133,10 @@ te.trainModelPhased(tf, {
     epochs: 1, batchSize: 128, learningRate: 0.001, optimizerType: "adam",
     trainingSchedule: [{ epochs: 1, trainableTags: { discriminator: false, generator: true } }],
     rotateSchedule: false,
-    onEpochEnd: function(e, l) { console.log("  G-only epoch: G=" + l.phaseLosses.step1.toFixed(4)); },
+    onEpochEnd: function(e, l) {
+      assert(l.phaseLosses.generator != null, "G-only epoch uses generator phase name");
+      console.log("  G-only epoch: G=" + l.phaseLosses.generator.toFixed(4));
+    },
   }).then(function() {
     var snap4 = snapshot();
 
@@ -150,7 +156,9 @@ te.trainModelPhased(tf, {
       ],
       rotateSchedule: true,
       onEpochEnd: function(e, l) {
-        var d = l.phaseLosses.step1, g = l.phaseLosses.step2;
+        var d = l.phaseLosses.discriminator, g = l.phaseLosses.generator;
+        assert(d != null, "full training emits discriminator phase loss at epoch " + (e+1));
+        assert(g != null, "full training emits generator phase loss at epoch " + (e+1));
         console.log("  Epoch " + (e+1) + " D:" + d.toFixed(4) + " G:" + g.toFixed(4));
         assert(d > 0, "D loss positive at epoch " + (e+1));
         assert(g > 0, "G loss positive at epoch " + (e+1));
