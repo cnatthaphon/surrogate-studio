@@ -2,11 +2,11 @@
 
 ![Status](https://img.shields.io/badge/status-active%20development-brightgreen) ![Models](https://img.shields.io/badge/models-23-blue) ![Demos](https://img.shields.io/badge/demos-5-orange)
 
-**A schema-driven ML experimentation platform that runs entirely in the browser.**
+**A schema-driven, browser-first ML experimentation platform.**
 
 **[Live Demo](https://cnatthaphon.github.io/surrogate-studio/)** | [Fashion-MNIST Benchmark](https://cnatthaphon.github.io/surrogate-studio/demo/Fashion-MNIST-Benchmark/) | [GAN](https://cnatthaphon.github.io/surrogate-studio/demo/Fashion-MNIST-GAN/) | [Diffusion](https://cnatthaphon.github.io/surrogate-studio/demo/Fashion-MNIST-Diffusion/) | [LSTM-VAE](https://cnatthaphon.github.io/surrogate-studio/demo/LSTM-VAE-for-dominant-motion-extraction/) | [Oscillator](https://cnatthaphon.github.io/surrogate-studio/demo/Oscillator-Surrogate/)
 
-Build datasets, design neural network architectures visually, train models, generate samples, and benchmark results — all from a single page. No Python install, no GPU server, no Docker.
+Build datasets, design neural network architectures visually, train models, generate samples, and benchmark results from a single page. It works fully in the browser, with an optional PyTorch server for faster training and cross-runtime checks.
 
 ![Demo Workflow](demo/Fashion-MNIST-Benchmark/images/demo_workflow.gif)
 
@@ -16,9 +16,9 @@ Build datasets, design neural network architectures visually, train models, gene
 
 - **Visual Model Builder** — drag-and-drop neural network design with [Drawflow](https://github.com/jerosoler/Drawflow). 35+ node types across MLP, CNN, RNN, VAE, GAN, and Diffusion architectures.
 - **Schema-Driven** — everything reads from schema and config. Zero hardcoded target names in core paths. New dataset types are plugins, not code changes. Each output node carries explicit `headType` (classification/regression/reconstruction) from schema metadata.
-- **Dual Runtime** — train with TF.js in the browser (WebGPU/WebGL/WASM/CPU auto-negotiated) or with PyTorch via the optional Node.js server. Same result contract, same visualization.
+- **Dual Runtime** — train with TF.js in the browser or with PyTorch via the optional Node.js server. Same graph contract, same trainer UI, same artifact flow.
 - **Cross-Runtime Weights** — per-node-type weight mapping between TF.js and PyTorch (Dense transpose, LSTM gate swap, GRU gate reorder, Conv dimension shuffle, BatchNorm running stats).
-- **Notebook Export** — one-click ZIP bundle with `dataset.csv` + `model.graph.json` + `run.ipynb` for reproducible PyTorch training outside the browser.
+- **Notebook Export** — export either a single `.ipynb` file or a ZIP bundle with `dataset.csv`, `model.graph.json`, and `run.ipynb` for reproducible PyTorch training outside the browser.
 - **Paper Reproductions** — self-contained demo folders that reproduce published research, with benchmarks and screenshots. No core modifications needed.
 
 ---
@@ -50,10 +50,10 @@ Real adversarial training with no hardcoded GAN logic — everything from Drawfl
 | # | Architecture | Loss | Paper |
 |---|---|---|---|
 | 1 | MLP-GAN (LayerNorm + Dropout) | BCE + label smoothing | Goodfellow 2014 |
-| 2 | DCGAN (BatchNorm + LeakyReLU) | BCE + label smoothing | Radford 2016 |
+| 2 | DCGAN (BatchNorm + LeakyReLU) | BCE (0/1 targets) | Radford 2016 |
 | 3 | MLP-WGAN (linear critic) | Wasserstein | Arjovsky 2017 |
 
-Pre-trained MLP-GAN and MLP-WGAN included — generate T-shirt images immediately.
+Pre-trained MLP-GAN, DCGAN, and MLP-WGAN checkpoints are included for immediate sampling in the public demo.
 
 ### [Fashion-MNIST Diffusion](demo/Fashion-MNIST-Diffusion/) — 4 Denoising Models
 
@@ -130,10 +130,10 @@ Reproduces the LSTM-VAE from Jadhav & Barati Farimani (2022) for ant trajectory 
 
 ## Quick Start
 
-### Browser (no install)
+### Browser / GitHub Pages
 
 ```
-Open index.html in Chrome/Edge (works on file://)
+Open `index.html` in Chrome/Edge (works on `file://`)
 ```
 
 Or serve locally:
@@ -159,7 +159,7 @@ npm install
 node training_server.js
 ```
 
-Check "Use PyTorch Server" in the Trainer config before training. CUDA will be used if available.
+Check `Use PyTorch Server` in the Trainer config before training. CUDA will be used if available.
 
 ---
 
@@ -204,14 +204,26 @@ demo/<paper>/
 
 ---
 
-## Scripts
+## Validation
+
+The public branch is still active development, so these are the most useful checks before pushing:
 
 ```bash
-# Run all contract tests
-node scripts/test_contract_all.js
+# Contract suite
+npm test
 
-# Full E2E test (requires PyTorch server running)
+# Browser UI checks
+npm run test:browser
+
+# Headless multi-schema pipeline
+npm run test:pipeline
+
+# Benchmark / full flow with server running
 node scripts/test_benchmark_full.js
+
+# Notebook export verification
+node scripts/test_headless_notebook_export.js
+node scripts/test_headless_export_verify.js
 
 # Capture demo screenshots + GIF
 node scripts/capture_demo_assets.js demo/Fashion-MNIST-Benchmark 5
@@ -240,7 +252,7 @@ node scripts/test_cross_runtime_weights.js
 
 ## GitHub Pages
 
-This project is fully client-side — deploy directly via GitHub Pages:
+The public site is served directly from this repository:
 
 ```
 https://<username>.github.io/surrogate-studio/
