@@ -1,11 +1,18 @@
 # Fashion-MNIST GAN — Real Adversarial Training
 
-![Demo Workflow](images/demo_workflow.gif)
-
-
 **Train a GAN with real adversarial structure — all defined in the visual graph editor.**
 
-No hardcoded GAN logic in the engine. The graph itself defines the full adversarial architecture using composable building blocks: ConcatBatch (merge real+fake), PhaseSwitch (label routing by phase), Constant (label values), weight tags (freeze control).
+No hardcoded GAN logic in the engine. The graph defines the full adversarial architecture using composable building blocks: ConcatBatch (merge real+fake), PhaseSwitch (label routing by phase), Constant (label values), weight tags (freeze control).
+
+## Generation Results
+
+| | Client (TF.js WebGL) | Server (PyTorch CUDA) |
+|:---:|:---:|:---:|
+| **MLP-GAN** | ![MLP Client](images/mlp_gan_client.png) | ![MLP Server](images/mlp_gan_server.png) |
+| **DCGAN** | ![DCGAN Client](images/dcgan_client.png) | ![DCGAN Server](images/dcgan_server.png) |
+| **WGAN** | ![WGAN Client](images/wgan_client.png) | ![WGAN Server](images/wgan_server.png) |
+
+All three architectures generate recognizable T-shirt images from random noise, trained on Fashion-MNIST class 0 (T-shirt/top, 6000 images). Pre-trained weights included — generate immediately without training.
 
 ## Presets
 
