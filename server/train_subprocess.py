@@ -814,6 +814,8 @@ def build_model_from_graph(graph, feature_size, target_size, num_classes=0):
                 nn.init.kaiming_uniform_(tensor, a=0.0, mode="fan_in", nonlinearity="relu"); return
             if init_name == "henormal":
                 nn.init.kaiming_normal_(tensor, a=0.0, mode="fan_in", nonlinearity="relu"); return
+            if init_name == "orthogonal":
+                nn.init.orthogonal_(tensor); return
             fan_in, _ = _fan_in_out(tensor)
             if init_name == "lecununiform":
                 bound = np.sqrt(3.0 / max(1.0, float(fan_in)))
@@ -825,28 +827,33 @@ def build_model_from_graph(graph, feature_size, target_size, num_classes=0):
         if module is None or not isinstance(cfg, dict):
             return
         t = str(layer_type or "")
-        if t in ("dense", "conv1d", "conv2d", "conv2d_transpose", "embedding"):
-            _apply_tensor_initializer(getattr(module, "weight", None), cfg, "kernel")
-            _apply_tensor_initializer(getattr(module, "bias", None), cfg, "bias")
+        # Match TF.js defaults when the graph leaves initializers unspecified.
+        if t in ("dense", "conv1d", "conv2d", "conv2d_transpose"):
+            _apply_tensor_initializer(getattr(module, "weight", None), cfg, "kernel", "glorotuniform")
+            _apply_tensor_initializer(getattr(module, "bias", None), cfg, "bias", "zeros")
+            return
+        if t == "embedding":
+            _apply_tensor_initializer(getattr(module, "weight", None), cfg, "kernel", "randomuniform")
+            _apply_tensor_initializer(getattr(module, "bias", None), cfg, "bias", "zeros")
             return
         if t == "batchnorm":
-            _apply_tensor_initializer(getattr(module, "weight", None), cfg, "gamma")
-            _apply_tensor_initializer(getattr(module, "bias", None), cfg, "beta")
-            _apply_tensor_initializer(getattr(module, "running_mean", None), cfg, "movingMean")
-            _apply_tensor_initializer(getattr(module, "running_var", None), cfg, "movingVariance")
+            _apply_tensor_initializer(getattr(module, "weight", None), cfg, "gamma", "ones")
+            _apply_tensor_initializer(getattr(module, "bias", None), cfg, "beta", "zeros")
+            _apply_tensor_initializer(getattr(module, "running_mean", None), cfg, "movingMean", "zeros")
+            _apply_tensor_initializer(getattr(module, "running_var", None), cfg, "movingVariance", "ones")
             return
         if t == "layernorm":
-            _apply_tensor_initializer(getattr(module, "weight", None), cfg, "gamma")
-            _apply_tensor_initializer(getattr(module, "bias", None), cfg, "beta")
+            _apply_tensor_initializer(getattr(module, "weight", None), cfg, "gamma", "ones")
+            _apply_tensor_initializer(getattr(module, "bias", None), cfg, "beta", "zeros")
             return
         if t in ("lstm", "gru", "rnn"):
             for name, param in module.named_parameters():
                 if name.startswith("weight_hh"):
-                    _apply_tensor_initializer(param, cfg, "recurrent", "default")
+                    _apply_tensor_initializer(param, cfg, "recurrent", "orthogonal")
                 elif name.startswith("weight_ih") or name.startswith("weight"):
-                    _apply_tensor_initializer(param, cfg, "kernel", "default")
+                    _apply_tensor_initializer(param, cfg, "kernel", "glorotuniform")
                 elif name.startswith("bias"):
-                    _apply_tensor_initializer(param, cfg, "bias", "default")
+                    _apply_tensor_initializer(param, cfg, "bias", "zeros")
 
     # Parse nodes + edges
     nodes = {}
