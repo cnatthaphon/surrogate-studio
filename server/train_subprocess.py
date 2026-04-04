@@ -16,8 +16,24 @@ import json
 import sys
 import os
 import math
+import signal
 import traceback
 import numpy as np
+
+_STOP_REQUESTED = False
+
+def _request_stop(signum, frame):
+    global _STOP_REQUESTED
+    if _STOP_REQUESTED:
+        return
+    _STOP_REQUESTED = True
+    try:
+        status("Stop requested. Finishing current batch and saving weights...")
+    except Exception:
+        pass
+
+def _should_stop():
+    return bool(_STOP_REQUESTED)
 
 def status(msg):
     print(json.dumps({"kind": "status", "message": str(msg)}), flush=True)
@@ -89,6 +105,8 @@ def _resolve_restore_best_weights(config, head_configs):
     return True
 
 def main():
+    global _STOP_REQUESTED
+    _STOP_REQUESTED = False
     if len(sys.argv) < 2:
         error("Usage: train_subprocess.py <config.json>")
         sys.exit(1)
@@ -114,6 +132,8 @@ def main():
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     status(f"PyTorch {torch.__version__} on {device}")
+    signal.signal(signal.SIGTERM, _request_stop)
+    signal.signal(signal.SIGINT, _request_stop)
 
     # --- Extract data ---
     status("Loading dataset into memory...")
@@ -420,8 +440,12 @@ def main():
     best_state = None
     no_improve = 0
     schedule_done = False
+    stopped_by_user = False
 
     for ep in range(1, epochs + 1):
+        if _should_stop():
+            stopped_by_user = True
+            break
         phase_losses = {}
 
         if schedule_done:
@@ -432,6 +456,9 @@ def main():
             n_batches = 0
             opt_all = _get_optimizer("all")
             for xb, yb in train_dl:
+                if _should_stop():
+                    stopped_by_user = True
+                    break
                 xb, yb = xb.to(device), yb.to(device)
                 opt_all.zero_grad()
                 pred = model(xb)
@@ -442,6 +469,8 @@ def main():
                 opt_all.step()
                 train_loss += loss.item()
                 n_batches += 1
+            if stopped_by_user and n_batches == 0:
+                break
             phase_losses["all"] = train_loss / max(n_batches, 1)
         else:
             if schedule_uses_batch_unit:
@@ -451,7 +480,7 @@ def main():
                 n_total_batches = len(train_dl)
                 batch_idx = 0
                 schedule_idx = 0
-                while batch_idx < n_total_batches:
+                while batch_idx < n_total_batches and not _should_stop():
                     si = schedule_idx % len(schedule)
                     step = schedule[si]
                     repeat_batches = _schedule_step_count(step, "batch")
@@ -467,7 +496,9 @@ def main():
                     step_opt = _get_optimizer(phase_name)
 
                     for _ in range(repeat_batches):
-                        if batch_idx >= n_total_batches:
+                        if batch_idx >= n_total_batches or _should_stop():
+                            if _should_stop():
+                                stopped_by_user = True
                             break
                         xb, yb = next(train_iter)
                         xb, yb = xb.to(device), yb.to(device)
@@ -486,11 +517,17 @@ def main():
                         step_sums[phase_name] = step_sums.get(phase_name, 0.0) + float(loss.item())
                         step_counts[phase_name] = step_counts.get(phase_name, 0) + 1
                         batch_idx += 1
+                    if _should_stop():
+                        stopped_by_user = True
+                        break
                     schedule_idx += 1
                 for phase_name, total in step_sums.items():
                     phase_losses[phase_name] = total / max(step_counts.get(phase_name, 1), 1)
             else:
                 for si, step in enumerate(schedule):
+                    if _should_stop():
+                        stopped_by_user = True
+                        break
                     step_epochs = _schedule_step_count(step, "epoch")
                     trainable_tags = step.get("trainableTags", None)
                     phase_name = _schedule_step_phase_name(step, si)
@@ -504,7 +541,13 @@ def main():
                     step_loss = 0.0
                     n_batches = 0
                     for _ in range(step_epochs):
+                        if _should_stop():
+                            stopped_by_user = True
+                            break
                         for xb, yb in train_dl:
+                            if _should_stop():
+                                stopped_by_user = True
+                                break
                             xb, yb = xb.to(device), yb.to(device)
                             step_opt.zero_grad()
                             pred = model(xb)
@@ -522,16 +565,22 @@ def main():
                                             p.data.clamp_(-clip_val, clip_val)
                             step_loss += loss.item()
                             n_batches += 1
+                        if stopped_by_user:
+                            break
                     phase_losses[phase_name] = step_loss / max(n_batches, 1)
+                    if stopped_by_user:
+                        break
 
             if not rotate_schedule:
                 schedule_done = True
 
+        if not phase_losses and stopped_by_user:
+            break
         total_train_loss = sum(phase_losses.values()) / max(len(phase_losses), 1)
 
         # Validate (skip if no val data)
         val_loss = None
-        if x_val.size > 0:
+        if not stopped_by_user and x_val.size > 0:
             model._phase_name = ""
             model.eval()
             val_loss = 0.0
@@ -563,12 +612,16 @@ def main():
 
         epoch_log(ep, total_train_loss, val_loss, current_lr, improved, phase_losses)
 
+        if stopped_by_user:
+            status(f"Training stop requested at epoch {ep}. Saving current weights...")
+            break
+
         if patience > 0 and no_improve >= patience:
             status(f"Early stopping at epoch {ep} (patience={patience})")
             break
 
     # Restore best weights (from config — default true for supervised, false for GAN)
-    restore_best = _resolve_restore_best_weights(config, head_configs)
+    restore_best = (not stopped_by_user) and _resolve_restore_best_weights(config, head_configs)
     if restore_best and best_state:
         model.load_state_dict(best_state)
 
@@ -719,6 +772,7 @@ def main():
         "bestValLoss": float(best_val_loss),
         "finalLr": float(optimizer.param_groups[0]["lr"]),
         "stoppedEarly": no_improve >= patience if patience > 0 else False,
+        "stoppedByUser": bool(stopped_by_user),
         "headCount": len(head_configs) or 1,
         "backend": str(device),
         "paramCount": len(weight_values),

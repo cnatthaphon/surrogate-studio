@@ -33,6 +33,8 @@
     var _trainingRunId = 0; // increments on each training start — old runs detect new run and stop
     var _activeModel = null; // reference to model during training (for weight save on stop)
     var _activeTrainingCancel = null; // best-effort cancel for worker/server runs
+    var _stopRequestedTrainingId = "";
+    var _stopRequestedRunId = 0;
 
     function _extractWeightsFromModel(tfModel) {
       var allW = tfModel.getWeights();
@@ -68,8 +70,13 @@
       return !!(stateApi && stateApi.getActiveTrainer() === trainerId && _subTab === "train");
     }
 
+    function _isStopRequestedRun(trainerId, runId) {
+      return _stopRequestedTrainingId === trainerId && _stopRequestedRunId === runId;
+    }
+
     function _appendTrainerEpochForRun(trainerId, runId, logEntry) {
       if (!_isCurrentTrainingRun(trainerId, runId)) return false;
+      if (_isStopRequestedRun(trainerId, runId)) return false;
       if (store) store.appendTrainerEpoch(trainerId, logEntry);
       if (_isTrainerTrainViewVisible(trainerId)) {
         var epochs = store && typeof store.getTrainerEpochs === "function" ? store.getTrainerEpochs(trainerId) : [];
@@ -1439,13 +1446,30 @@
       if (_isTraining && _activeTrainingId === activeId) {
         var stopBtn = el("button", { className: "osc-btn", style: "flex:1;background:linear-gradient(135deg,#dc2626,#991b1b);border-color:#ef4444;" }, "Stop Training");
         stopBtn.addEventListener("click", function () {
+          var cancelFn = _activeTrainingCancel;
+          var tc = store ? store.getTrainerCard(activeId) : null;
+          var isServerRun = !!(tc && tc.config && tc.config.useServer);
+          var isWorkerRun = !!(tc && tc.runtimeDiagnostics && tc.runtimeDiagnostics.executionMode === "worker");
+          if ((isServerRun || isWorkerRun) && cancelFn) {
+            _stopRequestedTrainingId = activeId;
+            _stopRequestedRunId = _trainingRunId;
+            tc.status = "stopping";
+            _setRuntimeDiagnostics(tc, {
+              executionMode: tc.runtimeDiagnostics && tc.runtimeDiagnostics.executionMode ? tc.runtimeDiagnostics.executionMode : (isServerRun ? "server" : "worker"),
+              status: "stopping",
+              note: "Training stop requested by user.",
+            });
+            if (store) store.upsertTrainerCard(tc);
+            try { Promise.resolve(cancelFn()).catch(function () {}); } catch (_) {}
+            onStatus(isServerRun ? "Stopping server training..." : "Stopping worker training...");
+            _renderLeftPanel(); _renderMainPanel(); _renderRightPanel();
+            return;
+          }
           _trainingRunId++;
           _isTraining = false;
           _activeTrainingId = "";
-          var cancelFn = _activeTrainingCancel;
           _activeTrainingCancel = null;
           try { if (_activeModel) _activeModel.stopTraining = true; } catch (_) {}
-          var tc = store ? store.getTrainerCard(activeId) : null;
           var savedWeights = false;
           if (tc) {
             tc.status = "stopped";
@@ -1762,6 +1786,8 @@
       var currentRunId = _trainingRunId;
       var runtimeRunId = activeId + "--run-" + currentRunId + "-" + Date.now().toString(36);
       _activeTrainingCancel = null;
+      _stopRequestedTrainingId = "";
+      _stopRequestedRunId = 0;
       _activeTrainingId = activeId;
       _subTab = "train";
       onStatus("Training... (serializing model)");
@@ -1891,10 +1917,13 @@
             buildResult.model.dispose();
             return;
           }
+          var wasStopRequested = _isStopRequestedRun(activeId, currentRunId) || !!(result && result.stoppedByUser);
           _isTraining = false;
           _activeTrainingCancel = null;
+          _stopRequestedTrainingId = "";
+          _stopRequestedRunId = 0;
           _activeTrainingId = "";
-          tCard.status = "done";
+          tCard.status = wasStopRequested ? "stopped" : "done";
           tCard.metrics = result;
           if (!tCard.metrics.paramCount) tCard.metrics.paramCount = buildResult.model.countParams();
           tCard.backend = result.resolvedBackend || result.backend || "pytorch";
@@ -1902,8 +1931,8 @@
             executionMode: "server",
             source: "server",
             resolvedBackend: String(result.resolvedBackend || result.backend || "pytorch"),
-            status: "done",
-            note: "Server training completed.",
+            status: wasStopRequested ? "stopped" : "done",
+            note: wasStopRequested ? "Server training stopped by user." : "Server training completed.",
           });
           tCard.trainedOnServer = true;
           if (!tCard.config) tCard.config = {};
@@ -1927,7 +1956,9 @@
             tCard.modelArtifactsLast = result.modelArtifacts;
           }
           if (store) store.upsertTrainerCard(tCard);
-          onStatus("\u2713 Done (PyTorch): MAE=" + (result.mae != null ? Number(result.mae).toExponential(3) : "—"));
+          onStatus(wasStopRequested
+            ? "\u2713 Stopped (PyTorch weights saved)"
+            : "\u2713 Done (PyTorch): MAE=" + (result.mae != null ? Number(result.mae).toExponential(3) : "—"));
           if (_isTrainerTrainViewVisible(activeId) || (stateApi && stateApi.getActiveTrainer() === activeId)) { _renderLeftPanel(); _renderMainPanel(); _renderRightPanel(); }
           _activeModel = null;
           buildResult.model.dispose();
@@ -1937,6 +1968,7 @@
             buildResult.model.dispose();
             return;
           }
+          var wasStopRequested = _isStopRequestedRun(activeId, currentRunId);
           _activeModel = null;
           _activeTrainingCancel = null;
           var msg = String(err.message || "");
@@ -1950,6 +1982,24 @@
             });
             onStatus("Server: " + msg + " \u2014 training on client");
             _runClientTraining();
+            return;
+          }
+          if (wasStopRequested) {
+            _isTraining = false;
+            _stopRequestedTrainingId = "";
+            _stopRequestedRunId = 0;
+            _activeTrainingId = "";
+            tCard.status = "stopped";
+            _setRuntimeDiagnostics(tCard, {
+              executionMode: "server",
+              source: "server",
+              status: "stopped",
+              note: "Server training stopped by user.",
+            });
+            if (store) store.upsertTrainerCard(tCard);
+            onStatus("Training stopped");
+            if (_isTrainerTrainViewVisible(activeId) || (stateApi && stateApi.getActiveTrainer() === activeId)) { _renderLeftPanel(); _renderMainPanel(); _renderRightPanel(); }
+            buildResult.model.dispose();
             return;
           }
           _isTraining = false;

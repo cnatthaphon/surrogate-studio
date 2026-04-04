@@ -294,10 +294,6 @@
     });
     cancelFn = function () {
       if (settled) return Promise.resolve({ canceled: true, alreadySettled: true });
-      settled = true;
-      if (evtSource) {
-        try { evtSource.close(); } catch (_) {}
-      }
       if (!jobId) return Promise.resolve({ canceled: true, pending: true });
       return stopTrainingOnServer(jobId, serverUrl);
     };

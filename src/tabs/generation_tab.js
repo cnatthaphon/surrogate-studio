@@ -462,7 +462,10 @@
       var isReady = !!_getTrainerArtifacts(selectedTrainer, g.config && g.config.weightSelection);
 
       if (g.trainerId && !isReady) {
-        var statusMsg = !selectedTrainer ? "Trainer not found" : selectedTrainer.status === "training" ? "Model is still training..." : "Model not trained yet. Train it first in the Trainer tab.";
+        var statusMsg = "Model not trained yet. Train it first in the Trainer tab.";
+        if (!selectedTrainer) statusMsg = "Trainer not found";
+        else if (selectedTrainer.status === "training" || selectedTrainer.status === "running") statusMsg = "Model is still training...";
+        else if (selectedTrainer.status === "stopping") statusMsg = "Model is stopping. Wait for weights to be saved.";
         rightEl.appendChild(el("div", { style: "margin-top:8px;padding:8px;background:#1c1917;border:1px solid #854d0e;border-radius:6px;font-size:11px;color:#fbbf24;" }, statusMsg));
       }
 
