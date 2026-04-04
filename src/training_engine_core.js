@@ -283,6 +283,7 @@
     var earlyStoppingPatienceRaw = Number(opts.earlyStoppingPatience);
     var earlyStoppingPatience = Number.isFinite(earlyStoppingPatienceRaw) && earlyStoppingPatienceRaw > 0
       ? Math.max(1, Math.floor(earlyStoppingPatienceRaw)) : 0;
+    var shuffleTrain = opts.shuffleTrain !== false;
     var restoreBestWeights = resolveRestoreBestWeights(opts, headConfigs);
 
     var currentLr = requestedLr;
@@ -536,6 +537,7 @@
     var earlyStoppingPatienceRaw = Number(opts.earlyStoppingPatience);
     var earlyStoppingPatience = Number.isFinite(earlyStoppingPatienceRaw) && earlyStoppingPatienceRaw > 0
       ? Math.max(1, Math.floor(earlyStoppingPatienceRaw)) : 0;
+    var shuffleTrain = opts.shuffleTrain !== false;
 
     // training schedule: [{epochs: N, trainableTags: {tag: bool}}]
     var schedule = Array.isArray(opts.trainingSchedule) && opts.trainingSchedule.length ? opts.trainingSchedule : null;
@@ -746,7 +748,13 @@
           }
         });
         if (!vars.length) return 0;
-        var indices = tf.range(start, end, 1, "int32");
+        var order = arguments.length > 6 ? arguments[6] : null;
+        var indices;
+        if (order && order.length) {
+          indices = tf.tensor1d(Array.prototype.slice.call(order, start, end), "int32");
+        } else {
+          indices = tf.range(start, end, 1, "int32");
+        }
         var xBatch = Array.isArray(xFull) ? xFull.map(function (x) { return tf.gather(x, indices); }) : tf.gather(xFull, indices);
         var yArrays = Array.isArray(yFull) ? yFull.map(function (y) { return tf.gather(y, indices); }) : tf.gather(yFull, indices);
         var loss = tf.tidy(function () {
@@ -780,15 +788,21 @@
         return totalLoss;
       }
 
-      function _trainStep(stepOpt, xFull, yFull, clipVal) {
+      function _makeShuffleOrder(fullN) {
+        if (!shuffleTrain || !(fullN > 1) || !tf.util || typeof tf.util.createShuffledIndices !== "function") return null;
+        return tf.util.createShuffledIndices(fullN);
+      }
+
+      function _trainStep(stepOpt, xFull, yFull, clipVal, order) {
         var fullN = Array.isArray(xFull) ? xFull[0].shape[0] : xFull.shape[0];
         var bs = Math.min(batchSize, fullN);
         var nBatches = Math.max(1, Math.ceil(fullN / bs));
         var totalLoss = 0;
+        var effectiveOrder = order || _makeShuffleOrder(fullN);
         for (var bi = 0; bi < nBatches; bi++) {
           var start = bi * bs;
           var end = Math.min(start + bs, fullN);
-          totalLoss += _trainBatch(stepOpt, xFull, yFull, start, end, clipVal);
+          totalLoss += _trainBatch(stepOpt, xFull, yFull, start, end, clipVal, effectiveOrder);
         }
         return totalLoss / nBatches;
       }
@@ -870,6 +884,7 @@
           var bs = Math.min(batchSize, fullN);
           var nBatches = Math.max(1, Math.ceil(fullN / bs));
           var batchIdx = 0;
+          var epochOrder = _makeShuffleOrder(fullN);
           while (batchIdx < nBatches) {
             var cycleStepIdx = stepIdx % schedule.length;
             var batchStep = schedule[cycleStepIdx];
@@ -882,7 +897,7 @@
               _regenNoise();
               var start = batchIdx * bs;
               var end = Math.min(start + bs, fullN);
-              var batchLoss = _trainBatch(_getOpt(batchLabel), xTrainInputs, yTrainArrays, start, end, batchClipVal);
+              var batchLoss = _trainBatch(_getOpt(batchLabel), xTrainInputs, yTrainArrays, start, end, batchClipVal, epochOrder);
               stepLosses[batchLabel] = (stepLosses[batchLabel] || 0) + batchLoss;
               if (!stepLosses[batchLabel + "::__count"]) stepLosses[batchLabel + "::__count"] = 0;
               stepLosses[batchLabel + "::__count"] += 1;

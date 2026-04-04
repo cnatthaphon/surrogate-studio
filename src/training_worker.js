@@ -511,6 +511,7 @@
     await model.fit(xTrain, singleHead ? yTrainTensors[0] : yTrainTensors, {
       epochs: Number(message.epochs || 1),
       batchSize: Number(message.batchSize || 32),
+      shuffle: message.shuffleTrain !== false,
       validationData: [xVal, singleHead ? yValTensors[0] : yValTensors],
       callbacks: [{
         onEpochEnd: function (epoch, logs) {

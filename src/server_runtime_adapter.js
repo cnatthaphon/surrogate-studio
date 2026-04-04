@@ -165,6 +165,7 @@
       restoreBestWeights: resolveRestoreBestWeights(spec),
       weightSelection: String(spec.weightSelection || ""),
       gradClipNorm: Number(spec.gradClipNorm || 0),
+      shuffleTrain: spec.shuffleTrain !== false,
       lrPatience: Number(spec.lrPatience || 3),
       lrFactor: Number(spec.lrFactor || 0.5),
       minLr: Number(spec.minLr || 1e-6),

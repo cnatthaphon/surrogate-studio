@@ -225,7 +225,8 @@ def main():
 
     # --- DataLoaders (after label conversion) ---
     train_ds = TensorDataset(torch.tensor(x_train), torch.tensor(y_train))
-    train_dl = DataLoader(train_ds, batch_size=batch_size, shuffle=True)
+    shuffle_train = bool(config.get("shuffleTrain", True))
+    train_dl = DataLoader(train_ds, batch_size=batch_size, shuffle=shuffle_train)
     val_ds = TensorDataset(torch.tensor(x_val), torch.tensor(y_val))
     val_dl = DataLoader(val_ds, batch_size=batch_size, shuffle=False)
 

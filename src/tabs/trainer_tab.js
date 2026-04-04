@@ -1986,6 +1986,7 @@
             minLr: Number(config.minLr || 0.000001),
             gradClipNorm: Number(config.gradClipNorm || 0),
             gradClipValue: Number(config.gradClipValue || 0),
+            shuffleTrain: config.shuffleTrain !== false,
             onEpochData: function (payload) {
               if (currentMountId !== _mountId) return;
               var logEntry = { epoch: payload.epoch, loss: payload.loss, val_loss: payload.val_loss, current_lr: payload.current_lr, improved: payload.improved };
@@ -2099,6 +2100,7 @@
           minLr: Number(config.minLr || 0.000001),
           gradClipNorm: Number(config.gradClipNorm || 0),
           gradClipValue: Number(config.gradClipValue || 0),
+          shuffleTrain: config.shuffleTrain !== false,
           trainingSchedule: config.trainingSchedule || null,
           rotateSchedule: config.rotateSchedule !== false,
           onEpochEnd: function (epoch, logs) {
