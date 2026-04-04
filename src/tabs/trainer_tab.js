@@ -1915,10 +1915,13 @@
       return;
 
       function _runClientTraining() {
+      var _isPhased = trainingEngine.needsPhasedTraining && trainingEngine.needsPhasedTraining(buildResult.headConfigs);
       // === WORKER PATH (non-blocking) ===
       var W = typeof window !== "undefined" ? window : {};
       var workerBridge = W.OSCTrainingWorkerBridge;
-      var useWorker = workerBridge && typeof workerBridge.runTrainingInWorker === "function";
+      // Phased training must stay on the main thread until the worker implements
+      // the same schedule/tag semantics as training_engine_core.
+      var useWorker = !_isPhased && workerBridge && typeof workerBridge.runTrainingInWorker === "function";
       if (useWorker) {
         // resolve worker path from script tags (handles subdirectory demos)
         var _workerUrl = "./src/training_worker.js";
@@ -2058,7 +2061,6 @@
 
       } else {
         // === FALLBACK: main thread (will freeze UI) ===
-        var _isPhased = trainingEngine.needsPhasedTraining && trainingEngine.needsPhasedTraining(buildResult.headConfigs);
         var _trainFn = _isPhased && trainingEngine.trainModelPhased ? trainingEngine.trainModelPhased : trainingEngine.trainModel;
         _activeModel = buildResult.model;
         var _myRunId = _trainingRunId; // capture for shouldStop closure
