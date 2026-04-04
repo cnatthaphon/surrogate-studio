@@ -539,6 +539,11 @@
     var earlyStoppingPatience = Number.isFinite(earlyStoppingPatienceRaw) && earlyStoppingPatienceRaw > 0
       ? Math.max(1, Math.floor(earlyStoppingPatienceRaw)) : 0;
     var shuffleTrain = opts.shuffleTrain !== false;
+    var batchYieldEvery = Math.max(1, Number(opts.batchYieldEvery) || 8);
+
+    function _yieldToUi() {
+      return new Promise(function (resolve) { setTimeout(resolve, 0); });
+    }
 
     // training schedule: [{epochs: N, trainableTags: {tag: bool}}]
     var schedule = Array.isArray(opts.trainingSchedule) && opts.trainingSchedule.length ? opts.trainingSchedule : null;
@@ -886,7 +891,7 @@
         }
       }
 
-      function nextEpoch() {
+      async function nextEpoch() {
         if (epoch >= epochs || shouldStop()) { _finish(); return; }
         if (earlyStoppingPatience > 0 && noImproveCount >= earlyStoppingPatience) { _finish(); return; }
 
@@ -914,6 +919,7 @@
           var batchIdx = 0;
           var epochOrder = _makeShuffleOrder(fullN);
           while (batchIdx < nBatches) {
+            if (shouldStop()) { _finish(); return; }
             var cycleStepIdx = stepIdx % schedule.length;
             var batchStep = schedule[cycleStepIdx];
             var batchLabel = _scheduleStepPhaseName(batchStep, cycleStepIdx);
@@ -929,6 +935,10 @@
               stepLosses[batchLabel] = (stepLosses[batchLabel] || 0) + batchLoss;
               if (!stepLosses[batchLabel + "::__count"]) stepLosses[batchLabel + "::__count"] = 0;
               stepLosses[batchLabel + "::__count"] += 1;
+              if (((batchIdx + 1) % batchYieldEvery) === 0 && batchIdx < nBatches - 1) {
+                await _yieldToUi();
+                if (shouldStop()) { _finish(); return; }
+              }
             }
             stepIdx++;
           }

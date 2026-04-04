@@ -59,6 +59,25 @@
     var _epochTableBody = null;
     var _subTab = "train"; // "train" | "test"
 
+    function _isCurrentTrainingRun(trainerId, runId) {
+      return _activeTrainingId === trainerId && _trainingRunId === runId;
+    }
+
+    function _isTrainerTrainViewVisible(trainerId) {
+      return !!(stateApi && stateApi.getActiveTrainer() === trainerId && _subTab === "train");
+    }
+
+    function _appendTrainerEpochForRun(trainerId, runId, logEntry) {
+      if (!_isCurrentTrainingRun(trainerId, runId)) return false;
+      if (store) store.appendTrainerEpoch(trainerId, logEntry);
+      if (_isTrainerTrainViewVisible(trainerId)) {
+        var epochs = store && typeof store.getTrainerEpochs === "function" ? store.getTrainerEpochs(trainerId) : [];
+        if (_lossChartDiv) _plotLossChart(epochs);
+        if (_epochTableBody) _appendEpochRow(logEntry);
+      }
+      return true;
+    }
+
     function _getSchemaId() {
       var aid = stateApi ? stateApi.getActiveTrainer() : "";
       if (aid && store) { var t = store.getTrainerCard(aid); if (t && t.schemaId) return t.schemaId; }
@@ -131,6 +150,16 @@
       var heads = Array.isArray(headConfigs) ? headConfigs : [];
       if (heads.some(function (h) { return String((h && h.phase) || "").trim() !== ""; })) return false;
       return true;
+    }
+
+    function _resolveWeightSelection(config, headConfigs) {
+      var cfg = config && typeof config === "object" ? config : {};
+      var weightSelection = String(cfg.weightSelection || "").trim().toLowerCase();
+      if (weightSelection === "last" || weightSelection === "best") return weightSelection;
+      if (Array.isArray(cfg.trainingSchedule) && cfg.trainingSchedule.length) return "last";
+      var heads = Array.isArray(headConfigs) ? headConfigs : [];
+      if (heads.some(function (h) { return String((h && h.phase) || "").trim() !== ""; })) return "last";
+      return "best";
     }
 
     function _getClientBackendAvailability(tf) {
@@ -339,6 +368,8 @@
     function _renderMainPanel() {
       var mainEl = layout.mainEl;
       mainEl.innerHTML = "";
+      _lossChartDiv = null;
+      _epochTableBody = null;
       var activeId = stateApi ? stateApi.getActiveTrainer() : "";
       if (!activeId) { mainEl.appendChild(el("div", { className: "osc-empty" }, "Select or create a trainer.")); return; }
       var t = store ? store.getTrainerCard(activeId) : null;
@@ -1407,8 +1438,10 @@
       if (_isTraining && _activeTrainingId === activeId) {
         var stopBtn = el("button", { className: "osc-btn", style: "flex:1;background:linear-gradient(135deg,#dc2626,#991b1b);border-color:#ef4444;" }, "Stop Training");
         stopBtn.addEventListener("click", function () {
+          _trainingRunId++;
           _isTraining = false;
           _activeTrainingId = "";
+          try { if (_activeModel) _activeModel.stopTraining = true; } catch (_) {}
           var tc = store ? store.getTrainerCard(activeId) : null;
           if (tc) {
             tc.status = "stopped";
@@ -1417,8 +1450,8 @@
               status: "stopped",
               note: "Training stopped by user.",
             });
-            // Save current (last) weights — both last and best (best=last on stop)
-            if (_activeModel) {
+            // Only client main-thread training has live weights in _activeModel.
+            if (_activeModel && !(tc.config && tc.config.useServer)) {
               try {
                 var lastW = _extractWeightsFromModel(_activeModel);
                 tc.modelArtifactsLast = lastW;
@@ -1706,6 +1739,7 @@
       tCard.datasetId = config.datasetId;
       tCard.modelId = config.modelId;
       tCard.status = "running";
+      tCard.error = "";
       tCard.config = config;
       _setRuntimeDiagnostics(tCard, {
         requestedBackend: String(config.runtimeBackend || "auto"),
@@ -1717,6 +1751,8 @@
       if (store) { store.upsertTrainerCard(tCard); store.replaceTrainerEpochs(activeId, []); }
       _isTraining = true;
       _trainingRunId++;
+      var currentRunId = _trainingRunId;
+      var runtimeRunId = activeId + "--run-" + currentRunId + "-" + Date.now().toString(36);
       _activeTrainingId = activeId;
       _subTab = "train";
       onStatus("Training... (serializing model)");
@@ -1741,6 +1777,7 @@
         onStatus("Checking PyTorch Server...");
         _checkServerConnection(serverUrl, function (ok) {
           _renderRightPanel(); // update server status display with full info
+          if (!_isCurrentTrainingRun(activeId, currentRunId)) return;
           if (!ok) {
             // first training → fallback to client. Continue training of server model → need server.
             if (tCard.trainedOnServer) {
@@ -1777,7 +1814,7 @@
           _activeModel = buildResult.model;
           // server OK — proceed with server training
           serverAdapter.runTrainingOnServer({
-          runId: activeId,
+          runId: runtimeRunId,
           schemaId: schemaId,
           graph: model.graph,
           dataset: {
@@ -1801,15 +1838,15 @@
           restoreBestWeights: _resolveRestoreBestWeights(config, buildResult.headConfigs),
           weightSelection: String(config.weightSelection || ""),
           gradClipNorm: Number(config.gradClipNorm || 0),
+          shuffleTrain: config.shuffleTrain !== false,
           lrPatience: Number(config.lrPatience || 3),
           lrFactor: Number(config.lrFactor || 0.5),
           minLr: Number(config.minLr || 0.000001),
           trainingSchedule: config.trainingSchedule || null,
           rotateSchedule: config.rotateSchedule !== false,
           onEpochData: function (payload) {
-            if (currentMountId !== _mountId) return;
             var logEntry = { epoch: payload.epoch, loss: payload.loss, val_loss: payload.val_loss, current_lr: payload.current_lr, improved: payload.improved, phaseLosses: payload.phaseLosses || null };
-            if (store) store.appendTrainerEpoch(activeId, logEntry);
+            if (!_appendTrainerEpochForRun(activeId, currentRunId, logEntry)) return;
             var phaseStr = "";
             if (payload.phaseLosses && typeof payload.phaseLosses === "object") {
               phaseStr = " | " + Object.keys(payload.phaseLosses).map(function (k) {
@@ -1818,14 +1855,10 @@
             }
             var valStr = payload.val_loss != null ? Number(payload.val_loss).toExponential(3) : "\u2014";
             onStatus("Epoch " + payload.epoch + " | loss=" + Number(payload.loss).toExponential(3) + " | val=" + valStr + phaseStr + (payload.improved ? " *" : ""));
-            if (stateApi && stateApi.getActiveTrainer() === activeId) {
-              var epochs = store.getTrainerEpochs(activeId);
-              if (_lossChartDiv) _plotLossChart(epochs);
-              _appendEpochRow(logEntry);
-            }
           },
           onStatus: function (msg) { onStatus(msg); },
           onReady: function (msg) {
+            if (!_isCurrentTrainingRun(activeId, currentRunId)) return;
             _setRuntimeDiagnostics(tCard, {
               executionMode: "server",
               source: "server",
@@ -1833,16 +1866,21 @@
               status: "running",
               note: "Server runtime initialized.",
             });
-            if (currentMountId === _mountId) _renderRightPanel();
+            if (store) store.upsertTrainerCard(tCard);
+            if (_isTrainerTrainViewVisible(activeId)) _renderRightPanel();
             onStatus("Server ready: " + (msg.backend || "pytorch"));
           },
         }, {
           serverUrl: String(config.serverUrl || serverAdapter.DEFAULT_SERVER),
         }).then(function (result) {
-          var wasStopped = !_isTraining;
+          if (!_isCurrentTrainingRun(activeId, currentRunId)) {
+            _activeModel = null;
+            buildResult.model.dispose();
+            return;
+          }
           _isTraining = false;
-          // Always save weights even if tab changed or stopped
-          tCard.status = wasStopped ? "stopped" : "done";
+          _activeTrainingId = "";
+          tCard.status = "done";
           tCard.metrics = result;
           if (!tCard.metrics.paramCount) tCard.metrics.paramCount = buildResult.model.countParams();
           tCard.backend = result.resolvedBackend || result.backend || "pytorch";
@@ -1850,8 +1888,8 @@
             executionMode: "server",
             source: "server",
             resolvedBackend: String(result.resolvedBackend || result.backend || "pytorch"),
-            status: wasStopped ? "stopped" : "done",
-            note: wasStopped ? "Server training stopped." : "Server training completed.",
+            status: "done",
+            note: "Server training completed.",
           });
           tCard.trainedOnServer = true;
           if (!tCard.config) tCard.config = {};
@@ -1875,11 +1913,16 @@
             tCard.modelArtifactsLast = result.modelArtifacts;
           }
           if (store) store.upsertTrainerCard(tCard);
-          onStatus(wasStopped ? "\u2713 Stopped (weights saved)" : "\u2713 Done (PyTorch): MAE=" + (result.mae != null ? Number(result.mae).toExponential(3) : "—"));
-          if (currentMountId === _mountId) { _renderLeftPanel(); _renderMainPanel(); _renderRightPanel(); }
+          onStatus("\u2713 Done (PyTorch): MAE=" + (result.mae != null ? Number(result.mae).toExponential(3) : "—"));
+          if (_isTrainerTrainViewVisible(activeId) || (stateApi && stateApi.getActiveTrainer() === activeId)) { _renderLeftPanel(); _renderMainPanel(); _renderRightPanel(); }
           _activeModel = null;
           buildResult.model.dispose();
         }).catch(function (err) {
+          if (!_isCurrentTrainingRun(activeId, currentRunId)) {
+            _activeModel = null;
+            buildResult.model.dispose();
+            return;
+          }
           _activeModel = null;
           var msg = String(err.message || "");
           // dataset too large for server → fallback to client training
@@ -1895,6 +1938,7 @@
             return;
           }
           _isTraining = false;
+          _activeTrainingId = "";
           tCard.status = "error"; tCard.error = msg;
           _setRuntimeDiagnostics(tCard, {
             executionMode: "server",
@@ -1904,7 +1948,7 @@
           });
           if (store) store.upsertTrainerCard(tCard);
           onStatus("Server error: " + msg);
-          _renderLeftPanel(); _renderMainPanel(); _renderRightPanel();
+          if (_isTrainerTrainViewVisible(activeId) || (stateApi && stateApi.getActiveTrainer() === activeId)) { _renderLeftPanel(); _renderMainPanel(); _renderRightPanel(); }
           buildResult.model.dispose();
         });
         }); // close checkServer.then
@@ -1948,7 +1992,7 @@
           onStatus("Training via TF.js Worker (" + (config.runtimeBackend || "auto") + ")...");
 
           workerBridge.runTrainingInWorker({
-            runId: activeId,
+            runId: runtimeRunId,
             modelArtifacts: artifacts,
             isSequence: buildResult.isSequence,
             headConfigs: buildResult.headConfigs,
@@ -1991,16 +2035,11 @@
             gradClipValue: Number(config.gradClipValue || 0),
             shuffleTrain: config.shuffleTrain !== false,
             onEpochData: function (payload) {
-              if (currentMountId !== _mountId) return;
               var logEntry = { epoch: payload.epoch, loss: payload.loss, val_loss: payload.val_loss, current_lr: payload.current_lr, improved: payload.improved };
-              if (store) store.appendTrainerEpoch(activeId, logEntry);
-              if (stateApi && stateApi.getActiveTrainer() === activeId) {
-                var epochs = store.getTrainerEpochs(activeId);
-                if (_lossChartDiv) _plotLossChart(epochs);
-                _appendEpochRow(logEntry);
-              }
+              _appendTrainerEpochForRun(activeId, currentRunId, logEntry);
             },
             onReady: function (msg) {
+              if (!_isCurrentTrainingRun(activeId, currentRunId)) return;
               var resolved = String((msg && msg.backend) || config.runtimeBackend || "auto");
               _setRuntimeDiagnostics(tCard, {
                 executionMode: "worker",
@@ -2009,15 +2048,20 @@
                 status: "running",
                 note: "Worker runtime initialized.",
               });
-              if (currentMountId === _mountId) _renderRightPanel();
+              if (store) store.upsertTrainerCard(tCard);
+              if (_isTrainerTrainViewVisible(activeId)) _renderRightPanel();
               onStatus("Worker ready: " + resolved);
             },
             onStatus: function (msg) { onStatus(msg); },
           }, {
             workerPath: _workerUrl,
           }).then(function (result) {
+            if (!_isCurrentTrainingRun(activeId, currentRunId)) {
+              buildResult.model.dispose();
+              return;
+            }
             _isTraining = false;
-            if (currentMountId !== _mountId) return;
+            _activeTrainingId = "";
             tCard.status = "done";
             tCard.metrics = result;
             tCard.backend = result.resolvedBackend || String(config.runtimeBackend || "auto");
@@ -2036,13 +2080,20 @@
                 delete wa.weightData;
               }
               tCard.modelArtifacts = wa;
+              tCard.modelArtifactsLast = wa;
+              tCard.modelArtifactsBest = wa;
             }
             if (store) store.upsertTrainerCard(tCard);
             onStatus("\u2713 Done (Worker): MAE=" + (result.mae != null ? Number(result.mae).toExponential(3) : "—"));
-            _renderLeftPanel(); _renderMainPanel(); _renderRightPanel();
+            if (_isTrainerTrainViewVisible(activeId) || (stateApi && stateApi.getActiveTrainer() === activeId)) { _renderLeftPanel(); _renderMainPanel(); _renderRightPanel(); }
             buildResult.model.dispose();
           }).catch(function (err) {
+            if (!_isCurrentTrainingRun(activeId, currentRunId)) {
+              buildResult.model.dispose();
+              return;
+            }
             _isTraining = false;
+            _activeTrainingId = "";
             tCard.status = "error"; tCard.error = err.message;
             _setRuntimeDiagnostics(tCard, {
               executionMode: "worker",
@@ -2052,7 +2103,7 @@
             });
             if (store) store.upsertTrainerCard(tCard);
             onStatus("Worker error: " + err.message);
-            _renderLeftPanel(); _renderMainPanel(); _renderRightPanel();
+            if (_isTrainerTrainViewVisible(activeId) || (stateApi && stateApi.getActiveTrainer() === activeId)) { _renderLeftPanel(); _renderMainPanel(); _renderRightPanel(); }
             buildResult.model.dispose();
           });
 
@@ -2063,7 +2114,7 @@
         // === FALLBACK: main thread (will freeze UI) ===
         var _trainFn = _isPhased && trainingEngine.trainModelPhased ? trainingEngine.trainModelPhased : trainingEngine.trainModel;
         _activeModel = buildResult.model;
-        var _myRunId = _trainingRunId; // capture for shouldStop closure
+        var _myRunId = currentRunId;
         _ensureClientBackend(tf, config.runtimeBackend, config.runtimeBackendOrder).then(function (resolvedBackend) {
         _setRuntimeDiagnostics(tCard, {
           executionMode: "main-thread",
@@ -2106,18 +2157,17 @@
           trainingSchedule: config.trainingSchedule || null,
           rotateSchedule: config.rotateSchedule !== false,
           onEpochEnd: function (epoch, logs) {
-            if (currentMountId !== _mountId) return;
             var logEntry = { epoch: epoch + 1, loss: logs.loss, val_loss: logs.val_loss, current_lr: logs.current_lr, improved: logs.improved, phaseLosses: logs.phaseLosses || null };
-            if (store) store.appendTrainerEpoch(activeId, logEntry);
-            if (stateApi && stateApi.getActiveTrainer() === activeId) {
-              var epochs = store.getTrainerEpochs(activeId);
-              if (_lossChartDiv) _plotLossChart(epochs);
-              _appendEpochRow(logEntry);
-            }
+            _appendTrainerEpochForRun(activeId, currentRunId, logEntry);
           },
         }).then(function (result) {
+          if (!_isCurrentTrainingRun(activeId, currentRunId)) {
+            _activeModel = null;
+            buildResult.model.dispose();
+            return;
+          }
           _isTraining = false;
-          if (currentMountId !== _mountId) return;
+          _activeTrainingId = "";
           tCard.status = "done";
           tCard.metrics = result;
           if (!tCard.metrics.paramCount) tCard.metrics.paramCount = buildResult.model.countParams();
@@ -2141,18 +2191,24 @@
               tCard.modelArtifactsBest = lastArtifacts; // fallback: last = best
             }
             // Active artifacts based on config selection
-            var sel = config.weightSelection || "best";
+            var sel = _resolveWeightSelection(config, buildResult.headConfigs);
             tCard.modelArtifacts = sel === "last" ? tCard.modelArtifactsLast : tCard.modelArtifactsBest;
           } catch (e) {
             console.warn("[trainer] Weight save failed:", e.message);
           }
           if (store) store.upsertTrainerCard(tCard);
           onStatus("\u2713 Done: MAE=" + (result.mae != null ? Number(result.mae).toExponential(3) : "—"));
-          _renderLeftPanel(); _renderMainPanel(); _renderRightPanel();
+          if (_isTrainerTrainViewVisible(activeId) || (stateApi && stateApi.getActiveTrainer() === activeId)) { _renderLeftPanel(); _renderMainPanel(); _renderRightPanel(); }
           _activeModel = null;
           buildResult.model.dispose();
         }).catch(function (err) {
+          if (!_isCurrentTrainingRun(activeId, currentRunId)) {
+            _activeModel = null;
+            buildResult.model.dispose();
+            return;
+          }
           _isTraining = false;
+          _activeTrainingId = "";
           _activeModel = null;
           tCard.status = "error"; tCard.error = err.message;
           _setRuntimeDiagnostics(tCard, {
@@ -2163,11 +2219,17 @@
           });
           if (store) store.upsertTrainerCard(tCard);
           onStatus("Error: " + err.message);
-          _renderLeftPanel(); _renderMainPanel(); _renderRightPanel();
+          if (_isTrainerTrainViewVisible(activeId) || (stateApi && stateApi.getActiveTrainer() === activeId)) { _renderLeftPanel(); _renderMainPanel(); _renderRightPanel(); }
           buildResult.model.dispose();
         });
         }).catch(function (err) {
+          if (!_isCurrentTrainingRun(activeId, currentRunId)) {
+            _activeModel = null;
+            buildResult.model.dispose();
+            return;
+          }
           _isTraining = false;
+          _activeTrainingId = "";
           _activeModel = null;
           tCard.status = "error"; tCard.error = String(err && err.message ? err.message : err);
           _setRuntimeDiagnostics(tCard, {
@@ -2178,7 +2240,7 @@
           });
           if (store) store.upsertTrainerCard(tCard);
           onStatus("Backend error: " + tCard.error);
-          _renderLeftPanel(); _renderMainPanel(); _renderRightPanel();
+          if (_isTrainerTrainViewVisible(activeId) || (stateApi && stateApi.getActiveTrainer() === activeId)) { _renderLeftPanel(); _renderMainPanel(); _renderRightPanel(); }
           buildResult.model.dispose();
         });
       }
@@ -2261,7 +2323,7 @@
       // always recheck server on mount (heartbeat)
       _checkServerConnection("", function () { _renderRightPanel(); });
     }
-    function unmount() { _mountId++; if (_configFormApi && typeof _configFormApi.destroy === "function") _configFormApi.destroy(); _configFormApi = null; layout.leftEl.innerHTML = ""; layout.mainEl.innerHTML = ""; layout.rightEl.innerHTML = ""; }
+    function unmount() { _mountId++; if (_configFormApi && typeof _configFormApi.destroy === "function") _configFormApi.destroy(); _configFormApi = null; _lossChartDiv = null; _epochTableBody = null; layout.leftEl.innerHTML = ""; layout.mainEl.innerHTML = ""; layout.rightEl.innerHTML = ""; }
     function refresh() { mount(); }
 
     return { mount: mount, unmount: unmount, refresh: refresh };
