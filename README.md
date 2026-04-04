@@ -47,13 +47,17 @@ A visual survey of 35 years of neural network research, trained and evaluated on
 
 Real adversarial training with no hardcoded GAN logic — everything from Drawflow graph blocks (ConcatBatch, PhaseSwitch, Constant, weight tags).
 
+| MLP-GAN (Client) | DCGAN (Client) | WGAN (Client) |
+|:---:|:---:|:---:|
+| ![MLP](demo/Fashion-MNIST-GAN/images/mlp_gan_client.png) | ![DCGAN](demo/Fashion-MNIST-GAN/images/dcgan_client.png) | ![WGAN](demo/Fashion-MNIST-GAN/images/wgan_client.png) |
+
 | # | Architecture | Loss | Paper |
 |---|---|---|---|
 | 1 | MLP-GAN (LayerNorm + Dropout) | BCE + label smoothing | Goodfellow 2014 |
 | 2 | DCGAN (BatchNorm + LeakyReLU) | BCE (0/1 targets) | Radford 2016 |
-| 3 | MLP-WGAN (linear critic) | Wasserstein | Arjovsky 2017 |
+| 3 | MLP-WGAN (linear critic, weight clipping) | Wasserstein | Arjovsky 2017 |
 
-Pre-trained MLP-GAN, DCGAN, and MLP-WGAN checkpoints are included for immediate sampling in the public demo.
+Pre-trained weights included for all 3 models — generate T-shirt images immediately without training. The screenshots above are client-generated examples; you can train on client (TF.js WebGL) or server (PyTorch CUDA).
 
 ### [Fashion-MNIST Diffusion](demo/Fashion-MNIST-Diffusion/) — 4 Denoising Models
 

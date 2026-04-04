@@ -1,11 +1,18 @@
 # Fashion-MNIST GAN — Real Adversarial Training
 
-![Demo Workflow](images/demo_workflow.gif)
-
-
 **Train a GAN with real adversarial structure — all defined in the visual graph editor.**
 
-No hardcoded GAN logic in the engine. The graph itself defines the full adversarial architecture using composable building blocks: ConcatBatch (merge real+fake), PhaseSwitch (label routing by phase), Constant (label values), weight tags (freeze control).
+No hardcoded GAN logic in the engine. The graph defines the full adversarial architecture using composable building blocks: ConcatBatch (merge real+fake), PhaseSwitch (label routing by phase), Constant (label values), weight tags (freeze control).
+
+## Generation Results
+
+| | Client (TF.js WebGL) | Server (PyTorch CUDA) |
+|:---:|:---:|:---:|
+| **MLP-GAN** | ![MLP Client](images/mlp_gan_client.png) | ![MLP Server](images/mlp_gan_server.png) |
+| **DCGAN** | ![DCGAN Client](images/dcgan_client.png) | ![DCGAN Server](images/dcgan_server.png) |
+| **WGAN** | ![WGAN Client](images/wgan_client.png) | ![WGAN Server](images/wgan_server.png) |
+
+All three architectures generate recognizable T-shirt images from random noise, trained on Fashion-MNIST class 0 (T-shirt/top, 6000 images). Pre-trained weights are included for all three models, so generation works immediately without retraining.
 
 ## Presets
 
@@ -28,7 +35,7 @@ Labels:
 ```
 
 - Weight-tag freeze: G layers tagged `generator`, D layers tagged `discriminator`
-- Training schedule: D:10 epochs, G:1 epoch (rotating)
+- Training schedule: D:1 batch, G:1 batch (rotating)
 - LR = 0.0005, Adam, batch size 128
 - Pre-trained weights included (1000 epochs on T-shirt class)
 
@@ -36,9 +43,9 @@ Labels:
 
 ```
 Generator:
-  SampleZ(128) → Dense(6272, relu) → BatchNorm → Reshape(7,7,128)
-    → ConvT2D(64, 4, stride=2, same, relu) → BatchNorm
-    → ConvT2D(1, 4, stride=2, same, sigmoid) → Flatten → Output(loss=none)
+  SampleZ(128) → Dense(6272, linear, bias=false) → BatchNorm → ReLU → Reshape(7,7,128)
+    → ConvT2D(64, 4, stride=2, same, linear, bias=false) → BatchNorm → ReLU
+    → ConvT2D(1, 4, stride=2, same, sigmoid, bias=false) → Flatten → Output(loss=none)
 
 Discriminator:
   ConcatBatch(fake + real) → Reshape(28,28,1)
@@ -47,11 +54,13 @@ Discriminator:
     → Flatten → Dense(1, sigmoid) → Output(loss=BCE)
 
 Labels:
-  Same PhaseSwitch + ConcatBatch label routing as MLP-GAN (smoothing 0.1/0.9)
+  Paper-style 0/1 targets via PhaseSwitch + ConcatBatch
+    D step: [0, 1]
+    G step: [1, 1]
 ```
 
-- Training schedule: D:1 epoch, G:2 epochs (rotating)
-- LR = 0.0005, Adam, batch size 128
+- Training schedule: D:1 batch, G:1 batch (rotating)
+- LR = 0.0002, Adam(beta1=0.5, beta2=0.999), batch size 128
 - Note: DCGAN training is slow on browser WebGL; recommended to train on PyTorch server
 
 ### 3. MLP-WGAN (Arjovsky 2017)
@@ -74,7 +83,7 @@ Labels:
 
 - Key difference: D has **linear output** (no sigmoid) — computes Wasserstein distance
 - LR = 0.00005, **RMSprop** (paper recommendation, not Adam), batch size 128
-- Training schedule: D:5 epochs, G:1 epoch (critic trains more per the paper)
+- Training schedule: D:5 batches, G:1 batch (critic trains more per the paper)
 
 ## Building Blocks Used
 
@@ -82,8 +91,8 @@ Labels:
 |---|---|
 | **SampleZ** | Random noise input for generator |
 | **ConcatBatch** | Merges real + fake images (and labels) into one batch for D |
-| **PhaseSwitch** | Routes labels by training phase: D step gets fake=0.1, G step gets fake=0.9 |
-| **Constant** | Produces label tensors (0.1 = smoothed fake, 0.9 = smoothed real) |
+| **PhaseSwitch** | Routes labels by training phase so fake targets change between D step and G step |
+| **Constant** | Produces label tensors such as 0.1/0.9 for BCE GANs or -1/+1 for WGAN |
 | **Weight tags** | `generator` / `discriminator` tags control which layers are frozen per phase |
 | **LayerNorm** | Normalizes G activations (MLP-GAN) — prevents mode collapse |
 | **BatchNorm** | Normalizes conv activations (DCGAN) — stabilizes deep conv training |
@@ -94,14 +103,14 @@ Labels:
 
 | Phase | What happens |
 |---|---|
-| **Discriminator** | D sees real images (label=0.9) + G output (label=0.1). G weights frozen via tag. |
-| **Generator** | PhaseSwitch flips fake label to 0.9. D weights frozen. Gradient flows through D to update G. |
+| **Discriminator** | D sees real images plus G output with discriminator-phase targets. G weights frozen via tag. |
+| **Generator** | PhaseSwitch flips fake targets for the generator phase. D weights frozen while gradient still flows through D to update G. |
 
 ## How to Use
 
 1. Open `index.html` in a browser (Chrome/Edge recommended)
 2. Generate Fashion-MNIST dataset (T-shirt class, 6000 images)
-3. **Pre-trained**: Select "MLP-GAN (pre-trained)" or "MLP-WGAN (pre-trained)" generation card to generate immediately
+3. **Pre-trained**: Select `MLP-GAN (pre-trained)`, `DCGAN (pre-trained)`, or `MLP-WGAN (pre-trained)` generation card to generate immediately
 4. **Train from scratch**: Select a trainer, click Start Training, watch D/G loss curves
 5. **Generation tab**: Random sampling from latent z to generate new images
 
