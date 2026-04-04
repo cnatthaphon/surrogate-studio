@@ -514,6 +514,7 @@
    */
   function trainModelPhased(tf, opts) {
     var model = opts.model;
+    var isSequence = Boolean(opts.isSequence);
     var headConfigs = opts.headConfigs || [];
     var dataset = opts.dataset;
     if (!dataset) throw new Error("opts.dataset required");
@@ -591,22 +592,37 @@
     var _phaseFlagIdx = -1; // index of phase_flag_input in model inputs
     inputNodes.forEach(function (inp, idx) { if (inp.name === "phase_flag_input") _phaseFlagIdx = idx; });
     var xTrainInputs;
+    var _inputBatchMeta = [];
+    var _currentPhaseFlagValue = 0;
+    function _createBaseTrainInput() {
+      return isSequence ? tf.tensor3d(dataset.seqTrain || dataset.xTrain) : tf.tensor2d(dataset.xTrain);
+    }
+    function _inferSampleZDim(inputIdx) {
+      var modelInput = model.inputs && model.inputs[inputIdx];
+      var shape = modelInput && modelInput.shape;
+      var dim = shape && shape.length ? shape[shape.length - 1] : null;
+      return Math.max(1, Number(dim) || 128);
+    }
     if (numInputs > 1 && inputNodes.length > 1) {
-      // create per-input tensors
+      // Dataset-backed inputs can share one base tensor. Special inputs
+      // (sample_z / phase flag) are generated per batch to avoid rebuilding
+      // full dataset-sized tensors on every schedule step.
+      var _sharedTrainInput = _createBaseTrainInput();
       xTrainInputs = inputNodes.map(function (inp) {
+        var idx = _inputBatchMeta.length;
         if (inp.name === "phase_flag_input") {
-          return tf.zeros([nSamples, 1]); // default flag=0, updated per step
+          _inputBatchMeta[idx] = { kind: "phase_flag" };
+          return null;
         }
         if (inp.name === "sample_z_layer") {
-          // SampleZ: generate random noise each epoch (will be regenerated per batch later)
-          var zDim = model.inputs.filter(function (i) { return i.name.indexOf("z_input") >= 0; })[0];
-          var dim = zDim ? zDim.shape[zDim.shape.length - 1] : 128;
-          return tf.randomNormal([nSamples, dim]);
+          _inputBatchMeta[idx] = { kind: "sample_z", dim: _inferSampleZDim(idx) };
+          return null;
         }
-        return tf.tensor2d(dataset.xTrain);
+        _inputBatchMeta[idx] = { kind: "dataset" };
+        return _sharedTrainInput;
       });
     } else {
-      xTrainInputs = tf.tensor2d(dataset.xTrain);
+      xTrainInputs = _createBaseTrainInput();
     }
 
     var yTrainArrays = [];
@@ -722,41 +738,45 @@
       }
 
       function _setPhaseFlagForStep(step, stepIdx) {
-        if (model._phaseFlag) model._phaseFlag.assign(tf.scalar(stepIdx, "int32"));
         if (_phaseFlagIdx < 0 || !Array.isArray(xTrainInputs) || !phaseSwitchConfigs.length) return;
         var tags = step.trainableTags || {};
-        var flagVal = phaseSwitchConfigs.some(function (cfg) {
+        _currentPhaseFlagValue = phaseSwitchConfigs.some(function (cfg) {
           var ap = String((cfg && cfg.activePhase) || "").trim();
           if (!ap) return false;
           if (step._phase) return String(step._phase) === ap;
           return !!tags[ap];
         }) ? 0 : 1;
-        var old = xTrainInputs[_phaseFlagIdx];
-        xTrainInputs[_phaseFlagIdx] = tf.fill([nSamples, 1], flagVal);
-        old.dispose();
       }
 
       // Training step: optimizer.minimize with model.apply.
       // Reads labels from model output when graphLabelOutputIdx is set.
       function _trainBatch(stepOpt, xFull, yFull, start, end, clipVal) {
-        // Collect all currently trainable variables. Phased freeze logic controls tags;
-        // untagged layers keep their declared trainable state.
-        var vars = [];
-        model.layers.forEach(function (l) {
-          if (l.trainable && l.trainableWeights) {
-            l.trainableWeights.forEach(function (w) { vars.push(w.read()); });
-          }
-        });
+        var vars = arguments.length > 7 ? arguments[7] : null;
+        if (!vars) vars = _collectTrainableVars();
         if (!vars.length) return 0;
         var order = arguments.length > 6 ? arguments[6] : null;
-        var indices;
+        var indices = null;
         if (order && order.length) {
           indices = tf.tensor1d(Array.prototype.slice.call(order, start, end), "int32");
-        } else {
-          indices = tf.range(start, end, 1, "int32");
         }
-        var xBatch = Array.isArray(xFull) ? xFull.map(function (x) { return tf.gather(x, indices); }) : tf.gather(xFull, indices);
-        var yArrays = Array.isArray(yFull) ? yFull.map(function (y) { return tf.gather(y, indices); }) : tf.gather(yFull, indices);
+        var batchN = Math.max(0, end - start);
+        function _sliceOrGather(tensor) {
+          if (indices) return tf.gather(tensor, indices);
+          var begin = [start];
+          var size = [batchN];
+          for (var di = 1; di < tensor.shape.length; di++) {
+            begin.push(0);
+            size.push(tensor.shape[di]);
+          }
+          return tensor.slice(begin, size);
+        }
+        var xBatch = Array.isArray(xFull) ? xFull.map(function (x, xi) {
+          var meta = _inputBatchMeta[xi] || null;
+          if (meta && meta.kind === "phase_flag") return tf.fill([batchN, 1], _currentPhaseFlagValue);
+          if (meta && meta.kind === "sample_z") return tf.randomNormal([batchN, meta.dim]);
+          return _sliceOrGather(x);
+        }) : _sliceOrGather(xFull);
+        var yArrays = Array.isArray(yFull) ? yFull.map(function (y) { return _sliceOrGather(y); }) : _sliceOrGather(yFull);
         var loss = tf.tidy(function () {
           return stepOpt.minimize(function () {
             var preds = model.apply(xBatch, { training: true });
@@ -788,21 +808,33 @@
         return totalLoss;
       }
 
+      function _collectTrainableVars() {
+        var vars = [];
+        model.layers.forEach(function (l) {
+          if (l.trainable && l.trainableWeights) {
+            l.trainableWeights.forEach(function (w) { vars.push(w.read()); });
+          }
+        });
+        return vars;
+      }
+
       function _makeShuffleOrder(fullN) {
         if (!shuffleTrain || !(fullN > 1) || !tf.util || typeof tf.util.createShuffledIndices !== "function") return null;
         return tf.util.createShuffledIndices(fullN);
       }
 
       function _trainStep(stepOpt, xFull, yFull, clipVal, order) {
-        var fullN = Array.isArray(xFull) ? xFull[0].shape[0] : xFull.shape[0];
+        var fullN = nSamples;
         var bs = Math.min(batchSize, fullN);
         var nBatches = Math.max(1, Math.ceil(fullN / bs));
         var totalLoss = 0;
         var effectiveOrder = order || _makeShuffleOrder(fullN);
+        var trainVars = _collectTrainableVars();
+        if (!trainVars.length) return 0;
         for (var bi = 0; bi < nBatches; bi++) {
           var start = bi * bs;
           var end = Math.min(start + bs, fullN);
-          totalLoss += _trainBatch(stepOpt, xFull, yFull, start, end, clipVal, effectiveOrder);
+          totalLoss += _trainBatch(stepOpt, xFull, yFull, start, end, clipVal, effectiveOrder, trainVars);
         }
         return totalLoss / nBatches;
       }
@@ -817,19 +849,15 @@
         return _stepOpts[key];
       }
 
-      function _regenNoise() {
-        if (Array.isArray(xTrainInputs)) {
-          xTrainInputs.forEach(function (xt, ti) {
-            if (inputNodes[ti] && inputNodes[ti].name === "sample_z_layer") {
-              var old = xTrainInputs[ti]; xTrainInputs[ti] = tf.randomNormal(old.shape); old.dispose();
-            }
-          });
-        }
-      }
-
       function _finish() {
-        if (Array.isArray(xTrainInputs)) xTrainInputs.forEach(function (t) { t.dispose(); });
-        else xTrainInputs.dispose();
+        if (Array.isArray(xTrainInputs)) {
+          var seen = {};
+          xTrainInputs.forEach(function (t) {
+            if (!t || seen[t.id]) return;
+            seen[t.id] = true;
+            t.dispose();
+          });
+        } else xTrainInputs.dispose();
         yTrainArrays.forEach(function (t) { t.dispose(); });
         resolve({ mae: 0, mse: 0, bestEpoch: bestEpoch > 0 ? bestEpoch : epochs, bestValLoss: bestValLoss, epochHistory: epochHistory, headCount: headConfigs.length, phased: true });
       }
@@ -864,7 +892,7 @@
 
         // if schedule done and no rotate → train all unfrozen
         if (scheduleComplete) {
-          _unfreezeAll(); _regenNoise();
+          _unfreezeAll();
           var loss = _trainStep(_getOpt("all"), xTrainInputs, yTrainArrays);
           epochHistory.push({ epoch: epoch + 1, loss: loss, phaseLosses: { all: loss } });
           var impr = loss < bestValLoss * (1 - 1e-4);
@@ -880,7 +908,7 @@
         var stepIdx = 0;
 
         if (scheduleUsesBatchUnit) {
-          var fullN = Array.isArray(xTrainInputs) ? xTrainInputs[0].shape[0] : xTrainInputs.shape[0];
+          var fullN = nSamples;
           var bs = Math.min(batchSize, fullN);
           var nBatches = Math.max(1, Math.ceil(fullN / bs));
           var batchIdx = 0;
@@ -893,11 +921,11 @@
             _freezeByStep(batchStep);
             _setPhaseFlagForStep(batchStep, cycleStepIdx);
             var batchClipVal = Number(batchStep.clipWeights || 0);
+            var batchVars = _collectTrainableVars();
             for (var rep = 0; rep < batchRepeats && batchIdx < nBatches; rep++, batchIdx++) {
-              _regenNoise();
               var start = batchIdx * bs;
               var end = Math.min(start + bs, fullN);
-              var batchLoss = _trainBatch(_getOpt(batchLabel), xTrainInputs, yTrainArrays, start, end, batchClipVal, epochOrder);
+              var batchLoss = _trainBatch(_getOpt(batchLabel), xTrainInputs, yTrainArrays, start, end, batchClipVal, epochOrder, batchVars);
               stepLosses[batchLabel] = (stepLosses[batchLabel] || 0) + batchLoss;
               if (!stepLosses[batchLabel + "::__count"]) stepLosses[batchLabel + "::__count"] = 0;
               stepLosses[batchLabel + "::__count"] += 1;
@@ -948,7 +976,6 @@
           var label = _scheduleStepPhaseName(step, stepIdx);
 
           _freezeByStep(step);
-          _regenNoise();
           _setPhaseFlagForStep(step, stepIdx);
 
           var stepLoss = 0;
