@@ -250,6 +250,40 @@
     return tf.tensor2d(rows || [], [n, c]);
   }
 
+  function makeSinusoidalTimeEmbedding(tTensor, dim) {
+    const d = Math.max(1, Number(dim) || 1);
+    if (d === 1) return tTensor;
+    return tf.tidy(function () {
+      const half = Math.max(1, Math.floor(d / 2));
+      const freqs = [];
+      for (let i = 0; i < half; i += 1) {
+        freqs.push(Math.exp(-Math.log(10000) * i / Math.max(1, half - 1)));
+      }
+      const freqTensor = tf.tensor2d(freqs, [1, half], "float32");
+      const angles = tTensor.mul(freqTensor);
+      const sin = tf.sin(angles);
+      const cos = tf.cos(angles);
+      const emb = tf.concat([sin, cos], 1);
+      freqTensor.dispose();
+      if (emb.shape[1] === d) return emb;
+      if (emb.shape[1] > d) return emb.slice([0, 0], [-1, d]);
+      const pad = tf.zeros([emb.shape[0], d - emb.shape[1]]);
+      const out = tf.concat([emb, pad], 1);
+      pad.dispose();
+      return out;
+    });
+  }
+
+  function makeSyntheticTimeInput(count, dim) {
+    const batch = Math.max(1, Number(count) || 1);
+    const outDim = Math.max(1, Number(dim) || 1);
+    const tScalar = tf.randomUniform([batch, 1], 0, 1, "float32");
+    if (outDim === 1) return tScalar;
+    const emb = makeSinusoidalTimeEmbedding(tScalar, outDim);
+    tScalar.dispose();
+    return emb;
+  }
+
   function applyGradClip(optimizer, gradClipNorm, gradClipValue) {
     if (gradClipNorm <= 0 && gradClipValue <= 0) return;
     const originalApplyGradients = optimizer.applyGradients.bind(optimizer);
@@ -413,12 +447,44 @@
       modelInitializer: modelArtifacts.modelInitializer || null,
     };
     const model = await tf.loadLayersModel(tf.io.fromMemory(artifactLike));
+    const modelInputs = Array.isArray(model.inputs) ? model.inputs : [];
+
+    function inferSyntheticInputSpec(input, idx) {
+      const name = String((input && input.name) || "");
+      const shape = input && input.shape;
+      const dim = Math.max(1, Number(shape && shape.length ? shape[shape.length - 1] : 1) || 1);
+      if (name.indexOf("z_input_") === 0) return { kind: "sample_z", dim: dim };
+      if (name === "phase_flag_input") return { kind: "phase_flag", dim: 1 };
+      if (name.indexOf("time_input_") === 0) return { kind: "time_embed", dim: dim };
+      void idx;
+      return { kind: "dataset", dim: dim };
+    }
+    function buildInputSet(baseTensor, count) {
+      if (modelInputs.length <= 1) return baseTensor;
+      return modelInputs.map(function (input, idx) {
+        const meta = inferSyntheticInputSpec(input, idx);
+        if (meta.kind === "sample_z") return tf.randomNormal([count, meta.dim]);
+        if (meta.kind === "phase_flag") return tf.zeros([count, 1]);
+        if (meta.kind === "time_embed") return makeSyntheticTimeInput(count, meta.dim);
+        return baseTensor;
+      });
+    }
+    function disposeInputSet(inputSet, baseTensor) {
+      if (!Array.isArray(inputSet)) return;
+      inputSet.forEach(function (tensor) {
+        if (tensor === baseTensor) return;
+        try { if (tensor && typeof tensor.dispose === "function") tensor.dispose(); } catch (_) {}
+      });
+    }
 
     const xTrain = isRnn ? tf.tensor3d(ds.seqTrain) : tf.tensor2d(ds.xTrain, [ds.xTrain.length, Number(ds.featureSize || 1)]);
     const yTrain = tf.tensor2d(ds.yTrain, [ds.yTrain.length, ySize]);
     const xVal = isRnn ? tf.tensor3d(ds.seqVal) : tf.tensor2d(ds.xVal, [ds.xVal.length, Number(ds.featureSize || 1)]);
     const yVal = tf.tensor2d(ds.yVal, [ds.yVal.length, ySize]);
     const xTest = isRnn ? tf.tensor3d(ds.seqTest) : tf.tensor2d(ds.xTest, [ds.xTest.length, Number(ds.featureSize || 1)]);
+    const xTrainInputs = buildInputSet(xTrain, ds.xTrain.length);
+    const xValInputs = buildInputSet(xVal, ds.xVal.length);
+    const xTestInputs = buildInputSet(xTest, ds.xTest.length);
 
     const targetMode = String(ds.targetMode || "x");
     const yTrainTensors = [];
@@ -508,11 +574,11 @@
       metrics: singleHead ? ["mae"] : metrics,
     });
 
-    await model.fit(xTrain, singleHead ? yTrainTensors[0] : yTrainTensors, {
+    await model.fit(xTrainInputs, singleHead ? yTrainTensors[0] : yTrainTensors, {
       epochs: Number(message.epochs || 1),
       batchSize: Number(message.batchSize || 32),
       shuffle: message.shuffleTrain !== false,
-      validationData: [xVal, singleHead ? yValTensors[0] : yValTensors],
+      validationData: [xValInputs, singleHead ? yValTensors[0] : yValTensors],
       callbacks: [{
         onEpochEnd: function (epoch, logs) {
           logs = logs || {};
@@ -599,8 +665,8 @@
       try { model.setWeights(bestWeights); } catch (_) {}
     }
 
-    const predValRaw = model.predict(isRnn ? xVal : xVal);
-    const predTestRaw = model.predict(isRnn ? xTest : xTest);
+    const predValRaw = model.predict(xValInputs);
+    const predTestRaw = model.predict(xTestInputs);
     const predVals = Array.isArray(predValRaw) ? predValRaw : [predValRaw];
     const predTests = Array.isArray(predTestRaw) ? predTestRaw : [predTestRaw];
     let mse = 0;
@@ -628,6 +694,9 @@
     disposeTensorArray(yTestTensors);
     disposeTensorArray(predVals);
     disposeTensorArray(predTests);
+    disposeInputSet(xTrainInputs, xTrain);
+    disposeInputSet(xValInputs, xVal);
+    disposeInputSet(xTestInputs, xTest);
     disposeTensor(xTrain);
     disposeTensor(xVal);
     disposeTensor(xTest);

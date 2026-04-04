@@ -15,6 +15,7 @@ Protocol (stdout JSON lines):
 import json
 import sys
 import os
+import math
 import traceback
 import numpy as np
 
@@ -1000,6 +1001,9 @@ def build_model_from_graph(graph, feature_size, target_size, num_classes=0):
                     # random input — like another input node
                     zdim = int(c.get("dim", 128))
                     dim_map[nid] = zdim
+                elif t == "time_embed":
+                    tdim = int(c.get("dim", 64))
+                    dim_map[nid] = max(1, tdim)
                 elif t == "image_source":
                     # image input — like input node
                     dim_map[nid] = int(c.get("featureSize", feature_size))
@@ -1121,6 +1125,25 @@ def build_model_from_graph(graph, feature_size, target_size, num_classes=0):
                     dim_map[nid] = in_dim
 
         def forward(self, x):
+            def _make_time_embedding(tensor, dim):
+                d = max(1, int(dim or 1))
+                if d == 1:
+                    return tensor
+                half = max(1, d // 2)
+                if half == 1:
+                    freqs = torch.ones((1, 1), device=tensor.device, dtype=tensor.dtype)
+                else:
+                    idx = torch.arange(half, device=tensor.device, dtype=tensor.dtype)
+                    freqs = torch.exp(-math.log(10000.0) * idx / max(1, half - 1)).view(1, half)
+                angles = tensor * freqs
+                emb = torch.cat([torch.sin(angles), torch.cos(angles)], dim=1)
+                if emb.shape[1] == d:
+                    return emb
+                if emb.shape[1] > d:
+                    return emb[:, :d]
+                pad = torch.zeros((emb.shape[0], d - emb.shape[1]), device=tensor.device, dtype=tensor.dtype)
+                return torch.cat([emb, pad], dim=1)
+
             def _flatten_tf_layout(tensor):
                 if tensor.dim() == 4:
                     return tensor.permute(0, 2, 3, 1).contiguous().view(tensor.shape[0], -1)
@@ -1129,6 +1152,7 @@ def build_model_from_graph(graph, feature_size, target_size, num_classes=0):
                 return tensor
 
             tensors = {}
+            runtime_time = None
             for nid in self.topo:
                 t = self.node_types[nid]
                 parents = self._edges_in.get(nid, [])
@@ -1144,6 +1168,12 @@ def build_model_from_graph(graph, feature_size, target_size, num_classes=0):
                     # generate fresh random noise each forward pass (like TF.js SampleZ)
                     zdim = int(self.node_configs[nid].get("dim", 128))
                     tensors[nid] = torch.randn(x.shape[0], zdim, device=x.device)
+                    continue
+                if t == "time_embed":
+                    tdim = int(self.node_configs[nid].get("dim", 64))
+                    if runtime_time is None:
+                        runtime_time = torch.rand(x.shape[0], 1, device=x.device, dtype=x.dtype)
+                    tensors[nid] = _make_time_embedding(runtime_time, tdim)
                     continue
 
                 # get input tensor (first parent)

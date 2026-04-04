@@ -34,6 +34,78 @@
     return output[Math.min(idx, output.length - 1)];
   }
 
+  function _makeSinusoidalTimeEmbedding(tf, tTensor, dim) {
+    var d = Math.max(1, Number(dim) || 1);
+    if (d === 1) return tTensor;
+    return tf.tidy(function () {
+      var half = Math.max(1, Math.floor(d / 2));
+      var freqs = [];
+      for (var i = 0; i < half; i++) {
+        freqs.push(Math.exp(-Math.log(10000) * i / Math.max(1, half - 1)));
+      }
+      var freqTensor = tf.tensor2d(freqs, [1, half], "float32");
+      var angles = tTensor.mul(freqTensor);
+      var sin = tf.sin(angles);
+      var cos = tf.cos(angles);
+      var emb = tf.concat([sin, cos], 1);
+      if (emb.shape[1] === d) return emb;
+      if (emb.shape[1] > d) return emb.slice([0, 0], [-1, d]);
+      var pad = tf.zeros([emb.shape[0], d - emb.shape[1]]);
+      var out = tf.concat([emb, pad], 1);
+      pad.dispose();
+      return out;
+    });
+  }
+
+  function _predictWithTimeCondition(tf, model, xTensor, tTensor, cfg) {
+    if (!model || !model.inputs || !model.inputs.length) return model.predict(xTensor);
+    var inputs = model.inputs;
+    var sampleCount = xTensor.shape[0];
+    var xDim = xTensor.shape[xTensor.shape.length - 1];
+    var tDim = tTensor.shape[tTensor.shape.length - 1];
+    var extraToDispose = [];
+
+    if (inputs.length === 1) {
+      var singleShape = inputs[0].shape || [];
+      var singleDim = singleShape[singleShape.length - 1];
+      if (singleDim === xDim + tDim) {
+        var merged = tf.concat([xTensor, tTensor], 1);
+        extraToDispose.push(merged);
+        return { output: model.predict(merged), dispose: function () { extraToDispose.forEach(function (t) { t.dispose(); }); } };
+      }
+      return { output: model.predict(xTensor), dispose: function () {} };
+    }
+
+    var timeInputIndex = cfg && cfg.timeInputIndex != null ? Number(cfg.timeInputIndex) : -1;
+    var dataInputIndex = cfg && cfg.dataInputIndex != null ? Number(cfg.dataInputIndex) : -1;
+    var prepared = [];
+    var usedData = false;
+    var usedTime = false;
+    for (var ii = 0; ii < inputs.length; ii++) {
+      var inputShape = inputs[ii].shape || [];
+      var inputDim = inputShape[inputShape.length - 1];
+      if ((ii === dataInputIndex) || (!usedData && inputDim === xDim)) {
+        prepared.push(xTensor);
+        usedData = true;
+        continue;
+      }
+      if ((ii === timeInputIndex) || (!usedTime && (inputDim === tDim || inputDim === 1 || inputDim > 1))) {
+        var tPrepared = inputDim === tDim ? tTensor : _makeSinusoidalTimeEmbedding(tf, tTensor, inputDim);
+        prepared.push(tPrepared);
+        if (tPrepared !== tTensor) extraToDispose.push(tPrepared);
+        usedTime = true;
+        continue;
+      }
+      var dummy = tf.zeros([sampleCount, inputDim]);
+      prepared.push(dummy);
+      extraToDispose.push(dummy);
+    }
+    return {
+      output: model.predict(prepared),
+      dispose: function () { extraToDispose.forEach(function (t) { t.dispose(); }); },
+    };
+  }
+
   /**
    * generate(tf, config) → Promise<{ samples, latents, lossHistory, method }>
    *
@@ -160,8 +232,11 @@
 
         // compute score (gradient of log p(x))
         var gradFn = tf.grad(function (xIn) {
-          var pred = scoreModel.predict(xIn);
-          var score = pickOutput(pred, cfg.outputIndex);
+          var tNorm = tf.fill([numSamples, 1], steps > 1 ? step / Math.max(1, steps - 1) : 0);
+          var predPack = _predictWithTimeCondition(tf, scoreModel, xIn, tNorm, cfg);
+          var score = pickOutput(predPack.output, cfg.outputIndex);
+          predPack.dispose();
+          tNorm.dispose();
           return score.mean(); // scalar score estimate
         });
         var grad = gradFn(x);
@@ -318,8 +393,8 @@
       // reverse diffusion
       for (var t = T - 1; t >= 0; t--) {
         var tNorm = tf.fill([numSamples, 1], t / T);
-        var input = x.concat(tNorm, 1); // [x_t, t_normalized]
-        var predictedNoise = model.predict(input);
+        var predPack = _predictWithTimeCondition(tf, model, x, tNorm, cfg);
+        var predictedNoise = predPack.output;
         var eps = pickOutput(predictedNoise, cfg.outputIndex);
 
         var alpha = alphas[t];
@@ -339,7 +414,7 @@
         }
 
         tNorm.dispose();
-        input.dispose();
+        predPack.dispose();
         if (Array.isArray(predictedNoise)) predictedNoise.forEach(function (pt) { pt.dispose(); }); else predictedNoise.dispose();
         if (x !== xT || t < T - 1) x.dispose();
         x = xPrev;
