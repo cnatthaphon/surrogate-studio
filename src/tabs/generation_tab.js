@@ -52,12 +52,53 @@
     var _activeGenId = null;
     var _isGenerating = false;
     var _mountId = 0;
+    var _refreshTimer = null;
+    var _lastTrainerSnapshot = "";
 
     function _getTrainerArtifacts(trainer, weightSelection) {
       if (!trainer) return null;
       var sel = String(weightSelection || "").trim().toLowerCase();
       if (sel === "best" && trainer.modelArtifactsBest) return trainer.modelArtifactsBest;
       return trainer.modelArtifactsLast || trainer.modelArtifacts || trainer.modelArtifactsBest || null;
+    }
+
+    function _snapshotSelectedTrainerState() {
+      if (!_activeGenId || !store) return "";
+      var g = _getGen(_activeGenId);
+      if (!g || !g.trainerId) return "no-gen";
+      var trainer = store.getTrainerCard(g.trainerId);
+      if (!trainer) return "missing:" + g.trainerId;
+      var art = _getTrainerArtifacts(trainer, g.config && g.config.weightSelection);
+      var specs = art && art.weightSpecs ? art.weightSpecs.length : 0;
+      var values = art && art.weightValues ? art.weightValues.length : 0;
+      return [
+        _activeGenId,
+        trainer.id,
+        String(trainer.status || ""),
+        specs,
+        values,
+        !!trainer.modelArtifactsLast,
+        !!trainer.modelArtifactsBest,
+      ].join("|");
+    }
+
+    function _startRefreshWatcher() {
+      _stopRefreshWatcher();
+      _lastTrainerSnapshot = _snapshotSelectedTrainerState();
+      _refreshTimer = setInterval(function () {
+        if (!stateApi || stateApi.getActiveTab() !== "generation") return;
+        var next = _snapshotSelectedTrainerState();
+        if (next === _lastTrainerSnapshot) return;
+        _lastTrainerSnapshot = next;
+        _renderLeftPanel();
+        _renderMainPanel();
+        _renderRightPanel();
+      }, 350);
+    }
+
+    function _stopRefreshWatcher() {
+      if (_refreshTimer) clearInterval(_refreshTimer);
+      _refreshTimer = null;
     }
 
     if (store && typeof store.initTables === "function") store.initTables({ tables: [GEN_TABLE] });
@@ -868,8 +909,8 @@
       mountEl.appendChild(el("pre", { style: "font-size:10px;color:#94a3b8;background:#171d30;padding:8px;border-radius:4px;" }, text));
     }
 
-    function mount() { _renderLeftPanel(); _renderMainPanel(); _renderRightPanel(); }
-    function unmount() { _mountId++; layout.leftEl.innerHTML = ""; layout.mainEl.innerHTML = ""; layout.rightEl.innerHTML = ""; }
+    function mount() { _renderLeftPanel(); _renderMainPanel(); _renderRightPanel(); _startRefreshWatcher(); }
+    function unmount() { _mountId++; _stopRefreshWatcher(); layout.leftEl.innerHTML = ""; layout.mainEl.innerHTML = ""; layout.rightEl.innerHTML = ""; }
     function refresh() { _renderLeftPanel(); _renderMainPanel(); _renderRightPanel(); }
 
     return { mount: mount, unmount: unmount, refresh: refresh };
