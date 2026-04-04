@@ -14,6 +14,10 @@ No hardcoded GAN logic in the engine. The graph defines the full adversarial arc
 
 All three architectures generate recognizable T-shirt images from random noise, trained on Fashion-MNIST class 0 (T-shirt/top, 6000 images). Pre-trained weights are included for all three models, so generation works immediately without retraining.
 
+The demo intentionally includes two kinds of trainer cards:
+- `MLP-GAN (pre-trained)`, `DCGAN (pre-trained)`, `MLP-WGAN (pre-trained)` — already have weights and are ready for Generation immediately
+- `MLP-GAN Trainer`, `DCGAN Trainer`, `MLP-WGAN Trainer` — blank draft trainers for training from scratch on client or server
+
 ## Presets
 
 ### 1. MLP-GAN (Goodfellow 2014)
@@ -110,9 +114,10 @@ Labels:
 
 1. Open `index.html` in a browser (Chrome/Edge recommended)
 2. Generate Fashion-MNIST dataset (T-shirt class, 6000 images)
-3. **Pre-trained**: Select `MLP-GAN (pre-trained)`, `DCGAN (pre-trained)`, or `MLP-WGAN (pre-trained)` generation card to generate immediately
-4. **Train from scratch**: Select a trainer, click Start Training, watch D/G loss curves
-5. **Generation tab**: Random sampling from latent z to generate new images
+3. **Immediate generation**: In the Generation tab, select `MLP-GAN Generate (pre-trained)`, `DCGAN Generate (pre-trained)`, or `MLP-WGAN Generate (pre-trained)` and click `Generate`
+4. **Train from scratch**: In the Trainer tab, select `MLP-GAN Trainer`, `DCGAN Trainer`, or `MLP-WGAN Trainer` and click `Start Training`
+5. **Use your own weights**: After training finishes, or after a graceful `Stop` saves weights, go back to the matching non-pretrained generation card and generate from that trainer
+6. **Interpret the cards**: cards without `(pre-trained)` are intentionally blank starting points; cards with `(pre-trained)` are ready-to-run demo checkpoints
 
 ## References
 

@@ -59,6 +59,8 @@ Real adversarial training with no hardcoded GAN logic — everything from Drawfl
 
 Pre-trained weights included for all 3 models — generate T-shirt images immediately without training. The screenshots above are client-generated examples; you can train on client (TF.js WebGL) or server (PyTorch CUDA).
 
+The GAN demo also includes blank trainer cards alongside the pre-trained ones. Use the cards with `(pre-trained)` for immediate generation, and use the plain `... Trainer` cards when you want to train from scratch.
+
 ### [Fashion-MNIST Diffusion](demo/Fashion-MNIST-Diffusion/) — 4 Denoising Models
 
 Iterative denoising from noise to images. Standard supervised MSE training — no adversarial dynamics.
