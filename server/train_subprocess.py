@@ -325,6 +325,17 @@ def main():
         except Exception:
             return 1
 
+    def _schedule_step_phase_name(step, idx):
+        explicit = str((step or {}).get("_phase", "") or "").strip()
+        if explicit:
+            return explicit
+        tags = (step or {}).get("trainableTags", None)
+        if isinstance(tags, dict):
+            enabled = [str(k).strip() for k, v in tags.items() if _cfg_bool(v, False) and str(k).strip()]
+            if len(enabled) == 1:
+                return enabled[0]
+        return f"step{idx + 1}"
+
     if raw_schedule and isinstance(raw_schedule, list) and len(raw_schedule) > 0:
         schedule = raw_schedule
     else:
@@ -442,7 +453,7 @@ def main():
                     step = schedule[si]
                     repeat_batches = _schedule_step_count(step, "batch")
                     trainable_tags = step.get("trainableTags", None)
-                    phase_name = step.get("_phase", f"step{si+1}")
+                    phase_name = _schedule_step_phase_name(step, si)
                     clip_val = float(step.get("clipWeights", 0))
 
                     freeze_by_tags(trainable_tags, phase_name)
@@ -479,7 +490,7 @@ def main():
                 for si, step in enumerate(schedule):
                     step_epochs = _schedule_step_count(step, "epoch")
                     trainable_tags = step.get("trainableTags", None)
-                    phase_name = step.get("_phase", f"step{si+1}")
+                    phase_name = _schedule_step_phase_name(step, si)
 
                     freeze_by_tags(trainable_tags, phase_name)
                     model._phase_idx = si  # legacy fallback for PhaseSwitch

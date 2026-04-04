@@ -1808,9 +1808,16 @@
           rotateSchedule: config.rotateSchedule !== false,
           onEpochData: function (payload) {
             if (currentMountId !== _mountId) return;
-            var logEntry = { epoch: payload.epoch, loss: payload.loss, val_loss: payload.val_loss, current_lr: payload.current_lr, improved: payload.improved };
+            var logEntry = { epoch: payload.epoch, loss: payload.loss, val_loss: payload.val_loss, current_lr: payload.current_lr, improved: payload.improved, phaseLosses: payload.phaseLosses || null };
             if (store) store.appendTrainerEpoch(activeId, logEntry);
-            onStatus("Epoch " + payload.epoch + " | loss=" + Number(payload.loss).toExponential(3) + " | val=" + Number(payload.val_loss).toExponential(3) + (payload.improved ? " *" : ""));
+            var phaseStr = "";
+            if (payload.phaseLosses && typeof payload.phaseLosses === "object") {
+              phaseStr = " | " + Object.keys(payload.phaseLosses).map(function (k) {
+                return k + ":" + Number(payload.phaseLosses[k]).toExponential(3);
+              }).join(" ");
+            }
+            var valStr = payload.val_loss != null ? Number(payload.val_loss).toExponential(3) : "\u2014";
+            onStatus("Epoch " + payload.epoch + " | loss=" + Number(payload.loss).toExponential(3) + " | val=" + valStr + phaseStr + (payload.improved ? " *" : ""));
             if (stateApi && stateApi.getActiveTrainer() === activeId) {
               var epochs = store.getTrainerEpochs(activeId);
               if (_lossChartDiv) _plotLossChart(epochs);

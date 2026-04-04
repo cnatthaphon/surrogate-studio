@@ -199,6 +199,7 @@
                 val_loss: data.val_loss,
                 current_lr: data.current_lr,
                 improved: data.improved,
+                phaseLosses: data.phaseLosses || null,
               });
             }
           } catch (e) { /* ignore parse errors */ }
