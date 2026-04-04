@@ -20,6 +20,7 @@ import signal
 import traceback
 import numpy as np
 from checkpoint_format import normalize_artifacts
+from runtime_weight_loader import load_weights_into_model
 
 _STOP_REQUESTED = False
 
@@ -163,8 +164,11 @@ def main():
     num_classes = ds.get("numClasses", 0)
     model = build_model_from_graph(graph, feature_size, target_size, num_classes)
     model = model.to(device)
+    resumed_from_checkpoint = load_weights_into_model(model, config)
     param_count = sum(p.numel() for p in model.parameters())
     status(f"Model: {param_count} params")
+    if resumed_from_checkpoint:
+        status("Resuming training from checkpoint weights...")
 
     # --- Training config ---
     epochs = int(config.get("epochs", 20))

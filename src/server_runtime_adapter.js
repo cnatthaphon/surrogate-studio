@@ -156,6 +156,7 @@
       schemaId: String(spec.schemaId || ""),
       graph: spec.graph || {},
       runtimeConfig: spec.runtimeConfig || { runtimeId: "python_server", backend: "cuda" },
+      modelArtifacts: spec.modelArtifacts || null,
       dataset: {
         mode: String(ds.mode || "direct"),
         featureSize: Number(ds.featureSize || 1),

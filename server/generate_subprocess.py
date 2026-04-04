@@ -10,7 +10,6 @@ Protocol: prints JSON line {"kind": "result", "result": {...}}
 import json
 import sys
 import numpy as np
-from checkpoint_format import extract_weight_values
 
 def _extract_graph_data(graph):
     if not isinstance(graph, dict):
@@ -85,7 +84,7 @@ def main():
 
     sys.path.insert(0, str(__import__("pathlib").Path(__file__).parent))
     from train_subprocess import build_model_from_graph
-    from predict_subprocess import _load_weights
+    from runtime_weight_loader import load_weights_into_model
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -103,12 +102,7 @@ def main():
     # Build + load weights
     model = build_model_from_graph(graph, feature_size, target_size, num_classes)
     model = model.to(device)
-    if not config.get("weightValues"):
-        vals = extract_weight_values(config)
-        if vals:
-            config = dict(config)
-            config["weightValues"] = vals
-    _load_weights(model, config)
+    load_weights_into_model(model, config)
     model.eval()
     output_index = _resolve_output_index(model, graph, output_node_id)
     gen_nodes = _extract_generation_nodes(graph)

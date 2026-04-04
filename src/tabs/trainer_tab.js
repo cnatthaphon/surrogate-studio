@@ -81,6 +81,31 @@
       }
       return null;
     }
+
+    function _resolveArtifactProducerRuntime(tCard, artifacts) {
+      var checkpoint = artifacts && artifacts.checkpoint && typeof artifacts.checkpoint === "object" ? artifacts.checkpoint : null;
+      if (checkpoint && checkpoint.producerRuntime) return String(checkpoint.producerRuntime);
+      if (tCard && tCard.checkpoint && tCard.checkpoint.producerRuntime) return String(tCard.checkpoint.producerRuntime);
+      if (tCard && tCard.trainedOnServer) return "python_server";
+      return "js_client";
+    }
+
+    function _getResumeArtifacts(tCard) {
+      if (!tCard) return null;
+      var artifacts = tCard.modelArtifactsLast || tCard.modelArtifacts || null;
+      if (!artifacts) return null;
+      return _normalizeCheckpointArtifacts(artifacts, _resolveArtifactProducerRuntime(tCard, artifacts));
+    }
+
+    function _loadArtifactsIntoTfModel(tf, model, artifacts) {
+      if (!tf || !model || !artifacts) return { loaded: false, reason: "missing_inputs" };
+      var W = typeof window !== "undefined" ? window : {};
+      var converter = W.OSCWeightConverter;
+      if (!converter || typeof converter.loadArtifactsIntoModel !== "function") {
+        return { loaded: false, reason: "converter_unavailable" };
+      }
+      return converter.loadArtifactsIntoModel(tf, model, artifacts);
+    }
     var _activeTrainingId = ""; // which trainer is currently being trained
     var _lossChartDiv = null;
     var _epochTableBody = null;
@@ -1795,6 +1820,23 @@
         });
       } catch (err) { onStatus("Build error: " + err.message); return; }
 
+      var resumeArtifacts = _getResumeArtifacts(tCard);
+      if (resumeArtifacts) {
+        try {
+          var resumeLoad = _loadArtifactsIntoTfModel(tf, buildResult.model, resumeArtifacts);
+          if (!resumeLoad || !resumeLoad.loaded) {
+            onStatus("Resume checkpoint ignored: " + ((resumeLoad && resumeLoad.reason) || "weight_load_failed"));
+            resumeArtifacts = null;
+          } else {
+            onStatus("Loaded saved checkpoint into training model.");
+          }
+        } catch (resumeErr) {
+          console.warn("[trainer] Resume checkpoint load failed:", resumeErr.message);
+          onStatus("Resume checkpoint ignored: " + resumeErr.message);
+          resumeArtifacts = null;
+        }
+      }
+
       // update trainer
       tCard.datasetId = config.datasetId;
       tCard.modelId = config.modelId;
@@ -1880,6 +1922,7 @@
           runId: runtimeRunId,
           schemaId: schemaId,
           graph: model.graph,
+          modelArtifacts: resumeArtifacts,
           dataset: {
             mode: graphMode, featureSize: featureSize, targetMode: activeDs.targetMode || defaultTarget,
             xTrain: activeDs.xTrain, yTrain: activeDs.yTrain, xVal: activeDs.xVal, yVal: activeDs.yVal,
