@@ -651,6 +651,9 @@ def build_model_from_graph(graph, feature_size, target_size, num_classes=0):
                     flat_dim = in_dim if isinstance(in_dim, int) else int(in_dim[0]) * int(in_dim[1]) * int(in_dim[2]) if isinstance(in_dim, list) and len(in_dim) == 3 else in_dim
                     setattr(self, f"ln_{nid}", nn.LayerNorm(flat_dim))
                     dim_map[nid] = in_dim
+                elif t == "relu":
+                    setattr(self, f"relu_{nid}", nn.ReLU())
+                    dim_map[nid] = in_dim
                 elif t == "leaky_relu":
                     alpha = float(c.get("alpha", 0.2))
                     setattr(self, f"lrelu_{nid}", nn.LeakyReLU(alpha))
@@ -828,6 +831,8 @@ def build_model_from_graph(graph, feature_size, target_size, num_classes=0):
                         tensors[nid] = getattr(self, f"ln_{nid}")(inp.view(shape[0], -1)).view(shape)
                     else:
                         tensors[nid] = getattr(self, f"ln_{nid}")(inp)
+                elif t == "relu":
+                    tensors[nid] = getattr(self, f"relu_{nid}")(inp)
                 elif t == "leaky_relu":
                     tensors[nid] = getattr(self, f"lrelu_{nid}")(inp)
                 elif t == "noise_injection":

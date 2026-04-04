@@ -101,7 +101,7 @@ Labels:
 
 1. Open `index.html` in a browser (Chrome/Edge recommended)
 2. Generate Fashion-MNIST dataset (T-shirt class, 6000 images)
-3. **Pre-trained**: Select "MLP-GAN (pre-trained)" generation card to generate immediately
+3. **Pre-trained**: Select "MLP-GAN (pre-trained)" or "MLP-WGAN (pre-trained)" generation card to generate immediately
 4. **Train from scratch**: Select a trainer, click Start Training, watch D/G loss curves
 5. **Generation tab**: Random sampling from latent z to generate new images
 

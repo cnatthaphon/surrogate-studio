@@ -643,6 +643,9 @@
         var eps = Math.max(1e-6, Number((node.data && node.data.epsilon) || 1e-3));
         return tf.layers.layerNormalization({ axis: -1, epsilon: eps, name: _n }).apply(inTensor);
       }
+      if (node.name === "relu_layer") {
+        return tf.layers.activation({ activation: "relu", name: _n }).apply(inTensor);
+      }
       if (node.name === "leaky_relu_layer") {
         var alpha = clamp(Number((node.data && node.data.alpha) || 0.2), 0.01, 0.5);
         return tf.layers.leakyReLU({ alpha: alpha, name: _n }).apply(inTensor);
