@@ -154,6 +154,40 @@
     return tf.tensor2d(rows, [rows.length, Math.max(1, cols)]);
   }
 
+  function makeSinusoidalTimeEmbedding(tf, tTensor, dim) {
+    var d = Math.max(1, Number(dim) || 1);
+    if (d === 1) return tTensor;
+    return tf.tidy(function () {
+      var half = Math.max(1, Math.floor(d / 2));
+      var freqs = [];
+      for (var i = 0; i < half; i++) {
+        freqs.push(Math.exp(-Math.log(10000) * i / Math.max(1, half - 1)));
+      }
+      var freqTensor = tf.tensor2d(freqs, [1, half], "float32");
+      var angles = tTensor.mul(freqTensor);
+      var sin = tf.sin(angles);
+      var cos = tf.cos(angles);
+      var emb = tf.concat([sin, cos], 1);
+      freqTensor.dispose();
+      if (emb.shape[1] === d) return emb;
+      if (emb.shape[1] > d) return emb.slice([0, 0], [-1, d]);
+      var pad = tf.zeros([emb.shape[0], d - emb.shape[1]]);
+      var out = tf.concat([emb, pad], 1);
+      pad.dispose();
+      return out;
+    });
+  }
+
+  function makeSyntheticTimeInput(tf, count, dim) {
+    var batch = Math.max(1, Number(count) || 1);
+    var outDim = Math.max(1, Number(dim) || 1);
+    var tScalar = tf.randomUniform([batch, 1], 0, 1, "float32");
+    if (outDim === 1) return tScalar;
+    var emb = makeSinusoidalTimeEmbedding(tf, tScalar, outDim);
+    tScalar.dispose();
+    return emb;
+  }
+
   function extractHeadRows(rowsMain, rowsParams, targetMode, head, datasetMeta) {
     var ht = String((head && head.headType) || "regression");
     if (ht === "latent_kl") {
@@ -232,6 +266,33 @@
     var xTest = (dataset.xTest && dataset.xTest.length)
       ? (isRnn ? tf.tensor3d(dataset.seqTest || dataset.xTest) : tf.tensor2d(dataset.xTest))
       : null;
+    var modelInputNodes = Array.isArray(opts.inputNodes) ? opts.inputNodes : [];
+
+    function _inferModelInputDim(inputIdx) {
+      var modelInput = opts.model && opts.model.inputs && opts.model.inputs[inputIdx];
+      var shape = modelInput && modelInput.shape;
+      return Math.max(1, Number(shape && shape.length ? shape[shape.length - 1] : 1) || 1);
+    }
+    function _buildInputSet(baseTensor, count) {
+      if (!(opts.model && opts.model.inputs) || opts.model.inputs.length <= 1 || !modelInputNodes.length) return baseTensor;
+      return modelInputNodes.map(function (inp, idx) {
+        var name = String((inp && inp.name) || "");
+        if (name === "sample_z_layer") {
+          return tf.randomNormal([count, _inferModelInputDim(idx)]);
+        }
+        if (name === "phase_flag_input") {
+          return tf.zeros([count, 1]);
+        }
+        if (name === "time_embed_layer") {
+          return makeSyntheticTimeInput(tf, count, _inferModelInputDim(idx));
+        }
+        return baseTensor;
+      });
+    }
+
+    var xTrainInputs = _buildInputSet(xTrain, dataset.xTrain.length);
+    var xValInputs = _buildInputSet(xVal, dataset.xVal.length);
+    var xTestInputs = xTest ? _buildInputSet(xTest, dataset.xTest.length) : null;
 
     var yTrainTensors = [];
     var yValTensors = [];
@@ -384,10 +445,10 @@
     };
 
     // training
-    return opts.model.fit(xTrain, singleHead ? yTrainTensors[0] : yTrainTensors, {
+    return opts.model.fit(xTrainInputs, singleHead ? yTrainTensors[0] : yTrainTensors, {
       epochs: opts.epochs || 10,
       batchSize: opts.batchSize || 32,
-      validationData: [xVal, singleHead ? yValTensors[0] : yValTensors],
+      validationData: [xValInputs, singleHead ? yValTensors[0] : yValTensors],
       callbacks: [progressCb],
     }).then(function () {
       // restore best weights
@@ -396,7 +457,7 @@
       }
 
       // compute final metrics
-      var predValRaw = opts.model.predict(xVal);
+      var predValRaw = opts.model.predict(xValInputs);
       var predVals = Array.isArray(predValRaw) ? predValRaw : [predValRaw];
       var mse = 0, mae = 0, testMse = 0, testMae = 0;
       for (var i = 0; i < predVals.length; i++) {
@@ -415,7 +476,7 @@
       var testN = 0;
 
       if (xTest && yTestTensors.length) {
-        var predTestRaw = opts.model.predict(xTest);
+        var predTestRaw = opts.model.predict(xTestInputs);
         var predTests = Array.isArray(predTestRaw) ? predTestRaw : [predTestRaw];
         // raw predictions for visualization
         testPredictions = predTests[0].arraySync();
@@ -459,6 +520,9 @@
       var disposeList = [xTrain, xVal].concat(yTrainTensors, yValTensors, yTestTensors, predVals);
       if (xTest) disposeList.push(xTest);
       tf.dispose(disposeList);
+      if (Array.isArray(xTrainInputs)) tf.dispose(xTrainInputs.filter(function (t) { return t !== xTrain; }));
+      if (Array.isArray(xValInputs)) tf.dispose(xValInputs.filter(function (t) { return t !== xVal; }));
+      if (Array.isArray(xTestInputs)) tf.dispose(xTestInputs.filter(function (t) { return t !== xTest; }));
       disposeTensorArray(bestWeights);
 
       return {
@@ -618,6 +682,10 @@
           _inputBatchMeta[idx] = { kind: "sample_z", dim: _inferSampleZDim(idx) };
           return null;
         }
+        if (inp.name === "time_embed_layer") {
+          _inputBatchMeta[idx] = { kind: "time_embed", dim: _inferSampleZDim(idx) };
+          return null;
+        }
         _inputBatchMeta[idx] = { kind: "dataset" };
         return _sharedTrainInput;
       });
@@ -774,6 +842,7 @@
           var meta = _inputBatchMeta[xi] || null;
           if (meta && meta.kind === "phase_flag") return tf.fill([batchN, 1], _currentPhaseFlagValue);
           if (meta && meta.kind === "sample_z") return tf.randomNormal([batchN, meta.dim]);
+          if (meta && meta.kind === "time_embed") return makeSyntheticTimeInput(tf, batchN, meta.dim);
           return _sliceOrGather(x);
         }) : _sliceOrGather(xFull);
         var yArrays = Array.isArray(yFull) ? yFull.map(function (y) { return _sliceOrGather(y); }) : _sliceOrGather(yFull);

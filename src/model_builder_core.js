@@ -479,7 +479,7 @@
     var ids = Object.keys(moduleData || {});
     if (!ids.length) throw new Error("Graph is empty.");
 
-    var inputNodeNames = { "input_layer": true, "image_source_block": true, "image_source_layer": true, "sample_z_layer": true };
+    var inputNodeNames = { "input_layer": true, "image_source_block": true, "image_source_layer": true, "sample_z_layer": true, "time_embed_layer": true };
     // only nodes with NO incoming connections are true external inputs
     // (e.g., Input node connected FROM ImageSource is NOT an external input)
     var inputIds = ids.filter(function (id) {
@@ -592,6 +592,9 @@
       if (iname === "sample_z_layer") {
         var zDim = Math.max(1, Number((inode.data && inode.data.dim) || 128));
         itensor = tf.input({ shape: [zDim], name: "z_input_" + iid });
+      } else if (iname === "time_embed_layer") {
+        var tDim = Math.max(1, Number((inode.data && inode.data.dim) || 64));
+        itensor = tf.input({ shape: [tDim], name: "time_input_" + iid });
       } else if (iname === "constant_layer") {
         // Constant needs a dummy input to derive batch size — use featureSize=1
         itensor = tf.input({ shape: [1], name: "const_input_" + iid });
@@ -688,7 +691,7 @@
     var applyNodeOp = function (node, inTensor, laterHasRecurrent, nodeId) {
       var _n = "n" + String(nodeId || ""); // deterministic layer name from graph node ID
       // input/image_source that receives from another node: passthrough
-      if (node.name === "input_layer" || node.name === "image_source_layer" || node.name === "image_source_block") {
+      if (node.name === "input_layer" || node.name === "image_source_layer" || node.name === "image_source_block" || node.name === "time_embed_layer") {
         return inTensor;
       }
       if (node.name === "dense_layer") {
