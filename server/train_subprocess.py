@@ -974,6 +974,9 @@ def build_model_from_graph(graph, feature_size, target_size, num_classes=0):
                     _apply_module_initializers(ln_mod, c, t)
                     setattr(self, f"ln_{nid}", ln_mod)
                     dim_map[nid] = in_dim
+                elif t == "relu":
+                    setattr(self, f"relu_{nid}", nn.ReLU())
+                    dim_map[nid] = in_dim
                 elif t == "leaky_relu":
                     alpha = float(c.get("alpha", 0.2))
                     setattr(self, f"lrelu_{nid}", nn.LeakyReLU(alpha))
@@ -1185,6 +1188,8 @@ def build_model_from_graph(graph, feature_size, target_size, num_classes=0):
                         tensors[nid] = nhwc.permute(0, 3, 1, 2).contiguous()
                     else:
                         tensors[nid] = getattr(self, f"ln_{nid}")(inp)
+                elif t == "relu":
+                    tensors[nid] = getattr(self, f"relu_{nid}")(inp)
                 elif t == "leaky_relu":
                     tensors[nid] = getattr(self, f"lrelu_{nid}")(inp)
                 elif t == "noise_injection":
