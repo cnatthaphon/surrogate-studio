@@ -190,6 +190,36 @@
     var evtSource = null;
     var settled = false;
     var jobId = "";
+    var stopRequested = false;
+    function _normalizeServerResult(fullResult) {
+      var out = fullResult || {};
+      if (out.modelArtifacts && out.modelArtifacts.weightData && !out.modelArtifacts.weightValues) {
+        out.modelArtifacts.weightValues = out.modelArtifacts.weightData;
+        delete out.modelArtifacts.weightData;
+      }
+      out.resolvedBackend = out.backend || out.resolvedBackend || "pytorch";
+      return out;
+    }
+    function _fetchServerResult() {
+      return fetch(serverUrl + "/api/train/" + jobId + "/result").then(function (r) {
+        if (!r.ok) throw new Error("Failed to fetch weights: " + r.status);
+        return r.json();
+      }).then(_normalizeServerResult);
+    }
+    function _recoverStoppedResult(reject, resolve) {
+      var tries = 0;
+      function poll() {
+        tries += 1;
+        _fetchServerResult().then(resolve).catch(function (err) {
+          if (tries >= 20) {
+            reject(new Error("Server stop completed but result was unavailable: " + err.message));
+            return;
+          }
+          setTimeout(poll, 250);
+        });
+      }
+      poll();
+    }
     var promise = new Promise(function (resolve, reject) {
       // POST with gzip compression for large payloads
       var statusCb = typeof spec.onStatus === "function" ? spec.onStatus : function () {};
@@ -237,20 +267,9 @@
             // if server has artifacts, fetch full result (weights) separately
             if (lightResult.hasArtifacts) {
               if (typeof spec.onStatus === "function") spec.onStatus("Training done — downloading weights...");
-              fetch(serverUrl + "/api/train/" + jobId + "/result").then(function (r) {
-                if (!r.ok) throw new Error("Failed to fetch weights: " + r.status);
-                return r.json();
-              }).then(function (fullResult) {
-                if (fullResult.modelArtifacts && fullResult.modelArtifacts.weightData) {
-                  fullResult.modelArtifacts.weightValues = fullResult.modelArtifacts.weightData;
-                  delete fullResult.modelArtifacts.weightData;
-                }
-                fullResult.resolvedBackend = fullResult.backend || "pytorch";
-                resolve(fullResult);
-              }).catch(function (e) { reject(new Error("Weight download failed: " + e.message)); });
+              _fetchServerResult().then(resolve).catch(function (e) { reject(new Error("Weight download failed: " + e.message)); });
             } else {
-              lightResult.resolvedBackend = lightResult.backend || "pytorch";
-              resolve(lightResult);
+              resolve(_normalizeServerResult(lightResult));
             }
           } catch (e) {
             reject(new Error("Failed to parse server result: " + e.message));
@@ -259,6 +278,12 @@
 
         evtSource.addEventListener("error", function (evt) {
           if (settled) return;
+          if (stopRequested && jobId) {
+            settled = true;
+            try { evtSource.close(); } catch (_) {}
+            _recoverStoppedResult(reject, resolve);
+            return;
+          }
           settled = true;
           evtSource.close();
           var msg = "Server training error";
@@ -268,6 +293,12 @@
 
         evtSource.onerror = function () {
           if (settled) return;
+          if (stopRequested && jobId) {
+            settled = true;
+            try { evtSource.close(); } catch (_) {}
+            _recoverStoppedResult(reject, resolve);
+            return;
+          }
           settled = true;
           evtSource.close();
           reject(new Error("SSE connection to training server lost"));
@@ -294,6 +325,7 @@
     });
     cancelFn = function () {
       if (settled) return Promise.resolve({ canceled: true, alreadySettled: true });
+      stopRequested = true;
       if (!jobId) return Promise.resolve({ canceled: true, pending: true });
       return stopTrainingOnServer(jobId, serverUrl);
     };
