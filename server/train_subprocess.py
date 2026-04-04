@@ -68,7 +68,8 @@ def _resolve_optimizer_config(config):
         "beta2": min(0.999999, max(0.0, _cfg_float(config.get("optimizerBeta2", betas[1] if len(betas) > 1 else 0.999), 0.999))),
         "momentum": max(0.0, _cfg_float(config.get("optimizerMomentum", opt.get("momentum", 0.0)), 0.0)),
         "rho": min(0.999999, max(0.0, _cfg_float(config.get("optimizerRho", opt.get("rho", 0.9)), 0.9))),
-        "epsilon": max(1e-8, _cfg_float(config.get("optimizerEpsilon", opt.get("epsilon", 1e-8)), 1e-8)),
+        # Match the TF.js client default when config does not specify epsilon.
+        "epsilon": max(1e-8, _cfg_float(config.get("optimizerEpsilon", opt.get("epsilon", 1e-7)), 1e-7)),
     }
 
 def _resolve_restore_best_weights(config, head_configs):
