@@ -26,6 +26,7 @@
     };
     var escapeHtml = deps.escapeHtml || function (s) { return String(s || ""); };
     var getTf = function () { var W = typeof window !== "undefined" ? window : {}; return W.tf || null; };
+    var getCheckpointFormat = function () { var W = typeof window !== "undefined" ? window : {}; return W.OSCCheckpointFormatCore || null; };
 
     var _mountId = 0;
     var _configFormApi = null;
@@ -55,7 +56,30 @@
         new Float32Array(buffer, offset, data.length).set(data);
         offset += data.length * 4;
       });
-      return { weightSpecs: specs, weightValues: Array.from(new Float32Array(buffer)) };
+      var artifacts = { weightSpecs: specs, weightValues: Array.from(new Float32Array(buffer)) };
+      var fmt = getCheckpointFormat();
+      if (fmt && typeof fmt.normalizeArtifacts === "function") {
+        return fmt.normalizeArtifacts(artifacts, { producerRuntime: "js_client" });
+      }
+      return artifacts;
+    }
+
+    function _normalizeCheckpointArtifacts(artifacts, producerRuntime) {
+      if (!artifacts) return null;
+      var fmt = getCheckpointFormat();
+      if (fmt && typeof fmt.normalizeArtifacts === "function") {
+        return fmt.normalizeArtifacts(artifacts, { producerRuntime: String(producerRuntime || "") });
+      }
+      return artifacts;
+    }
+
+    function _describeCheckpointArtifacts(artifacts, producerRuntime) {
+      if (!artifacts) return null;
+      var fmt = getCheckpointFormat();
+      if (fmt && typeof fmt.describeArtifacts === "function") {
+        return fmt.describeArtifacts(artifacts, { producerRuntime: String(producerRuntime || "") });
+      }
+      return null;
     }
     var _activeTrainingId = ""; // which trainer is currently being trained
     var _lossChartDiv = null;
@@ -1520,13 +1544,17 @@
           exportedAt: new Date().toISOString(),
         };
         // Extract weight values as Float32Array for binary storage
-        var artifacts = t.modelArtifactsLast || t.modelArtifacts || null;
-        var artifactsBest = t.modelArtifactsBest || null;
+        var runtimeId = t && t.trainedOnServer ? "python_server" : "js_client";
+        var artifacts = _normalizeCheckpointArtifacts(t.modelArtifactsLast || t.modelArtifacts || null, runtimeId);
+        var artifactsBest = _normalizeCheckpointArtifacts(t.modelArtifactsBest || null, runtimeId);
         var weightSpecs = artifacts ? artifacts.weightSpecs : [];
         var weightFloats = artifacts && artifacts.weightValues ? new Float32Array(artifacts.weightValues) : new Float32Array(0);
         var bestFloats = artifactsBest && artifactsBest.weightValues ? new Float32Array(artifactsBest.weightValues) : null;
         meta.weightSpecs = weightSpecs;
         meta.hasBestWeights = !!bestFloats;
+        meta.checkpoint = _describeCheckpointArtifacts(artifacts, runtimeId);
+        meta.bestCheckpoint = artifactsBest ? _describeCheckpointArtifacts(artifactsBest, runtimeId) : null;
+        meta.checkpointSchemaVersion = meta.checkpoint ? meta.checkpoint.schemaVersion : "";
 
         // Pack: [4 bytes meta length][meta JSON][last weights binary][best weights binary (optional)]
         var metaStr = JSON.stringify(meta);
@@ -1573,9 +1601,9 @@
           function _applyImport(data) {
             if (data.config) t.config = Object.assign(t.config || {}, data.config);
             if (data.metrics) t.metrics = data.metrics;
-            if (data.modelArtifacts) t.modelArtifacts = data.modelArtifacts;
-            if (data.modelArtifactsLast) t.modelArtifactsLast = data.modelArtifactsLast;
-            if (data.modelArtifactsBest) t.modelArtifactsBest = data.modelArtifactsBest;
+            if (data.modelArtifacts) t.modelArtifacts = _normalizeCheckpointArtifacts(data.modelArtifacts, (data.modelArtifacts && data.modelArtifacts.producerRuntime) || data.backend || "");
+            if (data.modelArtifactsLast) t.modelArtifactsLast = _normalizeCheckpointArtifacts(data.modelArtifactsLast, (data.modelArtifactsLast && data.modelArtifactsLast.producerRuntime) || data.backend || "");
+            if (data.modelArtifactsBest) t.modelArtifactsBest = _normalizeCheckpointArtifacts(data.modelArtifactsBest, (data.modelArtifactsBest && data.modelArtifactsBest.producerRuntime) || data.backend || "");
             if (data.status) t.status = data.status;
             if (data.backend) t.backend = data.backend;
             if (data.runtimeDiagnostics) t.runtimeDiagnostics = data.runtimeDiagnostics;
@@ -1598,7 +1626,7 @@
             var lastAligned = new ArrayBuffer(totalWeightFloats * 4);
             new Uint8Array(lastAligned).set(lastBytes);
             var lastWeights = Array.from(new Float32Array(lastAligned));
-            meta.modelArtifactsLast = { weightSpecs: specs, weightValues: lastWeights };
+            meta.modelArtifactsLast = _normalizeCheckpointArtifacts({ weightSpecs: specs, weightValues: lastWeights, checkpoint: meta.checkpoint || null }, (meta.checkpoint && meta.checkpoint.producerRuntime) || meta.backend || "");
             meta.modelArtifacts = meta.modelArtifactsLast;
             if (meta.hasBestWeights) {
               var bestStart = weightStart + totalWeightFloats * 4;
@@ -1606,7 +1634,7 @@
               var bestAligned = new ArrayBuffer(totalWeightFloats * 4);
               new Uint8Array(bestAligned).set(bestBytes);
               var bestWeights = Array.from(new Float32Array(bestAligned));
-              meta.modelArtifactsBest = { weightSpecs: specs, weightValues: bestWeights };
+              meta.modelArtifactsBest = _normalizeCheckpointArtifacts({ weightSpecs: specs, weightValues: bestWeights, checkpoint: meta.bestCheckpoint || meta.checkpoint || null }, (meta.bestCheckpoint && meta.bestCheckpoint.producerRuntime) || (meta.checkpoint && meta.checkpoint.producerRuntime) || meta.backend || "");
             }
             return meta;
           }
@@ -1952,6 +1980,7 @@
                 }
               } catch(e) {}
             }
+            result.modelArtifacts = _normalizeCheckpointArtifacts(result.modelArtifacts, "python_server");
             tCard.modelArtifacts = result.modelArtifacts;
             tCard.modelArtifactsLast = result.modelArtifacts;
           }
@@ -2145,7 +2174,7 @@
             });
             // convert worker's ArrayBuffer to JSON-safe array before store.upsert
             if (result.modelArtifacts) {
-              var wa = result.modelArtifacts;
+              var wa = _normalizeCheckpointArtifacts(result.modelArtifacts, "js_client");
               if (wa.weightData && wa.weightData.byteLength) {
                 wa.weightValues = Array.from(new Float32Array(wa.weightData));
                 delete wa.weightData;
@@ -2257,12 +2286,12 @@
           });
           // Save both last and best weights
           try {
-            var lastArtifacts = _extractWeightsFromModel(buildResult.model);
+            var lastArtifacts = _normalizeCheckpointArtifacts(_extractWeightsFromModel(buildResult.model), "js_client");
             tCard.modelArtifactsLast = lastArtifacts;
             // Best weights: if restoreBestWeights was on, model already has best.
             // If off, model has last. Best is stored separately during training via result.
             if (result.bestWeightValues) {
-              tCard.modelArtifactsBest = { weightSpecs: lastArtifacts.weightSpecs, weightValues: result.bestWeightValues };
+              tCard.modelArtifactsBest = _normalizeCheckpointArtifacts({ weightSpecs: lastArtifacts.weightSpecs, weightValues: result.bestWeightValues }, "js_client");
             } else {
               tCard.modelArtifactsBest = lastArtifacts; // fallback: last = best
             }

@@ -10,6 +10,7 @@ Protocol: prints JSON line {"kind": "result", "result": {...}}
 import json
 import sys
 import numpy as np
+from checkpoint_format import extract_weight_values
 
 
 def main():
@@ -46,10 +47,7 @@ def main():
     model = model.to(device)
 
     # Load weights
-    weight_values = config.get("weightValues", [])
-    if not weight_values:
-        artifacts = config.get("modelArtifacts", {})
-        weight_values = artifacts.get("weightValues", artifacts.get("weightData", []))
+    weight_values = extract_weight_values(config)
 
     if weight_values:
         flat = np.array(weight_values, dtype=np.float32)

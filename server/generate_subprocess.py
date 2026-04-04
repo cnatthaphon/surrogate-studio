@@ -10,6 +10,7 @@ Protocol: prints JSON line {"kind": "result", "result": {...}}
 import json
 import sys
 import numpy as np
+from checkpoint_format import extract_weight_values
 
 def _extract_graph_data(graph):
     if not isinstance(graph, dict):
@@ -102,6 +103,11 @@ def main():
     # Build + load weights
     model = build_model_from_graph(graph, feature_size, target_size, num_classes)
     model = model.to(device)
+    if not config.get("weightValues"):
+        vals = extract_weight_values(config)
+        if vals:
+            config = dict(config)
+            config["weightValues"] = vals
     _load_weights(model, config)
     model.eval()
     output_index = _resolve_output_index(model, graph, output_node_id)

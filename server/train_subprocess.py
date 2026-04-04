@@ -19,6 +19,7 @@ import math
 import signal
 import traceback
 import numpy as np
+from checkpoint_format import normalize_artifacts
 
 _STOP_REQUESTED = False
 
@@ -776,10 +777,7 @@ def main():
         "headCount": len(head_configs) or 1,
         "backend": str(device),
         "paramCount": len(weight_values),
-        "modelArtifacts": {
-            "weightSpecs": weight_specs,
-            "weightData": weight_values,
-        },
+        "modelArtifacts": normalize_artifacts(weight_specs, weight_values, producer_runtime="python_server", include_weight_data=True),
     }
     result.update(test_metrics)
 

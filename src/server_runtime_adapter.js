@@ -25,6 +25,10 @@
    */
 
   var DEFAULT_SERVER = "http://localhost:3777";
+  function getCheckpointFormat() {
+    var W = typeof window !== "undefined" ? window : {};
+    return W.OSCCheckpointFormatCore || null;
+  }
 
   function stopTrainingOnServer(jobId, serverUrl) {
     var url = String(serverUrl || DEFAULT_SERVER).replace(/\/$/, "");
@@ -196,6 +200,12 @@
       if (out.modelArtifacts && out.modelArtifacts.weightData && !out.modelArtifacts.weightValues) {
         out.modelArtifacts.weightValues = out.modelArtifacts.weightData;
         delete out.modelArtifacts.weightData;
+      }
+      var fmt = getCheckpointFormat();
+      if (fmt && out.modelArtifacts && typeof fmt.normalizeArtifacts === "function") {
+        out.modelArtifacts = fmt.normalizeArtifacts(out.modelArtifacts, {
+          producerRuntime: String(out.backend || out.resolvedBackend || "python_server"),
+        });
       }
       out.resolvedBackend = out.backend || out.resolvedBackend || "pytorch";
       return out;
