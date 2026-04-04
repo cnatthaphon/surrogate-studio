@@ -53,6 +53,13 @@
     var _isGenerating = false;
     var _mountId = 0;
 
+    function _getTrainerArtifacts(trainer, weightSelection) {
+      if (!trainer) return null;
+      var sel = String(weightSelection || "").trim().toLowerCase();
+      if (sel === "best" && trainer.modelArtifactsBest) return trainer.modelArtifactsBest;
+      return trainer.modelArtifactsLast || trainer.modelArtifacts || trainer.modelArtifactsBest || null;
+    }
+
     if (store && typeof store.initTables === "function") store.initTables({ tables: [GEN_TABLE] });
 
     // ─── Store helpers ───
@@ -182,7 +189,7 @@
           var _autoMethod = "reconstruct";
           if (store) {
             var _allTrainers = store.listTrainerCards ? store.listTrainerCards() : [];
-            var _trained = _allTrainers.filter(function (t) { return t.schemaId === sid && t.status === "done"; });
+            var _trained = _allTrainers.filter(function (t) { return t.schemaId === sid && !!_getTrainerArtifacts(t, "last"); });
             if (_trained.length) {
               _autoTrainerId = _trained[0].id;
               var _tm = _trained[0].modelId ? store.getModel(_trained[0].modelId) : null;
@@ -452,7 +459,7 @@
       rightEl.appendChild(configCard);
 
       // check if selected trainer is ready — check both weight sets
-      var isReady = selectedTrainer && (selectedTrainer.modelArtifacts || selectedTrainer.modelArtifactsLast || selectedTrainer.modelArtifactsBest);
+      var isReady = !!_getTrainerArtifacts(selectedTrainer, g.config && g.config.weightSelection);
 
       if (g.trainerId && !isReady) {
         var statusMsg = !selectedTrainer ? "Trainer not found" : selectedTrainer.status === "training" ? "Model is still training..." : "Model not trained yet. Train it first in the Trainer tab.";
@@ -488,9 +495,9 @@
 
       var trainer = store.getTrainerCard(g.trainerId);
       // if referenced trainer not trained, auto-find first trained model for this schema
-      if (!trainer || !trainer.modelArtifacts) {
+      if (!trainer || !_getTrainerArtifacts(trainer, g.config && g.config.weightSelection)) {
         var allTrainers = _listTrainersForSchema(g.schemaId);
-        var trained = allTrainers.filter(function (t) { return t.modelArtifacts; });
+        var trained = allTrainers.filter(function (t) { return !!_getTrainerArtifacts(t, g.config && g.config.weightSelection); });
         if (trained.length) {
           trainer = trained[0];
           g.trainerId = trainer.id;
@@ -500,13 +507,14 @@
           onStatus("Auto-selected trained model: " + trainer.name);
         }
       }
-      if (!trainer || !trainer.modelArtifacts) { onStatus("No trained model available. Train a model first in the Trainer tab."); return; }
+      if (!trainer || !_getTrainerArtifacts(trainer, g.config && g.config.weightSelection)) { onStatus("No trained model available. Train a model first in the Trainer tab."); return; }
       var modelRec = store.getModel(trainer.modelId);
       if (!modelRec) { onStatus("Model not found"); return; }
 
       var config = g.config || {};
       var method = config.method || "random";
       var trainerBackend = (trainer.config && trainer.config.runtimeBackend) || "auto";
+      var trainerArtifacts = _getTrainerArtifacts(trainer, config.weightSelection);
 
       // Generation always runs on client — model weights are already downloaded locally,
       // and methods like reconstruct/langevin need local data or produce small outputs.
@@ -538,7 +546,7 @@
             var sFeatureSize = (srcReg2 && typeof srcReg2.getFeatureSize === "function") ? srcReg2.getFeatureSize(activeDs2) : 0;
             if (!sFeatureSize && sTestX.length && sTestX[0]) sFeatureSize = sTestX[0].length;
             var serverConfig = {
-              graph: modelRec.graph, weightValues: trainer.modelArtifacts.weightValues,
+              graph: modelRec.graph, weightValues: trainerArtifacts && trainerArtifacts.weightValues,
               featureSize: Number(sFeatureSize || dsData2.featureSize || 40),
               targetSize: Number(sFeatureSize || dsData2.featureSize || 40), numClasses: dsData2.numClasses || dsData2.classCount || 0,
               method: method, numSamples: config.numSamples || 16,
@@ -598,9 +606,7 @@
         });
 
         // load weights — select based on config (last vs best)
-        var _wSel = config.weightSelection || "last";
-        var _artifacts = _wSel === "best" && trainer.modelArtifactsBest ? trainer.modelArtifactsBest
-          : trainer.modelArtifactsLast || trainer.modelArtifacts;
+        var _artifacts = trainerArtifacts;
         _loadWeights(tf, built.model, _artifacts);
 
         // determine latent dim and model for generation

@@ -92,7 +92,8 @@
       transfer.push(payload.modelArtifacts.weightData.buffer);
     }
 
-    return new Promise(function (resolve, reject) {
+    let cancelFn = null;
+    const promise = new Promise(function (resolve, reject) {
       let worker = null;
       try {
         worker = new WorkerCtor(workerPath);
@@ -125,6 +126,12 @@
         settled = true;
         finalize();
         reject(err || new Error("Training worker failed."));
+      };
+      cancelFn = function () {
+        if (settled) return;
+        settled = true;
+        finalize();
+        reject(new Error("Training worker canceled."));
       };
 
       worker.onmessage = function (evt) {
@@ -165,6 +172,8 @@
         fail(err);
       }
     });
+    promise.cancel = function () { if (cancelFn) cancelFn(); };
+    return promise;
   }
 
   const api = {

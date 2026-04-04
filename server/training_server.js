@@ -67,6 +67,18 @@ function broadcast(jobId, event, data) {
   });
 }
 
+function requestStop(jobId, reason) {
+  var job = jobs[jobId];
+  if (!job) return false;
+  if (job.process && (job.status === "running" || job.status === "queued" || job.status === "stopping")) {
+    job.status = "stopping";
+    broadcast(jobId, "status", reason || "Stopping training...");
+    try { job.process.kill("SIGTERM"); } catch (e) {}
+    return true;
+  }
+  return false;
+}
+
 // --- training subprocess ---
 function startTraining(jobId) {
   var job = jobs[jobId];
@@ -153,7 +165,9 @@ function startTraining(jobId) {
   });
 
   proc.on("exit", function (code) {
-    if (job.status === "running") {
+    if (job.status === "stopping" || job.status === "killed") {
+      job.status = "stopped";
+    } else if (job.status === "running") {
       if (code === 0 && job.result) {
         job.status = "done";
       } else {
@@ -284,6 +298,22 @@ var server = http.createServer(function (req, res) {
         res.end(JSON.stringify({ error: e.message }));
       }
     });
+    return;
+  }
+
+  // POST /api/train/:id/stop
+  var stopMatch = pathname.match(/^\/api\/train\/([a-zA-Z0-9_-]+)\/stop$/);
+  if (req.method === "POST" && stopMatch) {
+    var stopJobId = stopMatch[1];
+    var stopJob = jobs[stopJobId];
+    if (!stopJob) {
+      res.writeHead(404, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Job not found" }));
+      return;
+    }
+    requestStop(stopJobId, "Training stop requested by client.");
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ ok: true, jobId: stopJobId, status: stopJob.status }));
     return;
   }
 

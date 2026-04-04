@@ -32,6 +32,7 @@
     var _isTraining = false;
     var _trainingRunId = 0; // increments on each training start — old runs detect new run and stop
     var _activeModel = null; // reference to model during training (for weight save on stop)
+    var _activeTrainingCancel = null; // best-effort cancel for worker/server runs
 
     function _extractWeightsFromModel(tfModel) {
       var allW = tfModel.getWeights();
@@ -1441,8 +1442,11 @@
           _trainingRunId++;
           _isTraining = false;
           _activeTrainingId = "";
+          var cancelFn = _activeTrainingCancel;
+          _activeTrainingCancel = null;
           try { if (_activeModel) _activeModel.stopTraining = true; } catch (_) {}
           var tc = store ? store.getTrainerCard(activeId) : null;
+          var savedWeights = false;
           if (tc) {
             tc.status = "stopped";
             _setRuntimeDiagnostics(tc, {
@@ -1457,11 +1461,15 @@
                 tc.modelArtifactsLast = lastW;
                 if (!tc.modelArtifactsBest) tc.modelArtifactsBest = lastW;
                 tc.modelArtifacts = lastW; // on stop, always use last
+                savedWeights = true;
               } catch (e) {}
             }
             store.upsertTrainerCard(tc);
           }
-          onStatus("Training stopped (weights saved)");
+          if (cancelFn) {
+            try { Promise.resolve(cancelFn()).catch(function () {}); } catch (_) {}
+          }
+          onStatus(savedWeights ? "Training stopped (weights saved)" : "Training stop requested");
           _renderLeftPanel(); _renderMainPanel(); _renderRightPanel();
         });
         btnRow.appendChild(stopBtn);
@@ -1753,6 +1761,7 @@
       _trainingRunId++;
       var currentRunId = _trainingRunId;
       var runtimeRunId = activeId + "--run-" + currentRunId + "-" + Date.now().toString(36);
+      _activeTrainingCancel = null;
       _activeTrainingId = activeId;
       _subTab = "train";
       onStatus("Training... (serializing model)");
@@ -1788,7 +1797,7 @@
                 note: "Server required for this trainer but is not reachable.",
               });
               onStatus("Server not reachable. This model was trained on server \u2014 restart server to continue, or create new trainer for client.");
-              _isTraining = false; tCard.status = tCard.status === "training" ? "done" : tCard.status;
+              _isTraining = false; _activeTrainingCancel = null; tCard.status = tCard.status === "training" ? "done" : tCard.status;
               if (store) store.upsertTrainerCard(tCard);
               _renderLeftPanel(); _renderMainPanel(); _renderRightPanel();
               return;
@@ -1813,7 +1822,7 @@
           onStatus("Server connected \u2014 training on PyTorch...");
           _activeModel = buildResult.model;
           // server OK — proceed with server training
-          serverAdapter.runTrainingOnServer({
+          var serverRun = serverAdapter.runTrainingOnServer({
           runId: runtimeRunId,
           schemaId: schemaId,
           graph: model.graph,
@@ -1872,13 +1881,18 @@
           },
         }, {
           serverUrl: String(config.serverUrl || serverAdapter.DEFAULT_SERVER),
-        }).then(function (result) {
+        });
+        _activeTrainingCancel = (serverRun && typeof serverRun.cancel === "function")
+          ? function () { return serverRun.cancel(); }
+          : null;
+        serverRun.then(function (result) {
           if (!_isCurrentTrainingRun(activeId, currentRunId)) {
             _activeModel = null;
             buildResult.model.dispose();
             return;
           }
           _isTraining = false;
+          _activeTrainingCancel = null;
           _activeTrainingId = "";
           tCard.status = "done";
           tCard.metrics = result;
@@ -1924,6 +1938,7 @@
             return;
           }
           _activeModel = null;
+          _activeTrainingCancel = null;
           var msg = String(err.message || "");
           // dataset too large for server → fallback to client training
           if (msg.indexOf("too large") >= 0 || msg.indexOf("transfer") >= 0) {
@@ -1938,6 +1953,7 @@
             return;
           }
           _isTraining = false;
+          _activeTrainingCancel = null;
           _activeTrainingId = "";
           tCard.status = "error"; tCard.error = msg;
           _setRuntimeDiagnostics(tCard, {
@@ -1991,7 +2007,7 @@
         buildResult.model.save(tf.io.withSaveHandler(function (artifacts) {
           onStatus("Training via TF.js Worker (" + (config.runtimeBackend || "auto") + ")...");
 
-          workerBridge.runTrainingInWorker({
+          var workerRun = workerBridge.runTrainingInWorker({
             runId: runtimeRunId,
             modelArtifacts: artifacts,
             isSequence: buildResult.isSequence,
@@ -2055,12 +2071,17 @@
             onStatus: function (msg) { onStatus(msg); },
           }, {
             workerPath: _workerUrl,
-          }).then(function (result) {
+          });
+          _activeTrainingCancel = (workerRun && typeof workerRun.cancel === "function")
+            ? function () { return workerRun.cancel(); }
+            : null;
+          workerRun.then(function (result) {
             if (!_isCurrentTrainingRun(activeId, currentRunId)) {
               buildResult.model.dispose();
               return;
             }
             _isTraining = false;
+            _activeTrainingCancel = null;
             _activeTrainingId = "";
             tCard.status = "done";
             tCard.metrics = result;
@@ -2093,6 +2114,7 @@
               return;
             }
             _isTraining = false;
+            _activeTrainingCancel = null;
             _activeTrainingId = "";
             tCard.status = "error"; tCard.error = err.message;
             _setRuntimeDiagnostics(tCard, {
@@ -2114,6 +2136,9 @@
         // === FALLBACK: main thread (will freeze UI) ===
         var _trainFn = _isPhased && trainingEngine.trainModelPhased ? trainingEngine.trainModelPhased : trainingEngine.trainModel;
         _activeModel = buildResult.model;
+        _activeTrainingCancel = function () {
+          try { if (_activeModel) _activeModel.stopTraining = true; } catch (_) {}
+        };
         var _myRunId = currentRunId;
         _ensureClientBackend(tf, config.runtimeBackend, config.runtimeBackendOrder).then(function (resolvedBackend) {
         _setRuntimeDiagnostics(tCard, {
@@ -2167,6 +2192,7 @@
             return;
           }
           _isTraining = false;
+          _activeTrainingCancel = null;
           _activeTrainingId = "";
           tCard.status = "done";
           tCard.metrics = result;
@@ -2208,6 +2234,7 @@
             return;
           }
           _isTraining = false;
+          _activeTrainingCancel = null;
           _activeTrainingId = "";
           _activeModel = null;
           tCard.status = "error"; tCard.error = err.message;
@@ -2229,6 +2256,7 @@
             return;
           }
           _isTraining = false;
+          _activeTrainingCancel = null;
           _activeTrainingId = "";
           _activeModel = null;
           tCard.status = "error"; tCard.error = String(err && err.message ? err.message : err);

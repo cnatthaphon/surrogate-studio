@@ -26,6 +26,19 @@
 
   var DEFAULT_SERVER = "http://localhost:3777";
 
+  function stopTrainingOnServer(jobId, serverUrl) {
+    var url = String(serverUrl || DEFAULT_SERVER).replace(/\/$/, "");
+    var id = String(jobId || "").trim();
+    if (!id) return Promise.reject(new Error("Job id required"));
+    return fetch(url + "/api/train/" + encodeURIComponent(id) + "/stop", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+    }).then(function (res) {
+      if (!res.ok) throw new Error("Server stop returned " + res.status);
+      return res.json();
+    });
+  }
+
   function resolveRestoreBestWeights(spec) {
     var cfg = spec && typeof spec === "object" ? spec : {};
     if (typeof cfg.restoreBestWeights === "boolean") return cfg.restoreBestWeights;
@@ -173,12 +186,16 @@
       rotateSchedule: spec.rotateSchedule !== false,
     };
 
-    return new Promise(function (resolve, reject) {
+    var cancelFn = null;
+    var evtSource = null;
+    var settled = false;
+    var jobId = "";
+    var promise = new Promise(function (resolve, reject) {
       // POST with gzip compression for large payloads
       var statusCb = typeof spec.onStatus === "function" ? spec.onStatus : function () {};
       statusCb("Compressing dataset for server transfer...");
       _postJson(serverUrl + "/api/train", payload, statusCb).then(function (startResult) {
-        var jobId = startResult.jobId || payload.runId;
+        jobId = startResult.jobId || payload.runId;
         if (typeof spec.onReady === "function") {
           spec.onReady({ backend: startResult.backend || "pytorch" });
         }
@@ -187,8 +204,7 @@
         }
 
         // Connect to SSE stream for epoch updates
-        var evtSource = new EventSource(serverUrl + "/api/train/" + jobId);
-        var settled = false;
+        evtSource = new EventSource(serverUrl + "/api/train/" + jobId);
 
         evtSource.addEventListener("epoch", function (evt) {
           try {
@@ -276,6 +292,17 @@
         reject(new Error("Cannot reach training server at " + serverUrl + ": " + err.message));
       });
     });
+    cancelFn = function () {
+      if (settled) return Promise.resolve({ canceled: true, alreadySettled: true });
+      settled = true;
+      if (evtSource) {
+        try { evtSource.close(); } catch (_) {}
+      }
+      if (!jobId) return Promise.resolve({ canceled: true, pending: true });
+      return stopTrainingOnServer(jobId, serverUrl);
+    };
+    promise.cancel = function () { return cancelFn(); };
+    return promise;
   }
 
   // Check if server is available
@@ -327,6 +354,7 @@
 
   return {
     runTrainingOnServer: runTrainingOnServer,
+    stopTrainingOnServer: stopTrainingOnServer,
     runTestOnServer: runTestOnServer,
     predictOnServer: predictOnServer,
     generateOnServer: generateOnServer,
