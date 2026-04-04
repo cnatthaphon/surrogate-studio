@@ -230,8 +230,8 @@
         config: { epochs: 1000, batchSize: 128, learningRate: 0.0005, optimizerType: "adam", useServer: true,
                   earlyStoppingPatience: 0, lrSchedulerType: "none", weightSelection: "last",
                   trainingSchedule: [
-                    { epochs: 10, trainableTags: { discriminator: true, generator: false } },
-                    { epochs: 1, trainableTags: { discriminator: false, generator: true } }
+                    { unit: "batch", batches: 1, trainableTags: { discriminator: true, generator: false } },
+                    { unit: "batch", batches: 1, trainableTags: { discriminator: false, generator: true } }
                   ], rotateSchedule: true } },
       { id: "t-dcgan", name: "DCGAN Trainer", schemaId: sid, datasetId: DS, modelId: "m-dcgan", status: "draft",
         config: { epochs: 200, batchSize: 128, learningRate: 0.0002, optimizerType: "adam", optimizerBeta1: 0.5, optimizerBeta2: 0.999, useServer: true,
@@ -246,8 +246,8 @@
         config: { epochs: 1000, batchSize: 128, learningRate: 0.0005, optimizerType: "adam", useServer: true,
                   earlyStoppingPatience: 0, lrSchedulerType: "none", weightSelection: "last",
                   trainingSchedule: [
-                    { epochs: 10, trainableTags: { discriminator: true, generator: false } },
-                    { epochs: 1, trainableTags: { discriminator: false, generator: true } }
+                    { unit: "batch", batches: 1, trainableTags: { discriminator: true, generator: false } },
+                    { unit: "batch", batches: 1, trainableTags: { discriminator: false, generator: true } }
                   ], rotateSchedule: true },
         metrics: { bestEpoch: 928, paramCount: 1102230 } },
       { id: "t-dcgan-trained", name: "DCGAN (pre-trained)", schemaId: sid, datasetId: DS, modelId: "m-dcgan", status: "done",
@@ -264,16 +264,16 @@
         config: { epochs: 1000, batchSize: 128, learningRate: 0.00005, optimizerType: "rmsprop", useServer: true,
                   earlyStoppingPatience: 0, lrSchedulerType: "none", weightSelection: "last",
                   trainingSchedule: [
-                    { epochs: 5, trainableTags: { discriminator: true, generator: false }, clipWeights: 0.01 },
-                    { epochs: 1, trainableTags: { discriminator: false, generator: true } }
+                    { unit: "batch", batches: 5, trainableTags: { discriminator: true, generator: false }, clipWeights: 0.1 },
+                    { unit: "batch", batches: 1, trainableTags: { discriminator: false, generator: true } }
                   ], rotateSchedule: true } },
       { id: "t-mlp-wgan-trained", name: "MLP-WGAN (pre-trained)", schemaId: sid, datasetId: DS, modelId: "m-mlp-wgan", status: "done",
         _pretrainedVar: "MLP_WGAN_PRETRAINED_BIN_B64",
         config: { epochs: 1000, batchSize: 128, learningRate: 0.00005, optimizerType: "rmsprop", useServer: true,
                   earlyStoppingPatience: 0, lrSchedulerType: "none", weightSelection: "last",
                   trainingSchedule: [
-                    { epochs: 5, trainableTags: { discriminator: true, generator: false }, clipWeights: 0.01 },
-                    { epochs: 1, trainableTags: { discriminator: false, generator: true } }
+                    { unit: "batch", batches: 5, trainableTags: { discriminator: true, generator: false }, clipWeights: 0.1 },
+                    { unit: "batch", batches: 1, trainableTags: { discriminator: false, generator: true } }
                   ], rotateSchedule: true } },
     ],
     generations: [

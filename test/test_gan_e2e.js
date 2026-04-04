@@ -18,6 +18,10 @@ var te = require("../src/training_engine_core.js");
 
 eval(require("fs").readFileSync("./demo/Fashion-MNIST-GAN/preset.js", "utf8"));
 
+var preset = window.FASHION_MNIST_GAN_PRESET;
+var mlpGanTrainerCfg = preset.trainers.filter(function (t) { return t.id === "t-mlp-gan"; })[0].config;
+var mlpWganTrainerCfg = preset.trainers.filter(function (t) { return t.id === "t-mlp-wgan"; })[0].config;
+
 var PASS = 0, FAIL = 0;
 function assert(cond, msg) {
   if (cond) { PASS++; console.log("  ✓ " + msg); }
@@ -34,6 +38,13 @@ var buildOpts = {
 console.log("=== 1. Model Build ===");
 var built = mb.buildModelFromGraph(tf, graph, buildOpts);
 var model = built.model;
+
+assert(String((mlpGanTrainerCfg.trainingSchedule[0] || {}).unit || "") === "batch", "MLP-GAN preset uses batch-granularity D step");
+assert(Number((mlpGanTrainerCfg.trainingSchedule[0] || {}).batches || 0) === 1, "MLP-GAN preset uses D:1 batch");
+assert(String((mlpGanTrainerCfg.trainingSchedule[1] || {}).unit || "") === "batch", "MLP-GAN preset uses batch-granularity G step");
+assert(Number((mlpGanTrainerCfg.trainingSchedule[1] || {}).batches || 0) === 1, "MLP-GAN preset uses G:1 batch");
+assert(String((mlpWganTrainerCfg.trainingSchedule[0] || {}).unit || "") === "batch", "MLP-WGAN preset uses batch-granularity critic step");
+assert(Number((mlpWganTrainerCfg.trainingSchedule[0] || {}).batches || 0) === 5, "MLP-WGAN preset uses critic:5 batches");
 
 assert(model.inputs.length >= 2, "Model has >=2 inputs (z + img + flag)");
 assert(model.outputs.length === 3, "Model has 3 outputs (G + D + label)");
