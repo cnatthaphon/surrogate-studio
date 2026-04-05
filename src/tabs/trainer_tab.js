@@ -1520,8 +1520,16 @@
         var stopBtn = el("button", { className: "osc-btn", style: "flex:1;background:linear-gradient(135deg,#dc2626,#991b1b);border-color:#ef4444;" }, t.status === "stopping" ? "Stopping..." : "Stop Training");
         if (t.status === "stopping") stopBtn.disabled = true;
         stopBtn.addEventListener("click", function () {
+          if (stopBtn.disabled || _isStopRequestedRun(activeId, _trainingRunId)) return;
+          stopBtn.disabled = true;
+          stopBtn.textContent = "Stopping...";
           var cancelFn = _activeTrainingCancel;
           var tc = store ? store.getTrainerCard(activeId) : null;
+          if (tc && tc.status === "stopping") {
+            onStatus("Training stop already requested.");
+            _renderLeftPanel(); _renderMainPanel(); _renderRightPanel();
+            return;
+          }
           var isServerRun = !!(tc && tc.config && tc.config.useServer);
           var isWorkerRun = !!(tc && tc.runtimeDiagnostics && tc.runtimeDiagnostics.executionMode === "worker");
           if ((isServerRun || isWorkerRun) && cancelFn) {
