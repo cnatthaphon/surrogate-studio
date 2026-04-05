@@ -1233,6 +1233,7 @@
       if (!activeId) { rightEl.appendChild(el("h3", {}, "Config")); rightEl.appendChild(el("div", { className: "osc-empty" }, "Select a trainer.")); return; }
       var t = store ? store.getTrainerCard(activeId) : null;
       if (!t) return;
+      var isStopping = t.status === "stopping";
 
       var hasEpochs = (store.getTrainerEpochs(activeId) || []).length > 0;
       var hasArtifacts = !!(t.modelArtifactsLast || t.modelArtifacts || t.modelArtifactsBest);
@@ -1266,32 +1267,32 @@
       var defaultServerUrl = sra ? sra.DEFAULT_SERVER : "http://localhost:3777";
       var hasServerAdapter = !!sra;
       var formSchema = [
-        { key: "datasetId", label: "Dataset (" + schemaId + ")", type: "select", options: datasets.map(function (d) { return { value: d.id, label: (d.name || d.id) + (d.status === "ready" ? " \u2713" : " (draft)") }; }), disabled: isLocked },
-        { key: "modelId", label: "Model (" + schemaId + ")", type: "select", options: models.map(function (m) { return { value: m.id, label: m.name || m.id }; }), disabled: isLocked },
-        { key: "runtimeBackend", label: "Backend", type: "select", options: backends },
+        { key: "datasetId", label: "Dataset (" + schemaId + ")", type: "select", options: datasets.map(function (d) { return { value: d.id, label: (d.name || d.id) + (d.status === "ready" ? " \u2713" : " (draft)") }; }), disabled: isLocked || isStopping },
+        { key: "modelId", label: "Model (" + schemaId + ")", type: "select", options: models.map(function (m) { return { value: m.id, label: m.name || m.id }; }), disabled: isLocked || isStopping },
+        { key: "runtimeBackend", label: "Backend", type: "select", options: backends, disabled: isStopping },
       ];
       if (hasServerAdapter) {
-        formSchema.push({ key: "useServer", label: "Use PyTorch Server", type: "checkbox" });
-        formSchema.push({ key: "serverUrl", label: "Server URL", type: "text", placeholder: defaultServerUrl });
+        formSchema.push({ key: "useServer", label: "Use PyTorch Server", type: "checkbox", disabled: isStopping });
+        formSchema.push({ key: "serverUrl", label: "Server URL", type: "text", placeholder: defaultServerUrl, disabled: isStopping });
       }
       formSchema = formSchema.concat([
-        { key: "epochs", label: "Epochs", type: "number", min: 1, max: 1000 },
-        { key: "batchSize", label: "Batch size", type: "number", min: 1 },
-        { key: "learningRate", label: "Learning rate", type: "number", min: 0.0000001, step: 0.0001 },
-        { key: "optimizerType", label: "Optimizer", type: "select", options: optTypes.map(function (t) { return { value: t, label: t }; }) },
-        { key: "optimizerBeta1", label: "Adam beta1", type: "number", min: 0, max: 0.999999, step: 0.01 },
-        { key: "optimizerBeta2", label: "Adam beta2", type: "number", min: 0, max: 0.999999, step: 0.001 },
-        { key: "optimizerMomentum", label: "Momentum", type: "number", min: 0, max: 0.999999, step: 0.01 },
-        { key: "optimizerRho", label: "RMSProp rho", type: "number", min: 0, max: 0.999999, step: 0.01 },
-        { key: "optimizerEpsilon", label: "Opt epsilon", type: "number", min: 0.00000001, step: 0.00000001 },
-        { key: "lrSchedulerType", label: "LR scheduler", type: "select", options: lrTypes.map(function (t) { return { value: t, label: t }; }) },
-        { key: "earlyStoppingPatience", label: "Early stop patience", type: "number", min: 0 },
-        { key: "restoreBestWeights", label: "Restore best weights", type: "checkbox" },
-        { key: "lrPatience", label: "LR patience", type: "number", min: 1 },
-        { key: "lrFactor", label: "LR factor", type: "number", min: 0.05, max: 0.99, step: 0.05 },
-        { key: "minLr", label: "Min LR", type: "number", min: 0.0000001, step: 0.0000001 },
-        { key: "gradClipNorm", label: "Grad clip norm (0=off)", type: "number", min: 0, step: 0.1 },
-        { key: "gradClipValue", label: "Grad clip value (0=off)", type: "number", min: 0, step: 0.1 },
+        { key: "epochs", label: "Epochs", type: "number", min: 1, max: 1000, disabled: isStopping },
+        { key: "batchSize", label: "Batch size", type: "number", min: 1, disabled: isStopping },
+        { key: "learningRate", label: "Learning rate", type: "number", min: 0.0000001, step: 0.0001, disabled: isStopping },
+        { key: "optimizerType", label: "Optimizer", type: "select", options: optTypes.map(function (t) { return { value: t, label: t }; }), disabled: isStopping },
+        { key: "optimizerBeta1", label: "Adam beta1", type: "number", min: 0, max: 0.999999, step: 0.01, disabled: isStopping },
+        { key: "optimizerBeta2", label: "Adam beta2", type: "number", min: 0, max: 0.999999, step: 0.001, disabled: isStopping },
+        { key: "optimizerMomentum", label: "Momentum", type: "number", min: 0, max: 0.999999, step: 0.01, disabled: isStopping },
+        { key: "optimizerRho", label: "RMSProp rho", type: "number", min: 0, max: 0.999999, step: 0.01, disabled: isStopping },
+        { key: "optimizerEpsilon", label: "Opt epsilon", type: "number", min: 0.00000001, step: 0.00000001, disabled: isStopping },
+        { key: "lrSchedulerType", label: "LR scheduler", type: "select", options: lrTypes.map(function (t) { return { value: t, label: t }; }), disabled: isStopping },
+        { key: "earlyStoppingPatience", label: "Early stop patience", type: "number", min: 0, disabled: isStopping },
+        { key: "restoreBestWeights", label: "Restore best weights", type: "checkbox", disabled: isStopping },
+        { key: "lrPatience", label: "LR patience", type: "number", min: 1, disabled: isStopping },
+        { key: "lrFactor", label: "LR factor", type: "number", min: 0.05, max: 0.99, step: 0.05, disabled: isStopping },
+        { key: "minLr", label: "Min LR", type: "number", min: 0.0000001, step: 0.0000001, disabled: isStopping },
+        { key: "gradClipNorm", label: "Grad clip norm (0=off)", type: "number", min: 0, step: 0.1, disabled: isStopping },
+        { key: "gradClipValue", label: "Grad clip value (0=off)", type: "number", min: 0, step: 0.1, disabled: isStopping },
       ]);
       var config = t.config || {};
       var formValue = {
@@ -1585,6 +1586,21 @@
       btnRow.appendChild(exportBtn);
       rightEl.appendChild(btnRow);
 
+      if (isStopping) {
+        rightEl.style.position = "relative";
+        var stoppingOverlay = el("div", {
+          style: "position:absolute;inset:0;background:rgba(11,18,32,0.72);backdrop-filter:blur(2px);display:flex;align-items:center;justify-content:center;z-index:20;border-radius:8px;"
+        });
+        var stoppingMsg = el("div", {
+          style: "padding:10px 12px;background:#0f172a;border:1px solid #475569;border-radius:8px;color:#e2e8f0;font-size:12px;text-align:center;max-width:220px;"
+        }, [
+          el("div", { style: "font-weight:600;color:#fbbf24;margin-bottom:4px;" }, "Stopping and saving weights"),
+          el("div", { style: "font-size:11px;color:#cbd5e1;" }, "Wait until the trainer reaches 'stopped' before generating or continuing.")
+        ]);
+        stoppingOverlay.appendChild(stoppingMsg);
+        rightEl.appendChild(stoppingOverlay);
+      }
+
       // Export/Import trainer (config + weights)
       var eiRow = el("div", { style: "display:flex;gap:4px;margin-top:4px;" });
       var expTrainerBtn = el("button", { className: "osc-btn secondary", style: "flex:1;font-size:10px;" }, "Export Trainer");
@@ -1747,6 +1763,7 @@
       var activeId = stateApi ? stateApi.getActiveTrainer() : "";
       var tCard = activeId && store ? store.getTrainerCard(activeId) : null;
       if (!tCard) { onStatus("Select a trainer"); return; }
+      if (tCard.status === "stopping") { onStatus("Trainer is still stopping and saving weights. Please wait."); return; }
 
       var formConfig = _configFormApi && typeof _configFormApi.getConfig === "function" ? _configFormApi.getConfig() : {};
       // merge: tCard.config (has trainingSchedule, classFilter etc.) + form values (has epochs, lr etc.)
@@ -1848,6 +1865,8 @@
         });
       } catch (err) { onStatus("Build error: " + err.message); return; }
 
+      var isPhasedRun = trainingEngine.needsPhasedTraining && trainingEngine.needsPhasedTraining(buildResult.headConfigs);
+
       var resumeArtifacts = _getResumeArtifacts(tCard);
       if (resumeArtifacts) {
         try {
@@ -1871,7 +1890,7 @@
       tCard.status = "running";
       tCard.error = "";
       tCard.config = config;
-      var initialExecutionMode = Boolean(config.useServer) ? "server" : ((_isPhased || !_getWorkerSupport().available) ? "main-thread" : "worker");
+      var initialExecutionMode = Boolean(config.useServer) ? "server" : ((isPhasedRun || !_getWorkerSupport().available) ? "main-thread" : "worker");
       _setRuntimeDiagnostics(tCard, {
         requestedBackend: String(config.runtimeBackend || "auto"),
         executionMode: initialExecutionMode,
@@ -2138,7 +2157,7 @@
       return;
 
       function _runClientTraining() {
-      var _isPhased = trainingEngine.needsPhasedTraining && trainingEngine.needsPhasedTraining(buildResult.headConfigs);
+      var _isPhased = isPhasedRun;
       // === WORKER PATH (non-blocking) ===
       var W = typeof window !== "undefined" ? window : {};
       var workerBridge = W.OSCTrainingWorkerBridge;
