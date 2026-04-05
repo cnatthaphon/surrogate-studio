@@ -189,6 +189,20 @@
       return activeDs ? { x: activeDs[xKey] || [], y: activeDs[yKey] || [], length: (activeDs[xKey] || []).length } : { x: [], y: [], length: 0 };
     }
 
+    function _resolveReferenceSplit(dsData, preferredOrder) {
+      var order = Array.isArray(preferredOrder) && preferredOrder.length ? preferredOrder : ["test", "val", "train"];
+      for (var i = 0; i < order.length; i++) {
+        var splitName = String(order[i] || "").trim().toLowerCase();
+        if (!splitName) continue;
+        var split = _resolveDatasetSplit(dsData, splitName);
+        if (split && Array.isArray(split.x) && split.x.length) {
+          split.name = splitName;
+          return split;
+        }
+      }
+      return { name: "", x: [], y: [], length: 0 };
+    }
+
     function _resolveFeatureSize(dsData, fallbackRows) {
       var activeDs = _getActiveDatasetData(dsData) || {};
       var W = typeof window !== "undefined" ? window : {};
@@ -680,7 +694,7 @@
         });
 
         configCard.appendChild(el("div", { style: "font-size:10px;color:#64748b;margin-top:4px;" },
-          "Generative evaluation samples fresh outputs from the selected checkpoint and compares them to the dataset test split."));
+          "Generative evaluation samples fresh outputs from the selected checkpoint and compares them to the best available dataset reference split: test, then val, then train."));
       }
 
       rightEl.appendChild(configCard);
@@ -925,7 +939,7 @@
       var generationRuntime = String(gCfg.runtime || "client").trim().toLowerCase() === "server" ? "server" : "client";
       var dsData = dataset && dataset.data ? dataset.data : {};
       var activeDs = _getActiveDatasetData(dsData);
-      var testSplit = _resolveDatasetSplit(dsData, "test");
+      var testSplit = _resolveReferenceSplit(dsData, ["test", "val", "train"]);
       var testX = testSplit.x || [];
       var testY = testSplit.y || [];
       var numSamples = Math.max(1, Number(gCfg.numSamples) || 64);
@@ -1115,7 +1129,7 @@
       var dsData = dataset.data;
       var activeDs = _getActiveDatasetData(dsData);
       var nCls = activeDs.classCount || activeDs.numClasses || 10;
-      var testSplit = _resolveDatasetSplit(dsData, "test");
+      var testSplit = _resolveReferenceSplit(dsData, ["test", "val", "train"]);
       var testX = testSplit.x || [];
       var testY = testSplit.y || [];
       var featureSize = _resolveFeatureSize(dsData, testX) || 1;
@@ -1133,6 +1147,7 @@
       var meta = _resolveGenerationMeta(modelRec);
       var actualWeightSelection = _resolveActualWeightSelection(trainer, artifacts, ev.weightSelection);
       r.testN = testN;
+      r.referenceSplit = testSplit.name || "none";
       r.weightSelection = actualWeightSelection;
       r.checkpointRef = _getCheckpointRef(artifacts);
       r.checkpointRuntime = String((artifacts && artifacts.producerRuntime) || (artifacts && artifacts.checkpoint && artifacts.checkpoint.producerRuntime) || (trainer.trainedOnServer ? "python_server" : "js_client"));

@@ -117,7 +117,7 @@ Labels:
 3. **Immediate generation**: In the Generation tab, select `MLP-GAN Generate (pre-trained)`, `DCGAN Generate (pre-trained)`, or `MLP-WGAN Generate (pre-trained)` and click `Generate`
 4. **Train from scratch**: In the Trainer tab, select `MLP-GAN Trainer`, `DCGAN Trainer`, or `MLP-WGAN Trainer` and click `Start Training`
 5. **Use your own weights**: After training finishes, or after a graceful `Stop` saves weights, go back to the matching non-pretrained generation card and generate from that trainer
-6. **Run benchmark evaluation**: In the Evaluation tab, use `Generative Quality (pre-trained)` to compare pre-trained GAN checkpoints against the dataset test split with standard set metrics such as `MMD`, `NN precision/coverage`, and diversity gaps
+6. **Run benchmark evaluation**: In the Evaluation tab, use `Generative Quality (pre-trained)` to compare pre-trained GAN checkpoints against the best available dataset reference split (`test`, then `val`, then `train`) with standard set metrics such as `MMD`, `NN precision/coverage`, and diversity gaps
 7. **Interpret the cards**: cards without `(pre-trained)` are intentionally blank starting points; cards with `(pre-trained)` are ready-to-run demo checkpoints
 
 ## References
