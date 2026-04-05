@@ -400,7 +400,7 @@
       // render each run (most recent first)
       for (var ri = runs.length - 1; ri >= 0; ri--) {
         var run = runs[ri];
-        var runCard = el("div", { className: "osc-card", style: "margin-top:8px;" });
+        var runCard = el("div", { className: "osc-card", style: "margin-top:8px;overflow:hidden;" });
         var runTime = run.completedAt ? new Date(run.completedAt).toLocaleString() : "in progress";
         runCard.appendChild(el("div", { style: "font-size:12px;color:#67e8f9;font-weight:600;" },
           "Run #" + (ri + 1) + " \u2014 " + runTime));
@@ -417,7 +417,8 @@
         });
 
         // comparison table
-        var table = el("table", { className: "osc-metric-table", style: "width:100%;" });
+        var tableWrap = el("div", { style: "width:100%;overflow-x:auto;overflow-y:hidden;margin-top:6px;" });
+        var table = el("table", { className: "osc-metric-table", style: "width:100%;min-width:720px;" });
         var thead = el("tr", {});
         thead.appendChild(el("th", {}, "Model"));
         metricKeys.forEach(function (k) { thead.appendChild(el("th", {}, k.toUpperCase())); });
@@ -442,7 +443,7 @@
 
         results.forEach(function (r) {
           var tr = el("tr", {});
-          var modelCell = el("td", { style: "font-weight:600;color:#e2e8f0;" });
+          var modelCell = el("td", { style: "font-weight:600;color:#e2e8f0;min-width:180px;max-width:260px;vertical-align:top;word-break:break-word;overflow-wrap:anywhere;" });
           modelCell.appendChild(el("div", {}, escapeHtml(r.trainerName || r.modelName || "?")));
           var meta = [];
           if (r.weightSelection) meta.push("weights=" + String(r.weightSelection));
@@ -463,7 +464,8 @@
           tr.appendChild(el("td", { style: "color:" + sc + ";" }, (r.status || "pending") + (r.error ? ": " + r.error : "")));
           table.appendChild(tr);
         });
-        runCard.appendChild(table);
+        tableWrap.appendChild(table);
+        runCard.appendChild(tableWrap);
         _renderMetricLegend(runCard, metricKeys);
 
         // bar chart
@@ -483,7 +485,7 @@
       var doneResults = results.filter(function (r) { return r.status === "done"; });
       if (!doneResults.length) return;
 
-      var chartDiv = el("div", { style: "height:260px;margin-top:8px;" });
+      var chartDiv = el("div", { style: "height:280px;margin-top:8px;max-width:100%;overflow:hidden;" });
       container.appendChild(chartDiv);
 
       var names = doneResults.map(function (r) { return r.trainerName || r.modelName || "?"; });
