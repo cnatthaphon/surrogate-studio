@@ -427,7 +427,16 @@
 
         results.forEach(function (r) {
           var tr = el("tr", {});
-          tr.appendChild(el("td", { style: "font-weight:600;color:#e2e8f0;" }, escapeHtml(r.trainerName || r.modelName || "?")));
+          var modelCell = el("td", { style: "font-weight:600;color:#e2e8f0;" });
+          modelCell.appendChild(el("div", {}, escapeHtml(r.trainerName || r.modelName || "?")));
+          var meta = [];
+          if (r.weightSelection) meta.push("weights=" + String(r.weightSelection));
+          if (r.checkpointRef) meta.push(String(r.checkpointRef));
+          if (r.referenceSplit) meta.push("ref=" + String(r.referenceSplit));
+          if (meta.length) {
+            modelCell.appendChild(el("div", { style: "font-size:10px;color:#64748b;font-weight:400;margin-top:2px;" }, meta.join(" | ")));
+          }
+          tr.appendChild(modelCell);
           metricKeys.forEach(function (k) {
             var v = r.metrics && r.metrics[k];
             var isBest = v != null && v === best[k];
