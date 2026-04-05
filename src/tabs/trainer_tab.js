@@ -288,8 +288,13 @@
       var cfg = tCard.config || {};
       var prev = (tCard.runtimeDiagnostics && typeof tCard.runtimeDiagnostics === "object") ? tCard.runtimeDiagnostics : {};
       var worker = _getWorkerSupport();
+      var modeChanged = !!(patch && (
+        (patch.source != null && patch.source !== prev.source) ||
+        (patch.executionMode != null && patch.executionMode !== prev.executionMode)
+      ));
       tCard.runtimeDiagnostics = Object.assign({}, prev, patch || {}, {
         requestedBackend: (patch && patch.requestedBackend != null) ? patch.requestedBackend : (prev.requestedBackend || String(cfg.runtimeBackend || "auto")),
+        resolvedBackend: (patch && patch.resolvedBackend != null) ? patch.resolvedBackend : (modeChanged ? "" : (prev.resolvedBackend || "")),
         autoOrder: (patch && patch.autoOrder) ? patch.autoOrder : (prev.autoOrder || _normalizeClientBackendOrder(cfg.runtimeBackendOrder)),
         availableBackends: (patch && patch.availableBackends) ? patch.availableBackends : (prev.availableBackends || _getClientBackendAvailability(tf)),
         currentTfBackend: (patch && patch.currentTfBackend != null) ? patch.currentTfBackend : ((tf && typeof tf.getBackend === "function") ? String(tf.getBackend() || "") : (prev.currentTfBackend || "")),
@@ -310,9 +315,14 @@
       var worker = _getWorkerSupport();
       var diag = _setRuntimeDiagnostics(tCard || {}, {});
       var predictedMode = cfg.useServer ? "server" : (worker.available ? "worker" : "main-thread");
+      var resolved = String(diag.resolvedBackend || "").trim();
+      if (!resolved) {
+        if ((diag.source || (cfg.useServer ? "server" : "browser")) === "browser") resolved = String(diag.currentTfBackend || "");
+        else resolved = String((tCard && tCard.backend) || diag.currentTfBackend || "");
+      }
       return {
         requestedBackend: diag.requestedBackend || String(cfg.runtimeBackend || "auto"),
-        resolvedBackend: diag.resolvedBackend || String((tCard && tCard.backend) || diag.currentTfBackend || ""),
+        resolvedBackend: resolved,
         currentTfBackend: diag.currentTfBackend || ((tf && typeof tf.getBackend === "function") ? String(tf.getBackend() || "") : ""),
         autoOrder: Array.isArray(diag.autoOrder) ? diag.autoOrder : _normalizeClientBackendOrder(cfg.runtimeBackendOrder),
         availableBackends: diag.availableBackends || avail,
@@ -1560,6 +1570,10 @@
           _renderLeftPanel(); _renderMainPanel(); _renderRightPanel();
         });
         btnRow.appendChild(stopBtn);
+      } else if (t.status === "stopping") {
+        var stoppingBtn = el("button", { className: "osc-btn", style: "flex:1;background:linear-gradient(135deg,#475569,#334155);border-color:#64748b;" }, "Stopping...");
+        stoppingBtn.disabled = true;
+        btnRow.appendChild(stoppingBtn);
       } else {
         var trainLabel = hasTrained ? "Continue Training" : "Start Training";
         var trainBtn = el("button", { className: "osc-btn", style: "flex:1;" }, trainLabel);
@@ -1857,12 +1871,14 @@
       tCard.status = "running";
       tCard.error = "";
       tCard.config = config;
+      var initialExecutionMode = Boolean(config.useServer) ? "server" : ((_isPhased || !_getWorkerSupport().available) ? "main-thread" : "worker");
       _setRuntimeDiagnostics(tCard, {
         requestedBackend: String(config.runtimeBackend || "auto"),
-        executionMode: Boolean(config.useServer) ? "server" : (_getWorkerSupport().available ? "worker" : "main-thread"),
+        executionMode: initialExecutionMode,
         source: Boolean(config.useServer) ? "server" : "browser",
         status: "preparing",
         note: "Preparing training session.",
+        resolvedBackend: "",
       });
       var epochRowsBefore = store ? (store.getTrainerEpochs(activeId) || []) : [];
       var resumeEpochOffset = 0;
