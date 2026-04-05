@@ -24,6 +24,11 @@
       return v ? "on" : "off";
     }
 
+    function _numOr(value, fallback) {
+      var n = Number(value);
+      return Number.isFinite(n) ? n : fallback;
+    }
+
     function addInputNode(editor, x, y) {
       var html =
         "<div><div style='font-weight:700'>Input</div><div style='display:grid;gap:4px'>" +
