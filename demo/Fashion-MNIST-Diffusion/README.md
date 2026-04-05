@@ -89,7 +89,10 @@ ImageSource → AddNoise(σ=0.5, cosine) + TimeEmbed(128) → Concat
 1. Open `index.html` in a browser
 2. Generate Fashion-MNIST dataset (T-shirt class, 6000 images, 80/10/10 split)
 3. Select a trainer, click Start Training
-4. Generation tab: Reconstruct (test denoising) or DDPM (generate from noise)
+4. Generation tab: Reconstruct (test denoising) or DDPM/Langevin (generate from noise)
+5. Evaluation tab:
+   - `Generation Quality` compares sampled outputs to the dataset test split with standard set metrics (`MMD`, mean/std gaps, nearest-neighbor precision/coverage, diversity)
+   - `Reconstruction Quality` compares denoised reconstructions with `Reconstruction MSE`
 
 ## References
 

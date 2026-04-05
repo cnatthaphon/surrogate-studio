@@ -224,6 +224,215 @@
     return residuals;
   }
 
+  function _lcg(seed) {
+    var state = (Number(seed) || 42) >>> 0;
+    return function () {
+      state = (1664525 * state + 1013904223) >>> 0;
+      return state / 4294967296;
+    };
+  }
+
+  function _selectSampleRows(rows, limit, seed) {
+    var list = Array.isArray(rows) ? rows : [];
+    var maxRows = Math.max(0, Number(limit) || 0);
+    if (!maxRows || list.length <= maxRows) return list.slice();
+    var idx = [];
+    for (var i = 0; i < list.length; i++) idx.push(i);
+    var rand = _lcg(seed);
+    for (var j = idx.length - 1; j > 0; j--) {
+      var k = Math.floor(rand() * (j + 1));
+      var tmp = idx[j];
+      idx[j] = idx[k];
+      idx[k] = tmp;
+    }
+    idx = idx.slice(0, maxRows);
+    idx.sort(function (a, b) { return a - b; });
+    return idx.map(function (i0) { return list[i0]; });
+  }
+
+  function _coerceNumericMatrix(rows, limit, seed) {
+    var picked = _selectSampleRows(Array.isArray(rows) ? rows : [], limit, seed);
+    var out = [];
+    for (var i = 0; i < picked.length; i++) {
+      var row = picked[i];
+      if (!Array.isArray(row) || !row.length) continue;
+      out.push(row.map(function (v) {
+        var n = Number(v);
+        return Number.isFinite(n) ? n : 0;
+      }));
+    }
+    return out;
+  }
+
+  function _matrixDim(a, b) {
+    var dim = Infinity;
+    [a, b].forEach(function (rows) {
+      (rows || []).forEach(function (row) {
+        if (Array.isArray(row) && row.length) dim = Math.min(dim, row.length);
+      });
+    });
+    return Number.isFinite(dim) && dim > 0 ? dim : 0;
+  }
+
+  function _meanVector(rows, dim) {
+    var out = new Array(dim).fill(0);
+    if (!rows.length || !dim) return out;
+    for (var i = 0; i < rows.length; i++) {
+      for (var j = 0; j < dim; j++) out[j] += Number(rows[i][j] || 0);
+    }
+    for (var k = 0; k < dim; k++) out[k] /= rows.length;
+    return out;
+  }
+
+  function _stdVector(rows, dim, mean) {
+    var out = new Array(dim).fill(0);
+    if (!rows.length || !dim) return out;
+    for (var i = 0; i < rows.length; i++) {
+      for (var j = 0; j < dim; j++) {
+        var diff = Number(rows[i][j] || 0) - Number(mean[j] || 0);
+        out[j] += diff * diff;
+      }
+    }
+    for (var k = 0; k < dim; k++) out[k] = Math.sqrt(out[k] / rows.length);
+    return out;
+  }
+
+  function _avgAbsDiff(a, b, dim) {
+    if (!dim) return 0;
+    var sum = 0;
+    for (var i = 0; i < dim; i++) sum += Math.abs(Number(a[i] || 0) - Number(b[i] || 0));
+    return sum / dim;
+  }
+
+  function _rmsDistanceSq(a, b, dim) {
+    if (!dim) return 0;
+    var sum = 0;
+    for (var i = 0; i < dim; i++) {
+      var diff = Number(a[i] || 0) - Number(b[i] || 0);
+      sum += diff * diff;
+    }
+    return sum / dim;
+  }
+
+  function _avgPairwiseDistance(rows, dim) {
+    if (!rows || rows.length < 2 || !dim) return 0;
+    var total = 0;
+    var count = 0;
+    for (var i = 0; i < rows.length; i++) {
+      for (var j = i + 1; j < rows.length; j++) {
+        total += Math.sqrt(_rmsDistanceSq(rows[i], rows[j], dim));
+        count++;
+      }
+    }
+    return count ? total / count : 0;
+  }
+
+  function _avgNearestNeighborDistance(sourceRows, targetRows, dim) {
+    if (!sourceRows || !sourceRows.length || !targetRows || !targetRows.length || !dim) return 0;
+    var total = 0;
+    for (var i = 0; i < sourceRows.length; i++) {
+      var best = Infinity;
+      for (var j = 0; j < targetRows.length; j++) {
+        var distSq = _rmsDistanceSq(sourceRows[i], targetRows[j], dim);
+        if (distSq < best) best = distSq;
+      }
+      total += Math.sqrt(best);
+    }
+    return total / sourceRows.length;
+  }
+
+  function _estimateRbfSigma(referenceRows, generatedRows, dim) {
+    var pairs = [];
+    var refLimit = Math.min(referenceRows.length, 16);
+    var genLimit = Math.min(generatedRows.length, 16);
+    for (var i = 0; i < refLimit; i++) {
+      for (var j = i + 1; j < refLimit; j++) pairs.push(Math.sqrt(_rmsDistanceSq(referenceRows[i], referenceRows[j], dim)));
+    }
+    for (var g = 0; g < genLimit; g++) {
+      for (var h = g + 1; h < genLimit; h++) pairs.push(Math.sqrt(_rmsDistanceSq(generatedRows[g], generatedRows[h], dim)));
+    }
+    for (var r = 0; r < refLimit; r++) {
+      for (var s = 0; s < genLimit; s++) pairs.push(Math.sqrt(_rmsDistanceSq(referenceRows[r], generatedRows[s], dim)));
+    }
+    if (!pairs.length) return 1;
+    pairs.sort(function (a, b) { return a - b; });
+    var mid = Math.floor(pairs.length / 2);
+    var sigma = pairs[mid];
+    return sigma > 1e-8 ? sigma : 1;
+  }
+
+  function _rbfKernelFromDistSq(distSq, sigma) {
+    var denom = 2 * sigma * sigma;
+    return Math.exp(-distSq / Math.max(1e-8, denom));
+  }
+
+  function _computeMmdRbf(referenceRows, generatedRows, dim) {
+    if (!referenceRows.length || !generatedRows.length || !dim) return 0;
+    var sigma = _estimateRbfSigma(referenceRows, generatedRows, dim);
+    var xx = 0, yy = 0, xy = 0;
+    for (var i = 0; i < referenceRows.length; i++) {
+      for (var j = 0; j < referenceRows.length; j++) xx += _rbfKernelFromDistSq(_rmsDistanceSq(referenceRows[i], referenceRows[j], dim), sigma);
+    }
+    for (var g = 0; g < generatedRows.length; g++) {
+      for (var h = 0; h < generatedRows.length; h++) yy += _rbfKernelFromDistSq(_rmsDistanceSq(generatedRows[g], generatedRows[h], dim), sigma);
+    }
+    for (var r = 0; r < referenceRows.length; r++) {
+      for (var s = 0; s < generatedRows.length; s++) xy += _rbfKernelFromDistSq(_rmsDistanceSq(referenceRows[r], generatedRows[s], dim), sigma);
+    }
+    xx /= (referenceRows.length * referenceRows.length);
+    yy /= (generatedRows.length * generatedRows.length);
+    xy /= (referenceRows.length * generatedRows.length);
+    return Math.max(0, xx + yy - 2 * xy);
+  }
+
+  function computeSetComparisonMetrics(referenceSamples, generatedSamples, opts) {
+    var cfg = opts && typeof opts === "object" ? opts : {};
+    var seed = Number(cfg.seed) || 42;
+    var refRows = _coerceNumericMatrix(referenceSamples, Math.max(1, Number(cfg.referenceLimit) || 128), seed);
+    var genRows = _coerceNumericMatrix(generatedSamples, Math.max(1, Number(cfg.generatedLimit) || 128), seed + 1);
+    var dim = _matrixDim(refRows, genRows);
+    if (!refRows.length || !genRows.length || !dim) {
+      return {
+        referenceCount: refRows.length,
+        generatedCount: genRows.length,
+        dim: dim,
+        meanGap: 0,
+        stdGap: 0,
+        diversity: 0,
+        referenceDiversity: 0,
+        diversityGap: 0,
+        nnPrecision: 0,
+        nnCoverage: 0,
+        mmdRbf: 0,
+      };
+    }
+    var refMean = _meanVector(refRows, dim);
+    var genMean = _meanVector(genRows, dim);
+    var refStd = _stdVector(refRows, dim, refMean);
+    var genStd = _stdVector(genRows, dim, genMean);
+    var refDiv = _avgPairwiseDistance(_selectSampleRows(refRows, Math.max(2, Number(cfg.pairwiseLimit) || 64), seed + 2), dim);
+    var genDiv = _avgPairwiseDistance(_selectSampleRows(genRows, Math.max(2, Number(cfg.pairwiseLimit) || 64), seed + 3), dim);
+    var refForNN = _selectSampleRows(refRows, Math.max(1, Number(cfg.nnReferenceLimit) || 128), seed + 4);
+    var genForNN = _selectSampleRows(genRows, Math.max(1, Number(cfg.nnGeneratedLimit) || 128), seed + 5);
+    return {
+      referenceCount: refRows.length,
+      generatedCount: genRows.length,
+      dim: dim,
+      meanGap: _avgAbsDiff(refMean, genMean, dim),
+      stdGap: _avgAbsDiff(refStd, genStd, dim),
+      diversity: genDiv,
+      referenceDiversity: refDiv,
+      diversityGap: Math.abs(genDiv - refDiv),
+      nnPrecision: _avgNearestNeighborDistance(genForNN, refForNN, dim),
+      nnCoverage: _avgNearestNeighborDistance(refForNN, genForNN, dim),
+      mmdRbf: _computeMmdRbf(
+        _selectSampleRows(refRows, Math.max(2, Number(cfg.mmdReferenceLimit) || 64), seed + 6),
+        _selectSampleRows(genRows, Math.max(2, Number(cfg.mmdGeneratedLimit) || 64), seed + 7),
+        dim
+      ),
+    };
+  }
+
   return {
     computeRegressionMetrics: computeRegressionMetrics,
     computeClassificationMetrics: computeClassificationMetrics,
@@ -236,6 +445,7 @@
     r2Score: r2Score,
     rocCurveOneVsRest: rocCurveOneVsRest,
     computeResiduals: computeResiduals,
+    computeSetComparisonMetrics: computeSetComparisonMetrics,
     resolveInferenceMethod: resolveInferenceMethod,
     buildHistoryWindow: buildHistoryWindow,
   };

@@ -48,6 +48,7 @@
     };
     var getTf = function () { var W = typeof window !== "undefined" ? window : {}; return W.tf || null; };
     var getUiEngine = function () { var W = typeof window !== "undefined" ? window : {}; return W.OSCUiSharedEngine || null; };
+    var getGenerationEngine = function () { var W = typeof window !== "undefined" ? window : {}; return W.OSCGenerationEngineCore || null; };
     var modal = deps.modal;
 
     var _activeEvalId = null;
@@ -86,7 +87,13 @@
         list.push({ id: "macro_f1", name: "Macro F1", mode: "test" });
       }
       list.push({ id: "recon_mse", name: "Reconstruction MSE", mode: "generation" });
-      list.push({ id: "diversity", name: "Sample Diversity", mode: "generation" });
+      list.push({ id: "mmd_rbf", name: "MMD (RBF)", mode: "generation" });
+      list.push({ id: "mean_gap", name: "Mean Gap", mode: "generation" });
+      list.push({ id: "std_gap", name: "Std Gap", mode: "generation" });
+      list.push({ id: "nn_precision", name: "NN Precision", mode: "generation" });
+      list.push({ id: "nn_coverage", name: "NN Coverage", mode: "generation" });
+      list.push({ id: "diversity_gap", name: "Diversity Gap", mode: "generation" });
+      list.push({ id: "diversity", name: "Pairwise Diversity", mode: "generation" });
       return list;
     }
 
@@ -114,6 +121,96 @@
       if (!store) return [];
       return (typeof store.listTrainerCards === "function" ? store.listTrainerCards({}) : [])
         .filter(function (t) { return t.modelId && (!schemaId || t.schemaId === schemaId); });
+    }
+
+    function _getTrainerArtifacts(trainer, weightSelection) {
+      if (!trainer) return null;
+      var sel = String(weightSelection || "").trim().toLowerCase();
+      if (sel === "best" && trainer.modelArtifactsBest) return trainer.modelArtifactsBest;
+      return trainer.modelArtifactsLast || trainer.modelArtifacts || trainer.modelArtifactsBest || null;
+    }
+
+    function _getCheckpointRef(artifacts) {
+      var checkpoint = artifacts && artifacts.checkpoint && typeof artifacts.checkpoint === "object" ? artifacts.checkpoint : null;
+      return String((checkpoint && checkpoint.checkpointRef) || (artifacts && artifacts.checkpointRef) || "").trim();
+    }
+
+    function _resolveGenerationInfo(modelRec) {
+      if (!modelRec || !modelRec.graph || !modelBuilder) {
+        return {
+          family: "",
+          sampleNodes: [],
+          outputNodes: [],
+          hasLatentDecoder: false,
+          canReconstruct: true,
+          canRandomSample: false,
+          canClassifierGuide: false,
+          canLangevin: false,
+          canOptimize: false,
+          canInverse: true,
+          canDDPM: false,
+          defaultMethod: "reconstruct",
+        };
+      }
+      if (typeof modelBuilder.extractGenerationCapabilities === "function") {
+        return modelBuilder.extractGenerationCapabilities(modelRec.graph);
+      }
+      var family = typeof modelBuilder.inferModelFamily === "function" ? modelBuilder.inferModelFamily(modelRec.graph) : "";
+      return { family: family, sampleNodes: [], outputNodes: [], hasLatentDecoder: family === "vae", defaultMethod: family === "gan" ? "random" : "reconstruct" };
+    }
+
+    function _resolveGenerationMeta(modelRec) {
+      var engine = getGenerationEngine();
+      var info = _resolveGenerationInfo(modelRec);
+      var caps = engine && typeof engine.detectCapabilities === "function"
+        ? engine.detectCapabilities(info)
+        : { availableMethods: [{ id: "inverse", label: "Inverse / Transfer Learning" }], defaultMethod: "inverse" };
+      return { info: info, caps: caps };
+    }
+
+    function _getActiveDatasetData(dsData) {
+      return dsData && dsData.kind === "dataset_bundle" && dsData.datasets
+        ? dsData.datasets[dsData.activeVariantId || Object.keys(dsData.datasets)[0]]
+        : dsData;
+    }
+
+    function _resolveDatasetSplit(dsData, split) {
+      var activeDs = _getActiveDatasetData(dsData);
+      var W = typeof window !== "undefined" ? window : {};
+      var srcReg = W.OSCDatasetSourceRegistry || null;
+      if (srcReg && typeof srcReg.resolveDatasetSplit === "function") {
+        var resolved = srcReg.resolveDatasetSplit(activeDs, split);
+        if (resolved && resolved.x) return resolved;
+      }
+      var rec = activeDs && activeDs.records && activeDs.records[split];
+      if (rec) return { x: rec.x || [], y: rec.y || [], length: (rec.x || []).length };
+      var xKey = "x" + split.charAt(0).toUpperCase() + split.slice(1);
+      var yKey = "y" + split.charAt(0).toUpperCase() + split.slice(1);
+      return activeDs ? { x: activeDs[xKey] || [], y: activeDs[yKey] || [], length: (activeDs[xKey] || []).length } : { x: [], y: [], length: 0 };
+    }
+
+    function _resolveFeatureSize(dsData, fallbackRows) {
+      var activeDs = _getActiveDatasetData(dsData) || {};
+      var W = typeof window !== "undefined" ? window : {};
+      var srcReg = W.OSCDatasetSourceRegistry || null;
+      var fromRegistry = srcReg && typeof srcReg.getFeatureSize === "function" ? srcReg.getFeatureSize(activeDs) : 0;
+      if (Number(fromRegistry) > 0) return Number(fromRegistry);
+      if (activeDs.featureSize) return Number(activeDs.featureSize);
+      var rows = Array.isArray(fallbackRows) ? fallbackRows : [];
+      return rows.length && Array.isArray(rows[0]) ? rows[0].length : 0;
+    }
+
+    function _makeMethodOptions() {
+      return [
+        { value: "auto", label: "Auto" },
+        { value: "random", label: "Random Sampling" },
+        { value: "reconstruct", label: "Reconstruct" },
+        { value: "ddpm", label: "DDPM" },
+        { value: "langevin", label: "Langevin" },
+        { value: "optimize", label: "Latent Optimization" },
+        { value: "classifier_guided", label: "Classifier-Guided" },
+        { value: "inverse", label: "Inverse" },
+      ];
     }
 
     // ─── Get datasets for a schema ───
@@ -204,7 +301,28 @@
           var sid = _schemaSelect ? _schemaSelect.value : "";
           if (!name) { onStatus("Enter a name"); return; }
           var id = "eval_" + Date.now() + "_" + Math.floor(Math.random() * 10000);
-          var rec = { id: id, name: name, schemaId: sid, datasetId: "", trainerIds: [], evaluatorIds: ["mae", "rmse", "r2"], status: "draft", runs: [], createdAt: Date.now() };
+          var rec = {
+            id: id,
+            name: name,
+            schemaId: sid,
+            datasetId: "",
+            trainerIds: [],
+            evaluatorIds: ["mae", "rmse", "r2"],
+            runMode: "auto",
+            weightSelection: "last",
+            generationConfig: {
+              runtime: "client",
+              method: "auto",
+              numSamples: 64,
+              steps: 100,
+              lr: 0.01,
+              temperature: 1,
+              seed: 42,
+            },
+            status: "draft",
+            runs: [],
+            createdAt: Date.now(),
+          };
           _saveEval(rec);
           _activeEvalId = id;
           onStatus("Created: " + name);
@@ -275,7 +393,9 @@
         // find best values per metric (for highlighting)
         var best = {};
         metricKeys.forEach(function (k) {
-          var isLower = k === "mae" || k === "rmse" || k === "bias" || k === "recon_mse";
+          var isLower = k === "mae" || k === "rmse" || k === "bias" || k === "recon_mse" ||
+            k === "mmd_rbf" || k === "mean_gap" || k === "std_gap" ||
+            k === "nn_precision" || k === "nn_coverage" || k === "diversity_gap";
           var bestVal = isLower ? Infinity : -Infinity;
           results.forEach(function (r) {
             var v = r.metrics && r.metrics[k];
@@ -466,6 +586,103 @@
         });
       }
 
+      var modeRow = el("div", { className: "osc-form-row", style: "margin-top:8px;" });
+      modeRow.appendChild(el("label", {}, "Run Mode"));
+      var modeSel = el("select", { style: "width:100%;padding:4px;background:#1e293b;color:#e2e8f0;border:1px solid #334155;border-radius:4px;font-size:11px;" });
+      [
+        { value: "auto", label: "Auto" },
+        { value: "predict", label: "Predictive only" },
+        { value: "generate", label: "Generative only" },
+        { value: "both", label: "Both" },
+      ].forEach(function (opt) {
+        var o = el("option", { value: opt.value }, opt.label);
+        if (opt.value === String(ev.runMode || "auto")) o.selected = true;
+        modeSel.appendChild(o);
+      });
+      modeSel.addEventListener("change", function () { ev.runMode = modeSel.value; _saveEval(ev); _renderRightPanel(); });
+      modeRow.appendChild(modeSel);
+      configCard.appendChild(modeRow);
+
+      var selectedEvaluatorDefs = allEvaluators.filter(function (item) { return (ev.evaluatorIds || []).indexOf(item.id) >= 0; });
+      var hasGenerationMetrics = selectedEvaluatorDefs.some(function (item) { return item.mode === "generation" || item.mode === "both"; });
+
+      var selectedTrainerCards = (ev.trainerIds || []).map(function (tid) { return store ? store.getTrainerCard(tid) : null; }).filter(Boolean);
+      var hasBestWeights = selectedTrainerCards.some(function (t) { return !!t.modelArtifactsBest; });
+      var weightRow = el("div", { className: "osc-form-row", style: "margin-top:8px;" });
+      weightRow.appendChild(el("label", {}, "Weights"));
+      var weightSel = el("select", { style: "width:100%;padding:4px;background:#1e293b;color:#e2e8f0;border:1px solid #334155;border-radius:4px;font-size:11px;" });
+      [{ value: "last", label: "Last epoch" }, { value: "best", label: "Best loss" }].forEach(function (opt) {
+        var o = el("option", { value: opt.value }, opt.label);
+        if (opt.value === String(ev.weightSelection || "last")) o.selected = true;
+        if (opt.value === "best" && !hasBestWeights) o.disabled = true;
+        weightSel.appendChild(o);
+      });
+      weightSel.addEventListener("change", function () { ev.weightSelection = weightSel.value; _saveEval(ev); });
+      weightRow.appendChild(weightSel);
+      configCard.appendChild(weightRow);
+
+      var showGenSettings = String(ev.runMode || "auto") !== "predict" || hasGenerationMetrics;
+      if (showGenSettings) {
+        if (!ev.generationConfig) ev.generationConfig = {};
+        if (!ev.generationConfig.runtime) ev.generationConfig.runtime = "client";
+        if (!ev.generationConfig.method) ev.generationConfig.method = "auto";
+        if (!Number.isFinite(Number(ev.generationConfig.numSamples))) ev.generationConfig.numSamples = 64;
+        if (!Number.isFinite(Number(ev.generationConfig.steps))) ev.generationConfig.steps = 100;
+        if (!Number.isFinite(Number(ev.generationConfig.lr))) ev.generationConfig.lr = 0.01;
+        if (!Number.isFinite(Number(ev.generationConfig.temperature))) ev.generationConfig.temperature = 1;
+        if (!Number.isFinite(Number(ev.generationConfig.seed))) ev.generationConfig.seed = 42;
+
+        configCard.appendChild(el("div", { style: "font-size:10px;color:#67e8f9;margin:8px 0 4px;font-weight:600;" }, "Generation Settings"));
+
+        var genRuntimeRow = el("div", { className: "osc-form-row" });
+        genRuntimeRow.appendChild(el("label", {}, "Generation Runtime"));
+        var genRuntimeSel = el("select", { style: "width:100%;padding:4px;background:#1e293b;color:#e2e8f0;border:1px solid #334155;border-radius:4px;font-size:11px;" });
+        [{ value: "client", label: "Client (TF.js)" }, { value: "server", label: "Server (PyTorch)" }].forEach(function (opt) {
+          var o = el("option", { value: opt.value }, opt.label);
+          if (opt.value === String(ev.generationConfig.runtime || "client")) o.selected = true;
+          genRuntimeSel.appendChild(o);
+        });
+        genRuntimeSel.addEventListener("change", function () { ev.generationConfig.runtime = genRuntimeSel.value; _saveEval(ev); });
+        genRuntimeRow.appendChild(genRuntimeSel);
+        configCard.appendChild(genRuntimeRow);
+
+        var genMethodRow = el("div", { className: "osc-form-row" });
+        genMethodRow.appendChild(el("label", {}, "Generation Method"));
+        var genMethodSel = el("select", { style: "width:100%;padding:4px;background:#1e293b;color:#e2e8f0;border:1px solid #334155;border-radius:4px;font-size:11px;" });
+        _makeMethodOptions().forEach(function (opt) {
+          var o = el("option", { value: opt.value }, opt.label);
+          if (opt.value === String(ev.generationConfig.method || "auto")) o.selected = true;
+          genMethodSel.appendChild(o);
+        });
+        genMethodSel.addEventListener("change", function () { ev.generationConfig.method = genMethodSel.value; _saveEval(ev); });
+        genMethodRow.appendChild(genMethodSel);
+        configCard.appendChild(genMethodRow);
+
+        [
+          { key: "numSamples", label: "Samples", min: 1, max: 512, step: 1 },
+          { key: "steps", label: "Steps", min: 1, max: 1000, step: 1 },
+          { key: "lr", label: "Learning rate", min: 0.0001, max: 1, step: 0.001 },
+          { key: "temperature", label: "Temperature", min: 0.01, max: 5, step: 0.1 },
+          { key: "seed", label: "Seed", min: 1, step: 1 },
+        ].forEach(function (field) {
+          var row = el("div", { className: "osc-form-row" });
+          row.appendChild(el("label", {}, field.label));
+          var inp = el("input", { type: "number", value: String(ev.generationConfig[field.key]), style: "width:100%;padding:4px;background:#1e293b;color:#e2e8f0;border:1px solid #334155;border-radius:4px;font-size:11px;" });
+          if (field.min != null) inp.min = field.min;
+          if (field.max != null) inp.max = field.max;
+          if (field.step != null) inp.step = field.step;
+          inp.addEventListener("change", function () {
+            ev.generationConfig[field.key] = Number(inp.value);
+            _saveEval(ev);
+          });
+          row.appendChild(inp);
+          configCard.appendChild(row);
+        });
+
+        configCard.appendChild(el("div", { style: "font-size:10px;color:#64748b;margin-top:4px;" },
+          "Generative evaluation samples fresh outputs from the selected checkpoint and compares them to the dataset test split."));
+      }
+
       rightEl.appendChild(configCard);
 
       // action buttons
@@ -490,6 +707,7 @@
       if (!ev) return;
       if (!ev.trainerIds || !ev.trainerIds.length) { onStatus("Select at least one model"); return; }
       if (!ev.datasetId) { onStatus("Select a dataset"); return; }
+      if (!ev.evaluatorIds || !ev.evaluatorIds.length) { onStatus("Select at least one metric"); return; }
 
       var tf = getTf();
       var pc = predictionCore || (typeof window !== "undefined" && window.OSCPredictionCore) || null;
@@ -544,16 +762,344 @@
 
     function _getServerAdapter() { var W = typeof window !== "undefined" ? window : {}; return W.OSCServerRuntimeAdapter || null; }
 
+    function _resolveSelectedEvaluators(ev, isClassification) {
+      var selectedIds = ev && ev.evaluatorIds ? ev.evaluatorIds : [];
+      return _getAllEvaluators(ev && ev.schemaId, isClassification).filter(function (item) {
+        return selectedIds.indexOf(item.id) >= 0;
+      });
+    }
+
+    function _resolveRunNeeds(ev, selectedEvaluatorDefs) {
+      var mode = String((ev && ev.runMode) || "auto").trim().toLowerCase();
+      var defs = Array.isArray(selectedEvaluatorDefs) ? selectedEvaluatorDefs : [];
+      var hasPredictive = defs.some(function (item) { return String(item && item.mode || "test") !== "generation"; });
+      var hasGenerative = defs.some(function (item) {
+        var itemMode = String(item && item.mode || "test");
+        return itemMode === "generation" || itemMode === "both";
+      });
+      if (mode === "predict") return { predictive: true, generative: false };
+      if (mode === "generate") return { predictive: false, generative: true };
+      if (mode === "both") return { predictive: hasPredictive, generative: hasGenerative };
+      return { predictive: hasPredictive, generative: hasGenerative };
+    }
+
+    function _resolveGenerationMethod(meta, requested) {
+      var req = String(requested || "auto").trim().toLowerCase();
+      if (req && req !== "auto") return req;
+      var info = meta && meta.info ? meta.info : {};
+      if (info.canRandomSample) return "random";
+      if (info.canDDPM) return "ddpm";
+      if (info.canLangevin) return "langevin";
+      if (info.canReconstruct) return "reconstruct";
+      if (info.canInverse) return "inverse";
+      return String((meta && meta.caps && meta.caps.defaultMethod) || info.defaultMethod || "reconstruct");
+    }
+
+    function _resolveActualWeightSelection(trainer, artifacts, requested) {
+      var req = String(requested || "last").trim().toLowerCase();
+      if (!trainer) return req || "last";
+      if (req === "best" && trainer.modelArtifactsBest && artifacts === trainer.modelArtifactsBest) return "best";
+      if (trainer.modelArtifactsLast && artifacts === trainer.modelArtifactsLast) return "last";
+      if (trainer.modelArtifacts && artifacts === trainer.modelArtifacts) return req === "best" && trainer.modelArtifactsBest ? "best" : "last";
+      return req || "last";
+    }
+
+    function _applyPredictionMetrics(pc, r, selectedIds, allPreds, testY, testN, nCls, isClassification) {
+      if (!pc) return;
+      if (isClassification) {
+        var predLabels = allPreds.map(function (p) { return p.indexOf(Math.max.apply(null, p)); });
+        var trueLabels = testY.map(function (y) { return Array.isArray(y) ? y.indexOf(Math.max.apply(null, y)) : Number(y); });
+        var correct = 0;
+        for (var ci = 0; ci < testN; ci++) if (predLabels[ci] === trueLabels[ci]) correct++;
+        if (selectedIds.indexOf("accuracy") >= 0) r.metrics.accuracy = correct / testN;
+        if (selectedIds.indexOf("macro_f1") >= 0 && pc.confusionMatrix) {
+          var cm = pc.confusionMatrix(trueLabels, predLabels, nCls);
+          var prf = pc.precisionRecallF1(cm);
+          r.metrics.macro_f1 = prf.reduce(function (s, p) { return s + p.f1; }, 0) / Math.max(1, nCls);
+        }
+        return;
+      }
+
+      var truthFlat = [];
+      var predFlat = [];
+      for (var mi = 0; mi < testN; mi++) {
+        var yt = testY[mi];
+        var pp = allPreds[mi];
+        if (Array.isArray(yt) && yt.length > 1) {
+          for (var d = 0; d < yt.length; d++) {
+            truthFlat.push(Number(yt[d] || 0));
+            predFlat.push(Number((pp && pp[d]) || 0));
+          }
+        } else {
+          truthFlat.push(Number(Array.isArray(yt) ? yt[0] : yt || 0));
+          predFlat.push(Number(Array.isArray(pp) ? pp[0] : pp || 0));
+        }
+      }
+      var reg = pc.computeRegressionMetrics(truthFlat, predFlat);
+      if (selectedIds.indexOf("mae") >= 0) r.metrics.mae = reg.mae;
+      if (selectedIds.indexOf("rmse") >= 0) r.metrics.rmse = reg.rmse;
+      if (selectedIds.indexOf("bias") >= 0) r.metrics.bias = reg.bias;
+      if (selectedIds.indexOf("r2") >= 0) r.metrics.r2 = pc.r2Score(truthFlat, predFlat);
+    }
+
+    function _applyGenerationMetrics(pc, r, selectedIds, comparison, generationResult) {
+      if (selectedIds.indexOf("recon_mse") >= 0 && generationResult && generationResult.avgMse != null) r.metrics.recon_mse = Number(generationResult.avgMse);
+      if (!comparison) return;
+      if (selectedIds.indexOf("mmd_rbf") >= 0) r.metrics.mmd_rbf = Number(comparison.mmdRbf || 0);
+      if (selectedIds.indexOf("mean_gap") >= 0) r.metrics.mean_gap = Number(comparison.meanGap || 0);
+      if (selectedIds.indexOf("std_gap") >= 0) r.metrics.std_gap = Number(comparison.stdGap || 0);
+      if (selectedIds.indexOf("nn_precision") >= 0) r.metrics.nn_precision = Number(comparison.nnPrecision || 0);
+      if (selectedIds.indexOf("nn_coverage") >= 0) r.metrics.nn_coverage = Number(comparison.nnCoverage || 0);
+      if (selectedIds.indexOf("diversity_gap") >= 0) r.metrics.diversity_gap = Number(comparison.diversityGap || 0);
+      if (selectedIds.indexOf("diversity") >= 0) r.metrics.diversity = Number(comparison.diversity || 0);
+    }
+
+    function _applyModuleMetrics(schemaId, selectedIds, r, context) {
+      var moduleEvals = _getModuleEvaluators(schemaId);
+      moduleEvals.forEach(function (mev) {
+        if (selectedIds.indexOf(mev.id) < 0 || typeof mev.compute !== "function") return;
+        try {
+          var result = mev.compute(context);
+          if (result && result.value != null) r.metrics[mev.id] = result.value;
+        } catch (_) {}
+      });
+    }
+
+    function _runPredictiveEvaluation(tf, trainer, modelRec, artifacts, allowedOutputKeys, defaultTarget, nCls, featureSize, testX, useServer) {
+      var serverAdapter = _getServerAdapter();
+      if (useServer && serverAdapter) {
+        var serverUrl = (trainer.config && trainer.config.serverUrl) || "";
+        return serverAdapter.checkServer(serverUrl).then(function (ok) {
+          if (!ok) return null;
+          return serverAdapter.predictOnServer({
+            graph: modelRec.graph,
+            weightValues: artifacts && artifacts.weightValues,
+            weightSpecs: artifacts && artifacts.weightSpecs,
+            checkpoint: artifacts && artifacts.checkpoint,
+            featureSize: featureSize,
+            targetSize: featureSize,
+            numClasses: nCls,
+            xInput: testX,
+          }, serverUrl).then(function (result) {
+            return result && result.predictions ? result.predictions : [];
+          }).catch(function () {
+            return null;
+          });
+        });
+      }
+
+      return Promise.resolve().then(function () {
+        var graphMode = modelBuilder.inferGraphMode(modelRec.graph, "direct");
+        var built = modelBuilder.buildModelFromGraph(tf, modelRec.graph, {
+          mode: graphMode,
+          featureSize: featureSize,
+          windowSize: 1,
+          seqFeatureSize: featureSize,
+          allowedOutputKeys: allowedOutputKeys,
+          defaultTarget: defaultTarget,
+          numClasses: nCls,
+        });
+        _loadWeights(tf, built.model, artifacts);
+        var allPreds = [];
+        var batchSize = 256;
+        for (var bi = 0; bi < testX.length; bi += batchSize) {
+          var bEnd = Math.min(bi + batchSize, testX.length);
+          var bt = tf.tensor2d(testX.slice(bi, bEnd));
+          var br = built.model.predict(bt);
+          allPreds = allPreds.concat((Array.isArray(br) ? br[0] : br).arraySync());
+          bt.dispose();
+          if (Array.isArray(br)) br.forEach(function (t) { t.dispose(); }); else br.dispose();
+        }
+        built.model.dispose();
+        return allPreds;
+      });
+    }
+
+    function _runGenerativeEvaluation(tf, trainer, modelRec, dataset, artifacts, ev, meta, featureSize, nCls) {
+      var engine = getGenerationEngine();
+      var serverAdapter = _getServerAdapter();
+      if (!engine) return Promise.reject(new Error("Generation engine not available"));
+
+      var gCfg = ev && ev.generationConfig ? ev.generationConfig : {};
+      var method = _resolveGenerationMethod(meta, gCfg.method);
+      var generationRuntime = String(gCfg.runtime || "client").trim().toLowerCase() === "server" ? "server" : "client";
+      var dsData = dataset && dataset.data ? dataset.data : {};
+      var activeDs = _getActiveDatasetData(dsData);
+      var testSplit = _resolveDatasetSplit(dsData, "test");
+      var testX = testSplit.x || [];
+      var testY = testSplit.y || [];
+      var numSamples = Math.max(1, Number(gCfg.numSamples) || 64);
+      var steps = Math.max(1, Number(gCfg.steps) || 100);
+      var seed = Number(gCfg.seed) || 42;
+      var lr = Number(gCfg.lr || 0.01);
+      var temperature = Number(gCfg.temperature || 1);
+      var allowedOutputKeys = schemaRegistry ? schemaRegistry.getOutputKeys(ev.schemaId) : [];
+      var defaultTarget = (allowedOutputKeys[0] && (allowedOutputKeys[0].key || allowedOutputKeys[0])) || "";
+      var graphMode = modelBuilder.inferGraphMode(modelRec.graph, "direct");
+
+      function buildServerConfig() {
+        var config = {
+          graph: modelRec.graph,
+          weightValues: artifacts && artifacts.weightValues,
+          weightSpecs: artifacts && artifacts.weightSpecs,
+          checkpoint: artifacts && artifacts.checkpoint,
+          featureSize: featureSize,
+          targetSize: featureSize,
+          numClasses: nCls,
+          method: method,
+          numSamples: numSamples,
+          steps: steps,
+          lr: lr,
+          latentDim: modelBuilder.extractLatentInfo ? (modelBuilder.extractLatentInfo(modelRec.graph).latentDim || featureSize) : featureSize,
+          temperature: temperature,
+          seed: seed,
+          targetClass: Number(gCfg.targetClass || 0),
+          guidanceWeight: Number(gCfg.guidanceWeight || 1.0),
+          sampleNodeId: "",
+          outputNodeId: "",
+        };
+        if (method === "reconstruct" || method === "optimize") config.originals = testX.slice(0, numSamples);
+        if (method === "inverse") {
+          var targets = [];
+          var targetCount = Math.min(numSamples, testY.length);
+          for (var i = 0; i < targetCount; i++) targets.push(Array.isArray(testY[i]) ? testY[i] : [testY[i]]);
+          config.target = targets;
+        }
+        return config;
+      }
+
+      function buildClientConfig(built, outputIndex, sampleInputIndex, latentDim, genModel) {
+        var cfg = {
+          method: method,
+          model: genModel,
+          latentDim: latentDim,
+          numSamples: numSamples,
+          steps: steps,
+          lr: lr,
+          temperature: temperature,
+          seed: seed,
+          outputIndex: outputIndex,
+          sampleInputIndex: sampleInputIndex,
+        };
+        if (method === "classifier_guided") {
+          cfg.classifierModel = built.model;
+          cfg.targetClass = Number(gCfg.targetClass || 0);
+          cfg.guidanceWeight = Number(gCfg.guidanceWeight || 1.0);
+        }
+        if (method === "reconstruct") {
+          cfg.fullModel = built.model;
+          cfg.model = built.model;
+          cfg.originals = testX.slice(0, numSamples);
+        }
+        if (method === "optimize") {
+          cfg.objective = engine.objectives && typeof engine.objectives.reconstruction === "function"
+            ? engine.objectives.reconstruction(testX.slice(0, numSamples), outputIndex)
+            : null;
+          if (!cfg.objective) throw new Error("Optimize evaluation requires generation objectives");
+        }
+        if (method === "langevin") cfg.scoreModel = built.model;
+        if (method === "inverse") {
+          var targets = [];
+          var targetCount = Math.min(numSamples, testY.length);
+          for (var i = 0; i < targetCount; i++) targets.push(Array.isArray(testY[i]) ? testY[i] : [testY[i]]);
+          cfg.target = targets;
+        }
+        return cfg;
+      }
+
+      if (generationRuntime === "server") {
+        if (!serverAdapter) return Promise.reject(new Error("Server runtime adapter unavailable"));
+        var serverUrl = (trainer.config && trainer.config.serverUrl) || "";
+        return serverAdapter.checkServer(serverUrl).then(function (ok) {
+          if (!ok) throw new Error("Server not reachable");
+          return serverAdapter.generateOnServer(buildServerConfig(), serverUrl);
+        }).then(function (result) {
+          result = result || {};
+          result.method = result.method || method;
+          result.runtime = "server";
+          result.checkpointRef = _getCheckpointRef(artifacts);
+          result.weightSelection = _resolveActualWeightSelection(trainer, artifacts, ev.weightSelection);
+          return result;
+        });
+      }
+
+      return Promise.resolve().then(function () {
+        var built = modelBuilder.buildModelFromGraph(tf, modelRec.graph, {
+          mode: graphMode,
+          featureSize: featureSize,
+          windowSize: 1,
+          seqFeatureSize: featureSize,
+          allowedOutputKeys: allowedOutputKeys,
+          defaultTarget: defaultTarget,
+          numClasses: nCls,
+        });
+        _loadWeights(tf, built.model, artifacts);
+
+        var genModel = built.model;
+        var latentInfo = modelBuilder.extractLatentInfo ? modelBuilder.extractLatentInfo(modelRec.graph) : { latentDim: featureSize };
+        var latentDim = latentInfo.latentDim || featureSize;
+        var genNodes = { sampleNodes: meta.info.sampleNodes || [], outputNodes: meta.info.outputNodes || [] };
+        var sampleInputIndex = -1;
+        var outputIndex = 0;
+
+        if (genNodes.sampleNodes.length) {
+          latentDim = genNodes.sampleNodes[0].dim || latentDim;
+          if (built.inputNodes) {
+            for (var si = 0; si < built.inputNodes.length; si++) {
+              if (built.inputNodes[si].id === genNodes.sampleNodes[0].id) { sampleInputIndex = si; break; }
+            }
+          }
+        }
+
+        if (genNodes.outputNodes.length > 1 && built.headConfigs) {
+          var passthrough = genNodes.outputNodes.find(function (item) { return item.loss === "none"; }) || genNodes.outputNodes[0];
+          for (var oi = 0; oi < built.headConfigs.length; oi++) {
+            if (built.headConfigs[oi].id && built.headConfigs[oi].id.indexOf(passthrough.id + ":") === 0) {
+              outputIndex = oi;
+              break;
+            }
+          }
+        }
+
+        if (meta.info.hasLatentDecoder && method !== "inverse" && method !== "reconstruct") {
+          try {
+            var decoder = modelBuilder.extractDecoder(tf, built.model, latentDim);
+            if (decoder && decoder.model) {
+              genModel = decoder.model;
+              latentDim = decoder.latentDim || latentDim;
+              outputIndex = 0;
+            }
+          } catch (_) {}
+        }
+
+        var clientConfig = buildClientConfig(built, outputIndex, sampleInputIndex, latentDim, genModel);
+        return engine.generate(tf, clientConfig).then(function (result) {
+          result = result || {};
+          result.method = result.method || method;
+          result.runtime = "client";
+          result.checkpointRef = _getCheckpointRef(artifacts);
+          result.weightSelection = _resolveActualWeightSelection(trainer, artifacts, ev.weightSelection);
+          if (genModel !== built.model) try { genModel.dispose(); } catch (_) {}
+          built.model.dispose();
+          return result;
+        }).catch(function (err) {
+          if (genModel !== built.model) try { genModel.dispose(); } catch (_) {}
+          built.model.dispose();
+          throw err;
+        });
+      });
+    }
+
     function _evaluateOneModel(tf, pc, ev, r, tid) {
       var trainer = store.getTrainerCard(tid);
       if (!trainer) { r.status = "error"; r.error = "Trainer not found"; return Promise.resolve(); }
       var modelRec = store.getModel(trainer.modelId);
       var dataset = store.getDataset(ev.datasetId);
       r.modelName = modelRec ? modelRec.name : trainer.modelId;
+      r.metrics = r.metrics || {};
 
-      if (trainer.status !== "done" || !trainer.modelArtifacts) {
-        r.status = "skipped"; r.error = "Not trained"; return Promise.resolve();
-      }
+      var artifacts = _getTrainerArtifacts(trainer, ev.weightSelection);
+      if (!artifacts) { r.status = "skipped"; r.error = "Not trained"; return Promise.resolve(); }
       if (!modelRec || !modelRec.graph || !dataset || !dataset.data) {
         r.status = "error"; r.error = "Missing model or dataset"; return Promise.resolve();
       }
@@ -563,168 +1109,105 @@
       var defaultTarget = (allowedOutputKeys[0] && (allowedOutputKeys[0].key || allowedOutputKeys[0])) || "";
       var defHeadType = (allowedOutputKeys[0] && allowedOutputKeys[0].headType) || "regression";
       var isClassification = defHeadType === "classification";
-
+      var selectedEvaluatorDefs = _resolveSelectedEvaluators(ev, isClassification);
+      var runNeeds = _resolveRunNeeds(ev, selectedEvaluatorDefs);
+      var selectedIds = ev.evaluatorIds || [];
       var dsData = dataset.data;
-      var isBundle = dsData.kind === "dataset_bundle" && dsData.datasets;
-      var activeDs = isBundle ? dsData.datasets[dsData.activeVariantId || Object.keys(dsData.datasets)[0]] : dsData;
+      var activeDs = _getActiveDatasetData(dsData);
       var nCls = activeDs.classCount || activeDs.numClasses || 10;
-
-      // resolve test data via source registry or legacy
-      var W = typeof window !== "undefined" ? window : {};
-      var srcReg = W.OSCDatasetSourceRegistry || null;
-      var testSplit;
-      if (srcReg && typeof srcReg.resolveDatasetSplit === "function") {
-        testSplit = srcReg.resolveDatasetSplit(activeDs, "test");
-      } else {
-        var testXLegacy = activeDs.xTest || (activeDs.records && activeDs.records.test && activeDs.records.test.x) || [];
-        var testYLegacy = activeDs.yTest || (activeDs.records && activeDs.records.test && activeDs.records.test.y) || [];
-        testSplit = { x: testXLegacy, y: testYLegacy, length: testXLegacy.length };
-      }
-      var testX = testSplit.x;
-      var testY = testSplit.y;
-      var featureSize = (srcReg && typeof srcReg.getFeatureSize === "function") ? srcReg.getFeatureSize(activeDs) : 0;
-      if (!featureSize && testX.length) featureSize = testX[0].length;
-      if (!featureSize) featureSize = 1;
+      var testSplit = _resolveDatasetSplit(dsData, "test");
+      var testX = testSplit.x || [];
+      var testY = testSplit.y || [];
+      var featureSize = _resolveFeatureSize(dsData, testX) || 1;
+      var testN = testX.length;
 
       if (isClassification && testY.length && typeof testY[0] === "number") {
         testY = testY.map(function (l) { var a = new Array(nCls).fill(0); a[l] = 1; return a; });
       }
-
-      var testN = testX.length;
-      if (!testN) { r.status = "error"; r.error = "No test data"; return Promise.resolve(); }
-
-      // try server if model was server-trained, fallback to client if unreachable
-      if (trainer.trainedOnServer && trainer.config && trainer.config.useServer) {
-        var serverAdapter = _getServerAdapter();
-        if (serverAdapter) {
-          var serverUrl = (trainer.config && trainer.config.serverUrl) || "";
-          return serverAdapter.checkServer(serverUrl).then(function (ok) {
-            if (!ok) {
-              r.status = "error"; r.error = "Server not reachable \u2014 retrain on client or restart server";
-              return;
-            }
-            return serverAdapter.predictOnServer({
-              graph: modelRec.graph, weightValues: trainer.modelArtifacts.weightValues,
-              featureSize: featureSize, targetSize: featureSize, numClasses: nCls,
-              xInput: testX,
-            }, serverUrl).then(function (result) {
-              var allPreds = result.predictions || [];
-              _computeMetrics(pc, r, ev, allPreds, testX, testY, testN, nCls, isClassification, activeDs, schemaId);
-            }).catch(function (err) {
-              r.status = "error"; r.error = "Server error: " + err.message + " \u2014 retrain on client or restart server";
-            });
-          });
-        }
+      if ((runNeeds.predictive || runNeeds.generative) && !testN) {
+        r.status = "error";
+        r.error = "No test data";
+        return Promise.resolve();
       }
 
-      _evalOnClient();
-      return Promise.resolve();
-
-      function _evalOnClient() {
-
-      // client-side TF.js inference
-      var graphMode = modelBuilder.inferGraphMode(modelRec.graph, "direct");
-      var built = modelBuilder.buildModelFromGraph(tf, modelRec.graph, {
-        mode: graphMode, featureSize: featureSize, windowSize: 1, seqFeatureSize: featureSize,
-        allowedOutputKeys: allowedOutputKeys, defaultTarget: defaultTarget, numClasses: nCls,
-      });
-      _loadWeights(tf, built.model, trainer.modelArtifacts);
-
-      var allPreds = [];
-      var batchSize = 256;
-      for (var bi = 0; bi < testN; bi += batchSize) {
-        var bEnd = Math.min(bi + batchSize, testN);
-        var bt = tf.tensor2d(testX.slice(bi, bEnd));
-        var br = built.model.predict(bt);
-        allPreds = allPreds.concat((Array.isArray(br) ? br[0] : br).arraySync());
-        bt.dispose();
-        if (Array.isArray(br)) br.forEach(function (t) { t.dispose(); }); else br.dispose();
-      }
-
-      _computeMetrics(pc, r, ev, allPreds, testX, testY, testN, nCls, isClassification, activeDs, schemaId);
-      r.status = "done";
-      built.model.dispose();
-      } // end _evalOnClient
-      return Promise.resolve();
-    }
-
-    function _computeMetrics(pc, r, ev, allPreds, testX, testY, testN, nCls, isClassification, activeDs, schemaId) {
+      var meta = _resolveGenerationMeta(modelRec);
+      var actualWeightSelection = _resolveActualWeightSelection(trainer, artifacts, ev.weightSelection);
       r.testN = testN;
-      var selectedIds = ev.evaluatorIds || [];
+      r.weightSelection = actualWeightSelection;
+      r.checkpointRef = _getCheckpointRef(artifacts);
+      r.checkpointRuntime = String((artifacts && artifacts.producerRuntime) || (artifacts && artifacts.checkpoint && artifacts.checkpoint.producerRuntime) || (trainer.trainedOnServer ? "python_server" : "js_client"));
 
-      if (isClassification && pc) {
-        var predLabels = allPreds.map(function (p) { return p.indexOf(Math.max.apply(null, p)); });
-        var trueLabels = testY.map(function (y) { return Array.isArray(y) ? y.indexOf(Math.max.apply(null, y)) : Number(y); });
-        var correct = 0;
-        for (var ci = 0; ci < testN; ci++) if (predLabels[ci] === trueLabels[ci]) correct++;
-        if (selectedIds.indexOf("accuracy") >= 0) r.metrics.accuracy = correct / testN;
-        if (selectedIds.indexOf("macro_f1") >= 0 && pc.confusionMatrix) {
-          var cm = pc.confusionMatrix(trueLabels, predLabels, nCls);
-          var prf = pc.precisionRecallF1(cm);
-          r.metrics.macro_f1 = prf.reduce(function (s, p) { return s + p.f1; }, 0) / nCls;
-        }
-      } else if (pc) {
-        var truthFlat = [], predFlat = [];
-        for (var mi = 0; mi < testN; mi++) {
-          var yt = testY[mi], pp = allPreds[mi];
-          if (Array.isArray(yt) && yt.length > 1) {
-            for (var d = 0; d < yt.length; d++) { truthFlat.push(Number(yt[d] || 0)); predFlat.push(Number((pp && pp[d]) || 0)); }
-          } else {
-            truthFlat.push(Number(Array.isArray(yt) ? yt[0] : yt || 0));
-            predFlat.push(Number(Array.isArray(pp) ? pp[0] : pp || 0));
+      var predictiveResult = null;
+      var generationResult = null;
+      var comparison = null;
+      var useServerPredict = !!(trainer.trainedOnServer && trainer.config && trainer.config.useServer);
+
+      return Promise.resolve()
+        .then(function () {
+          if (!runNeeds.predictive) return null;
+          return _runPredictiveEvaluation(tf, trainer, modelRec, artifacts, allowedOutputKeys, defaultTarget, nCls, featureSize, testX, useServerPredict);
+        })
+        .then(function (allPreds) {
+          predictiveResult = allPreds;
+          if (runNeeds.predictive && allPreds == null) {
+            return _runPredictiveEvaluation(tf, trainer, modelRec, artifacts, allowedOutputKeys, defaultTarget, nCls, featureSize, testX, false);
           }
-        }
-        var reg = pc.computeRegressionMetrics(truthFlat, predFlat);
-        if (selectedIds.indexOf("mae") >= 0) r.metrics.mae = reg.mae;
-        if (selectedIds.indexOf("rmse") >= 0) r.metrics.rmse = reg.rmse;
-        if (selectedIds.indexOf("bias") >= 0) r.metrics.bias = reg.bias;
-        if (selectedIds.indexOf("r2") >= 0) r.metrics.r2 = pc.r2Score(truthFlat, predFlat);
-      }
-
-      // generation metrics from stored runs
-      var tid = r.trainerId;
-      var genRuns = _listGenerationRuns(tid);
-      if (genRuns.length) {
-        var latestGen = genRuns[genRuns.length - 1];
-        if (selectedIds.indexOf("recon_mse") >= 0 && latestGen.avgMse != null) r.metrics.recon_mse = latestGen.avgMse;
-        if (selectedIds.indexOf("diversity") >= 0 && latestGen.samples && latestGen.samples.length > 1) r.metrics.diversity = _computeDiversity(latestGen.samples);
-      }
-
-      // module custom evaluators
-      var moduleEvals = _getModuleEvaluators(schemaId);
-      moduleEvals.forEach(function (mev) {
-        if (selectedIds.indexOf(mev.id) < 0 || typeof mev.compute !== "function") return;
-        try {
-          var result = mev.compute({ predictions: allPreds, truth: testY, samples: genRuns.length ? genRuns[genRuns.length - 1].samples : null, originals: genRuns.length ? genRuns[genRuns.length - 1].originals : null, datasetData: activeDs });
-          if (result && result.value != null) r.metrics[mev.id] = result.value;
-        } catch (e) { /* skip */ }
-      });
-
-      r.status = "done";
+          return allPreds;
+        })
+        .then(function (allPreds) {
+          predictiveResult = allPreds;
+          if (runNeeds.predictive && Array.isArray(allPreds)) {
+            _applyPredictionMetrics(pc, r, selectedIds, allPreds, testY, testN, nCls, isClassification);
+          }
+          if (!runNeeds.generative) return null;
+          return _runGenerativeEvaluation(tf, trainer, modelRec, dataset, artifacts, ev, meta, featureSize, nCls);
+        })
+        .then(function (genResult) {
+          generationResult = genResult;
+          if (runNeeds.generative && genResult && pc && typeof pc.computeSetComparisonMetrics === "function") {
+            comparison = pc.computeSetComparisonMetrics(testX, genResult.samples || [], {
+              seed: Number((ev.generationConfig && ev.generationConfig.seed) || 42),
+              referenceLimit: 128,
+              generatedLimit: Math.max(16, Number((ev.generationConfig && ev.generationConfig.numSamples) || 64)),
+              pairwiseLimit: 64,
+              nnReferenceLimit: 128,
+              nnGeneratedLimit: 128,
+              mmdReferenceLimit: 64,
+              mmdGeneratedLimit: 64,
+            });
+            _applyGenerationMetrics(pc, r, selectedIds, comparison, genResult);
+            r.generation = {
+              method: genResult.method,
+              runtime: genResult.runtime,
+              numSamples: genResult.numSamples || ((genResult.samples && genResult.samples.length) || 0),
+              checkpointRef: genResult.checkpointRef || r.checkpointRef,
+              weightSelection: genResult.weightSelection || actualWeightSelection,
+            };
+          }
+          _applyModuleMetrics(schemaId, selectedIds, r, {
+            predictions: predictiveResult,
+            truth: testY,
+            samples: generationResult && generationResult.samples ? generationResult.samples : null,
+            originals: generationResult && generationResult.originals ? generationResult.originals : null,
+            referenceSamples: testX,
+            datasetData: activeDs,
+            trainer: trainer,
+            generationMethod: generationResult && generationResult.method,
+            generationRuntime: generationResult && generationResult.runtime,
+            comparisonMetrics: comparison,
+          });
+          r.status = "done";
+        })
+        .catch(function (err) {
+          r.status = "error";
+          r.error = err && err.message ? err.message : String(err || "Evaluation failed");
+        });
     }
 
     function _loadWeights(tf, model, artifacts) {
       var converter = (typeof window !== "undefined" && window.OSCWeightConverter) ? window.OSCWeightConverter : null;
       if (!converter || typeof converter.loadArtifactsIntoModel !== "function") return;
       converter.loadArtifactsIntoModel(tf, model, artifacts);
-    }
-
-    function _computeDiversity(samples) {
-      if (!samples || samples.length < 2) return 0;
-      var n = Math.min(samples.length, 50);
-      var totalDist = 0; var count = 0;
-      for (var i = 0; i < n; i++) {
-        for (var j = i + 1; j < n; j++) {
-          var d = 0;
-          for (var k = 0; k < samples[i].length; k++) {
-            var diff = (samples[i][k] || 0) - (samples[j][k] || 0);
-            d += diff * diff;
-          }
-          totalDist += Math.sqrt(d);
-          count++;
-        }
-      }
-      return count > 0 ? totalDist / count : 0;
     }
 
     function mount() { _renderLeftPanel(); _renderMainPanel(); _renderRightPanel(); }
