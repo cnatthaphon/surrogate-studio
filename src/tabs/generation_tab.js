@@ -511,22 +511,27 @@
         wsRow.appendChild(el("label", { style: "font-size:11px;color:#94a3b8;" }, "Weights"));
         var hasLast = !!(_trainerForWeights.modelArtifactsLast || _trainerForWeights.modelArtifacts);
         var hasBest = !!_trainerForWeights.modelArtifactsBest;
-        if (hasLast && hasBest) {
-          var wsSel = el("select", { style: "width:100%;padding:4px;background:#1e293b;color:#e2e8f0;border:1px solid #334155;border-radius:4px;font-size:11px;" });
-          [{ value: "last", label: "Last epoch" }, { value: "best", label: "Best loss" }].forEach(function (opt) {
-            var o = el("option", { value: opt.value }, opt.label);
-            if (opt.value === (g.config.weightSelection || "last")) o.selected = true;
-            wsSel.appendChild(o);
-          });
-          wsSel.addEventListener("change", function () {
-            g.config.weightSelection = wsSel.value;
-            _saveGen(g);
-          });
-          wsRow.appendChild(wsSel);
-        } else {
-          g.config.weightSelection = hasBest ? "best" : "last";
-          wsRow.appendChild(el("div", { style: "padding:4px 6px;background:#1e293b;color:#e2e8f0;border:1px solid #334155;border-radius:4px;font-size:11px;" }, hasBest ? "Best loss" : "Last epoch"));
+        var selectedWeight = String((g.config && g.config.weightSelection) || "last");
+        if (selectedWeight === "best" && !hasBest) selectedWeight = hasLast ? "last" : "best";
+        if (selectedWeight === "last" && !hasLast) selectedWeight = hasBest ? "best" : "last";
+        g.config.weightSelection = selectedWeight;
+        var wsSel = el("select", { style: "width:100%;padding:4px;background:#1e293b;color:#e2e8f0;border:1px solid #334155;border-radius:4px;font-size:11px;" });
+        [{ value: "last", label: "Last epoch" }, { value: "best", label: "Best loss" }].forEach(function (opt) {
+          var o = el("option", { value: opt.value }, opt.label);
+          if (opt.value === selectedWeight) o.selected = true;
+          if (opt.value === "last" && !hasLast) o.disabled = true;
+          if (opt.value === "best" && !hasBest) o.disabled = true;
+          wsSel.appendChild(o);
+        });
+        wsSel.addEventListener("change", function () {
+          g.config.weightSelection = wsSel.value;
+          _saveGen(g);
+          _renderRightPanel();
+        });
+        if (!hasLast && !hasBest) {
+          wsSel.disabled = true;
         }
+        wsRow.appendChild(wsSel);
         configCard.appendChild(wsRow);
         var selectedArtifacts = _getTrainerArtifacts(_trainerForWeights, g.config && g.config.weightSelection);
         if (selectedArtifacts) {
