@@ -377,6 +377,7 @@
       if (!g) return;
       if (!g.config) g.config = {};
       if (!g.config.generationRuntime) g.config.generationRuntime = "client";
+      var isGeneratingUi = _isGenerating || g.status === "generating";
 
       var configCard = el("div", { className: "osc-card" });
 
@@ -574,10 +575,10 @@
       }
 
       // buttons
-      var genBtn = el("button", { className: "osc-btn", style: "width:100%;margin-top:8px;" }, _isGenerating ? "Generating..." : "Generate");
-      if (_isGenerating || !isReady) genBtn.disabled = true;
+      var genBtn = el("button", { className: "osc-btn", style: "width:100%;margin-top:8px;" }, isGeneratingUi ? "Generating..." : "Generate");
+      if (isGeneratingUi || !isReady) genBtn.disabled = true;
       genBtn.addEventListener("click", function () {
-        if (genBtn.disabled || _isGenerating) return;
+        if (genBtn.disabled || _isGenerating || g.status === "generating") return;
         genBtn.disabled = true;
         genBtn.textContent = "Generating...";
         _handleGenerate();
@@ -589,6 +590,7 @@
 
       if (g.runs && g.runs.length) {
         var clearBtn = el("button", { className: "osc-btn secondary", style: "width:100%;margin-top:4px;" }, "Clear Results");
+        if (isGeneratingUi) clearBtn.disabled = true;
         clearBtn.addEventListener("click", function () {
           g.runs = []; g.status = "draft"; _saveGen(g);
           _renderMainPanel(); _renderLeftPanel();
@@ -598,14 +600,29 @@
         rightEl.appendChild(el("div", { style: "font-size:10px;color:#64748b;margin-top:6px;text-align:center;" },
           g.runs.length + " run(s)"));
       }
+
+      if (isGeneratingUi) {
+        rightEl.style.position = "relative";
+        var generatingOverlay = el("div", {
+          style: "position:absolute;inset:0;background:rgba(11,18,32,0.72);backdrop-filter:blur(2px);display:flex;align-items:center;justify-content:center;z-index:20;border-radius:8px;"
+        });
+        var generatingMsg = el("div", {
+          style: "padding:10px 12px;background:#0f172a;border:1px solid #475569;border-radius:8px;color:#e2e8f0;font-size:12px;text-align:center;max-width:220px;"
+        }, [
+          el("div", { style: "font-weight:600;color:#38bdf8;margin-bottom:4px;" }, "Generating"),
+          el("div", { style: "font-size:11px;color:#cbd5e1;" }, "Wait until this run finishes before changing settings or starting another generation.")
+        ]);
+        generatingOverlay.appendChild(generatingMsg);
+        rightEl.appendChild(generatingOverlay);
+      }
     }
 
     function _getServerAdapter() { var W = typeof window !== "undefined" ? window : {}; return W.OSCServerRuntimeAdapter || null; }
 
     // ─── GENERATE ───
     function _handleGenerate() {
-      if (_isGenerating) { onStatus("Already generating..."); return; }
       var g = _getGen(_activeGenId);
+      if (_isGenerating || (g && g.status === "generating")) { onStatus("Already generating..."); return; }
       if (!g || !g.trainerId) { onStatus("Select a model first"); return; }
 
       var trainer = store.getTrainerCard(g.trainerId);
