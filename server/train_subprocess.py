@@ -581,7 +581,9 @@ def main():
 
         if not phase_losses and stopped_by_user:
             break
-        total_train_loss = sum(phase_losses.values()) / max(len(phase_losses), 1)
+        # Match the client phased trainer: total epoch loss is the sum of
+        # per-phase average losses, not the mean across phases.
+        total_train_loss = sum(phase_losses.values())
 
         # Validate (skip if no val data)
         val_loss = None
