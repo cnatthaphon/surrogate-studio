@@ -10,6 +10,33 @@ DEFAULT_TENSOR_LAYOUT = "osc-tensor-layout-v1"
 DEFAULT_VALUE_ENCODING = "float32-le"
 
 
+def _fnv1a_update(hash_value: int, byte_value: int) -> int:
+    hash_value ^= (byte_value & 0xFF)
+    hash_value = (hash_value * 0x01000193) & 0xFFFFFFFF
+    return hash_value
+
+
+def _hash_string(hash_value: int, text: str) -> int:
+    for ch in str(text or ""):
+        code = ord(ch)
+        hash_value = _fnv1a_update(hash_value, code & 0xFF)
+        hash_value = _fnv1a_update(hash_value, (code >> 8) & 0xFF)
+    return hash_value
+
+
+def _build_checkpoint_ref(specs: List[Dict[str, Any]], values: List[float]) -> str:
+    import struct
+    hash_value = 0x811C9DC5
+    for sp in specs or []:
+        hash_value = _hash_string(hash_value, str((sp or {}).get("name", "")))
+        hash_value = _hash_string(hash_value, "x".join(str(x) for x in ((sp or {}).get("shape", []) or [])))
+        hash_value = _hash_string(hash_value, str((sp or {}).get("dtype", "float32")))
+    for v in values or []:
+        for b in struct.pack("<f", float(v)):
+            hash_value = _fnv1a_update(hash_value, b)
+    return f"ckpt-{hash_value:08x}"
+
+
 def _infer_tensor_role(name: str) -> str:
     raw = str(name or "").strip().lower()
     if not raw:
@@ -53,6 +80,7 @@ def describe_artifacts(weight_specs: List[Dict[str, Any]], total_values: int, pr
         "tensorLayout": DEFAULT_TENSOR_LAYOUT,
         "valueEncoding": DEFAULT_VALUE_ENCODING,
         "producerRuntime": str(producer_runtime or ""),
+        "checkpointRef": "",
         "tensorCount": len(specs),
         "totalValues": int(total_values or 0),
         "tensors": [
@@ -73,12 +101,14 @@ def normalize_artifacts(weight_specs: List[Dict[str, Any]], weight_values: List[
     specs = deepcopy(weight_specs or [])
     values = list(weight_values or [])
     checkpoint = describe_artifacts(specs, len(values), producer_runtime)
+    checkpoint["checkpointRef"] = _build_checkpoint_ref(specs, values)
     out = {
         "weightSpecs": specs,
         "checkpointSchemaVersion": SCHEMA_VERSION,
         "tensorLayout": DEFAULT_TENSOR_LAYOUT,
         "valueEncoding": DEFAULT_VALUE_ENCODING,
         "producerRuntime": str(producer_runtime or ""),
+        "checkpointRef": checkpoint.get("checkpointRef", ""),
         "tensors": checkpoint.get("tensors", []),
         "checkpoint": checkpoint,
     }

@@ -62,6 +62,11 @@
       return trainer.modelArtifactsLast || trainer.modelArtifacts || trainer.modelArtifactsBest || null;
     }
 
+    function _getCheckpointRef(artifacts) {
+      var checkpoint = artifacts && artifacts.checkpoint && typeof artifacts.checkpoint === "object" ? artifacts.checkpoint : null;
+      return String((checkpoint && checkpoint.checkpointRef) || (artifacts && artifacts.checkpointRef) || "").trim();
+    }
+
     function _snapshotSelectedTrainerState() {
       if (!_activeGenId || !store) return "";
       var g = _getGen(_activeGenId);
@@ -315,6 +320,10 @@
         var runtimeLabel = result.runtime ? " | " + result.runtime : "";
         card.appendChild(el("div", { style: "font-size:12px;color:" + statusColor + ";font-weight:600;" },
           "#" + (idx + 1) + " " + (result.method || "?") + " | " + (result.numSamples || 0) + " samples | " + (result.status || "?") + runtimeLabel));
+        if (result.weightSelection || result.checkpointRef) {
+          card.appendChild(el("div", { style: "font-size:10px;color:#94a3b8;margin-top:4px;" },
+            "Weights: " + String(result.weightSelection || "last") + " | Checkpoint: " + String(result.checkpointRef || "unversioned")));
+        }
 
         if (result.error) {
           card.appendChild(el("div", { style: "font-size:10px;color:#f43f5e;margin-top:4px;" }, "Error: " + result.error));
@@ -494,23 +503,35 @@
         if (!g.config.outputNodeId) g.config.outputNodeId = _genNodes.outputNodes[0].id;
       }
 
-      // Weight selection (last vs best) — only show if trainer has both
+      // Weight selection / checkpoint identity
       var _trainerForWeights = g.trainerId ? (store ? store.getTrainerCard(g.trainerId) : null) : null;
-      if (_trainerForWeights && _trainerForWeights.modelArtifactsLast && _trainerForWeights.modelArtifactsBest) {
+      if (_trainerForWeights && (_trainerForWeights.modelArtifactsLast || _trainerForWeights.modelArtifactsBest || _trainerForWeights.modelArtifacts)) {
         var wsRow = el("div", { className: "osc-form-row" });
         wsRow.appendChild(el("label", { style: "font-size:11px;color:#94a3b8;" }, "Weights"));
-        var wsSel = el("select", { style: "width:100%;padding:4px;background:#1e293b;color:#e2e8f0;border:1px solid #334155;border-radius:4px;font-size:11px;" });
-        [{ value: "last", label: "Last epoch" }, { value: "best", label: "Best loss" }].forEach(function (opt) {
-          var o = el("option", { value: opt.value }, opt.label);
-          if (opt.value === (g.config.weightSelection || "last")) o.selected = true;
-          wsSel.appendChild(o);
-        });
-        wsSel.addEventListener("change", function () {
-          g.config.weightSelection = wsSel.value;
-          _saveGen(g);
-        });
-        wsRow.appendChild(wsSel);
+        var hasLast = !!(_trainerForWeights.modelArtifactsLast || _trainerForWeights.modelArtifacts);
+        var hasBest = !!_trainerForWeights.modelArtifactsBest;
+        if (hasLast && hasBest) {
+          var wsSel = el("select", { style: "width:100%;padding:4px;background:#1e293b;color:#e2e8f0;border:1px solid #334155;border-radius:4px;font-size:11px;" });
+          [{ value: "last", label: "Last epoch" }, { value: "best", label: "Best loss" }].forEach(function (opt) {
+            var o = el("option", { value: opt.value }, opt.label);
+            if (opt.value === (g.config.weightSelection || "last")) o.selected = true;
+            wsSel.appendChild(o);
+          });
+          wsSel.addEventListener("change", function () {
+            g.config.weightSelection = wsSel.value;
+            _saveGen(g);
+          });
+          wsRow.appendChild(wsSel);
+        } else {
+          g.config.weightSelection = hasBest ? "best" : "last";
+          wsRow.appendChild(el("div", { style: "padding:4px 6px;background:#1e293b;color:#e2e8f0;border:1px solid #334155;border-radius:4px;font-size:11px;" }, hasBest ? "Best loss" : "Last epoch"));
+        }
         configCard.appendChild(wsRow);
+        var selectedArtifacts = _getTrainerArtifacts(_trainerForWeights, g.config && g.config.weightSelection);
+        if (selectedArtifacts) {
+          configCard.appendChild(el("div", { style: "font-size:10px;color:#94a3b8;margin-top:-2px;margin-bottom:6px;" },
+            "Checkpoint: " + (_getCheckpointRef(selectedArtifacts) || "unversioned") + " | source=" + (_trainerForWeights.trainedOnServer ? "python_server" : "js_client")));
+        }
       }
 
       // numeric params — show relevant fields based on method
@@ -663,6 +684,8 @@
           serverAdapter.generateOnServer(serverConfig, serverUrl).then(function (result) {
             _isGenerating = false;
             result.runtime = "server";
+            result.weightSelection = String(config.weightSelection || "last");
+            result.checkpointRef = _getCheckpointRef(trainerArtifacts);
             result.status = "done";
             if (!g.runs) g.runs = [];
             g.runs.push(result); g.status = "done"; _saveGen(g);
@@ -833,6 +856,8 @@
           _isGenerating = false;
           if (currentMountId !== _mountId) return;
           result.runtime = "client";
+          result.weightSelection = String(config.weightSelection || "last");
+          result.checkpointRef = _getCheckpointRef(_artifacts);
           result.status = "done";
           if (!g.runs) g.runs = [];
           g.runs.push(result);

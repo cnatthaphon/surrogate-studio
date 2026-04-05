@@ -97,6 +97,11 @@
       return _normalizeCheckpointArtifacts(artifacts, _resolveArtifactProducerRuntime(tCard, artifacts));
     }
 
+    function _getCheckpointRef(artifacts) {
+      var checkpoint = artifacts && artifacts.checkpoint && typeof artifacts.checkpoint === "object" ? artifacts.checkpoint : null;
+      return String((checkpoint && checkpoint.checkpointRef) || (artifacts && artifacts.checkpointRef) || "").trim();
+    }
+
     function _loadArtifactsIntoTfModel(tf, model, artifacts) {
       if (!tf || !model || !artifacts) return { loaded: false, reason: "missing_inputs" };
       var W = typeof window !== "undefined" ? window : {};
@@ -1220,7 +1225,8 @@
       if (!t) return;
 
       var hasEpochs = (store.getTrainerEpochs(activeId) || []).length > 0;
-      var hasTrained = (t.status === "done" && t.modelArtifacts) || hasEpochs;
+      var hasArtifacts = !!(t.modelArtifactsLast || t.modelArtifacts || t.modelArtifactsBest);
+      var hasTrained = hasArtifacts || hasEpochs || t.status === "done" || t.status === "stopped";
       var isLocked = hasTrained && t.datasetId && t.modelId;
 
       rightEl.appendChild(el("h3", {}, hasTrained ? "Continue Training" : "Training Config"));
@@ -1229,6 +1235,13 @@
         var lockInfo = el("div", { style: "font-size:10px;color:#f59e0b;margin-bottom:6px;padding:4px 6px;border:1px solid #7c2d12;border-radius:4px;background:#431407;" });
         lockInfo.textContent = "Dataset + Model locked after training. Clear session to change.";
         rightEl.appendChild(lockInfo);
+      }
+      var currentArtifacts = t.modelArtifactsLast || t.modelArtifacts || t.modelArtifactsBest || null;
+      var checkpointRef = _getCheckpointRef(currentArtifacts);
+      if (currentArtifacts) {
+        var checkpointInfo = el("div", { style: "font-size:10px;color:#94a3b8;margin-bottom:6px;padding:4px 6px;border:1px solid #334155;border-radius:4px;background:#0f172a;" });
+        checkpointInfo.textContent = "Current checkpoint: " + (checkpointRef || "unversioned") + " | source=" + (t.trainedOnServer ? "python_server" : "js_client");
+        rightEl.appendChild(checkpointInfo);
       }
 
       // dataset + model selection (same schema)
@@ -1492,8 +1505,9 @@
 
       // buttons — show Stop only for the actively training trainer
       var btnRow = el("div", { style: "display:flex;gap:4px;margin-top:8px;" });
-      if (_isTraining && _activeTrainingId === activeId) {
-        var stopBtn = el("button", { className: "osc-btn", style: "flex:1;background:linear-gradient(135deg,#dc2626,#991b1b);border-color:#ef4444;" }, "Stop Training");
+      if (_activeTrainingId === activeId && (_isTraining || t.status === "running" || t.status === "stopping")) {
+        var stopBtn = el("button", { className: "osc-btn", style: "flex:1;background:linear-gradient(135deg,#dc2626,#991b1b);border-color:#ef4444;" }, t.status === "stopping" ? "Stopping..." : "Stop Training");
+        if (t.status === "stopping") stopBtn.disabled = true;
         stopBtn.addEventListener("click", function () {
           var cancelFn = _activeTrainingCancel;
           var tc = store ? store.getTrainerCard(activeId) : null;
@@ -1850,7 +1864,18 @@
         status: "preparing",
         note: "Preparing training session.",
       });
-      if (store) { store.upsertTrainerCard(tCard); store.replaceTrainerEpochs(activeId, []); }
+      var epochRowsBefore = store ? (store.getTrainerEpochs(activeId) || []) : [];
+      var resumeEpochOffset = 0;
+      if (resumeArtifacts && epochRowsBefore.length) {
+        resumeEpochOffset = epochRowsBefore.reduce(function (maxEpoch, row) {
+          var epochNum = Number((row && row.epoch) || 0);
+          return epochNum > maxEpoch ? epochNum : maxEpoch;
+        }, 0);
+      }
+      if (store) {
+        store.upsertTrainerCard(tCard);
+        if (!resumeArtifacts) store.replaceTrainerEpochs(activeId, []);
+      }
       _isTraining = true;
       _trainingRunId++;
       var currentRunId = _trainingRunId;
@@ -1951,7 +1976,7 @@
           trainingSchedule: config.trainingSchedule || null,
           rotateSchedule: config.rotateSchedule !== false,
           onEpochData: function (payload) {
-            var logEntry = { epoch: payload.epoch, loss: payload.loss, val_loss: payload.val_loss, current_lr: payload.current_lr, improved: payload.improved, phaseLosses: payload.phaseLosses || null };
+            var logEntry = { epoch: resumeEpochOffset + Number(payload.epoch || 0), loss: payload.loss, val_loss: payload.val_loss, current_lr: payload.current_lr, improved: payload.improved, phaseLosses: payload.phaseLosses || null };
             if (!_appendTrainerEpochForRun(activeId, currentRunId, logEntry)) return;
             var phaseStr = "";
             if (payload.phaseLosses && typeof payload.phaseLosses === "object") {
@@ -2173,7 +2198,7 @@
             gradClipValue: Number(config.gradClipValue || 0),
             shuffleTrain: config.shuffleTrain !== false,
             onEpochData: function (payload) {
-              var logEntry = { epoch: payload.epoch, loss: payload.loss, val_loss: payload.val_loss, current_lr: payload.current_lr, improved: payload.improved };
+              var logEntry = { epoch: resumeEpochOffset + Number(payload.epoch || 0), loss: payload.loss, val_loss: payload.val_loss, current_lr: payload.current_lr, improved: payload.improved };
               _appendTrainerEpochForRun(activeId, currentRunId, logEntry);
             },
             onReady: function (msg) {
@@ -2304,7 +2329,7 @@
           trainingSchedule: config.trainingSchedule || null,
           rotateSchedule: config.rotateSchedule !== false,
           onEpochEnd: function (epoch, logs) {
-            var logEntry = { epoch: epoch + 1, loss: logs.loss, val_loss: logs.val_loss, current_lr: logs.current_lr, improved: logs.improved, phaseLosses: logs.phaseLosses || null };
+            var logEntry = { epoch: resumeEpochOffset + epoch + 1, loss: logs.loss, val_loss: logs.val_loss, current_lr: logs.current_lr, improved: logs.improved, phaseLosses: logs.phaseLosses || null };
             _appendTrainerEpochForRun(activeId, currentRunId, logEntry);
           },
         }).then(function (result) {

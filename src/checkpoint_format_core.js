@@ -11,6 +11,38 @@
   var DEFAULT_TENSOR_LAYOUT = "osc-tensor-layout-v1";
   var DEFAULT_VALUE_ENCODING = "float32-le";
 
+  function _fnv1aUpdate(hash, byteValue) {
+    hash ^= (byteValue & 0xff);
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+    return hash >>> 0;
+  }
+
+  function _hashString(hash, text) {
+    var s = String(text || "");
+    for (var i = 0; i < s.length; i++) {
+      var code = s.charCodeAt(i);
+      hash = _fnv1aUpdate(hash, code & 0xff);
+      hash = _fnv1aUpdate(hash, (code >>> 8) & 0xff);
+    }
+    return hash >>> 0;
+  }
+
+  function _buildCheckpointRef(specs, values) {
+    var hash = 0x811c9dc5;
+    var safeSpecs = Array.isArray(specs) ? specs : [];
+    for (var i = 0; i < safeSpecs.length; i++) {
+      var sp = safeSpecs[i] || {};
+      hash = _hashString(hash, sp.name || "");
+      hash = _hashString(hash, (sp.shape || []).join("x"));
+      hash = _hashString(hash, sp.dtype || "float32");
+    }
+    if (values && values.byteLength != null) {
+      var bytes = new Uint8Array(values.buffer, values.byteOffset || 0, values.byteLength);
+      for (var bi = 0; bi < bytes.length; bi++) hash = _fnv1aUpdate(hash, bytes[bi]);
+    }
+    return "ckpt-" + ("00000000" + (hash >>> 0).toString(16)).slice(-8);
+  }
+
   function _cloneSpecs(specs) {
     return (Array.isArray(specs) ? specs : []).map(function (sp) {
       return {
@@ -67,6 +99,7 @@
       tensorLayout: tensorLayout,
       valueEncoding: valueEncoding,
       producerRuntime: producerRuntime,
+      checkpointRef: _buildCheckpointRef(specs, values),
       tensorCount: specs.length,
       totalValues: values ? values.length : 0,
       tensors: specs.map(function (sp) {
@@ -93,6 +126,7 @@
       tensorLayout: checkpoint.tensorLayout,
       valueEncoding: checkpoint.valueEncoding,
       producerRuntime: checkpoint.producerRuntime,
+      checkpointRef: checkpoint.checkpointRef,
       tensors: checkpoint.tensors,
       checkpoint: checkpoint,
     };
