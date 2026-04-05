@@ -1586,7 +1586,15 @@
       } else {
         var trainLabel = hasTrained ? "Continue Training" : "Start Training";
         var trainBtn = el("button", { className: "osc-btn", style: "flex:1;" }, trainLabel);
-        trainBtn.addEventListener("click", _handleTrain);
+        trainBtn.addEventListener("click", function () {
+          if (trainBtn.disabled) return;
+          trainBtn.disabled = true;
+          trainBtn.textContent = "Starting...";
+          _handleTrain();
+          setTimeout(function () {
+            if (!_isTraining && stateApi && stateApi.getActiveTrainer && stateApi.getActiveTrainer() === activeId) _renderRightPanel();
+          }, 0);
+        });
         btnRow.appendChild(trainBtn);
       }
       var exportBtn = el("button", { className: "osc-btn secondary", style: "flex:1;" }, "Export Notebook");

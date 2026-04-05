@@ -576,7 +576,15 @@
       // buttons
       var genBtn = el("button", { className: "osc-btn", style: "width:100%;margin-top:8px;" }, _isGenerating ? "Generating..." : "Generate");
       if (_isGenerating || !isReady) genBtn.disabled = true;
-      genBtn.addEventListener("click", function () { _handleGenerate(); });
+      genBtn.addEventListener("click", function () {
+        if (genBtn.disabled || _isGenerating) return;
+        genBtn.disabled = true;
+        genBtn.textContent = "Generating...";
+        _handleGenerate();
+        setTimeout(function () {
+          if (!_isGenerating) _renderRightPanel();
+        }, 0);
+      });
       rightEl.appendChild(genBtn);
 
       if (g.runs && g.runs.length) {
