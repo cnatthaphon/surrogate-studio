@@ -183,6 +183,18 @@
       return { info: info, caps: caps };
     }
 
+    function _ensureGenerationOverrides(ev) {
+      if (!ev.generationConfig) ev.generationConfig = {};
+      if (!ev.generationConfig.byTrainer || typeof ev.generationConfig.byTrainer !== "object") ev.generationConfig.byTrainer = {};
+      return ev.generationConfig.byTrainer;
+    }
+
+    function _getGenerationOverride(ev, trainerId) {
+      var byTrainer = _ensureGenerationOverrides(ev);
+      if (!byTrainer[trainerId] || typeof byTrainer[trainerId] !== "object") byTrainer[trainerId] = {};
+      return byTrainer[trainerId];
+    }
+
     function _getActiveDatasetData(dsData) {
       return dsData && dsData.kind === "dataset_bundle" && dsData.datasets
         ? dsData.datasets[dsData.activeVariantId || Object.keys(dsData.datasets)[0]]
@@ -760,6 +772,67 @@
           configCard.appendChild(row);
         });
 
+        var overrideTrainers = selectedTrainerCards.filter(function (t) {
+          var modelRec = store ? store.getModel(t.modelId) : null;
+          if (!modelRec) return false;
+          var meta = _resolveGenerationMeta(modelRec);
+          return (meta.info.sampleNodes && meta.info.sampleNodes.length > 1) || (meta.info.outputNodes && meta.info.outputNodes.length > 1);
+        });
+        if (overrideTrainers.length) {
+          configCard.appendChild(el("div", { style: "font-size:10px;color:#67e8f9;margin:8px 0 4px;font-weight:600;" }, "Model-specific Node Selection"));
+          overrideTrainers.forEach(function (trainerCard) {
+            var modelRec = store ? store.getModel(trainerCard.modelId) : null;
+            if (!modelRec) return;
+            var meta = _resolveGenerationMeta(modelRec);
+            var info = meta.info || {};
+            var override = _getGenerationOverride(ev, trainerCard.id);
+            configCard.appendChild(el("div", { style: "font-size:10px;color:#e2e8f0;margin:6px 0 3px;font-weight:600;" }, trainerCard.name || trainerCard.id));
+            if (info.sampleNodes && info.sampleNodes.length > 1) {
+              var sampleRow = el("div", { className: "osc-form-row" });
+              sampleRow.appendChild(el("label", {}, "Sample input"));
+              var sampleSel = el("select", { style: "width:100%;padding:4px;background:#1e293b;color:#e2e8f0;border:1px solid #334155;border-radius:4px;font-size:11px;" });
+              info.sampleNodes.forEach(function (sn, idx) {
+                var label = sn.blockName || ("SampleZ z~" + sn.distribution);
+                label += " (dim=" + sn.dim + ")";
+                var opt = el("option", { value: sn.id }, label);
+                if (sn.id === String(override.sampleNodeId || info.sampleNodes[0].id || "")) opt.selected = true;
+                sampleSel.appendChild(opt);
+              });
+              sampleSel.addEventListener("change", function () {
+                override.sampleNodeId = sampleSel.value;
+                _saveEval(ev);
+              });
+              if (!override.sampleNodeId) override.sampleNodeId = info.sampleNodes[0].id;
+              sampleRow.appendChild(sampleSel);
+              configCard.appendChild(sampleRow);
+            }
+            if (info.outputNodes && info.outputNodes.length > 1) {
+              var outRow = el("div", { className: "osc-form-row" });
+              outRow.appendChild(el("label", {}, "Output head"));
+              var outSel = el("select", { style: "width:100%;padding:4px;background:#1e293b;color:#e2e8f0;border:1px solid #334155;border-radius:4px;font-size:11px;" });
+              var defaultOutId = String(override.outputNodeId || "");
+              if (!defaultOutId) {
+                var pass = info.outputNodes.find(function (o) { return o.loss === "none"; });
+                defaultOutId = pass ? pass.id : info.outputNodes[0].id;
+              }
+              info.outputNodes.forEach(function (on) {
+                var label = on.blockName || (on.phase ? on.phase : "Output #" + on.id);
+                label += on.loss === "none" ? " [passthrough]" : " [" + on.loss + "]";
+                var opt = el("option", { value: on.id }, label);
+                if (on.id === defaultOutId) opt.selected = true;
+                outSel.appendChild(opt);
+              });
+              outSel.addEventListener("change", function () {
+                override.outputNodeId = outSel.value;
+                _saveEval(ev);
+              });
+              if (!override.outputNodeId) override.outputNodeId = defaultOutId;
+              outRow.appendChild(outSel);
+              configCard.appendChild(outRow);
+            }
+          });
+        }
+
         configCard.appendChild(el("div", { style: "font-size:10px;color:#64748b;margin-top:4px;" },
           "Generative evaluation samples fresh outputs from the selected checkpoint and compares them to the best available dataset reference split: test, then val, then train."));
       }
@@ -1022,6 +1095,7 @@
       var allowedOutputKeys = schemaRegistry ? schemaRegistry.getOutputKeys(ev.schemaId) : [];
       var defaultTarget = (allowedOutputKeys[0] && (allowedOutputKeys[0].key || allowedOutputKeys[0])) || "";
       var graphMode = modelBuilder.inferGraphMode(modelRec.graph, "direct");
+      var trainerOverride = _getGenerationOverride(ev, trainer.id);
 
       function buildServerConfig() {
         var config = {
@@ -1041,8 +1115,8 @@
           seed: seed,
           targetClass: Number(gCfg.targetClass || 0),
           guidanceWeight: Number(gCfg.guidanceWeight || 1.0),
-          sampleNodeId: "",
-          outputNodeId: "",
+          sampleNodeId: String(trainerOverride.sampleNodeId || ""),
+          outputNodeId: String(trainerOverride.outputNodeId || ""),
         };
         if (method === "reconstruct" || method === "optimize") config.originals = testX.slice(0, numSamples);
         if (method === "inverse") {
@@ -1128,7 +1202,17 @@
         var sampleInputIndex = -1;
         var outputIndex = 0;
 
-        if (genNodes.sampleNodes.length) {
+        if (trainerOverride.sampleNodeId && genNodes.sampleNodes.length) {
+          var selectedSample = genNodes.sampleNodes.find(function (s) { return s.id === trainerOverride.sampleNodeId; });
+          if (selectedSample) {
+            latentDim = selectedSample.dim || latentDim;
+            if (built.inputNodes) {
+              for (var si0 = 0; si0 < built.inputNodes.length; si0++) {
+                if (built.inputNodes[si0].id === trainerOverride.sampleNodeId) { sampleInputIndex = si0; break; }
+              }
+            }
+          }
+        } else if (genNodes.sampleNodes.length) {
           latentDim = genNodes.sampleNodes[0].dim || latentDim;
           if (built.inputNodes) {
             for (var si = 0; si < built.inputNodes.length; si++) {
@@ -1137,11 +1221,18 @@
           }
         }
 
-        if (genNodes.outputNodes.length > 1 && built.headConfigs) {
-          var passthrough = genNodes.outputNodes.find(function (item) { return item.loss === "none"; }) || genNodes.outputNodes[0];
+        if (trainerOverride.outputNodeId && built.headConfigs && built.headConfigs.length > 1) {
           for (var oi = 0; oi < built.headConfigs.length; oi++) {
-            if (built.headConfigs[oi].id && built.headConfigs[oi].id.indexOf(passthrough.id + ":") === 0) {
+            if (built.headConfigs[oi].id && built.headConfigs[oi].id.indexOf(trainerOverride.outputNodeId + ":") === 0) {
               outputIndex = oi;
+              break;
+            }
+          }
+        } else if (genNodes.outputNodes.length > 1 && built.headConfigs) {
+          var passthrough = genNodes.outputNodes.find(function (item) { return item.loss === "none"; }) || genNodes.outputNodes[0];
+          for (var oi1 = 0; oi1 < built.headConfigs.length; oi1++) {
+            if (built.headConfigs[oi1].id && built.headConfigs[oi1].id.indexOf(passthrough.id + ":") === 0) {
+              outputIndex = oi1;
               break;
             }
           }
