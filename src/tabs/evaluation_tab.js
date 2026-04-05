@@ -254,6 +254,28 @@
       ];
     }
 
+    function _getCommonGenerationMethodOptions(trainerCards) {
+      var base = _makeMethodOptions();
+      var selected = Array.isArray(trainerCards) ? trainerCards.filter(Boolean) : [];
+      if (!selected.length) return base;
+
+      var allowedIds = null;
+      selected.forEach(function (trainer) {
+        var modelRec = store ? store.getModel(trainer.modelId) : null;
+        var meta = _resolveGenerationMeta(modelRec);
+        var ids = (meta && meta.caps && Array.isArray(meta.caps.availableMethods) ? meta.caps.availableMethods : [])
+          .map(function (m) { return String(m.id || "").trim().toLowerCase(); })
+          .filter(Boolean);
+        if (allowedIds == null) allowedIds = ids.slice();
+        else allowedIds = allowedIds.filter(function (id) { return ids.indexOf(id) >= 0; });
+      });
+
+      var keep = {};
+      keep.auto = true;
+      (allowedIds || []).forEach(function (id) { keep[id] = true; });
+      return base.filter(function (opt) { return !!keep[String(opt.value || "").trim().toLowerCase()]; });
+    }
+
     // ─── Get datasets for a schema ───
     function _listDatasetsForSchema(schemaId) {
       if (!store) return [];
@@ -624,10 +646,15 @@
       if (trainers.length) {
         configCard.appendChild(el("div", { style: "font-size:10px;color:#67e8f9;margin:8px 0 4px;font-weight:600;" }, "Models"));
         trainers.forEach(function (t) {
-          var modelWrap = el("div", { style: "margin-bottom:4px;" });
+          var isSelected = (ev.trainerIds || []).indexOf(t.id) >= 0;
+          var modelWrap = el("div", {
+            style: "margin-bottom:6px;padding:6px 8px;border:1px solid " +
+              (isSelected ? "#334155" : "#243244") + ";border-radius:6px;background:" +
+              (isSelected ? "#111827" : "#0f172a") + ";"
+          });
           var row = el("div", { style: "display:flex;align-items:center;gap:6px;margin-bottom:3px;" });
           var cb = el("input", { type: "checkbox" });
-          cb.checked = (ev.trainerIds || []).indexOf(t.id) >= 0;
+          cb.checked = isSelected;
           cb.addEventListener("change", function () {
             if (cb.checked) {
               if ((ev.trainerIds || []).indexOf(t.id) < 0) { ev.trainerIds = (ev.trainerIds || []).concat([t.id]); }
@@ -658,7 +685,7 @@
               var needsSampleSelect = rowInfo.sampleNodes && rowInfo.sampleNodes.length > 1;
               var needsOutputSelect = rowInfo.outputNodes && rowInfo.outputNodes.length > 1;
               if (needsSampleSelect || needsOutputSelect) {
-                var inlineBox = el("div", { style: "margin:4px 0 0 18px;padding:6px;background:#101827;border:1px solid #243244;border-radius:6px;" });
+                var inlineBox = el("div", { style: "margin:6px 0 0 18px;padding:6px;background:#0b1220;border:1px dashed #3b4a63;border-radius:6px;" });
                 inlineBox.appendChild(el("div", { style: "font-size:10px;color:#67e8f9;font-weight:600;margin-bottom:4px;" }, "Generation path"));
                 if (needsSampleSelect) {
                   var sampleRow = el("div", { className: "osc-form-row", style: "margin-bottom:4px;" });
@@ -801,10 +828,17 @@
         genRuntimeRow.appendChild(genRuntimeSel);
         configCard.appendChild(genRuntimeRow);
 
+        var genMethodOptions = _getCommonGenerationMethodOptions(selectedTrainerCards);
+        var selectedMethod = String(ev.generationConfig.method || "auto").trim().toLowerCase();
+        var allowedMethodIds = genMethodOptions.map(function (opt) { return String(opt.value || "").trim().toLowerCase(); });
+        if (allowedMethodIds.indexOf(selectedMethod) < 0) {
+          ev.generationConfig.method = "auto";
+        }
+
         var genMethodRow = el("div", { className: "osc-form-row" });
         genMethodRow.appendChild(el("label", {}, "Generation Method"));
         var genMethodSel = el("select", { style: "width:100%;padding:4px;background:#1e293b;color:#e2e8f0;border:1px solid #334155;border-radius:4px;font-size:11px;" });
-        _makeMethodOptions().forEach(function (opt) {
+        genMethodOptions.forEach(function (opt) {
           var o = el("option", { value: opt.value }, opt.label);
           if (opt.value === String(ev.generationConfig.method || "auto")) o.selected = true;
           genMethodSel.appendChild(o);
@@ -945,7 +979,12 @@
 
     function _resolveGenerationMethod(meta, requested) {
       var req = String(requested || "auto").trim().toLowerCase();
-      if (req && req !== "auto") return req;
+      var availableIds = meta && meta.caps && Array.isArray(meta.caps.availableMethods)
+        ? meta.caps.availableMethods.map(function (m) { return String(m.id || "").trim().toLowerCase(); })
+        : [];
+      if (req && req !== "auto") {
+        if (!availableIds.length || availableIds.indexOf(req) >= 0) return req;
+      }
       var info = meta && meta.info ? meta.info : {};
       if (info.canRandomSample) return "random";
       if (info.canDDPM) return "ddpm";
