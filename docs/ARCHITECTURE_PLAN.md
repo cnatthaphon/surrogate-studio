@@ -1,154 +1,64 @@
-# Surrogate Studio: Architecture Plan (Mar 2026)
+# Architecture Notes (Apr 2026)
 
 ## Goal
-Ship a schema-first surrogate platform where the same contracts can run across:
-- browser client (primary now)
-- notebook export flow
-- server runtimes (next phase, with `pytorch` baseline and optional `tf-node` adapter for `tfjs` family)
 
-`oscillator` is one dataset schema/module in this platform, not the whole product.
+Keep Surrogate Studio schema-driven and browser-first while allowing the same model/trainer/checkpoint contracts to work across:
 
-## Repository Strategy
-- Current phase: keep development in-place in `comphys/oscillator-surrogate`.
-- Pre-release phase: split to new repo `surrogate-platform`.
-- Split staging helper: `scripts/stage_platform_repo.sh`
-- Detailed checklist: `REPO_SPLIT_PLAN.md`
+- TF.js in the browser
+- optional PyTorch server runtime
+- exported notebook flow
 
-## Current Baseline (Implemented)
+## Current Shape
 
-1. Platform structure
-- Data Lab, Model Lab, Training Lab, Generation, Evaluation.
-- Left panel item engine shared across labs.
-- Right inspector forms rendered by shared UI engine.
+1. Product surface
+- single-page app with Playground, Dataset, Model, Trainer, Generation, and Evaluation tabs
+- demo folders are self-contained plugin-style presets
 
-2. Schema-first contracts
-- `schema_registry` defines dataset/model contracts and preconfig.
-- Feature-node policy per schema is active:
-  - trajectory schema can use history/params/onehot
-  - image schema can use image source/onehot
-- Presets are schema-scoped templates.
-- Built-in schema definitions are declarative:
-  - `model.presets[*].metadata.graphSpec`
-  - `model.metadata.featureNodes.palette.items[*]`
+2. Core contracts
+- schemas define allowed features, outputs, presets, and palette metadata
+- model graphs are stored as declarative Drawflow payloads
+- trainer records bind dataset + model + runtime config + history
+- checkpoints are moving toward one canonical runtime-neutral format
 
-3. Dataset modules
-- Registered modules:
-  - `oscillator`
-  - `mnist`
-  - `fashion_mnist`
-- Module build path is active from Data Lab.
-- MNIST/Fashion source is lazy-loaded and cached once per variant.
+3. Runtime model
+- browser path is primary
+- PyTorch server is optional and uses the same graph/checkpoint contract
+- notebook export should preserve the same identifiers and model/trainer assumptions
 
-4. Workspace storage
-- Unified entity contract for:
-  - datasets
-  - models
-  - trainer sessions
-  - epoch history
-- IndexedDB adapter + memory fallback under same store API.
+## Stable Rules
 
-5. Client training execution
-- Training runner + runtime/backend selectors are active.
-- Main panel shows single selected trainer (left panel controls selection).
-- Runtime handshake + normalized runtime events are wired.
-- Dataset generation uses worker path (with controlled fallback).
-- Client training uses worker path (with controlled fallback).
+1. No model-family hardcode in the core path
+- behavior should come from schema, graph, trainer config, and checkpoint metadata
 
-6. Notebook export
-- Export comes from selected Training sessions.
-- Bundle contract follows same dataset/model/session IDs.
+2. One checkpoint source of truth
+- browser and server may adapt the checkpoint differently
+- exported trainer/checkpoint format should stay runtime-neutral
 
-## Known Gaps (As of Mar 2026)
+3. Shared contracts before shared UI shortcuts
+- if two runtimes disagree, fix the contract/adapter first
+- do not patch behavior with model-specific branches
 
-1. Trainer coverage
-- Full trainer execution is stable for `oscillator`.
-- Non-oscillator schemas are not fully enabled in run queue yet.
+4. Browser-first product behavior
+- client path should remain the default UX
+- server features should improve speed, parity checking, or heavy workloads, not redefine the core product
 
-2. Server runtime adapters
-- Contract scaffolding exists.
-- End-to-end server execution parity is still pending.
+## Current Gaps
 
-3. Module-owned rendering
-- Generic render engine is active.
-- Full per-module custom render override system is only partial; some UI still follows schema profile + shared views.
+1. Server runtime is still per-run
+- each training run starts a fresh subprocess
+- checkpoints persist; live optimizer/runtime state does not
 
-4. Legacy app composition
-- `app.js` has been reduced in preset/palette ownership, but still contains legacy orchestration/render glue that should move into smaller core modules.
+2. Cross-runtime parity is improved but not perfect
+- TF.js and PyTorch can share checkpoints and generate from them
+- numeric traces and image samples still will not be bit-identical
 
-## Canonical Contracts
+3. Diffusion coverage still needs more end-to-end validation
+- graph/runtime support exists
+- research-faithful training semantics still need more verification
 
-1. Dataset schema contract
-- sample type, split defaults/modes, display metadata
-- feature node metadata + node policy
-- optional model presets and defaults
-- optional palette sections/items/default node config
+## Working Priorities
 
-2. Dataset module contract
-- `id`, `schemaId`, `label`, `description`
-- `preconfig.dataset`
-- `build(cfg)` returns normalized dataset payload
-
-3. Runtime contract
-- normalized runtime config:
-  - `runtimeId`, `backend`, `transport`, `irVersion`
-- normalized runtime events:
-  - handshake, run start, epoch, complete/fail/skip
-
-4. Export contract
-- session-driven export
-- dataset/model/session identifiers preserved
-- notebook bundle uses same IR assumptions as client pipeline
-
-5. Model graph contract
-- graph preset is declared as data (`graphSpec`), not generated by schema-specific code in app layer
-- graph runtime renders nodes/edges from contract
-- node palette defaults come from schema contract
-
-## Execution Roadmap
-
-### Phase A: Client parity by schema
-1. Finish training adapters for image schemas (`mnist`, `fashion_mnist`).
-2. Keep drawflow->feature inference schema-validated with no hidden fallback behavior.
-3. Ensure per-epoch metrics format is identical for all schema trainers.
-
-### Phase B: Render extensibility
-1. Finalize module-level preview/builder render extension points.
-2. Keep shared render engine as default path.
-3. Ensure module override does not fork data contracts.
-4. Continue reducing `app.js` to renderer/orchestrator only.
-
-### Phase C: Server adapters
-1. Implement runtime adapters:
-  - `python_server` (primary target)
-  - `node_server` (optional)
-2. Keep handshake/event payload shape identical to client.
-3. Reuse same notebook/export artifacts and IDs.
-
-### Phase D: Research expansion
-1. Add new schemas/modules (FDM/FEM and other physical systems).
-2. Extend model blocks for broader NN families while keeping graph-driven semantics.
-3. Preserve no-hardcode policy: behavior from contracts, not tab-specific branches.
-
-## Engineering Rules
-
-1. No hardcode behavior by tab/schema branch
-- infer and validate from schema + graph + module contracts.
-
-2. Processing and rendering separation
-- processing functions are script-testable without UI.
-- render layer only binds UI to those functions.
-
-3. Shared engine first
-- list/form rendering changes should be fixed once and apply across labs.
-
-4. Reproducibility
-- deterministic split/seed behavior by contract.
-- export artifacts must be portable without local hidden dependencies.
-
-5. Script test gate
-- contract tests must pass before release updates:
-  - `node scripts/test_contract_all.js`
-- declarative schema contract tests must pass:
-  - `node scripts/test_contract_schema_declarative_defs.js`
-- model graph core contract tests must pass:
-  - `node scripts/test_contract_model_graph_core.js`
+1. Keep contracts explicit and versioned
+2. Reduce stale docs when runtime behavior changes
+3. Add targeted regression tests when a cross-runtime bug is fixed
+4. Keep `main` clean and branch work short-lived

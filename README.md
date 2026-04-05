@@ -6,6 +6,8 @@
 
 **[Live Demo](https://cnatthaphon.github.io/surrogate-studio/)** | [Fashion-MNIST Benchmark](https://cnatthaphon.github.io/surrogate-studio/demo/Fashion-MNIST-Benchmark/) | [GAN](https://cnatthaphon.github.io/surrogate-studio/demo/Fashion-MNIST-GAN/) | [Diffusion](https://cnatthaphon.github.io/surrogate-studio/demo/Fashion-MNIST-Diffusion/) | [LSTM-VAE](https://cnatthaphon.github.io/surrogate-studio/demo/LSTM-VAE-for-dominant-motion-extraction/) | [Oscillator](https://cnatthaphon.github.io/surrogate-studio/demo/Oscillator-Surrogate/)
 
+**[Contributing](CONTRIBUTING.md)** | **[Developer Docs](docs/README.md)** | **[Server Notes](server/README.md)** | **[Schema Notes](schemas/README.md)**
+
 Build datasets, design neural network architectures visually, train models, generate samples, and benchmark results from a single page. It works fully in the browser, with an optional PyTorch server for faster training and cross-runtime checks.
 
 ![Demo Workflow](demo/Fashion-MNIST-Benchmark/images/demo_workflow.gif)
