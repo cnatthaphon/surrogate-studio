@@ -1251,7 +1251,7 @@
       var checkpointRef = _getCheckpointRef(currentArtifacts);
       if (currentArtifacts) {
         var checkpointInfo = el("div", { style: "font-size:10px;color:#94a3b8;margin-bottom:6px;padding:4px 6px;border:1px solid #334155;border-radius:4px;background:#0f172a;" });
-        checkpointInfo.textContent = "Current checkpoint: " + (checkpointRef || "unversioned") + " | source=" + (t.trainedOnServer ? "python_server" : "js_client");
+        checkpointInfo.textContent = "Current checkpoint: " + (checkpointRef || "unversioned") + " | source=" + _resolveArtifactProducerRuntime(t, currentArtifacts);
         rightEl.appendChild(checkpointInfo);
       }
 
@@ -1567,6 +1567,7 @@
                 tc.modelArtifactsLast = lastW;
                 if (!tc.modelArtifactsBest) tc.modelArtifactsBest = lastW;
                 tc.modelArtifacts = lastW; // on stop, always use last
+                tc.trainedOnServer = false;
                 savedWeights = true;
               } catch (e) {}
             }
@@ -1629,7 +1630,7 @@
           exportedAt: new Date().toISOString(),
         };
         // Extract weight values as Float32Array for binary storage
-        var runtimeId = t && t.trainedOnServer ? "python_server" : "js_client";
+        var runtimeId = _resolveArtifactProducerRuntime(t, t.modelArtifactsLast || t.modelArtifacts || t.modelArtifactsBest || null);
         var artifacts = _normalizeCheckpointArtifacts(t.modelArtifactsLast || t.modelArtifacts || null, runtimeId);
         var artifactsBest = _normalizeCheckpointArtifacts(t.modelArtifactsBest || null, runtimeId);
         var weightSpecs = artifacts ? artifacts.weightSpecs : [];
@@ -2302,6 +2303,7 @@
               tCard.modelArtifactsLast = wa;
               tCard.modelArtifactsBest = wa;
             }
+            tCard.trainedOnServer = false;
             if (store) store.upsertTrainerCard(tCard);
             onStatus("\u2713 Done (Worker): MAE=" + (result.mae != null ? Number(result.mae).toExponential(3) : "—"));
             if (_isTrainerTrainViewVisible(activeId) || (stateApi && stateApi.getActiveTrainer() === activeId)) { _renderLeftPanel(); _renderMainPanel(); _renderRightPanel(); }
@@ -2420,6 +2422,7 @@
           } catch (e) {
             console.warn("[trainer] Weight save failed:", e.message);
           }
+          tCard.trainedOnServer = false;
           if (store) store.upsertTrainerCard(tCard);
           onStatus("\u2713 Done: MAE=" + (result.mae != null ? Number(result.mae).toExponential(3) : "—"));
           if (_isTrainerTrainViewVisible(activeId) || (stateApi && stateApi.getActiveTrainer() === activeId)) { _renderLeftPanel(); _renderMainPanel(); _renderRightPanel(); }

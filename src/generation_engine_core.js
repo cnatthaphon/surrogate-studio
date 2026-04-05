@@ -25,6 +25,11 @@
 
   // --- helpers ---
   function clampInt(v, lo, hi) { var n = Math.floor(Number(v)); return n < lo ? lo : n > hi ? hi : n; }
+  function _seedAt(baseSeed, offset) {
+    var seed = Math.floor(Number(baseSeed || 42));
+    var off = Math.floor(Number(offset || 0));
+    return (seed + off) | 0;
+  }
 
   /** Pick the correct output tensor from model.predict() result.
    *  outputIndex selects which head when model has multiple outputs. */
@@ -173,8 +178,9 @@
     return new Promise(function (resolve) {
       var model = cfg.model;
       if (!model) throw new Error("generation: model required");
+      var seed = _seedAt(cfg.seed, 0);
 
-      var z = tf.randomNormal([numSamples, latentDim], 0, temperature);
+      var z = tf.randomNormal([numSamples, latentDim], 0, temperature, "float32", seed);
       var inputTensors = z;
       var extraTensors = [];
       // multi-input models (e.g., GAN with SampleZ + ImageSource): provide all inputs
@@ -225,7 +231,7 @@
       var lossHistory = [];
 
       // init from noise
-      var x = tf.variable(tf.randomNormal([numSamples, dim], 0, temperature));
+      var x = tf.variable(tf.randomNormal([numSamples, dim], 0, temperature, "float32", _seedAt(cfg.seed, 0)));
 
       for (var step = 0; step < steps; step++) {
         var sigma = noiseSchedule ? noiseSchedule[Math.min(step, noiseSchedule.length - 1)] : 1.0;
@@ -242,7 +248,7 @@
         var grad = gradFn(x);
 
         // Langevin update: x += ε/2 * score + √ε * noise
-        var noise = tf.randomNormal(x.shape, 0, Math.sqrt(epsilon) * sigma);
+        var noise = tf.randomNormal(x.shape, 0, Math.sqrt(epsilon) * sigma, "float32", _seedAt(cfg.seed, step + 1));
         var update = x.add(grad.mul(epsilon / 2)).add(noise);
         x.assign(update);
 
@@ -280,7 +286,7 @@
       var lossHistory = [];
 
       // init z from noise
-      var z = tf.variable(tf.randomNormal([numSamples, latentDim], 0, temperature));
+      var z = tf.variable(tf.randomNormal([numSamples, latentDim], 0, temperature, "float32", _seedAt(cfg.seed, 0)));
       var optimizer = tf.train.adam(lr);
 
       for (var step = 0; step < steps; step++) {
@@ -329,7 +335,7 @@
       var lossHistory = [];
 
       // init x from small random
-      var x = tf.variable(tf.randomNormal([numSamples].concat(inputShape), 0, 0.1));
+      var x = tf.variable(tf.randomNormal([numSamples].concat(inputShape), 0, 0.1, "float32", _seedAt(cfg.seed, 0)));
       var optimizer = tf.train.adam(lr);
 
       for (var step = 0; step < steps; step++) {
@@ -387,7 +393,7 @@
       for (var j = 0; j < T; j++) { cumProd *= alphas[j]; alphasCumprod.push(cumProd); }
 
       // start from pure noise
-      var xT = tf.randomNormal([numSamples, dim]);
+      var xT = tf.randomNormal([numSamples, dim], 0, 1, "float32", _seedAt(cfg.seed, 0));
       var x = xT;
 
       // reverse diffusion
@@ -406,7 +412,7 @@
         var xPrev = x.sub(eps.mul(noiseCoeff)).mul(scale);
         if (t > 0) {
           var sigma = Math.sqrt(betas[t]);
-          var z = tf.randomNormal(x.shape, 0, sigma);
+          var z = tf.randomNormal(x.shape, 0, sigma, "float32", _seedAt(cfg.seed, T - t));
           var xWithNoise = xPrev.add(z);
           z.dispose();
           xPrev.dispose();

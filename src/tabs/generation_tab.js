@@ -531,7 +531,7 @@
         var selectedArtifacts = _getTrainerArtifacts(_trainerForWeights, g.config && g.config.weightSelection);
         if (selectedArtifacts) {
           configCard.appendChild(el("div", { style: "font-size:10px;color:#94a3b8;margin-top:-2px;margin-bottom:6px;" },
-            "Checkpoint: " + (_getCheckpointRef(selectedArtifacts) || "unversioned") + " | source=" + (_trainerForWeights.trainedOnServer ? "python_server" : "js_client")));
+            "Checkpoint: " + (_getCheckpointRef(selectedArtifacts) || "unversioned") + " | source=" + String(((selectedArtifacts.checkpoint && selectedArtifacts.checkpoint.producerRuntime) || selectedArtifacts.producerRuntime || ((_trainerForWeights && _trainerForWeights.trainedOnServer) ? "python_server" : "js_client")))));
         }
       }
 
