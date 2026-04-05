@@ -2,22 +2,132 @@
 
 from __future__ import annotations
 
-from typing import Any
+import re
+from typing import Any, Dict, List, Tuple
 
 import numpy as np
 
-from checkpoint_format import extract_weight_values
+from checkpoint_format import extract_weight_specs, extract_weight_values
+
+
+def _strip_suffix(name: str) -> str:
+    return re.sub(r"_\d+$", "", str(name or ""))
+
+
+def _canonicalize_weight_name(raw_name: str) -> str:
+    name = _strip_suffix(raw_name)
+    if not name:
+        return ""
+    if name.startswith("tfjs_"):
+        name = name[5:]
+    if "/" in name:
+        return _strip_suffix(name)
+
+    m = re.match(r"^(dense|conv1d|conv2d|convt2d|embed|out)_(\d+)\.(weight|bias)$", name)
+    if m:
+        return f"n{m.group(2)}/{'kernel' if m.group(3) == 'weight' else 'bias'}"
+
+    m = re.match(r"^(bn|ln)_(\d+)\.(weight|bias|running_mean|running_var)$", name)
+    if m:
+        tail_map = {
+            "weight": "gamma",
+            "bias": "beta",
+            "running_mean": "moving_mean",
+            "running_var": "moving_variance",
+        }
+        return f"n{m.group(2)}/{tail_map[m.group(3)]}"
+
+    m = re.match(r"^(rnn|gru|lstm)_(\d+)\.(kernel|recurrent_kernel|bias)$", name)
+    if m:
+        return f"n{m.group(2)}/{m.group(3)}"
+
+    return name
+
+
+def _spec_size(shape: List[int]) -> int:
+    total = 1
+    for dim in shape or []:
+        total *= int(dim)
+    return total
+
+
+def _build_saved_tensor_map(config: Any) -> Tuple[Dict[str, Dict[str, Any]], np.ndarray]:
+    specs = extract_weight_specs(config)
+    values = extract_weight_values(config)
+    flat = np.array(values, dtype=np.float32) if values else np.array([], dtype=np.float32)
+    saved_map: Dict[str, Dict[str, Any]] = {}
+    offset = 0
+    for idx, spec in enumerate(specs):
+        shape = list((spec or {}).get("shape", []) or [])
+        size = _spec_size(shape)
+        key = _canonicalize_weight_name((spec or {}).get("name", ""))
+        if key:
+            saved_map[key] = {
+                "offset": offset,
+                "size": size,
+                "shape": shape,
+                "index": idx,
+                "name": str((spec or {}).get("name", "")),
+            }
+        offset += size
+    return saved_map, flat
+
+
+def _load_named_checkpoint(model: Any, saved_map: Dict[str, Dict[str, Any]], flat: np.ndarray) -> bool:
+    import torch
+
+    if not saved_map:
+        return False
+
+    state = model.state_dict()
+    new_state = {}
+    matched = 0
+    matched_specs = set()
+
+    for name, param in state.items():
+        if "num_batches_tracked" in name:
+            continue
+        key = _canonicalize_weight_name(name)
+        saved = saved_map.get(key)
+        if not saved:
+            continue
+        vals = flat[saved["offset"]:saved["offset"] + saved["size"]]
+        expected_size = int(param.numel())
+        if vals.size != expected_size:
+            continue
+        matched_specs.add(key)
+        if param.dim() == 2:
+            new_state[name] = torch.tensor(vals.reshape(param.shape[1], param.shape[0]).T, dtype=torch.float32)
+        elif param.dim() == 3 and name.startswith("conv1d_"):
+            tf_shape = (param.shape[2], param.shape[1], param.shape[0])
+            new_state[name] = torch.tensor(vals.reshape(tf_shape).transpose(2, 1, 0), dtype=torch.float32)
+        elif param.dim() == 4 and (name.startswith("conv2d_") or name.startswith("convt2d_")):
+            tf_shape = (param.shape[2], param.shape[3], param.shape[1], param.shape[0])
+            new_state[name] = torch.tensor(vals.reshape(tf_shape).transpose(3, 2, 0, 1), dtype=torch.float32)
+        else:
+            new_state[name] = torch.tensor(vals.reshape(param.shape), dtype=torch.float32)
+        matched += 1
+
+    if not matched:
+        return False
+
+    merged_state = dict(state)
+    merged_state.update(new_state)
+    model.load_state_dict(merged_state)
+    return True
 
 
 def load_weights_into_model(model: Any, config: Any) -> bool:
     """Load canonical checkpoint weights into a PyTorch model in-place."""
     import torch
 
-    weight_values = extract_weight_values(config)
-    if not weight_values:
-      return False
+    saved_map, flat = _build_saved_tensor_map(config)
+    if flat.size == 0:
+        return False
 
-    flat = np.array(weight_values, dtype=np.float32)
+    if _load_named_checkpoint(model, saved_map, flat):
+        return True
+
     state = model.state_dict()
     bn_running = [k for k in state if "running_mean" in k or "running_var" in k]
     regular = [k for k in state if "num_batches_tracked" not in k and k not in bn_running]

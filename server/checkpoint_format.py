@@ -73,6 +73,22 @@ def extract_weight_values(source: Any) -> List[float]:
     return []
 
 
+def extract_weight_specs(source: Any) -> List[Dict[str, Any]]:
+    if not isinstance(source, dict):
+        return []
+    if isinstance(source.get("weightSpecs"), list):
+        return deepcopy(source.get("weightSpecs") or [])
+    if isinstance(source.get("modelArtifacts"), dict):
+        specs = extract_weight_specs(source["modelArtifacts"])
+        if specs:
+            return specs
+    if isinstance(source.get("checkpoint"), dict):
+        specs = extract_weight_specs(source["checkpoint"])
+        if specs:
+            return specs
+    return []
+
+
 def describe_artifacts(weight_specs: List[Dict[str, Any]], total_values: int, producer_runtime: str = "") -> Dict[str, Any]:
     specs = deepcopy(weight_specs or [])
     return {

@@ -93,6 +93,7 @@ async function runCase(name, graph, featureSize, xInput) {
     targetSize: tfArr[0].length,
     numClasses: 0,
     xInput: xInput,
+    weightSpecs: artifacts.weightSpecs,
     weightValues: Array.from(new Float32Array(artifacts.weightData)),
   };
   var cfgPath = path.join("/tmp", "surrogate_studio_dense_parity_" + name + ".json");
@@ -153,6 +154,23 @@ async function runCase(name, graph, featureSize, xInput) {
     6,
     Array.from({ length: 4 }, function (_, r) {
       return Array.from({ length: 6 }, function (_, c) { return ((r + 2) * (c + 1)) / 30; });
+    })
+  );
+
+  console.log("\n=== 3. Dense + BatchNorm Parity ===");
+  await runCase(
+    "dense_batchnorm_dense",
+    G([
+      ["input", { mode: "flat" }],
+      ["dense", { units: 8, activation: "linear", useBias: true }],
+      ["batchnorm", { epsilon: 0.001, momentum: 0.9 }],
+      ["relu", {}],
+      ["dense", { units: 3, activation: "linear", useBias: true }],
+      ["output", { target: "custom", targetType: "custom", loss: "none" }],
+    ]),
+    6,
+    Array.from({ length: 4 }, function (_, r) {
+      return Array.from({ length: 6 }, function (_, c) { return ((r + 3) * (c + 1)) / 40; });
     })
   );
 

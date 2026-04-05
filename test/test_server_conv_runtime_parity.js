@@ -93,6 +93,7 @@ async function runCase(name, graph, featureSize, xInput) {
     targetSize: tfArr[0].length,
     numClasses: 0,
     xInput: xInput,
+    weightSpecs: artifacts.weightSpecs,
     weightValues: Array.from(new Float32Array(artifacts.weightData)),
   };
   var cfgPath = path.join("/tmp", "surrogate_studio_conv_parity_" + name + ".json");
