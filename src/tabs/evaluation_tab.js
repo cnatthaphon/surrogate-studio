@@ -54,6 +54,21 @@
     var _activeEvalId = null;
     var _isRunning = false;
     var _mountId = 0;
+    var METRIC_HELP = {
+      mmd_rbf: { dir: "lower", text: "Overall distribution distance between generated samples and the reference set." },
+      mean_gap: { dir: "lower", text: "Average absolute gap between per-feature means of generated and reference samples." },
+      std_gap: { dir: "lower", text: "Average absolute gap between per-feature standard deviations." },
+      nn_precision: { dir: "lower", text: "Average distance from each generated sample to its nearest reference sample." },
+      nn_coverage: { dir: "lower", text: "Average distance from each reference sample to its nearest generated sample." },
+      diversity_gap: { dir: "lower", text: "Gap between generated diversity and reference diversity." },
+      diversity: { dir: "context", text: "Average pairwise distance among generated samples. Compare alongside diversity_gap." },
+      recon_mse: { dir: "lower", text: "Reconstruction mean squared error." },
+      mae: { dir: "lower", text: "Mean absolute prediction error." },
+      rmse: { dir: "lower", text: "Root mean squared prediction error." },
+      acc: { dir: "higher", text: "Classification accuracy." },
+      f1: { dir: "higher", text: "F1 score." },
+      auc_macro: { dir: "higher", text: "Macro-averaged AUC." }
+    };
 
     // init custom table
     if (store && typeof store.initTables === "function") store.initTables({ tables: [EVAL_TABLE] });
@@ -406,7 +421,7 @@
         var thead = el("tr", {});
         thead.appendChild(el("th", {}, "Model"));
         metricKeys.forEach(function (k) { thead.appendChild(el("th", {}, k.toUpperCase())); });
-        thead.appendChild(el("th", {}, "N"));
+        thead.appendChild(el("th", {}, "Ref N"));
         thead.appendChild(el("th", {}, "Status"));
         table.appendChild(thead);
 
@@ -449,6 +464,7 @@
           table.appendChild(tr);
         });
         runCard.appendChild(table);
+        _renderMetricLegend(runCard, metricKeys);
 
         // bar chart
         _renderBarChart(runCard, results, metricKeys);
@@ -490,6 +506,28 @@
         legend: { orientation: "h", y: -0.2, font: { size: 9 } },
         margin: { t: 10, b: 60, l: 50, r: 10 },
       }, { responsive: true });
+    }
+
+    function _renderMetricLegend(container, metricKeys) {
+      var keys = (metricKeys || []).filter(function (k) { return !!METRIC_HELP[String(k || "").toLowerCase()]; });
+      if (!keys.length) return;
+
+      var card = el("div", { style: "margin-top:8px;padding:8px;border:1px solid #334155;border-radius:6px;background:#0f172a;" });
+      card.appendChild(el("div", { style: "font-size:11px;color:#67e8f9;font-weight:600;margin-bottom:4px;" }, "Metric Notes"));
+
+      keys.forEach(function (k) {
+        var meta = METRIC_HELP[String(k || "").toLowerCase()];
+        if (!meta) return;
+        var dirText = meta.dir === "lower" ? "Lower is better" : meta.dir === "higher" ? "Higher is better" : "Context-dependent";
+        card.appendChild(el("div", { style: "font-size:10px;color:#94a3b8;line-height:1.45;margin-top:3px;" }, [
+          el("span", { style: "color:#e2e8f0;font-weight:600;" }, String(k).toUpperCase()),
+          document.createTextNode(" — " + dirText + ". " + meta.text)
+        ]));
+      });
+
+      card.appendChild(el("div", { style: "font-size:10px;color:#64748b;margin-top:6px;" },
+        "Ref N is the number of reference samples used from the selected dataset split."));
+      container.appendChild(card);
     }
 
     function _renderModuleViz(container, ev, run, mountId) {
@@ -1172,7 +1210,7 @@
       }
       if ((runNeeds.predictive || runNeeds.generative) && !testN) {
         r.status = "error";
-        r.error = "No test data";
+        r.error = "No reference data";
         return Promise.resolve();
       }
 
