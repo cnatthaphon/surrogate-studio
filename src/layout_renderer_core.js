@@ -60,6 +60,8 @@
     ".osc-btn { display: inline-flex; align-items: center; justify-content: center; padding: 5px 12px; border-radius: 6px; border: 1px solid #0ea5e9; background: linear-gradient(135deg, #0284c7 0%, #0369a1 100%); color: #fff; font-weight: 600; cursor: pointer; font-size: 12px; transition: all 0.15s; box-shadow: 0 1px 3px rgba(2,132,199,0.3); }",
     ".osc-btn:hover { filter: brightness(1.15); transform: translateY(-0.5px); box-shadow: 0 2px 6px rgba(2,132,199,0.4); }",
     ".osc-btn:active { transform: translateY(0); }",
+    ".osc-btn:disabled, .osc-btn[disabled] { cursor: not-allowed; opacity: 0.55; filter: saturate(0.7); box-shadow: none; transform: none; }",
+    ".osc-btn:disabled:hover, .osc-btn[disabled]:hover { cursor: not-allowed; filter: saturate(0.7); transform: none; box-shadow: none; }",
     ".osc-btn.secondary { border-color: #1e293b; background: #111827; color: #94a3b8; box-shadow: none; }",
     ".osc-btn.secondary:hover { border-color: #334155; color: #cbd5e1; }",
     ".osc-btn.sm { padding: 2px 7px; font-size: 10px; }",
@@ -72,6 +74,7 @@
     ".osc-form-row label, .row label { font-size: 11px; color: #94a3b8; }",
     ".osc-form-row input, .osc-form-row select, .row input, .row select { padding: 4px 7px; border-radius: 4px; border: 1px solid #2d3748; background: #1a202e; color: #e2e8f0; font-size: 12px; width: 100%; outline: none; transition: border-color 0.2s; }",
     ".osc-form-row input:focus, .osc-form-row select:focus, .row input:focus, .row select:focus { border-color: #38bdf8; box-shadow: 0 0 0 1px rgba(56,189,248,0.2); }",
+    ".osc-form-row input:disabled, .osc-form-row select:disabled, .row input:disabled, .row select:disabled { cursor: not-allowed; opacity: 0.7; }",
     ".osc-form-row input[type='checkbox'] { width: auto; accent-color: #38bdf8; }",
 
     // empty state

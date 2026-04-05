@@ -1605,10 +1605,10 @@
       if (isStopping) {
         rightEl.style.position = "relative";
         var stoppingOverlay = el("div", {
-          style: "position:absolute;inset:0;background:rgba(11,18,32,0.72);backdrop-filter:blur(2px);display:flex;align-items:center;justify-content:center;z-index:20;border-radius:8px;"
+          style: "position:absolute;inset:0;background:rgba(11,18,32,0.72);backdrop-filter:blur(2px);display:flex;align-items:center;justify-content:center;z-index:20;border-radius:8px;cursor:not-allowed;"
         });
         var stoppingMsg = el("div", {
-          style: "padding:10px 12px;background:#0f172a;border:1px solid #475569;border-radius:8px;color:#e2e8f0;font-size:12px;text-align:center;max-width:220px;"
+          style: "padding:10px 12px;background:#0f172a;border:1px solid #475569;border-radius:8px;color:#e2e8f0;font-size:12px;text-align:center;max-width:220px;cursor:not-allowed;"
         }, [
           el("div", { style: "font-weight:600;color:#fbbf24;margin-bottom:4px;" }, "Stopping and saving weights"),
           el("div", { style: "font-size:11px;color:#cbd5e1;" }, "Wait until the trainer reaches 'stopped' before generating or continuing.")
