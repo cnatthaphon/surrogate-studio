@@ -231,7 +231,13 @@
     function _listDatasetsForSchema(schemaId) {
       if (!store) return [];
       return (typeof store.listDatasets === "function" ? store.listDatasets({}) : [])
-        .filter(function (d) { return d.status === "ready" && (!schemaId || d.schemaId === schemaId); });
+        .filter(function (d) { return !schemaId || d.schemaId === schemaId; })
+        .sort(function (a, b) {
+          var aReady = a && a.status === "ready" ? 1 : 0;
+          var bReady = b && b.status === "ready" ? 1 : 0;
+          if (aReady !== bReady) return bReady - aReady;
+          return String((a && a.name) || (a && a.id) || "").localeCompare(String((b && b.name) || (b && b.id) || ""));
+        });
     }
 
     // ─── Get generation runs for a trainer ───
@@ -354,7 +360,7 @@
         mainEl.appendChild(el("div", { className: "osc-card" }, [
           el("div", { style: "font-size:13px;color:#67e8f9;font-weight:600;" }, "Multi-Model Benchmark"),
           el("div", { style: "font-size:12px;color:#94a3b8;margin-top:4px;" },
-            "Create an evaluation to compare trained models on the same test set. Select a schema, add models, pick metrics, and run."),
+            "Create an evaluation to compare trained models against the same reference dataset. Select a schema, add models, pick metrics, and run."),
         ]));
         return;
       }
@@ -430,7 +436,7 @@
           });
           tr.appendChild(el("td", { style: "color:#64748b;" }, String(r.testN || "\u2014")));
           var sc = r.status === "done" ? "#4ade80" : r.status === "error" ? "#f43f5e" : r.status === "skipped" ? "#64748b" : "#fbbf24";
-          tr.appendChild(el("td", { style: "color:" + sc + ";" }, r.status || "pending"));
+          tr.appendChild(el("td", { style: "color:" + sc + ";" }, (r.status || "pending") + (r.error ? ": " + r.error : "")));
           table.appendChild(tr);
         });
         runCard.appendChild(table);
@@ -523,13 +529,23 @@
       var dsSel = el("select", { style: "width:100%;padding:4px;background:#1e293b;color:#e2e8f0;border:1px solid #334155;border-radius:4px;font-size:11px;" });
       dsSel.appendChild(el("option", { value: "" }, "-- select --"));
       datasets.forEach(function (d) {
-        var opt = el("option", { value: d.id }, (d.name || d.id) + " (" + (d.data && d.data.testCount ? d.data.testCount + " test" : "?") + ")");
+        var splitInfo = d.data && (d.data.testCount || d.data.valCount || d.data.trainCount)
+          ? ((d.data.testCount || 0) + " test / " + (d.data.valCount || 0) + " val / " + (d.data.trainCount || 0) + " train")
+          : "generate first";
+        var statusLabel = d.status === "ready" ? "ready" : (d.status || "draft");
+        var opt = el("option", { value: d.id }, (d.name || d.id) + " [" + statusLabel + "] (" + splitInfo + ")");
         if (d.id === ev.datasetId) opt.selected = true;
         dsSel.appendChild(opt);
       });
       dsSel.addEventListener("change", function () { ev.datasetId = dsSel.value; _saveEval(ev); });
       dsRow.appendChild(dsSel);
       configCard.appendChild(dsRow);
+
+      var selectedDataset = ev.datasetId && store && typeof store.getDataset === "function" ? store.getDataset(ev.datasetId) : null;
+      if (selectedDataset && (!selectedDataset.data || selectedDataset.status !== "ready")) {
+        configCard.appendChild(el("div", { style: "margin-top:6px;padding:6px;background:#1c1917;border:1px solid #854d0e;border-radius:4px;font-size:10px;color:#fbbf24;" },
+          "Selected dataset is not generated yet. Use the Dataset tab and click Generate Dataset before running evaluation."));
+      }
 
       // trainer selection (checkboxes, filtered by schema)
       var trainers = _listTrainersForSchema(ev.schemaId);
@@ -552,8 +568,10 @@
           var statusColor = t.status === "done" ? "#4ade80" : t.status === "training" ? "#fbbf24" : "#64748b";
           row.appendChild(el("span", { style: "font-size:11px;color:" + statusColor + ";" }, statusTag));
           row.appendChild(el("span", { style: "font-size:11px;color:#e2e8f0;" }, (t.name || t.id)));
-          if (t.metrics && t.metrics.mae != null) {
-            row.appendChild(el("span", { style: "font-size:9px;color:#64748b;" }, "MAE=" + Number(t.metrics.mae).toExponential(2)));
+          if (t.metrics && t.metrics.bestEpoch != null) {
+            row.appendChild(el("span", { style: "font-size:9px;color:#64748b;" }, "bestEpoch=" + String(t.metrics.bestEpoch)));
+          } else if (t.metrics && t.metrics.paramCount != null) {
+            row.appendChild(el("span", { style: "font-size:9px;color:#64748b;" }, "params=" + String(t.metrics.paramCount)));
           }
           configCard.appendChild(row);
         });
@@ -722,6 +740,11 @@
       if (!ev.trainerIds || !ev.trainerIds.length) { onStatus("Select at least one model"); return; }
       if (!ev.datasetId) { onStatus("Select a dataset"); return; }
       if (!ev.evaluatorIds || !ev.evaluatorIds.length) { onStatus("Select at least one metric"); return; }
+      var selectedDataset = store && typeof store.getDataset === "function" ? store.getDataset(ev.datasetId) : null;
+      if (!selectedDataset || !selectedDataset.data || selectedDataset.status !== "ready") {
+        onStatus("Generate the selected dataset first in the Dataset tab.");
+        return;
+      }
 
       var tf = getTf();
       var pc = predictionCore || (typeof window !== "undefined" && window.OSCPredictionCore) || null;

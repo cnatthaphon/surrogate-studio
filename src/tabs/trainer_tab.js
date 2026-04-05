@@ -111,6 +111,12 @@
       }
       return converter.loadArtifactsIntoModel(tf, model, artifacts);
     }
+    function _inferTrainerFamily(tCard) {
+      if (!tCard || !store || !modelBuilder) return "supervised";
+      var modelRec = store.getModel(tCard.modelId);
+      if (!modelRec || !modelRec.graph || typeof modelBuilder.inferModelFamily !== "function") return "supervised";
+      return String(modelBuilder.inferModelFamily(modelRec.graph) || "supervised");
+    }
     var _activeTrainingId = ""; // which trainer is currently being trained
     var _lossChartDiv = null;
     var _epochTableBody = null;
@@ -469,11 +475,16 @@
         (t.modelId ? " | Model: " + (function () { var m = store.getModel(t.modelId); return m ? m.name : t.modelId; })() : "") +
         (t.backend ? " | Backend: " + String(t.backend) : "") +
         (t.metrics && t.metrics.paramCount ? " | Params: " + Number(t.metrics.paramCount).toLocaleString() : "")));
-      if (t.metrics) {
+      var family = _inferTrainerFamily(t);
+      if (t.metrics && family !== "gan" && family !== "diffusion") {
         header.appendChild(el("div", { style: "font-size:12px;color:#4ade80;margin-top:4px;" },
           "MAE: " + (t.metrics.mae != null ? Number(t.metrics.mae).toExponential(3) : "—") +
           " | Test MAE: " + (t.metrics.testMae != null ? Number(t.metrics.testMae).toExponential(3) : "—") +
           " | Best epoch: " + (t.metrics.bestEpoch || "—")));
+      } else if (t.metrics && (t.metrics.bestEpoch != null || t.metrics.paramCount != null)) {
+        header.appendChild(el("div", { style: "font-size:12px;color:#94a3b8;margin-top:4px;" },
+          (t.metrics.bestEpoch != null ? ("Best epoch: " + t.metrics.bestEpoch) : "Best epoch: —") +
+          (t.metrics.paramCount != null ? (" | Params: " + Number(t.metrics.paramCount).toLocaleString()) : "")));
       }
       mainEl.appendChild(header);
 
