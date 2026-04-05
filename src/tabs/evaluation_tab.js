@@ -608,11 +608,23 @@
           "Selected dataset is not generated yet. Use the Dataset tab and click Generate Dataset before running evaluation."));
       }
 
+      var isClassification = false;
+      if (ev.schemaId && schemaRegistry) {
+        var outputKeys = schemaRegistry.getOutputKeys(ev.schemaId);
+        var defHt = outputKeys && outputKeys[0] ? (outputKeys[0].headType || "regression") : "regression";
+        isClassification = defHt === "classification";
+      }
+      var allEvaluators = _getAllEvaluators(ev.schemaId, isClassification);
+      var selectedEvaluatorDefs = allEvaluators.filter(function (item) { return (ev.evaluatorIds || []).indexOf(item.id) >= 0; });
+      var hasGenerationMetrics = selectedEvaluatorDefs.some(function (item) { return item.mode === "generation" || item.mode === "both"; });
+      var showGenSettings = String(ev.runMode || "auto") !== "predict" || hasGenerationMetrics;
+
       // trainer selection (checkboxes, filtered by schema)
       var trainers = _listTrainersForSchema(ev.schemaId);
       if (trainers.length) {
         configCard.appendChild(el("div", { style: "font-size:10px;color:#67e8f9;margin:8px 0 4px;font-weight:600;" }, "Models"));
         trainers.forEach(function (t) {
+          var modelWrap = el("div", { style: "margin-bottom:4px;" });
           var row = el("div", { style: "display:flex;align-items:center;gap:6px;margin-bottom:3px;" });
           var cb = el("input", { type: "checkbox" });
           cb.checked = (ev.trainerIds || []).indexOf(t.id) >= 0;
@@ -623,6 +635,7 @@
               ev.trainerIds = (ev.trainerIds || []).filter(function (id) { return id !== t.id; });
             }
             _saveEval(ev);
+            _renderRightPanel();
           });
           row.appendChild(cb);
           var statusTag = t.status === "done" ? "\u2713" : t.status === "training" ? "\u23f3" : "\u25cb";
@@ -634,7 +647,67 @@
           } else if (t.metrics && t.metrics.paramCount != null) {
             row.appendChild(el("span", { style: "font-size:9px;color:#64748b;" }, "params=" + String(t.metrics.paramCount)));
           }
-          configCard.appendChild(row);
+          modelWrap.appendChild(row);
+
+          if (cb.checked && showGenSettings) {
+            var modelRecForRow = store ? store.getModel(t.modelId) : null;
+            if (modelRecForRow) {
+              var rowMeta = _resolveGenerationMeta(modelRecForRow);
+              var rowInfo = rowMeta.info || {};
+              var override = _getGenerationOverride(ev, t.id);
+              var needsSampleSelect = rowInfo.sampleNodes && rowInfo.sampleNodes.length > 1;
+              var needsOutputSelect = rowInfo.outputNodes && rowInfo.outputNodes.length > 1;
+              if (needsSampleSelect || needsOutputSelect) {
+                var inlineBox = el("div", { style: "margin:4px 0 0 18px;padding:6px;background:#101827;border:1px solid #243244;border-radius:6px;" });
+                inlineBox.appendChild(el("div", { style: "font-size:10px;color:#67e8f9;font-weight:600;margin-bottom:4px;" }, "Generation path"));
+                if (needsSampleSelect) {
+                  var sampleRow = el("div", { className: "osc-form-row", style: "margin-bottom:4px;" });
+                  sampleRow.appendChild(el("label", {}, "Sample input"));
+                  var sampleSel = el("select", { style: "width:100%;padding:4px;background:#1e293b;color:#e2e8f0;border:1px solid #334155;border-radius:4px;font-size:11px;" });
+                  rowInfo.sampleNodes.forEach(function (sn) {
+                    var label = sn.blockName || ("SampleZ z~" + sn.distribution);
+                    label += " (dim=" + sn.dim + ")";
+                    var opt = el("option", { value: sn.id }, label);
+                    if (sn.id === String(override.sampleNodeId || rowInfo.sampleNodes[0].id || "")) opt.selected = true;
+                    sampleSel.appendChild(opt);
+                  });
+                  sampleSel.addEventListener("change", function () {
+                    override.sampleNodeId = sampleSel.value;
+                    _saveEval(ev);
+                  });
+                  if (!override.sampleNodeId) override.sampleNodeId = rowInfo.sampleNodes[0].id;
+                  sampleRow.appendChild(sampleSel);
+                  inlineBox.appendChild(sampleRow);
+                }
+                if (needsOutputSelect) {
+                  var outRow = el("div", { className: "osc-form-row", style: "margin-bottom:0;" });
+                  outRow.appendChild(el("label", {}, "Output head"));
+                  var outSel = el("select", { style: "width:100%;padding:4px;background:#1e293b;color:#e2e8f0;border:1px solid #334155;border-radius:4px;font-size:11px;" });
+                  var defaultOutId = String(override.outputNodeId || "");
+                  if (!defaultOutId) {
+                    var pass = rowInfo.outputNodes.find(function (o) { return o.loss === "none"; });
+                    defaultOutId = pass ? pass.id : rowInfo.outputNodes[0].id;
+                  }
+                  rowInfo.outputNodes.forEach(function (on) {
+                    var label = on.blockName || (on.phase ? on.phase : "Output #" + on.id);
+                    label += on.loss === "none" ? " [passthrough]" : " [" + on.loss + "]";
+                    var opt = el("option", { value: on.id }, label);
+                    if (on.id === defaultOutId) opt.selected = true;
+                    outSel.appendChild(opt);
+                  });
+                  outSel.addEventListener("change", function () {
+                    override.outputNodeId = outSel.value;
+                    _saveEval(ev);
+                  });
+                  if (!override.outputNodeId) override.outputNodeId = defaultOutId;
+                  outRow.appendChild(outSel);
+                  inlineBox.appendChild(outRow);
+                }
+                modelWrap.appendChild(inlineBox);
+              }
+            }
+          }
+          configCard.appendChild(modelWrap);
         });
       } else {
         configCard.appendChild(el("div", { style: "font-size:10px;color:#64748b;margin:8px 0;" }, "No models for this schema."));
@@ -651,13 +724,6 @@
       }
 
       // evaluator selection
-      var isClassification = false;
-      if (ev.schemaId && schemaRegistry) {
-        var outputKeys = schemaRegistry.getOutputKeys(ev.schemaId);
-        var defHt = outputKeys && outputKeys[0] ? (outputKeys[0].headType || "regression") : "regression";
-        isClassification = defHt === "classification";
-      }
-      var allEvaluators = _getAllEvaluators(ev.schemaId, isClassification);
       if (allEvaluators.length) {
         configCard.appendChild(el("div", { style: "font-size:10px;color:#67e8f9;margin:8px 0 4px;font-weight:600;" }, "Metrics"));
         allEvaluators.forEach(function (evl) {
@@ -696,9 +762,6 @@
       modeRow.appendChild(modeSel);
       configCard.appendChild(modeRow);
 
-      var selectedEvaluatorDefs = allEvaluators.filter(function (item) { return (ev.evaluatorIds || []).indexOf(item.id) >= 0; });
-      var hasGenerationMetrics = selectedEvaluatorDefs.some(function (item) { return item.mode === "generation" || item.mode === "both"; });
-
       var selectedTrainerCards = (ev.trainerIds || []).map(function (tid) { return store ? store.getTrainerCard(tid) : null; }).filter(Boolean);
       var hasBestWeights = selectedTrainerCards.some(function (t) { return !!t.modelArtifactsBest; });
       var weightRow = el("div", { className: "osc-form-row", style: "margin-top:8px;" });
@@ -714,7 +777,6 @@
       weightRow.appendChild(weightSel);
       configCard.appendChild(weightRow);
 
-      var showGenSettings = String(ev.runMode || "auto") !== "predict" || hasGenerationMetrics;
       if (showGenSettings) {
         if (!ev.generationConfig) ev.generationConfig = {};
         if (!ev.generationConfig.runtime) ev.generationConfig.runtime = "client";
@@ -771,67 +833,6 @@
           row.appendChild(inp);
           configCard.appendChild(row);
         });
-
-        var overrideTrainers = selectedTrainerCards.filter(function (t) {
-          var modelRec = store ? store.getModel(t.modelId) : null;
-          if (!modelRec) return false;
-          var meta = _resolveGenerationMeta(modelRec);
-          return (meta.info.sampleNodes && meta.info.sampleNodes.length > 1) || (meta.info.outputNodes && meta.info.outputNodes.length > 1);
-        });
-        if (overrideTrainers.length) {
-          configCard.appendChild(el("div", { style: "font-size:10px;color:#67e8f9;margin:8px 0 4px;font-weight:600;" }, "Model-specific Node Selection"));
-          overrideTrainers.forEach(function (trainerCard) {
-            var modelRec = store ? store.getModel(trainerCard.modelId) : null;
-            if (!modelRec) return;
-            var meta = _resolveGenerationMeta(modelRec);
-            var info = meta.info || {};
-            var override = _getGenerationOverride(ev, trainerCard.id);
-            configCard.appendChild(el("div", { style: "font-size:10px;color:#e2e8f0;margin:6px 0 3px;font-weight:600;" }, trainerCard.name || trainerCard.id));
-            if (info.sampleNodes && info.sampleNodes.length > 1) {
-              var sampleRow = el("div", { className: "osc-form-row" });
-              sampleRow.appendChild(el("label", {}, "Sample input"));
-              var sampleSel = el("select", { style: "width:100%;padding:4px;background:#1e293b;color:#e2e8f0;border:1px solid #334155;border-radius:4px;font-size:11px;" });
-              info.sampleNodes.forEach(function (sn, idx) {
-                var label = sn.blockName || ("SampleZ z~" + sn.distribution);
-                label += " (dim=" + sn.dim + ")";
-                var opt = el("option", { value: sn.id }, label);
-                if (sn.id === String(override.sampleNodeId || info.sampleNodes[0].id || "")) opt.selected = true;
-                sampleSel.appendChild(opt);
-              });
-              sampleSel.addEventListener("change", function () {
-                override.sampleNodeId = sampleSel.value;
-                _saveEval(ev);
-              });
-              if (!override.sampleNodeId) override.sampleNodeId = info.sampleNodes[0].id;
-              sampleRow.appendChild(sampleSel);
-              configCard.appendChild(sampleRow);
-            }
-            if (info.outputNodes && info.outputNodes.length > 1) {
-              var outRow = el("div", { className: "osc-form-row" });
-              outRow.appendChild(el("label", {}, "Output head"));
-              var outSel = el("select", { style: "width:100%;padding:4px;background:#1e293b;color:#e2e8f0;border:1px solid #334155;border-radius:4px;font-size:11px;" });
-              var defaultOutId = String(override.outputNodeId || "");
-              if (!defaultOutId) {
-                var pass = info.outputNodes.find(function (o) { return o.loss === "none"; });
-                defaultOutId = pass ? pass.id : info.outputNodes[0].id;
-              }
-              info.outputNodes.forEach(function (on) {
-                var label = on.blockName || (on.phase ? on.phase : "Output #" + on.id);
-                label += on.loss === "none" ? " [passthrough]" : " [" + on.loss + "]";
-                var opt = el("option", { value: on.id }, label);
-                if (on.id === defaultOutId) opt.selected = true;
-                outSel.appendChild(opt);
-              });
-              outSel.addEventListener("change", function () {
-                override.outputNodeId = outSel.value;
-                _saveEval(ev);
-              });
-              if (!override.outputNodeId) override.outputNodeId = defaultOutId;
-              outRow.appendChild(outSel);
-              configCard.appendChild(outRow);
-            }
-          });
-        }
 
         configCard.appendChild(el("div", { style: "font-size:10px;color:#64748b;margin-top:4px;" },
           "Generative evaluation samples fresh outputs from the selected checkpoint and compares them to the best available dataset reference split: test, then val, then train."));
