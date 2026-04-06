@@ -331,36 +331,83 @@
 
         var Plotly = (typeof window !== "undefined" && window.Plotly) ? window.Plotly : null;
 
-        // loss chart — only show if losses have meaningful (non-zero) values
-        var _hasRealLoss = result.lossHistory && result.lossHistory.length > 1 &&
-          result.lossHistory.some(function (h) { return h.loss > 0; });
-        if (_hasRealLoss && Plotly) {
-          var chartWrap = el("div", { style: "width:100%;min-height:200px;max-height:200px;position:relative;overflow:hidden;flex:0 0 200px;margin-top:8px;" });
-          var chartDiv = el("div", { style: "position:absolute;top:0;left:0;right:0;bottom:0;" });
-          chartWrap.appendChild(chartDiv);
-          card.appendChild(chartWrap);
-          Plotly.newPlot(chartDiv, [
-            { x: result.lossHistory.map(function (h) { return h.step; }), y: result.lossHistory.map(function (h) { return h.loss; }), mode: "lines", name: "Loss", line: { color: "#22d3ee" } },
-          ], {
-            paper_bgcolor: "#0f1320", plot_bgcolor: "#0f1320", font: { color: "#cbd5e1", size: 10 },
-            title: { text: "Optimization Progress", font: { size: 11 } },
-            xaxis: { title: "Step", gridcolor: "#1e293b" }, yaxis: { title: "Loss", gridcolor: "#1e293b" },
-            margin: { t: 30, b: 40, l: 50, r: 10 },
-          }, { responsive: true });
-        }
-
         if (result.avgMse != null) {
           card.appendChild(el("div", { style: "font-size:11px;color:#4ade80;margin-top:4px;" }, "Avg MSE: " + result.avgMse.toExponential(4)));
         }
 
-        // sample visualization
+        // sample visualization with toggle: Images / Stats chart
         if (result.samples && result.samples.length) {
           var sampleDim = result.samples[0] ? result.samples[0].length : 0;
-          card.appendChild(el("div", { style: "font-size:10px;color:#94a3b8;margin-top:8px;" },
-            (result.method || "?") + ": " + result.samples.length + " samples | " + sampleDim + " dimensions"));
-          var vizMount = el("div", { style: "margin-top:8px;display:block;clear:both;width:100%;" });
+          var _hasStats = sampleDim > 1 && Plotly;
+
+          // toggle bar
+          var toggleBar = el("div", { style: "display:flex;gap:4px;margin-top:8px;align-items:center;" });
+          toggleBar.appendChild(el("span", { style: "font-size:10px;color:#94a3b8;" },
+            (result.method || "?") + ": " + result.samples.length + " samples | " + sampleDim + "d"));
+          if (_hasStats) {
+            var btnStyle = "font-size:10px;padding:2px 8px;border-radius:3px;border:1px solid #334155;cursor:pointer;";
+            var btnImages = el("button", { style: btnStyle + "margin-left:auto;background:#1e293b;color:#e2e8f0;" }, "Images");
+            var btnStats = el("button", { style: btnStyle + "background:transparent;color:#64748b;" }, "Stats");
+            toggleBar.appendChild(btnImages);
+            toggleBar.appendChild(btnStats);
+          }
+          card.appendChild(toggleBar);
+
+          var vizMount = el("div", { style: "margin-top:6px;width:100%;" });
           card.appendChild(vizMount);
+
+          var statsMount = el("div", { style: "margin-top:6px;width:100%;display:none;" });
+          card.appendChild(statsMount);
+
+          // render images (default view)
           _renderGeneratedSamples(vizMount, result.samples, trainer, Plotly, result.originals, result.method);
+
+          // render stats chart (hidden until toggled): per-pixel mean across all samples
+          if (_hasStats && Plotly) {
+            (function (vm, sm, bi, bs) {
+              var statsRendered = false;
+              function renderStats() {
+                if (statsRendered) return;
+                statsRendered = true;
+                var nS = result.samples.length, nD = result.samples[0].length;
+                var mean = new Array(nD).fill(0);
+                var std = new Array(nD).fill(0);
+                for (var si = 0; si < nS; si++) for (var di = 0; di < nD; di++) mean[di] += result.samples[si][di];
+                for (var mi = 0; mi < nD; mi++) mean[mi] /= nS;
+                for (var si2 = 0; si2 < nS; si2++) for (var di2 = 0; di2 < nD; di2++) { var d = result.samples[si2][di2] - mean[di2]; std[di2] += d * d; }
+                for (var vi = 0; vi < nD; vi++) std[vi] = Math.sqrt(std[vi] / nS);
+                var xIdx = []; for (var xi = 0; xi < nD; xi++) xIdx.push(xi);
+                var chartEl = el("div", { style: "height:140px;width:100%;" });
+                sm.appendChild(chartEl);
+                Plotly.newPlot(chartEl, [
+                  { x: xIdx, y: mean, mode: "lines", name: "Mean", line: { color: "#22d3ee", width: 1 } },
+                  { x: xIdx, y: std, mode: "lines", name: "Std", line: { color: "#f59e0b", width: 1 } },
+                ], {
+                  paper_bgcolor: "rgba(0,0,0,0)", plot_bgcolor: "rgba(0,0,0,0)", font: { color: "#cbd5e1", size: 9 },
+                  xaxis: { title: "Pixel", gridcolor: "#1e293b", zeroline: false },
+                  yaxis: { gridcolor: "#1e293b", zeroline: false },
+                  margin: { t: 4, b: 28, l: 36, r: 8 },
+                  legend: { x: 0.7, y: 1, font: { size: 9 } },
+                }, { responsive: true, displayModeBar: false });
+                // summary text
+                var globalMean = mean.reduce(function (a, b) { return a + b; }, 0) / nD;
+                var globalStd = std.reduce(function (a, b) { return a + b; }, 0) / nD;
+                sm.appendChild(el("div", { style: "font-size:10px;color:#94a3b8;margin-top:4px;" },
+                  "Mean pixel: " + globalMean.toFixed(4) + " | Avg std: " + globalStd.toFixed(4) + " | Samples: " + nS));
+              }
+              bi.addEventListener("click", function () {
+                vm.style.display = ""; sm.style.display = "none";
+                bi.style.background = "#1e293b"; bi.style.color = "#e2e8f0";
+                bs.style.background = "transparent"; bs.style.color = "#64748b";
+              });
+              bs.addEventListener("click", function () {
+                vm.style.display = "none"; sm.style.display = "";
+                bs.style.background = "#1e293b"; bs.style.color = "#e2e8f0";
+                bi.style.background = "transparent"; bi.style.color = "#64748b";
+                renderStats();
+              });
+            })(vizMount, statsMount, btnImages, btnStats);
+          }
         }
         mainEl.appendChild(card);
       });
@@ -418,6 +465,16 @@
       });
       trainerRow.appendChild(trainerSel);
       configCard.appendChild(trainerRow);
+
+      // dataset status — show which dataset is linked and if data is available
+      if (selectedTrainer && selectedTrainer.datasetId) {
+        var _dsRec = store ? store.getDataset(selectedTrainer.datasetId) : null;
+        var _dsName = _dsRec ? (_dsRec.name || selectedTrainer.datasetId) : selectedTrainer.datasetId;
+        var _dsHasData = _dsRec && _dsRec.data && (_dsRec.data.sourceId || _dsRec.data.records || _dsRec.data.xTrain);
+        var _dsColor = _dsHasData ? "#4ade80" : "#fbbf24";
+        var _dsLabel = _dsHasData ? "\u2713 " + _dsName : "\u26a0 " + _dsName + " — not generated yet";
+        configCard.appendChild(el("div", { style: "font-size:10px;color:" + _dsColor + ";margin:-4px 0 6px 0;padding-left:2px;" }, _dsLabel));
+      }
 
       // method selector (resolved from graph capabilities)
       var caps = selectedMeta.caps;
@@ -878,16 +935,15 @@
           var rActiveDs = _getActiveDs(dsData);
           var rSplit = _resolveGenSplit(rActiveDs, "test");
           var testX = rSplit.x;
+          if (!testX.length) { rSplit = _resolveGenSplit(rActiveDs, "val"); testX = rSplit.x; }
           if (!testX.length) { rSplit = _resolveGenSplit(rActiveDs, "train"); testX = rSplit.x; }
-          // If no dataset loaded yet, generate noisy samples as input (shows denoising ability)
           if (!testX.length) {
-            var nSynth = config.numSamples || 16;
-            testX = [];
-            for (var ri = 0; ri < nSynth; ri++) {
-              var synth = new Array(featureSize);
-              for (var rj = 0; rj < featureSize; rj++) synth[rj] = Math.random();
-              testX.push(synth);
-            }
+            _isGenerating = false;
+            g.status = "draft"; _saveGen(g);
+            onStatus("Reconstruct requires dataset — go to Dataset tab and click Generate first.");
+            _renderRightPanel();
+            built.model.dispose();
+            return;
           }
           genConfig.originals = testX.slice(0, config.numSamples || 16);
         }

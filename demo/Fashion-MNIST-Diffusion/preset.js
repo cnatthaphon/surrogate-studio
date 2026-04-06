@@ -214,10 +214,15 @@
       { id: "g-sde-gen",       name: "Score SDE Generate",    schemaId: sid, trainerId: "t-score-sde",    family: "diffusion", config: { method: "ddpm", numSamples: 16, steps: 50, temperature: 1.0, seed: 42 }, status: "draft", runs: [], createdAt: Date.now() },
       { id: "g-sde-recon",     name: "Score SDE Reconstruct", schemaId: sid, trainerId: "t-score-sde",    family: "diffusion", config: { method: "reconstruct", numSamples: 16, temperature: 1.0, seed: 42 }, status: "draft", runs: [], createdAt: Date.now() },
       // Pre-trained generation configs
-      { id: "g-denoiser-recon-pre", name: "Denoiser Reconstruct (pre-trained)", schemaId: sid, trainerId: "t-mlp-denoiser-pre", family: "diffusion", config: { method: "reconstruct", numSamples: 16, temperature: 1.0, seed: 42 }, status: "draft", runs: [], createdAt: Date.now() },
-      { id: "g-ddpm-gen-pre",       name: "DDPM Generate (pre-trained)",        schemaId: sid, trainerId: "t-mlp-ddpm-pre",     family: "diffusion", config: { method: "ddpm", numSamples: 16, steps: 50, temperature: 1.0, seed: 42 }, status: "draft", runs: [], createdAt: Date.now() },
-      { id: "g-ncsn-gen-pre",       name: "NCSN Langevin (pre-trained)",        schemaId: sid, trainerId: "t-ncsn-pre",         family: "diffusion", config: { method: "langevin", numSamples: 16, steps: 100, lr: 0.01, temperature: 1.0, seed: 42 }, status: "draft", runs: [], createdAt: Date.now() },
-      { id: "g-sde-gen-pre",        name: "Score SDE Generate (pre-trained)",   schemaId: sid, trainerId: "t-score-sde-pre",    family: "diffusion", config: { method: "ddpm", numSamples: 16, steps: 50, temperature: 1.0, seed: 42 }, status: "draft", runs: [], createdAt: Date.now() },
+      // Pre-trained: one generation + one reconstruct per model
+      { id: "g-denoiser-gen-pre",   name: "Denoiser Generate (pre-trained)",     schemaId: sid, trainerId: "t-mlp-denoiser-pre", family: "diffusion", config: { method: "ddpm", numSamples: 16, steps: 50, temperature: 1.0, seed: 42 }, status: "draft", runs: [], createdAt: Date.now() },
+      { id: "g-denoiser-recon-pre", name: "Denoiser Reconstruct (pre-trained)",  schemaId: sid, trainerId: "t-mlp-denoiser-pre", family: "diffusion", config: { method: "reconstruct", numSamples: 16, temperature: 1.0, seed: 42 }, status: "draft", runs: [], createdAt: Date.now() },
+      { id: "g-ddpm-gen-pre",       name: "DDPM Generate (pre-trained)",         schemaId: sid, trainerId: "t-mlp-ddpm-pre",     family: "diffusion", config: { method: "ddpm", numSamples: 16, steps: 50, temperature: 1.0, seed: 42 }, status: "draft", runs: [], createdAt: Date.now() },
+      { id: "g-ddpm-recon-pre",     name: "DDPM Reconstruct (pre-trained)",      schemaId: sid, trainerId: "t-mlp-ddpm-pre",     family: "diffusion", config: { method: "reconstruct", numSamples: 16, temperature: 1.0, seed: 42 }, status: "draft", runs: [], createdAt: Date.now() },
+      { id: "g-ncsn-gen-pre",       name: "NCSN Langevin (pre-trained)",         schemaId: sid, trainerId: "t-ncsn-pre",         family: "diffusion", config: { method: "langevin", numSamples: 16, steps: 100, lr: 0.01, temperature: 1.0, seed: 42 }, status: "draft", runs: [], createdAt: Date.now() },
+      { id: "g-ncsn-recon-pre",     name: "NCSN Reconstruct (pre-trained)",      schemaId: sid, trainerId: "t-ncsn-pre",         family: "diffusion", config: { method: "reconstruct", numSamples: 16, temperature: 1.0, seed: 42 }, status: "draft", runs: [], createdAt: Date.now() },
+      { id: "g-sde-gen-pre",        name: "Score SDE Generate (pre-trained)",    schemaId: sid, trainerId: "t-score-sde-pre",    family: "diffusion", config: { method: "ddpm", numSamples: 16, steps: 50, temperature: 1.0, seed: 42 }, status: "draft", runs: [], createdAt: Date.now() },
+      { id: "g-sde-recon-pre",      name: "Score SDE Reconstruct (pre-trained)", schemaId: sid, trainerId: "t-score-sde-pre",    family: "diffusion", config: { method: "reconstruct", numSamples: 16, temperature: 1.0, seed: 42 }, status: "draft", runs: [], createdAt: Date.now() },
     ],
     evaluations: [
       {
@@ -225,7 +230,7 @@
         name: "Generation Quality",
         schemaId: sid,
         datasetId: DS,
-        trainerIds: ["t-mlp-ddpm", "t-ncsn", "t-score-sde"],
+        trainerIds: ["t-mlp-ddpm-pre", "t-ncsn-pre", "t-score-sde-pre"],
         evaluatorIds: ["mmd_rbf", "mean_gap", "std_gap", "nn_precision", "nn_coverage", "diversity_gap", "diversity"],
         runMode: "generate",
         weightSelection: "last",
@@ -239,7 +244,7 @@
         name: "Reconstruction Quality",
         schemaId: sid,
         datasetId: DS,
-        trainerIds: ["t-mlp-denoiser", "t-mlp-ddpm", "t-ncsn", "t-score-sde"],
+        trainerIds: ["t-mlp-denoiser-pre", "t-mlp-ddpm-pre", "t-ncsn-pre", "t-score-sde-pre"],
         evaluatorIds: ["recon_mse"],
         runMode: "generate",
         weightSelection: "last",
