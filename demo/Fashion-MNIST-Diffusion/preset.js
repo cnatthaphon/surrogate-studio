@@ -174,6 +174,7 @@
       { id: "m-score-sde",    name: "4. Score SDE (Song et al. 2021)",  schemaId: sid, graph: _scoreSde(),    createdAt: Date.now() },
     ],
     trainers: [
+      // Draft trainers (for user to train from scratch)
       { id: "t-mlp-denoiser", name: "MLP Denoiser Trainer", schemaId: sid, datasetId: DS, modelId: "m-mlp-denoiser", status: "draft",
         config: { epochs: 50, batchSize: 128, learningRate: 0.001, optimizerType: "adam", useServer: true,
                   earlyStoppingPatience: 10, lrSchedulerType: "plateau", lrPatience: 5, lrFactor: 0.5 } },
@@ -186,6 +187,23 @@
       { id: "t-score-sde", name: "Score SDE Trainer", schemaId: sid, datasetId: DS, modelId: "m-score-sde", status: "draft",
         config: { epochs: 100, batchSize: 128, learningRate: 0.001, optimizerType: "adam", useServer: true,
                   earlyStoppingPatience: 15, lrSchedulerType: "plateau", lrPatience: 5, lrFactor: 0.5 } },
+      // Pre-trained trainers (ready for generation)
+      { id: "t-mlp-denoiser-pre", name: "MLP Denoiser (pre-trained)", schemaId: sid, datasetId: DS, modelId: "m-mlp-denoiser", status: "done",
+        _pretrainedVar: "MLP_DENOISER_PRETRAINED_BIN_B64",
+        config: { epochs: 30, batchSize: 64, learningRate: 0.001, optimizerType: "adam",
+                  lrSchedulerType: "plateau", lrPatience: 5, lrFactor: 0.5 } },
+      { id: "t-mlp-ddpm-pre", name: "MLP DDPM (pre-trained)", schemaId: sid, datasetId: DS, modelId: "m-mlp-ddpm", status: "done",
+        _pretrainedVar: "MLP_DDPM_PRETRAINED_BIN_B64",
+        config: { epochs: 30, batchSize: 64, learningRate: 0.001, optimizerType: "adam",
+                  lrSchedulerType: "plateau", lrPatience: 5, lrFactor: 0.5 } },
+      { id: "t-ncsn-pre", name: "NCSN (pre-trained)", schemaId: sid, datasetId: DS, modelId: "m-ncsn", status: "done",
+        _pretrainedVar: "NCSN_PRETRAINED_BIN_B64",
+        config: { epochs: 30, batchSize: 64, learningRate: 0.001, optimizerType: "adam",
+                  lrSchedulerType: "plateau", lrPatience: 5, lrFactor: 0.5 } },
+      { id: "t-score-sde-pre", name: "Score SDE (pre-trained)", schemaId: sid, datasetId: DS, modelId: "m-score-sde", status: "done",
+        _pretrainedVar: "SCORE_SDE_PRETRAINED_BIN_B64",
+        config: { epochs: 30, batchSize: 64, learningRate: 0.001, optimizerType: "adam",
+                  lrSchedulerType: "plateau", lrPatience: 5, lrFactor: 0.5 } },
     ],
     generations: [
       { id: "g-denoiser-recon", name: "Denoiser Reconstruct", schemaId: sid, trainerId: "t-mlp-denoiser", family: "diffusion", config: { method: "reconstruct", numSamples: 16, temperature: 1.0, seed: 42 }, status: "draft", runs: [], createdAt: Date.now() },
@@ -195,6 +213,11 @@
       { id: "g-ncsn-recon",    name: "NCSN Reconstruct",      schemaId: sid, trainerId: "t-ncsn",         family: "diffusion", config: { method: "reconstruct", numSamples: 16, temperature: 1.0, seed: 42 }, status: "draft", runs: [], createdAt: Date.now() },
       { id: "g-sde-gen",       name: "Score SDE Generate",    schemaId: sid, trainerId: "t-score-sde",    family: "diffusion", config: { method: "ddpm", numSamples: 16, steps: 50, temperature: 1.0, seed: 42 }, status: "draft", runs: [], createdAt: Date.now() },
       { id: "g-sde-recon",     name: "Score SDE Reconstruct", schemaId: sid, trainerId: "t-score-sde",    family: "diffusion", config: { method: "reconstruct", numSamples: 16, temperature: 1.0, seed: 42 }, status: "draft", runs: [], createdAt: Date.now() },
+      // Pre-trained generation configs
+      { id: "g-denoiser-recon-pre", name: "Denoiser Reconstruct (pre-trained)", schemaId: sid, trainerId: "t-mlp-denoiser-pre", family: "diffusion", config: { method: "reconstruct", numSamples: 16, temperature: 1.0, seed: 42 }, status: "draft", runs: [], createdAt: Date.now() },
+      { id: "g-ddpm-gen-pre",       name: "DDPM Generate (pre-trained)",        schemaId: sid, trainerId: "t-mlp-ddpm-pre",     family: "diffusion", config: { method: "ddpm", numSamples: 16, steps: 50, temperature: 1.0, seed: 42 }, status: "draft", runs: [], createdAt: Date.now() },
+      { id: "g-ncsn-gen-pre",       name: "NCSN Langevin (pre-trained)",        schemaId: sid, trainerId: "t-ncsn-pre",         family: "diffusion", config: { method: "langevin", numSamples: 16, steps: 100, lr: 0.01, temperature: 1.0, seed: 42 }, status: "draft", runs: [], createdAt: Date.now() },
+      { id: "g-sde-gen-pre",        name: "Score SDE Generate (pre-trained)",   schemaId: sid, trainerId: "t-score-sde-pre",    family: "diffusion", config: { method: "ddpm", numSamples: 16, steps: 50, temperature: 1.0, seed: 42 }, status: "draft", runs: [], createdAt: Date.now() },
     ],
     evaluations: [
       {

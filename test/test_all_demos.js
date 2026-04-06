@@ -83,10 +83,18 @@ function nextDemo() {
     var isPhased = te.needsPhasedTraining && te.needsPhasedTraining(built.headConfigs);
     var trainFn = isPhased ? te.trainModelPhased : te.trainModel;
 
-    // Build y data matching each head's expected shape
-    var hasKlHead = built.headConfigs.some(function (h) { return String(h.headType || "").indexOf("latent_kl") >= 0; });
-    var yTrain = hasKlHead ? xTrain.map(function (r) { return r.slice(0, demo.featureSize); }) : xTrain;
-    var yVal = hasKlHead ? xTrain.slice(0, 10).map(function (r) { return r.slice(0, demo.featureSize); }) : xTrain.slice(0, 10);
+    // Build y data matching the primary output head's expected shape
+    var primaryOutput = built.model.outputs[0];
+    var outUnits = primaryOutput.shape[primaryOutput.shape.length - 1] || demo.featureSize;
+    function makeY(rows) {
+      return rows.map(function (r) {
+        var y = [];
+        for (var yi = 0; yi < outUnits; yi++) y.push(r[yi] != null ? r[yi] : Math.random());
+        return y;
+      });
+    }
+    var yTrain = makeY(xTrain);
+    var yVal = makeY(xTrain.slice(0, 10));
 
     var trainOpts = {
       model: built.model, headConfigs: built.headConfigs, inputNodes: built.inputNodes || [],

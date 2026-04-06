@@ -2514,6 +2514,22 @@
         var runtimeFiles = NRA && NRA.files ? Object.keys(NRA.files) : [];
         var runtimeLoader = NRA && NRA.files ? function (name) { return NRA.files[name] || ""; } : null;
 
+        // Resolve source registry data into records format for notebook export
+        var exportDsData = dataset.data;
+        var srcReg3 = W.OSCDatasetSourceRegistry || null;
+        if (exportDsData && exportDsData.sourceId && srcReg3 && typeof srcReg3.resolveDatasetSplit === "function") {
+          var eTrain = srcReg3.resolveDatasetSplit(exportDsData, "train");
+          var eVal = srcReg3.resolveDatasetSplit(exportDsData, "val");
+          var eTest = srcReg3.resolveDatasetSplit(exportDsData, "test");
+          exportDsData = Object.assign({}, exportDsData, {
+            records: {
+              train: { x: eTrain.x, y: eTrain.y },
+              val: { x: eVal.x, y: eVal.y },
+              test: { x: eTest.x, y: eTest.y },
+            },
+          });
+        }
+
         NBC.createNotebookBundleZipFromConfig({
           seed: 42,
           zipFileName: String(tCard.name || "trainer").replace(/\s+/g, "_") + "_bundle.zip",
@@ -2529,7 +2545,7 @@
             epochs: Number(config.epochs || 20),
             batchSize: Number(config.batchSize || 32),
             learningRate: Number(config.learningRate || 0.001),
-            datasetData: dataset.data,
+            datasetData: exportDsData,
             datasetCsvPath: "dataset.csv",
             modelGraphPath: "model_graph.json",
           }],

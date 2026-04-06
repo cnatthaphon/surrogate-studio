@@ -226,46 +226,45 @@
       var scoreModel = cfg.scoreModel || cfg.model;
       if (!scoreModel) throw new Error("generation: model/scoreModel required for Langevin");
 
-      var noiseSchedule = cfg.noiseSchedule || null;
       var epsilon = lr;
       var lossHistory = [];
 
-      // init from noise
-      var x = tf.variable(tf.randomNormal([numSamples, dim], 0, temperature, "float32", _seedAt(cfg.seed, 0)));
+      // Annealed iterative denoising: start from noise, repeatedly denoise + re-noise
+      // with decreasing noise level. Works for x0-prediction denoisers (sigmoid output).
+      var x = tf.randomNormal([numSamples, dim], 0, temperature, "float32", _seedAt(cfg.seed, 0));
 
       for (var step = 0; step < steps; step++) {
-        var sigma = noiseSchedule ? noiseSchedule[Math.min(step, noiseSchedule.length - 1)] : 1.0;
+        var tNorm = (steps - 1 - step) / Math.max(1, steps - 1); // 1 → 0 (high noise → clean)
+        var tTensor = tf.fill([numSamples, 1], tNorm);
+        var predPack = _predictWithTimeCondition(tf, scoreModel, x, tTensor, cfg);
+        var x0Pred = pickOutput(predPack.output, cfg.outputIndex);
 
-        // compute score (gradient of log p(x))
-        var gradFn = tf.grad(function (xIn) {
-          var tNorm = tf.fill([numSamples, 1], steps > 1 ? step / Math.max(1, steps - 1) : 0);
-          var predPack = _predictWithTimeCondition(tf, scoreModel, xIn, tNorm, cfg);
-          var score = pickOutput(predPack.output, cfg.outputIndex);
-          predPack.dispose();
-          tNorm.dispose();
-          return score.mean(); // scalar score estimate
-        });
-        var grad = gradFn(x);
+        // Compute MSE between current x and predicted clean image (for monitoring)
+        var mse = x0Pred.sub(x).square().mean().arraySync();
+        lossHistory.push({ step: step, loss: mse });
+        if (onStep) onStep(step, mse);
 
-        // Langevin update: x += ε/2 * score + √ε * noise
-        var noise = tf.randomNormal(x.shape, 0, Math.sqrt(epsilon) * sigma, "float32", _seedAt(cfg.seed, step + 1));
-        var update = x.add(grad.mul(epsilon / 2)).add(noise);
-        x.assign(update);
+        // Mix: move toward predicted clean image, add decreasing noise
+        var noiseLevel = Math.max(0, (1 - (step + 1) / steps)) * epsilon;
+        var noise = noiseLevel > 0
+          ? tf.randomNormal(x.shape, 0, noiseLevel, "float32", _seedAt(cfg.seed, step + 1))
+          : null;
+        var xNext = noise ? x0Pred.add(noise) : x0Pred;
 
-        var lossVal = grad.abs().mean().arraySync();
-        lossHistory.push({ step: step, loss: lossVal });
-        if (onStep) onStep(step, lossVal);
-
-        grad.dispose();
-        noise.dispose();
-        update.dispose();
+        tTensor.dispose();
+        predPack.dispose();
+        if (Array.isArray(predPack.output)) predPack.output.forEach(function (t) { t.dispose(); }); else if (predPack.output !== x0Pred) predPack.output.dispose();
+        x.dispose();
+        if (noise) noise.dispose();
+        if (xNext !== x0Pred) x0Pred.dispose();
+        x = xNext;
       }
 
       var samples = x.arraySync();
       var result = {
         method: "langevin",
         samples: samples,
-        latents: samples, // in Langevin, samples ARE the latents (data space)
+        latents: samples,
         lossHistory: lossHistory,
         numSamples: numSamples,
         latentDim: dim,
@@ -374,13 +373,17 @@
   }
 
   // === DDPM: iterative denoising from x_T ~ N(0,1) ===
+  // Supports two prediction modes:
+  //   - "x0" (default): model predicts clean image x_0 (sigmoid output)
+  //   - "eps": model predicts noise ε (linear output)
   function _generateDDPM(tf, cfg, numSamples, dim, steps, onStep) {
     return new Promise(function (resolve) {
-      var model = cfg.model; // denoiser: takes [x_t, t_normalized] → predicted noise
+      var model = cfg.model;
       if (!model) throw new Error("generation: denoiser model required for DDPM");
 
       var T = steps;
       var lossHistory = [];
+      var predMode = cfg.ddpmPredMode || "x0"; // default to x0-prediction for sigmoid denoisers
 
       // linear beta schedule
       var betaStart = cfg.betaStart || 0.0001;
@@ -400,18 +403,29 @@
       for (var t = T - 1; t >= 0; t--) {
         var tNorm = tf.fill([numSamples, 1], t / T);
         var predPack = _predictWithTimeCondition(tf, model, x, tNorm, cfg);
-        var predictedNoise = predPack.output;
-        var eps = pickOutput(predictedNoise, cfg.outputIndex);
+        var rawPred = predPack.output;
+        var pred = pickOutput(rawPred, cfg.outputIndex);
 
         var alpha = alphas[t];
         var alphaCum = alphasCumprod[t];
-        var scale = 1 / Math.sqrt(alpha);
-        var noiseCoeff = (1 - alpha) / Math.sqrt(1 - alphaCum);
+        var alphaCumPrev = t > 0 ? alphasCumprod[t - 1] : 1.0;
+        var xPrev;
 
-        // x_{t-1} = 1/√α_t * (x_t - (1-α_t)/√(1-ᾱ_t) * ε_θ) + σ_t * z
-        var xPrev = x.sub(eps.mul(noiseCoeff)).mul(scale);
+        if (predMode === "x0") {
+          // x0-prediction: model outputs x̂_0, compute x_{t-1} via posterior
+          // posterior mean = √(ᾱ_{t-1}) * β_t / (1-ᾱ_t) * x̂_0 + √(α_t) * (1-ᾱ_{t-1}) / (1-ᾱ_t) * x_t
+          var coeff1 = Math.sqrt(alphaCumPrev) * betas[t] / (1 - alphaCum);
+          var coeff2 = Math.sqrt(alpha) * (1 - alphaCumPrev) / (1 - alphaCum);
+          xPrev = pred.mul(coeff1).add(x.mul(coeff2));
+        } else {
+          // eps-prediction: model outputs ε̂, standard DDPM reverse
+          var scale = 1 / Math.sqrt(alpha);
+          var noiseCoeff = (1 - alpha) / Math.sqrt(1 - alphaCum);
+          xPrev = x.sub(pred.mul(noiseCoeff)).mul(scale);
+        }
+
         if (t > 0) {
-          var sigma = Math.sqrt(betas[t]);
+          var sigma = Math.sqrt(betas[t] * (1 - alphaCumPrev) / (1 - alphaCum));
           var z = tf.randomNormal(x.shape, 0, sigma, "float32", _seedAt(cfg.seed, T - t));
           var xWithNoise = xPrev.add(z);
           z.dispose();
@@ -421,7 +435,7 @@
 
         tNorm.dispose();
         predPack.dispose();
-        if (Array.isArray(predictedNoise)) predictedNoise.forEach(function (pt) { pt.dispose(); }); else predictedNoise.dispose();
+        if (Array.isArray(rawPred)) rawPred.forEach(function (pt) { pt.dispose(); }); else rawPred.dispose();
         if (x !== xT || t < T - 1) x.dispose();
         x = xPrev;
 
@@ -455,7 +469,31 @@
       var n = Math.min(numSamples, originals.length);
       var inputArr = originals.slice(0, n);
       var inputTensor = tf.tensor2d(inputArr);
-      var output = model.predict(inputTensor);
+
+      // Multi-input models (e.g. diffusion with time_embed): provide dummy time input
+      var modelInput = inputTensor;
+      var extraToDispose = [];
+      if (model.inputs && model.inputs.length > 1) {
+        var inputs = [];
+        var usedData = false;
+        for (var ii = 0; ii < model.inputs.length; ii++) {
+          var inpShape = model.inputs[ii].shape || [];
+          var inpDim = inpShape[inpShape.length - 1];
+          if (!usedData && inpDim === inputArr[0].length) {
+            inputs.push(inputTensor);
+            usedData = true;
+          } else {
+            var dummy = tf.zeros([n, inpDim]);
+            inputs.push(dummy);
+            extraToDispose.push(dummy);
+          }
+        }
+        if (!usedData) inputs[0] = inputTensor;
+        modelInput = inputs;
+      }
+
+      var output = model.predict(modelInput);
+      extraToDispose.forEach(function (t) { t.dispose(); });
       var reconstructed = pickOutput(output, cfg.outputIndex).arraySync();
 
       // per-sample MSE

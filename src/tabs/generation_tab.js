@@ -315,7 +315,7 @@
       }
 
       runs.forEach(function (result, idx) {
-        var card = el("div", { className: "osc-card", style: "margin-top:8px;" });
+        var card = el("div", { className: "osc-card", style: "margin-top:8px;overflow:hidden;display:flex;flex-direction:column;" });
         var statusColor = result.status === "done" ? "#4ade80" : result.status === "error" ? "#f43f5e" : "#fbbf24";
         var runtimeLabel = result.runtime ? " | " + result.runtime : "";
         card.appendChild(el("div", { style: "font-size:12px;color:" + statusColor + ";font-weight:600;" },
@@ -331,10 +331,14 @@
 
         var Plotly = (typeof window !== "undefined" && window.Plotly) ? window.Plotly : null;
 
-        // loss chart
-        if (result.lossHistory && result.lossHistory.length > 1 && Plotly) {
-          var chartDiv = el("div", { style: "height:200px;margin-top:8px;" });
-          card.appendChild(chartDiv);
+        // loss chart — only show if losses have meaningful (non-zero) values
+        var _hasRealLoss = result.lossHistory && result.lossHistory.length > 1 &&
+          result.lossHistory.some(function (h) { return h.loss > 0; });
+        if (_hasRealLoss && Plotly) {
+          var chartWrap = el("div", { style: "width:100%;min-height:200px;max-height:200px;position:relative;overflow:hidden;flex:0 0 200px;margin-top:8px;" });
+          var chartDiv = el("div", { style: "position:absolute;top:0;left:0;right:0;bottom:0;" });
+          chartWrap.appendChild(chartDiv);
+          card.appendChild(chartWrap);
           Plotly.newPlot(chartDiv, [
             { x: result.lossHistory.map(function (h) { return h.step; }), y: result.lossHistory.map(function (h) { return h.loss; }), mode: "lines", name: "Loss", line: { color: "#22d3ee" } },
           ], {
@@ -354,7 +358,7 @@
           var sampleDim = result.samples[0] ? result.samples[0].length : 0;
           card.appendChild(el("div", { style: "font-size:10px;color:#94a3b8;margin-top:8px;" },
             (result.method || "?") + ": " + result.samples.length + " samples | " + sampleDim + " dimensions"));
-          var vizMount = el("div", { style: "margin-top:8px;" });
+          var vizMount = el("div", { style: "margin-top:8px;display:block;clear:both;width:100%;" });
           card.appendChild(vizMount);
           _renderGeneratedSamples(vizMount, result.samples, trainer, Plotly, result.originals, result.method);
         }
@@ -753,7 +757,20 @@
 
         var dataset = trainer.datasetId ? store.getDataset(trainer.datasetId) : null;
         var dsData = dataset && dataset.data ? dataset.data : {};
-        var featureSize = Number(dsData.featureSize || (dsData.xTrain && dsData.xTrain[0] && dsData.xTrain[0].length) || 40);
+        // Resolve featureSize: dataset → graph input node → source registry → fallback
+        var _graphFeatureSize = 0;
+        if (modelRec.graph) {
+          var _gd = modelBuilder.extractGraphData ? modelBuilder.extractGraphData(modelRec.graph) : null;
+          if (_gd) {
+            Object.keys(_gd).forEach(function (nid) {
+              var nd = _gd[nid];
+              if ((nd.name === "input_layer" || nd.name === "image_source_layer" || nd.name === "image_source_block") && nd.data && nd.data.featureSize) {
+                _graphFeatureSize = Number(nd.data.featureSize);
+              }
+            });
+          }
+        }
+        var featureSize = Number(dsData.featureSize || (dsData.xTrain && dsData.xTrain[0] && dsData.xTrain[0].length) || _graphFeatureSize || 40);
         var latentInfo = modelBuilder.extractLatentInfo ? modelBuilder.extractLatentInfo(modelRec.graph) : { latentDim: 16 };
         var latentDim = latentInfo.latentDim || 16;
 
@@ -789,8 +806,9 @@
           }
         } else if (genNodes.sampleNodes.length) {
           genLatentDim = genNodes.sampleNodes[0].dim;
-        } else if (latentDim > 0) {
-          genLatentDim = latentDim;
+        } else if (latentInfo.latentDim > 0) {
+          // Only override featureSize with latentDim if the graph actually has latent nodes
+          genLatentDim = latentInfo.latentDim;
         }
 
         // --- resolve outputNodeId → outputIndex ---
@@ -861,6 +879,16 @@
           var rSplit = _resolveGenSplit(rActiveDs, "test");
           var testX = rSplit.x;
           if (!testX.length) { rSplit = _resolveGenSplit(rActiveDs, "train"); testX = rSplit.x; }
+          // If no dataset loaded yet, generate noisy samples as input (shows denoising ability)
+          if (!testX.length) {
+            var nSynth = config.numSamples || 16;
+            testX = [];
+            for (var ri = 0; ri < nSynth; ri++) {
+              var synth = new Array(featureSize);
+              for (var rj = 0; rj < featureSize; rj++) synth[rj] = Math.random();
+              testX.push(synth);
+            }
+          }
           genConfig.originals = testX.slice(0, config.numSamples || 16);
         }
 
@@ -971,7 +999,7 @@
         if (originals && originals.length && method === "reconstruct") {
           mountEl.appendChild(el("div", { style: "font-size:10px;color:#67e8f9;margin-bottom:4px;font-weight:600;" }, "Original → Reconstructed"));
         }
-        var gridWrap = el("div", { style: "display:flex;flex-wrap:wrap;gap:4px;" });
+        var gridWrap = el("div", { style: "display:flex;flex-wrap:wrap;gap:4px;width:100%;" });
         var maxShow = Math.min(samples.length, 32);
         for (var si = 0; si < maxShow; si++) {
           // for reconstruct: show original-reconstructed pairs
