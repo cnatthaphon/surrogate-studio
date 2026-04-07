@@ -1069,6 +1069,33 @@ def build_model_from_graph(graph, feature_size, target_size, num_classes=0):
                     scale = float(c.get("scale", 0.1))
                     setattr(self, f"noise_scale_{nid}", scale)
                     dim_map[nid] = in_dim
+                elif t == "patch_embed":
+                    ps = int(c.get("patchSize", 7))
+                    ed = int(c.get("embedDim", 64))
+                    img_size = int(round(in_dim ** 0.5))
+                    num_patches = (img_size // ps) ** 2
+                    patch_dim = ps * ps
+                    setattr(self, f"pe_proj_{nid}", nn.Linear(patch_dim, ed))
+                    setattr(self, f"pe_pos_{nid}", nn.Parameter(torch.randn(1, num_patches, ed) * 0.02))
+                    setattr(self, f"pe_num_patches_{nid}", num_patches)
+                    setattr(self, f"pe_patch_dim_{nid}", patch_dim)
+                    dim_map[nid] = ed  # output is [batch, num_patches, embed_dim] but track embed_dim
+                elif t == "transformer_block":
+                    heads = int(c.get("numHeads", 4))
+                    ffn = int(c.get("ffnDim", 128))
+                    drop = float(c.get("dropout", 0.1))
+                    setattr(self, f"tb_ln1_{nid}", nn.LayerNorm(in_dim))
+                    setattr(self, f"tb_attn_{nid}", nn.MultiheadAttention(in_dim, heads, dropout=drop, batch_first=True))
+                    setattr(self, f"tb_ln2_{nid}", nn.LayerNorm(in_dim))
+                    setattr(self, f"tb_ffn_{nid}", nn.Sequential(
+                        nn.Linear(in_dim, ffn), nn.ReLU(), nn.Dropout(drop),
+                        nn.Linear(ffn, in_dim), nn.Dropout(drop)
+                    ))
+                    dim_map[nid] = in_dim
+                elif t == "global_avg_pool1d":
+                    dim_map[nid] = in_dim
+                elif t == "global_avg_pool2d":
+                    dim_map[nid] = in_dim
                 elif t == "detach":
                     dim_map[nid] = in_dim
                 elif t == "concat_batch":
@@ -1326,6 +1353,37 @@ def build_model_from_graph(graph, feature_size, target_size, num_classes=0):
                     scale = getattr(self, f"noise_scale_{nid}", 0.1)
                     if self.training:
                         tensors[nid] = inp + torch.randn_like(inp) * scale
+                    else:
+                        tensors[nid] = inp
+                elif t == "patch_embed":
+                    num_patches = getattr(self, f"pe_num_patches_{nid}")
+                    patch_dim = getattr(self, f"pe_patch_dim_{nid}")
+                    # [batch, H*W] → [batch, num_patches, patch_dim]
+                    patches = inp.view(inp.shape[0], num_patches, patch_dim)
+                    projected = getattr(self, f"pe_proj_{nid}")(patches)
+                    pos_embed = getattr(self, f"pe_pos_{nid}")
+                    tensors[nid] = projected + pos_embed
+                elif t == "transformer_block":
+                    ln1 = getattr(self, f"tb_ln1_{nid}")
+                    attn = getattr(self, f"tb_attn_{nid}")
+                    ln2 = getattr(self, f"tb_ln2_{nid}")
+                    ffn = getattr(self, f"tb_ffn_{nid}")
+                    # Pre-norm attention + residual
+                    normed = ln1(inp)
+                    attn_out, _ = attn(normed, normed, normed)
+                    res1 = inp + attn_out
+                    # Pre-norm FFN + residual
+                    res2 = res1 + ffn(ln2(res1))
+                    tensors[nid] = res2
+                elif t == "global_avg_pool1d":
+                    # [batch, seq, dim] → [batch, dim]
+                    if inp.dim() == 3:
+                        tensors[nid] = inp.mean(dim=1)
+                    else:
+                        tensors[nid] = inp
+                elif t == "global_avg_pool2d":
+                    if inp.dim() == 4:
+                        tensors[nid] = inp.mean(dim=[2, 3])
                     else:
                         tensors[nid] = inp
                 elif t == "detach":

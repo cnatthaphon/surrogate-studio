@@ -410,6 +410,29 @@
       return editor.addNode("time_embed_layer", 0, 1, x, y, "time_embed_layer", { dim: dim }, html);
     }
 
+    function addPatchEmbedNode(editor, x, y, cfg) {
+      var patchSize = Math.max(1, Number((cfg && cfg.patchSize) || 7));
+      var embedDim = Math.max(1, Number((cfg && cfg.embedDim) || 64));
+      var html =
+        "<div><div style='font-weight:700'>PatchEmbed</div>" +
+        "<div class='node-summary' style='font-size:11px;color:#94a3b8;'>patch=" + patchSize + ", dim=" + embedDim + "</div></div>";
+      return editor.addNode("patch_embed_layer", 1, 1, x, y, "patch_embed_layer",
+        { patchSize: patchSize, embedDim: embedDim }, html);
+    }
+
+    function addTransformerBlockNode(editor, x, y, cfg) {
+      var numHeads = Math.max(1, Number((cfg && cfg.numHeads) || 4));
+      var ffnDim = Math.max(1, Number((cfg && cfg.ffnDim) || 128));
+      var dropout = Math.max(0, Math.min(1, Number((cfg && cfg.dropout) || 0.1)));
+      var weightTag = String((cfg && cfg.weightTag) || "");
+      var tagHtml = weightTag ? "<div style='font-size:9px;color:#38bdf8;'>[" + weightTag + "]</div>" : "";
+      var html =
+        "<div><div style='font-weight:700'>Transformer</div>" + tagHtml +
+        "<div class='node-summary' style='font-size:11px;color:#94a3b8;'>heads=" + numHeads + ", ffn=" + ffnDim + "</div></div>";
+      return editor.addNode("transformer_block_layer", 1, 1, x, y, "transformer_block_layer",
+        { numHeads: numHeads, ffnDim: ffnDim, dropout: dropout, weightTag: weightTag }, html);
+    }
+
     function addClassEmbedNode(editor, x, y, cfg) {
       var numClasses = Math.max(2, Number((cfg && cfg.numClasses) || 10));
       var html =
@@ -524,6 +547,10 @@
       var html = "<div><div style='font-weight:700'>GlobalAvgPool2D</div><div class='node-summary' style='font-size:11px;color:#94a3b8;'>spatial → 1</div></div>";
       return editor.addNode("global_avg_pool2d_layer", 1, 1, x, y, "global_avg_pool2d_layer", {}, html);
     }
+    function addGlobalAvgPool1dNode(editor, x, y, cfg) {
+      var html = "<div><div style='font-weight:700'>GlobalAvgPool1D</div><div class='node-summary' style='font-size:11px;color:#94a3b8;'>seq → 1</div></div>";
+      return editor.addNode("global_avg_pool1d_layer", 1, 1, x, y, "global_avg_pool1d_layer", {}, html);
+    }
 
     function getNodeFactories() {
       return {
@@ -563,6 +590,8 @@
         phase_switch: addPhaseSwitchNode,
         noise_injection: addNoiseInjectionNode,
         time_embed: addTimeEmbedNode,
+        patch_embed: addPatchEmbedNode,
+        transformer_block: addTransformerBlockNode,
         class_embed: addClassEmbedNode,
         embedding: addEmbeddingNode,
         conv2d: addConv2dNode,
@@ -572,6 +601,7 @@
         upsample2d: addUpSampling2dNode,
         reshape: addReshapeNode,
         global_avg_pool2d: addGlobalAvgPool2dNode,
+        global_avg_pool1d: addGlobalAvgPool1dNode,
       };
     }
 
@@ -927,6 +957,17 @@
         addField({ kind: "number", key: "numClasses", label: "Num classes", value: Math.max(2, Number(d.numClasses || 10)), min: 2, step: 1 });
         return spec;
       }
+      if (node.name === "patch_embed_layer") {
+        addField({ kind: "number", key: "patchSize", label: "Patch size", value: Math.max(1, Number(d.patchSize || 7)), min: 1, step: 1 });
+        addField({ kind: "number", key: "embedDim", label: "Embed dim", value: Math.max(1, Number(d.embedDim || 64)), min: 1, step: 1 });
+        return spec;
+      }
+      if (node.name === "transformer_block_layer") {
+        addField({ kind: "number", key: "numHeads", label: "Attention heads", value: Math.max(1, Number(d.numHeads || 4)), min: 1, step: 1 });
+        addField({ kind: "number", key: "ffnDim", label: "FFN dim", value: Math.max(1, Number(d.ffnDim || 128)), min: 1, step: 1 });
+        addField({ kind: "number", key: "dropout", label: "Dropout", value: Number(d.dropout || 0.1), min: 0, max: 0.9, step: 0.05 });
+        return spec;
+      }
       if (node.name === "image_source_block" || node.name === "image_source_layer") {
         // source key options from schema
         var imgSrcSpec = (typeof api.getImageSourceSpec === "function") ? api.getImageSourceSpec("", sid) : null;
@@ -1126,7 +1167,7 @@
         addField({ kind: "number", key: "strides", label: "Strides", value: Math.max(1, Number(d.strides || d.poolSize || 2)), min: 1, step: 1 });
         return spec;
       }
-      if (node.name === "flatten_layer" || node.name === "global_avg_pool2d_layer") { return spec; }
+      if (node.name === "flatten_layer" || node.name === "global_avg_pool2d_layer" || node.name === "global_avg_pool1d_layer") { return spec; }
       if (node.name === "upsample2d_layer") {
         addField({ kind: "number", key: "size", label: "Upsample factor", value: Math.max(1, Number(d.size || 2)), min: 1, step: 1 });
         return spec;
