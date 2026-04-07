@@ -52,13 +52,6 @@ Standard supervised learning (MSE loss) — no adversarial dynamics:
 - Target: clean image (reconstruction)
 - Uses `model.fit()` (fast, GPU-optimized)
 
-## Generation
-
-| Method | Description |
-|---|---|
-| **Reconstruct** | Pass test images through noise → denoise (shows quality) |
-| **DDPM** | Iterative: start from pure noise, denoise T steps → generates new images |
-
 ### 3. NCSN (Song & Ermon 2019)
 
 ```
@@ -85,6 +78,14 @@ ImageSource → AddNoise(σ=0.5, cosine) + TimeEmbed(128) → Concat
 - Larger timestep embedding (128-dim)
 - Skip connection from encoder to decoder (UNet-like)
 - Unified framework: DDPM and NCSN as discretizations of SDEs
+
+## Generation
+
+| Method | Description |
+|---|---|
+| **Reconstruct** | Pass test images through noise → denoise (shows quality) |
+| **DDPM** | Iterative: start from pure noise, denoise T steps → new images |
+| **Langevin** | Annealed iterative denoising from noise → new images |
 
 ## How to Use
 

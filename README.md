@@ -1,10 +1,10 @@
 # Surrogate Studio
 
-![Status](https://img.shields.io/badge/status-active%20development-brightgreen) ![Models](https://img.shields.io/badge/models-23-blue) ![Demos](https://img.shields.io/badge/demos-5-orange)
+![Status](https://img.shields.io/badge/status-active%20development-brightgreen) ![Models](https://img.shields.io/badge/models-25-blue) ![Demos](https://img.shields.io/badge/demos-6-orange)
 
 **A schema-driven, browser-first ML experimentation platform.**
 
-**[Live Demo](https://cnatthaphon.github.io/surrogate-studio/)** | [Fashion-MNIST Benchmark](https://cnatthaphon.github.io/surrogate-studio/demo/Fashion-MNIST-Benchmark/) | [GAN](https://cnatthaphon.github.io/surrogate-studio/demo/Fashion-MNIST-GAN/) | [Diffusion](https://cnatthaphon.github.io/surrogate-studio/demo/Fashion-MNIST-Diffusion/) | [LSTM-VAE](https://cnatthaphon.github.io/surrogate-studio/demo/LSTM-VAE-for-dominant-motion-extraction/) | [Oscillator](https://cnatthaphon.github.io/surrogate-studio/demo/Oscillator-Surrogate/)
+**[Live Demo](https://cnatthaphon.github.io/surrogate-studio/)** | [Benchmark](https://cnatthaphon.github.io/surrogate-studio/demo/Fashion-MNIST-Benchmark/) | [GAN](https://cnatthaphon.github.io/surrogate-studio/demo/Fashion-MNIST-GAN/) | [Diffusion](https://cnatthaphon.github.io/surrogate-studio/demo/Fashion-MNIST-Diffusion/) | [Conditional Diffusion](https://cnatthaphon.github.io/surrogate-studio/demo/Fashion-MNIST-Conditional-Diffusion/) | [LSTM-VAE](https://cnatthaphon.github.io/surrogate-studio/demo/LSTM-VAE-for-dominant-motion-extraction/) | [Oscillator](https://cnatthaphon.github.io/surrogate-studio/demo/Oscillator-Surrogate/)
 
 **[Contributing](CONTRIBUTING.md)** | **[Developer Docs](docs/README.md)** | **[Server Notes](server/README.md)** | **[Schema Notes](schemas/README.md)**
 
@@ -82,6 +82,19 @@ Iterative denoising from noise to images. Standard supervised MSE training — n
 | 3 | NCSN (deep score network) | Langevin dynamics | Song & Ermon 2019 |
 | 4 | Score SDE (skip connections, cosine schedule) | SDE sampling | Song et al. 2021 |
 
+### [Fashion-MNIST Conditional Diffusion](demo/Fashion-MNIST-Conditional-Diffusion/) — Class-Conditioned Generation
+
+Live: [GitHub Pages](https://cnatthaphon.github.io/surrogate-studio/demo/Fashion-MNIST-Conditional-Diffusion/) | Guide: [README](demo/Fashion-MNIST-Conditional-Diffusion/README.md)
+
+Generate specific Fashion-MNIST classes by conditioning the denoiser on a one-hot class label. Uses the new **ClassEmbed** graph node — select T-shirt, Trouser, or Sneaker from a dropdown.
+
+| # | Architecture | Conditioning | Paper |
+|---|---|---|---|
+| 1 | Conditional DDPM | image + time + class | Ho 2020 + class concat |
+| 2 | Conditional Denoiser | image + class | Baseline + class concat |
+
+3 classes (T-shirt/top, Trouser, Sneaker), pretrained on 18K real Fashion-MNIST images. Evaluations included: generation quality, reconstruction quality, per-class comparison.
+
 ### [LSTM-VAE for Dominant Motion Extraction](demo/LSTM-VAE-for-dominant-motion-extraction/)
 
 Live: [GitHub Pages](https://cnatthaphon.github.io/surrogate-studio/demo/LSTM-VAE-for-dominant-motion-extraction/) | Guide: [README](demo/LSTM-VAE-for-dominant-motion-extraction/README.md)
@@ -141,7 +154,7 @@ Live: [GitHub Pages](https://cnatthaphon.github.io/surrogate-studio/demo/Oscilla
 | **RNN** | SimpleRNN, GRU, LSTM, Conv1D, Concat |
 | **VAE** | Latent mu, Latent logvar, Reparameterize |
 | **GAN** | SampleZ, Detach |
-| **Diffusion** | AddNoise (GaussianNoise), NoiseSchedule, TimeEmbed |
+| **Diffusion** | AddNoise (GaussianNoise), NoiseSchedule, TimeEmbed, ClassEmbed |
 | **NLP** | Embedding |
 | **Feature** | ImageSource, History, WindowHistory, Params, OneHot |
 | **Utility** | SinNorm, CosNorm, TimeNorm, TimeSec |
@@ -164,6 +177,7 @@ Direct demo entrypoints:
 https://cnatthaphon.github.io/surrogate-studio/demo/Fashion-MNIST-Benchmark/
 https://cnatthaphon.github.io/surrogate-studio/demo/Fashion-MNIST-GAN/
 https://cnatthaphon.github.io/surrogate-studio/demo/Fashion-MNIST-Diffusion/
+https://cnatthaphon.github.io/surrogate-studio/demo/Fashion-MNIST-Conditional-Diffusion/
 https://cnatthaphon.github.io/surrogate-studio/demo/LSTM-VAE-for-dominant-motion-extraction/
 https://cnatthaphon.github.io/surrogate-studio/demo/Oscillator-Surrogate/
 ```
