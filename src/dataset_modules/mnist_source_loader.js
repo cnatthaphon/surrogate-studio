@@ -338,10 +338,26 @@
     return Promise.resolve(decompressGzipToUint8(buffer));
   }
 
+  function resolveNodeLocalUrl(url) {
+    var raw = String(url || "");
+    if (!NODE_MODE || !raw || raw.indexOf("file:") === 0 || /^https?:/i.test(raw)) {
+      return raw;
+    }
+    try {
+      var path = require("path");
+      var fileUrl = require("url");
+      var absPath = path.resolve(typeof __dirname !== "undefined" ? __dirname : process.cwd(), raw);
+      return String(fileUrl.pathToFileURL(absPath));
+    } catch (_err) {
+      return raw;
+    }
+  }
+
   // Try local path first, fall back to CDN (avoids rate limits on GitHub raw)
   function fetchWithFallback(localUrl, cdnUrl) {
-    if (!localUrl) return fetchArrayBuffer(cdnUrl);
-    return fetchArrayBuffer(localUrl).catch(function () { return fetchArrayBuffer(cdnUrl); });
+    var resolvedLocal = resolveNodeLocalUrl(localUrl);
+    if (!resolvedLocal) return fetchArrayBuffer(cdnUrl);
+    return fetchArrayBuffer(resolvedLocal).catch(function () { return fetchArrayBuffer(cdnUrl); });
   }
 
   function fetchAndDecodeNodeVariant(variant) {
