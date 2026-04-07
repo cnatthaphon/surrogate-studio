@@ -627,8 +627,11 @@
         var _classNames = [];
         var _dsSchema = schemaRegistry ? schemaRegistry.getDatasetSchema(g.schemaId || "") : null;
         var _schemaClassNames = [];
-        if (_dsSchema && _dsSchema.featureNodes && _dsSchema.featureNodes.oneHot && _dsSchema.featureNodes.oneHot.length) {
-          _schemaClassNames = _dsSchema.featureNodes.oneHot[0].values || [];
+        var _modelSchema = schemaRegistry ? schemaRegistry.getModelSchema(g.schemaId || "") : null;
+        var _fn = _modelSchema && _modelSchema.metadata && _modelSchema.metadata.featureNodes ? _modelSchema.metadata.featureNodes : null;
+        if (!_fn && _dsSchema) _fn = (_dsSchema.metadata && _dsSchema.metadata.featureNodes) || _dsSchema.featureNodes || null;
+        if (_fn && _fn.oneHot && _fn.oneHot.length) {
+          _schemaClassNames = _fn.oneHot[0].values || [];
         }
         // Map through classFilter if available (e.g. [0,1,7] → T-shirt, Trouser, Sneaker)
         var _dsRec2 = selectedTrainer && selectedTrainer.datasetId ? (store ? store.getDataset(selectedTrainer.datasetId) : null) : null;

@@ -143,7 +143,9 @@
         config: { method: "ddpm", numSamples: 16, steps: 50, temperature: 1.0, seed: 42, targetClass: 0 }, status: "draft", runs: [], createdAt: Date.now() },
       { id: "g-cond-denoiser-recon", name: "Cond. Denoiser Reconstruct", schemaId: sid, trainerId: "t-cond-denoiser", family: "diffusion",
         config: { method: "reconstruct", numSamples: 16, temperature: 1.0, seed: 42 }, status: "draft", runs: [], createdAt: Date.now() },
-      // Pre-trained generation: one per class per model
+      // Pre-trained generation
+      { id: "g-cond-ddpm-random", name: "DDPM → Random (pre-trained)", schemaId: sid, trainerId: "t-cond-ddpm-pre", family: "diffusion",
+        config: { method: "ddpm", numSamples: 16, steps: 50, temperature: 1.0, seed: 42, targetClass: -1 }, status: "draft", runs: [], createdAt: Date.now() },
       { id: "g-cond-ddpm-tshirt", name: "DDPM → T-shirt (pre-trained)", schemaId: sid, trainerId: "t-cond-ddpm-pre", family: "diffusion",
         config: { method: "ddpm", numSamples: 16, steps: 50, temperature: 1.0, seed: 42, targetClass: 0 }, status: "draft", runs: [], createdAt: Date.now() },
       { id: "g-cond-ddpm-trouser", name: "DDPM → Trouser (pre-trained)", schemaId: sid, trainerId: "t-cond-ddpm-pre", family: "diffusion",
