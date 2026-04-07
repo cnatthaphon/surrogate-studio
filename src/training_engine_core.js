@@ -273,7 +273,7 @@
       var shape = modelInput && modelInput.shape;
       return Math.max(1, Number(shape && shape.length ? shape[shape.length - 1] : 1) || 1);
     }
-    function _buildInputSet(baseTensor, count) {
+    function _buildInputSet(baseTensor, count, labelRows) {
       if (!(opts.model && opts.model.inputs) || opts.model.inputs.length <= 1 || !modelInputNodes.length) return baseTensor;
       return modelInputNodes.map(function (inp, idx) {
         var name = String((inp && inp.name) || "");
@@ -289,8 +289,8 @@
         if (name === "class_embed_layer") {
           // one-hot class labels from dataset — or random if not available
           var nCls = _inferModelInputDim(idx);
-          if (dataset.labelsTrain && Array.isArray(dataset.labelsTrain)) {
-            return tf.tensor2d(dataset.labelsTrain.slice(0, count));
+          if (labelRows && Array.isArray(labelRows)) {
+            return tf.tensor2d(labelRows.slice(0, count));
           }
           // random one-hot fallback
           var randClasses = tf.randomUniform([count], 0, nCls, "int32");
@@ -302,9 +302,9 @@
       });
     }
 
-    var xTrainInputs = _buildInputSet(xTrain, dataset.xTrain.length);
-    var xValInputs = _buildInputSet(xVal, dataset.xVal.length);
-    var xTestInputs = xTest ? _buildInputSet(xTest, dataset.xTest.length) : null;
+    var xTrainInputs = _buildInputSet(xTrain, dataset.xTrain.length, dataset.labelsTrain);
+    var xValInputs = _buildInputSet(xVal, dataset.xVal.length, dataset.labelsVal);
+    var xTestInputs = xTest ? _buildInputSet(xTest, dataset.xTest.length, dataset.labelsTest) : null;
 
     var yTrainTensors = [];
     var yValTensors = [];

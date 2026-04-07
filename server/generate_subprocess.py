@@ -159,6 +159,8 @@ def main():
             sys.exit(1)
         n = min(num_samples, len(originals))
         x = torch.tensor(originals[:n], dtype=torch.float32).to(device)
+        if hasattr(model, "_class_labels") and getattr(model, "_class_labels") is not None:
+            model._class_labels = model._class_labels[:n]
         model._runtime_time = torch.zeros(n, 1, dtype=torch.float32, device=device)
         with torch.no_grad():
             pred = _pick_output(model(x), output_index).cpu().numpy()

@@ -107,7 +107,7 @@
           continue;
         }
       }
-      if ((ii === timeInputIndex) || (!usedTime && !usedClass && (inputDim === tDim || inputDim === 1 || inputDim > 1))) {
+      if ((ii === timeInputIndex) || (!usedTime && (inputDim === tDim || inputDim === 1 || inputDim > 1))) {
         var tPrepared = inputDim === tDim ? tTensor : _makeSinusoidalTimeEmbedding(tf, tTensor, inputDim);
         prepared.push(tPrepared);
         if (tPrepared !== tTensor) extraToDispose.push(tPrepared);
