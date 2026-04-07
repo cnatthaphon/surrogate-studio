@@ -4,6 +4,8 @@
 
 Same engine as GAN and supervised demos. No hardcoded diffusion logic — the graph defines noise injection, timestep conditioning, and denoising network using composable building blocks.
 
+Pre-trained weights are included for all four diffusion models, so you can generate and evaluate immediately before training from scratch.
+
 ## Presets
 
 ### 1. MLP Denoiser (baseline)
@@ -88,11 +90,13 @@ ImageSource → AddNoise(σ=0.5, cosine) + TimeEmbed(128) → Concat
 
 1. Open `index.html` in a browser
 2. Generate Fashion-MNIST dataset (T-shirt class, 6000 images, 80/10/10 split)
-3. Select a trainer, click Start Training
-4. Generation tab: Reconstruct (test denoising) or DDPM/Langevin (generate from noise)
-5. Evaluation tab:
+3. **Immediate generation**: in the Generation tab, use the `(pre-trained)` cards first if you want to inspect the shipped checkpoints without retraining
+4. **Train from scratch**: in the Trainer tab, select the plain trainer cards and click `Start Training`
+5. Generation tab: use `Reconstruct` to inspect denoising quality, or `DDPM` / `Langevin` to sample from noise
+6. Evaluation tab:
    - `Generation Quality` compares sampled outputs to the best available reference split (`test`, then `val`, then `train`) with standard set metrics (`MMD`, mean/std gaps, nearest-neighbor precision/coverage, diversity)
    - `Reconstruction Quality` compares denoised reconstructions with `Reconstruction MSE`
+7. Use the `Weights` selector to compare `Last epoch` and `Best loss` when a trainer has both checkpoints saved
 
 ## References
 
