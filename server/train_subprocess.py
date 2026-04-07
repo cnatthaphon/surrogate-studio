@@ -1074,6 +1074,10 @@ def build_model_from_graph(graph, feature_size, target_size, num_classes=0):
                 elif t == "concat_batch":
                     # concat along batch axis: feature dim stays same
                     dim_map[nid] = in_dim
+                elif t == "concat":
+                    # concat along feature axis: sum of parent dims
+                    total_dim = sum(dim_map.get(p["from"], in_dim) for p in parents_sorted if p["from"] in dim_map)
+                    dim_map[nid] = total_dim if total_dim > 0 else in_dim
                 elif t == "phase_switch":
                     dim_map[nid] = in_dim
                 elif t == "constant":
@@ -1335,6 +1339,15 @@ def build_model_from_graph(graph, feature_size, target_size, num_classes=0):
                         if any(s != shapes[0] for s in shapes):
                             parent_tensors = [_flatten_tf_layout(pt) for pt in parent_tensors]
                         tensors[nid] = torch.cat(parent_tensors, dim=0)
+                    else:
+                        tensors[nid] = inp
+                    continue
+                elif t == "concat":
+                    # concat along feature axis (last dim) — used by diffusion (noisy_image + time_embed)
+                    parent_tensors = [tensors[p["from"]] for p in parents_sorted if p["from"] in tensors]
+                    if len(parent_tensors) >= 2:
+                        parent_tensors = [_flatten_tf_layout(pt) if pt.dim() > 2 else pt for pt in parent_tensors]
+                        tensors[nid] = torch.cat(parent_tensors, dim=-1)
                     else:
                         tensors[nid] = inp
                     continue
