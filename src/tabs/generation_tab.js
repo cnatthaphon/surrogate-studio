@@ -610,20 +610,52 @@
         { key: "temperature", label: "Temperature", value: g.config.temperature || 1.0, min: 0.01, max: 5, step: 0.1 },
         { key: "seed", label: "Seed", value: g.config.seed || 42, min: 1, step: 1 },
       ];
-      // class conditioning: show targetClass if model has class_embed or method is classifier_guided
+      // class conditioning: show class selector if model has class_embed or method is classifier_guided
       var _hasClassEmbed = false;
-      var _classEmbedMax = 9;
+      var _numClasses = 10;
       if (selectedModel && selectedModel.graph && modelBuilder.extractGraphData) {
         var _egd = modelBuilder.extractGraphData(selectedModel.graph);
         if (_egd) Object.keys(_egd).forEach(function (nid) {
           if (_egd[nid].name === "class_embed_layer") {
             _hasClassEmbed = true;
-            _classEmbedMax = Math.max(1, Number((_egd[nid].data && _egd[nid].data.numClasses) || 10)) - 1;
+            _numClasses = Math.max(2, Number((_egd[nid].data && _egd[nid].data.numClasses) || 10));
           }
         });
       }
       if (_hasClassEmbed || currentMethod === "classifier_guided") {
-        fields.push({ key: "targetClass", label: "Target class", value: g.config.targetClass || 0, min: 0, max: _classEmbedMax, step: 1 });
+        // Build class name list from schema
+        var _classNames = [];
+        var _dsSchema = schemaRegistry ? schemaRegistry.getDatasetSchema(g.schemaId || "") : null;
+        var _schemaClassNames = [];
+        if (_dsSchema && _dsSchema.featureNodes && _dsSchema.featureNodes.oneHot && _dsSchema.featureNodes.oneHot.length) {
+          _schemaClassNames = _dsSchema.featureNodes.oneHot[0].values || [];
+        }
+        // Map through classFilter if available (e.g. [0,1,7] → T-shirt, Trouser, Sneaker)
+        var _dsRec2 = selectedTrainer && selectedTrainer.datasetId ? (store ? store.getDataset(selectedTrainer.datasetId) : null) : null;
+        var _classFilter = (_dsRec2 && _dsRec2.config && _dsRec2.config.classFilter) || null;
+        for (var ci = 0; ci < _numClasses; ci++) {
+          var origIdx = _classFilter && _classFilter[ci] != null ? _classFilter[ci] : ci;
+          var cName = _schemaClassNames[origIdx] || ("Class " + origIdx);
+          _classNames.push(ci + ": " + cName);
+        }
+
+        var classRow = el("div", { className: "osc-form-row" });
+        classRow.appendChild(el("label", { style: "font-size:11px;color:#94a3b8;" }, "Target class"));
+        var classSel = el("select", { style: "width:100%;padding:4px;background:#1e293b;color:#e2e8f0;border:1px solid #334155;border-radius:4px;font-size:11px;" });
+        var randOpt = el("option", { value: "-1" }, "Random (mixed)");
+        if ((g.config.targetClass == null || g.config.targetClass < 0)) randOpt.selected = true;
+        classSel.appendChild(randOpt);
+        _classNames.forEach(function (name, idx) {
+          var opt = el("option", { value: String(idx) }, name);
+          if (Number(g.config.targetClass) === idx) opt.selected = true;
+          classSel.appendChild(opt);
+        });
+        classSel.addEventListener("change", function () {
+          g.config.targetClass = Number(classSel.value);
+          _saveGen(g);
+        });
+        classRow.appendChild(classSel);
+        configCard.appendChild(classRow);
       }
       if (currentMethod === "classifier_guided") {
         fields.push({ key: "guidanceWeight", label: "Guidance weight", value: g.config.guidanceWeight || 1.0, min: 0.01, max: 10, step: 0.1 });
@@ -922,14 +954,24 @@
           var ceIdx = built.inputNodes.indexOf(ceNode);
           var ceShape = built.model.inputs[ceIdx] ? built.model.inputs[ceIdx].shape : [];
           var numCls = ceShape[ceShape.length - 1] || 10;
-          var targetCls = Math.max(0, Math.min(numCls - 1, Number(config.targetClass || 0)));
+          var targetCls = config.targetClass != null ? Number(config.targetClass) : -1;
           var nSamp = config.numSamples || 16;
-          // build one-hot: [nSamp, numCls] with targetCls=1
           var cvArr = [];
-          for (var ci = 0; ci < nSamp; ci++) {
-            var row = new Array(numCls).fill(0);
-            row[targetCls] = 1;
-            cvArr.push(row);
+          if (targetCls < 0) {
+            // Random: each sample gets a random class
+            for (var ci = 0; ci < nSamp; ci++) {
+              var row = new Array(numCls).fill(0);
+              row[Math.floor(Math.random() * numCls)] = 1;
+              cvArr.push(row);
+            }
+          } else {
+            // Specific class: all samples get the same class
+            targetCls = Math.max(0, Math.min(numCls - 1, targetCls));
+            for (var ci2 = 0; ci2 < nSamp; ci2++) {
+              var row2 = new Array(numCls).fill(0);
+              row2[targetCls] = 1;
+              cvArr.push(row2);
+            }
           }
           genConfig.classVector = tf.tensor2d(cvArr);
         }
