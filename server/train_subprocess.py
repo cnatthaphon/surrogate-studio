@@ -1076,7 +1076,7 @@ def build_model_from_graph(graph, feature_size, target_size, num_classes=0):
                     dim_map[nid] = in_dim
                 elif t == "concat":
                     # concat along feature axis: sum of parent dims
-                    total_dim = sum(dim_map.get(p["from"], in_dim) for p in parents_sorted if p["from"] in dim_map)
+                    total_dim = sum(dim_map.get(p["from"], in_dim) for p in parents if p["from"] in dim_map)
                     dim_map[nid] = total_dim if total_dim > 0 else in_dim
                 elif t == "phase_switch":
                     dim_map[nid] = in_dim
