@@ -292,8 +292,8 @@ node scripts/test_cross_runtime_weights.js
 
 The public site is served directly from this repository:
 
-```
-https://<username>.github.io/surrogate-studio/
+```text
+https://cnatthaphon.github.io/surrogate-studio/
 ```
 
 ---
