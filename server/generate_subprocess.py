@@ -59,22 +59,22 @@ def _pick_output(pred, output_index):
 
 def _make_time_embedding_gen(t_scalar, dim, batch, device):
     """Sinusoidal time embedding for generation (matches training engine)."""
+    import torch as _torch
     half = max(1, dim // 2)
-    freqs = torch.exp(-np.log(10000) * torch.arange(half, dtype=torch.float32, device=device) / max(1, half - 1))
-    t = torch.full((batch, 1), t_scalar, dtype=torch.float32, device=device)
+    freqs = _torch.exp(-np.log(10000) * _torch.arange(half, dtype=_torch.float32, device=device) / max(1, half - 1))
+    t = _torch.full((batch, 1), t_scalar, dtype=_torch.float32, device=device)
     angles = t * freqs.unsqueeze(0)
-    emb = torch.cat([torch.sin(angles), torch.cos(angles)], dim=1)
+    emb = _torch.cat([_torch.sin(angles), _torch.cos(angles)], dim=1)
     if emb.shape[1] > dim:
         emb = emb[:, :dim]
     elif emb.shape[1] < dim:
-        emb = torch.cat([emb, torch.zeros(batch, dim - emb.shape[1], device=device)], dim=1)
+        emb = _torch.cat([emb, _torch.zeros(batch, dim - emb.shape[1], device=device)], dim=1)
     return emb
 
 def _forward_with_time(model, x, t_norm, batch, graph_data, device, output_index=0):
     """Forward pass that sets time_embed and class_embed before model(x)."""
-    # Set time embedding as model attribute (forward() checks _runtime_time)
-    model._runtime_time = torch.full((batch, 1), t_norm, dtype=torch.float32, device=device)
-    # class_labels already set in main generate()
+    import torch as _torch
+    model._runtime_time = _torch.full((batch, 1), t_norm, dtype=_torch.float32, device=device)
     return model(x)
 
 def _resolve_output_index(model, graph, output_node_id=""):

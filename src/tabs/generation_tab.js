@@ -792,20 +792,31 @@
           var sTestX = (sTestSplit && sTestSplit.x) ? sTestSplit.x : ((activeDs2.records && activeDs2.records.test && activeDs2.records.test.x) || (activeDs2.xTest || []));
           var sFeatureSize = (srcReg2 && typeof srcReg2.getFeatureSize === "function") ? srcReg2.getFeatureSize(activeDs2) : 0;
           if (!sFeatureSize && sTestX.length && sTestX[0]) sFeatureSize = sTestX[0].length;
+          // resolve featureSize from graph (same as client path)
+          var _sGraphFs = 0;
+          if (modelRec.graph && modelBuilder.extractGraphData) {
+            var _sgd = modelBuilder.extractGraphData(modelRec.graph);
+            if (_sgd) Object.keys(_sgd).forEach(function (nid) {
+              var nd = _sgd[nid];
+              if ((nd.name === "input_layer" || nd.name === "image_source_layer" || nd.name === "image_source_block") && nd.data && nd.data.featureSize)
+                _sGraphFs = Number(nd.data.featureSize);
+            });
+          }
+          var sResolvedFs = Number(sFeatureSize || dsData2.featureSize || _sGraphFs || 40);
           var serverConfig = {
             graph: modelRec.graph,
             weightValues: trainerArtifacts && trainerArtifacts.weightValues,
             weightSpecs: trainerArtifacts && trainerArtifacts.weightSpecs,
-            featureSize: Number(sFeatureSize || dsData2.featureSize || 40),
-            targetSize: Number(sFeatureSize || dsData2.featureSize || 40), numClasses: dsData2.numClasses || dsData2.classCount || 0,
+            featureSize: sResolvedFs,
+            targetSize: sResolvedFs, numClasses: dsData2.numClasses || dsData2.classCount || 0,
             method: method,
             numSamples: config.numSamples || 16,
             steps: config.steps || 100,
             lr: config.lr || 0.01,
-            latentDim: modelBuilder.extractLatentInfo ? (modelBuilder.extractLatentInfo(modelRec.graph).latentDim || 20) : 20,
+            latentDim: sResolvedFs,
             temperature: config.temperature || 1.0,
-            seed: config.seed || 42,
-            targetClass: Number(config.targetClass || 0),
+            seed: (config.seed || 42) + (Date.now() % 100000),
+            targetClass: config.targetClass != null ? Number(config.targetClass) : -1,
             guidanceWeight: Number(config.guidanceWeight || 1.0),
             sampleNodeId: config.sampleNodeId || "",
             outputNodeId: config.outputNodeId || "",
