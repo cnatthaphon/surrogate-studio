@@ -21,6 +21,8 @@
       labelUrl: "https://storage.googleapis.com/learnjs-data/model-builder/mnist_labels_uint8",
       imageIdxUrl: "https://ossci-datasets.s3.amazonaws.com/mnist/train-images-idx3-ubyte.gz",
       labelIdxUrl: "https://ossci-datasets.s3.amazonaws.com/mnist/train-labels-idx1-ubyte.gz",
+      imageIdxLocal: "../../data/mnist/train-images-idx3-ubyte.gz",
+      labelIdxLocal: "../../data/mnist/train-labels-idx1-ubyte.gz",
       classNames: ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"],
       // Original split: first 55000 in sprite are train (IDX has 60000), last 10000 are test
       originalTrainCount: 55000,
