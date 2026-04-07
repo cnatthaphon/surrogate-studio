@@ -27,6 +27,18 @@ def _canonicalize_weight_name(raw_name: str) -> str:
     if m:
         return f"n{m.group(2)}/{'kernel' if m.group(3) == 'weight' else 'bias'}"
 
+    m = re.match(r"^pe_proj_(\d+)\.(weight|bias)$", name)
+    if m:
+        return f"n{m.group(1)}_proj/{'kernel' if m.group(2) == 'weight' else 'bias'}"
+
+    m = re.match(r"^tb_(ln1|ln2)_(\d+)\.(weight|bias)$", name)
+    if m:
+        return f"n{m.group(2)}_{m.group(1)}/{'gamma' if m.group(3) == 'weight' else 'beta'}"
+
+    m = re.match(r"^tb_(q|k|v|attn_proj|ffn1|ffn2)_(\d+)\.(weight|bias)$", name)
+    if m:
+        return f"n{m.group(2)}_{m.group(1)}/{'kernel' if m.group(3) == 'weight' else 'bias'}"
+
     m = re.match(r"^(bn|ln)_(\d+)\.(weight|bias|running_mean|running_var)$", name)
     if m:
         tail_map = {
@@ -101,7 +113,7 @@ def _load_named_checkpoint(model: Any, saved_map: Dict[str, Dict[str, Any]], fla
         elif param.dim() == 3 and name.startswith("conv1d_"):
             tf_shape = (param.shape[2], param.shape[1], param.shape[0])
             new_state[name] = torch.tensor(vals.reshape(tf_shape).transpose(2, 1, 0), dtype=torch.float32)
-        elif param.dim() == 4 and (name.startswith("conv2d_") or name.startswith("convt2d_")):
+        elif param.dim() == 4 and (name.startswith("conv2d_") or name.startswith("convt2d_") or name.startswith("pe_proj_")):
             tf_shape = (param.shape[2], param.shape[3], param.shape[1], param.shape[0])
             new_state[name] = torch.tensor(vals.reshape(tf_shape).transpose(3, 2, 0, 1), dtype=torch.float32)
         else:
@@ -173,7 +185,7 @@ def load_weights_into_model(model: Any, config: Any) -> bool:
             new_state[name] = torch.tensor(vals.reshape(param.shape[1], param.shape[0]).T, dtype=torch.float32)
         elif param.dim() == 3 and name.startswith("conv1d_"):
             new_state[name] = torch.tensor(vals.reshape(param.shape[2], param.shape[1], param.shape[0]).transpose(2, 1, 0), dtype=torch.float32)
-        elif param.dim() == 4 and (name.startswith("conv2d_") or name.startswith("convt2d_")):
+        elif param.dim() == 4 and (name.startswith("conv2d_") or name.startswith("convt2d_") or name.startswith("pe_proj_")):
             tf_shape = (param.shape[2], param.shape[3], param.shape[1], param.shape[0])
             new_state[name] = torch.tensor(vals.reshape(tf_shape).transpose(3, 2, 0, 1), dtype=torch.float32)
         else:

@@ -43,8 +43,8 @@
     var pe = N(d, "patch_embed", { patchSize: 7, embedDim: 64 }, 240, 100);
     var tb = N(d, "transformer_block", { numHeads: 4, ffnDim: 128, dropout: 0.1 }, 440, 100);
     var gap = N(d, "global_avg_pool1d", {}, 640, 100);
-    var cls = N(d, "dense", { units: 10, activation: "softmax" }, 800, 100);
-    var out = N(d, "output", { target: "label", targetType: "label", loss: "crossentropy", headType: "classification" }, 960, 100);
+    var cls = N(d, "dense", { units: 10, activation: "linear" }, 800, 100);
+    var out = N(d, "output", { target: "label", targetType: "label", loss: "cross_entropy", headType: "classification" }, 960, 100);
     C(d, img, pe); C(d, pe, tb); C(d, tb, gap); C(d, gap, cls); C(d, cls, out);
     return graph(d);
   }
@@ -59,8 +59,8 @@
     var tb1 = N(d, "transformer_block", { numHeads: 4, ffnDim: 128, dropout: 0.1 }, 400, 100);
     var tb2 = N(d, "transformer_block", { numHeads: 4, ffnDim: 128, dropout: 0.1 }, 580, 100);
     var gap = N(d, "global_avg_pool1d", {}, 740, 100);
-    var cls = N(d, "dense", { units: 10, activation: "softmax" }, 880, 100);
-    var out = N(d, "output", { target: "label", targetType: "label", loss: "crossentropy", headType: "classification" }, 1020, 100);
+    var cls = N(d, "dense", { units: 10, activation: "linear" }, 880, 100);
+    var out = N(d, "output", { target: "label", targetType: "label", loss: "cross_entropy", headType: "classification" }, 1020, 100);
     C(d, img, pe); C(d, pe, tb1); C(d, tb1, tb2); C(d, tb2, gap); C(d, gap, cls); C(d, cls, out);
     return graph(d);
   }
@@ -77,8 +77,8 @@
     var gap = N(d, "global_avg_pool1d", {}, 660, 100);
     var h1 = N(d, "dense", { units: 128, activation: "relu" }, 780, 100);
     var drop = N(d, "dropout", { rate: 0.2 }, 880, 100);
-    var cls = N(d, "dense", { units: 10, activation: "softmax" }, 960, 100);
-    var out = N(d, "output", { target: "label", targetType: "label", loss: "crossentropy", headType: "classification" }, 1080, 100);
+    var cls = N(d, "dense", { units: 10, activation: "linear" }, 960, 100);
+    var out = N(d, "output", { target: "label", targetType: "label", loss: "cross_entropy", headType: "classification" }, 1080, 100);
     C(d, img, pe); C(d, pe, tb1); C(d, tb1, tb2); C(d, tb2, gap); C(d, gap, h1); C(d, h1, drop); C(d, drop, cls); C(d, cls, out);
     return graph(d);
   }
@@ -117,7 +117,7 @@
         schemaId: sid,
         datasetId: DS,
         trainerIds: ["t-tiny-vit", "t-small-vit", "t-vit-mlp-head"],
-        evaluatorIds: ["mae", "rmse", "r2"],
+        evaluatorIds: ["accuracy", "macro_f1"],
         runMode: "test",
         weightSelection: "best",
         status: "draft",

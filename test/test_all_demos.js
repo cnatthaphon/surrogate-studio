@@ -26,6 +26,7 @@ var demos = [
   { name: "Fashion-MNIST Benchmark", preset: "demo/Fashion-MNIST-Benchmark/preset.js", var: "FASHION_MNIST_BENCHMARK_PRESET", schema: "fashion_mnist", featureSize: 784, outputKeys: [{ key: "pixel_values", headType: "reconstruction" }, { key: "label", headType: "classification" }], defaultTarget: "pixel_values" },
   { name: "Fashion-MNIST GAN", preset: "demo/Fashion-MNIST-GAN/preset.js", var: "FASHION_MNIST_GAN_PRESET", schema: "fashion_mnist", featureSize: 784, outputKeys: [{ key: "pixel_values", headType: "reconstruction" }], defaultTarget: "pixel_values" },
   { name: "Fashion-MNIST Diffusion", preset: "demo/Fashion-MNIST-Diffusion/preset.js", var: "FASHION_MNIST_DIFFUSION_PRESET", schema: "fashion_mnist", featureSize: 784, outputKeys: [{ key: "pixel_values", headType: "reconstruction" }], defaultTarget: "pixel_values" },
+  { name: "Fashion-MNIST Transformer", preset: "demo/Fashion-MNIST-Transformer/preset.js", var: "FASHION_MNIST_TRANSFORMER_PRESET", schema: "fashion_mnist", featureSize: 784, outputKeys: [{ key: "label", headType: "classification" }], defaultTarget: "label" },
   { name: "Oscillator Surrogate", preset: "demo/Oscillator-Surrogate/preset.js", var: "OSCILLATOR_DEMO_PRESET", schema: "oscillator", featureSize: 4, outputKeys: [{ key: "xv", headType: "regression" }], defaultTarget: "xv" },
   { name: "LSTM-VAE", preset: "demo/LSTM-VAE-for-dominant-motion-extraction/preset.js", var: "LSTM_VAE_DEMO_PRESET", schema: "ant_trajectory", featureSize: 40, outputKeys: [{ key: "xv", headType: "regression" }], defaultTarget: "xv" },
 ];

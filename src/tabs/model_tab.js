@@ -28,6 +28,13 @@
     var _graphRuntime = null;
     var _selectedNodeId = null;
 
+    function _normalizePresetNodeType(rawName) {
+      var type = String(rawName || "");
+      if (/_layer$/.test(type)) type = type.replace(/_layer$/, "");
+      if (/_block$/.test(type) && type !== "transformer_block") type = type.replace(/_block$/, "");
+      return type;
+    }
+
     function _getSchemaId() {
       // prefer active model's schema, fallback to active schema
       var activeId = stateApi ? stateApi.getActiveModel() : "";
@@ -62,7 +69,7 @@
         var n = data[id];
         if (!n) return;
         var rawName = String(n.name || n.class || "");
-        var type = rawName.replace(/_layer$/, "").replace(/_block$/, "");
+        var type = _normalizePresetNodeType(rawName);
         nodes.push({
           key: String(id),
           type: type,

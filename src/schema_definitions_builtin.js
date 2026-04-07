@@ -92,6 +92,9 @@
       _paletteItem("addReparamBtn", "reparam", "Reparam z", "NN", { group: "z_shared", beta: 1e-3, matchWeight: 1 }),
       _paletteItem("addNoiseScheduleBtn", "noise_schedule", "NoiseSchedule", "Utils", {}),
       _paletteItem("addConcatBtn", "concat", "Concat", "Utils", { numInputs: 2 }),
+      _paletteItem("addPatchEmbedBtn", "patch_embed", "PatchEmbed", "Transformer", { patchSize: 7, embedDim: 64 }),
+      _paletteItem("addTransformerBlockBtn", "transformer_block", "TransformerBlock", "Transformer", { numHeads: 4, ffnDim: 128, dropout: 0.1 }),
+      _paletteItem("addGlobalAvgPool1dBtn", "global_avg_pool1d", "GlobalAvgPool1D", "Transformer", {}),
       _paletteItem("addOutputMultiBtn", "output", "Output", "Output", { target: "label", targetType: "label", loss: "cross_entropy" }),
     ];
   }

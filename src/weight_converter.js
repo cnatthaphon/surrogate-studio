@@ -111,6 +111,15 @@
     var m = name.match(/^(dense|conv1d|conv2d|convt2d|embed|out)_(\d+)\.(weight|bias)$/);
     if (m) return "n" + m[2] + "/" + (m[3] === "weight" ? "kernel" : "bias");
 
+    m = name.match(/^pe_proj_(\d+)\.(weight|bias)$/);
+    if (m) return "n" + m[1] + "_proj/" + (m[2] === "weight" ? "kernel" : "bias");
+
+    m = name.match(/^tb_(ln1|ln2)_(\d+)\.(weight|bias)$/);
+    if (m) return "n" + m[2] + "_" + m[1] + "/" + (m[3] === "weight" ? "gamma" : "beta");
+
+    m = name.match(/^tb_(q|k|v|attn_proj|ffn1|ffn2)_(\d+)\.(weight|bias)$/);
+    if (m) return "n" + m[2] + "_" + m[1] + "/" + (m[3] === "weight" ? "kernel" : "bias");
+
     m = name.match(/^(bn|ln)_(\d+)\.(weight|bias|running_mean|running_var)$/);
     if (m) {
       var tailMap = {
@@ -317,7 +326,7 @@
         outValues = outValues.concat(Array.from(conv));
         offset += size; i++; continue;
       }
-      if (shape.length === 4 && name.indexOf("conv") >= 0) {
+      if (shape.length === 4 && (name.indexOf("conv") >= 0 || name.indexOf("pe_proj_") === 0)) {
         // Conv2D: [O, I, H, W] → [H, W, I, O]
         var O2 = shape[0], I2 = shape[1], H2 = shape[2], W2 = shape[3];
         var conv2 = new Float32Array(size);
@@ -372,7 +381,12 @@
     return specs.some(function (s) {
       var n = s.name || "";
       if (n.indexOf("tfjs_") === 0 || n.indexOf("/") >= 0) return false;
-      return n.match(/^\d+\./) || n.indexOf("weight_ih") >= 0 || n.indexOf("weight_hh") >= 0 || n.indexOf("rnn_") >= 0;
+      return n.match(/^\d+\./) ||
+        n.indexOf("weight_ih") >= 0 ||
+        n.indexOf("weight_hh") >= 0 ||
+        n.indexOf("rnn_") >= 0 ||
+        n.indexOf("pe_proj_") === 0 ||
+        n.indexOf("tb_") === 0;
     });
   }
 

@@ -413,24 +413,42 @@
     function addPatchEmbedNode(editor, x, y, cfg) {
       var patchSize = Math.max(1, Number((cfg && cfg.patchSize) || 7));
       var embedDim = Math.max(1, Number((cfg && cfg.embedDim) || 64));
+      var useBias = _cfgUseBias(cfg);
+      var weightTag = String((cfg && cfg.weightTag) || "");
+      var blockName = String((cfg && cfg.blockName) || "");
+      var tagHtml = "";
+      if (weightTag || blockName) {
+        var parts = [];
+        if (blockName) parts.push(blockName);
+        if (weightTag) parts.push("[" + weightTag + "]");
+        tagHtml = "<div style='font-size:9px;color:#38bdf8;'>" + parts.join(" ") + "</div>";
+      }
       var html =
-        "<div><div style='font-weight:700'>PatchEmbed</div>" +
-        "<div class='node-summary' style='font-size:11px;color:#94a3b8;'>patch=" + patchSize + ", dim=" + embedDim + "</div></div>";
+        "<div><div style='font-weight:700'>PatchEmbed</div>" + tagHtml +
+        "<div class='node-summary' style='font-size:11px;color:#94a3b8;'>patch=" + patchSize + ", dim=" + embedDim + ", bias=" + _useBiasLabel(useBias) + "</div></div>";
       return editor.addNode("patch_embed_layer", 1, 1, x, y, "patch_embed_layer",
-        { patchSize: patchSize, embedDim: embedDim }, html);
+        { patchSize: patchSize, embedDim: embedDim, useBias: useBias, weightTag: weightTag, blockName: blockName }, html);
     }
 
     function addTransformerBlockNode(editor, x, y, cfg) {
       var numHeads = Math.max(1, Number((cfg && cfg.numHeads) || 4));
       var ffnDim = Math.max(1, Number((cfg && cfg.ffnDim) || 128));
       var dropout = Math.max(0, Math.min(1, Number((cfg && cfg.dropout) || 0.1)));
+      var epsilon = Math.max(1e-6, Number((cfg && cfg.epsilon) || 1e-3));
       var weightTag = String((cfg && cfg.weightTag) || "");
-      var tagHtml = weightTag ? "<div style='font-size:9px;color:#38bdf8;'>[" + weightTag + "]</div>" : "";
+      var blockName = String((cfg && cfg.blockName) || "");
+      var tagHtml = "";
+      if (weightTag || blockName) {
+        var parts = [];
+        if (blockName) parts.push(blockName);
+        if (weightTag) parts.push("[" + weightTag + "]");
+        tagHtml = "<div style='font-size:9px;color:#38bdf8;'>" + parts.join(" ") + "</div>";
+      }
       var html =
         "<div><div style='font-weight:700'>Transformer</div>" + tagHtml +
-        "<div class='node-summary' style='font-size:11px;color:#94a3b8;'>heads=" + numHeads + ", ffn=" + ffnDim + "</div></div>";
+        "<div class='node-summary' style='font-size:11px;color:#94a3b8;'>heads=" + numHeads + ", ffn=" + ffnDim + ", ε=" + epsilon.toExponential(1) + "</div></div>";
       return editor.addNode("transformer_block_layer", 1, 1, x, y, "transformer_block_layer",
-        { numHeads: numHeads, ffnDim: ffnDim, dropout: dropout, weightTag: weightTag }, html);
+        { numHeads: numHeads, ffnDim: ffnDim, dropout: dropout, epsilon: epsilon, weightTag: weightTag, blockName: blockName }, html);
     }
 
     function addClassEmbedNode(editor, x, y, cfg) {
@@ -960,12 +978,20 @@
       if (node.name === "patch_embed_layer") {
         addField({ kind: "number", key: "patchSize", label: "Patch size", value: Math.max(1, Number(d.patchSize || 7)), min: 1, step: 1 });
         addField({ kind: "number", key: "embedDim", label: "Embed dim", value: Math.max(1, Number(d.embedDim || 64)), min: 1, step: 1 });
+        addField({ kind: "select", key: "useBias", label: "Use bias", value: _cfgUseBias(d) ? "true" : "false", options: [{ value: "true", label: "true" }, { value: "false", label: "false" }] });
+        addInitializerFields("kernel", "Kernel");
+        addInitializerFields("bias", "Bias", { value: 0 });
+        addField({ kind: "text", key: "weightTag", label: "Weight tag (for freeze)", value: String(d.weightTag || ""), placeholder: "e.g. encoder" });
+        addField({ kind: "text", key: "blockName", label: "Block name", value: String(d.blockName || ""), placeholder: "e.g. vit_patch" });
         return spec;
       }
       if (node.name === "transformer_block_layer") {
         addField({ kind: "number", key: "numHeads", label: "Attention heads", value: Math.max(1, Number(d.numHeads || 4)), min: 1, step: 1 });
         addField({ kind: "number", key: "ffnDim", label: "FFN dim", value: Math.max(1, Number(d.ffnDim || 128)), min: 1, step: 1 });
         addField({ kind: "number", key: "dropout", label: "Dropout", value: Number(d.dropout || 0.1), min: 0, max: 0.9, step: 0.05 });
+        addField({ kind: "number", key: "epsilon", label: "LayerNorm eps", value: Math.max(1e-6, Number(d.epsilon || 1e-3)).toFixed(6), min: 0.000001, step: 0.000001 });
+        addField({ kind: "text", key: "weightTag", label: "Weight tag (for freeze)", value: String(d.weightTag || ""), placeholder: "e.g. encoder" });
+        addField({ kind: "text", key: "blockName", label: "Block name", value: String(d.blockName || ""), placeholder: "e.g. vit_block1" });
         return spec;
       }
       if (node.name === "image_source_block" || node.name === "image_source_layer") {
@@ -1334,6 +1360,14 @@
         data.epsilon = Math.max(1e-6, Number(rawValue) || 1e-3);
       } else if (k === "dropout") {
         data.dropout = api.clamp(Number(rawValue) || 0.1, 0, 0.8);
+      } else if (k === "patchSize") {
+        data.patchSize = Math.max(1, Math.round(Number(rawValue) || 7));
+      } else if (k === "embedDim") {
+        data.embedDim = Math.max(1, Math.round(Number(rawValue) || 64));
+      } else if (k === "numHeads") {
+        data.numHeads = Math.max(1, Math.round(Number(rawValue) || 4));
+      } else if (k === "ffnDim") {
+        data.ffnDim = Math.max(1, Math.round(Number(rawValue) || 128));
       } else if (k === "returnseq") {
         var rs = String(rawValue || "auto");
         data.returnseq = (rs === "true" || rs === "false") ? rs : "auto";

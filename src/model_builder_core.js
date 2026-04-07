@@ -871,28 +871,31 @@
         return _applyLayerMetadata(tf.layers.gaussianNoise({ stddev: noiseScale, name: _n }), node).apply(inTensor);
       }
 
-      // PatchEmbed: [batch, H*W] → [batch, numPatches, embedDim]
+      // PatchEmbed: flattened square image → non-overlapping patch tokens.
       if (node.name === "patch_embed_layer") {
         var pePS = Math.max(1, Number((node.data && node.data.patchSize) || 7));
         var peED = Math.max(1, Number((node.data && node.data.embedDim) || 64));
-        var peImgSize = Math.round(Math.sqrt(inTensor.shape[inTensor.shape.length - 1]));
-        var peNumPatches = Math.floor(peImgSize / pePS) * Math.floor(peImgSize / pePS);
-        var pePatchDim = pePS * pePS;
-        // reshape [batch, H*W] → [batch, numPatches, patchDim]
-        var peReshaped = tf.layers.reshape({ targetShape: [peNumPatches, pePatchDim], name: _n + "_reshape" }).apply(inTensor);
-        // project [batch, numPatches, patchDim] → [batch, numPatches, embedDim]
-        var peProjected = tf.layers.timeDistributed({
-          layer: tf.layers.dense({ units: peED, name: _n + "_proj_inner" }),
+        var peFlat = Number(inTensor.shape[inTensor.shape.length - 1] || 0);
+        var peImgSize = Math.round(Math.sqrt(peFlat));
+        if (!Number.isFinite(peImgSize) || peImgSize <= 0 || peImgSize * peImgSize !== peFlat) {
+          throw new Error("PatchEmbed expects square flattened image input, got featureSize=" + String(peFlat));
+        }
+        var pePatchesPerSide = Math.floor(peImgSize / pePS);
+        var peNumPatches = pePatchesPerSide * pePatchesPerSide;
+        var peImage = tf.layers.reshape({ targetShape: [peImgSize, peImgSize, 1], name: _n + "_image" }).apply(inTensor);
+        var peConvCfg = {
+          filters: peED,
+          kernelSize: [pePS, pePS],
+          strides: [pePS, pePS],
+          padding: "valid",
+          activation: "linear",
+          useBias: _resolveUseBias(node.data, true),
           name: _n + "_proj"
-        }).apply(peReshaped);
-        // add learnable positional embedding
-        // use a Dense(embedDim) on a range tensor — simulated via bias-only layer on zeros
-        // simpler: just add a trainable variable via a Dense that maps embedDim→embedDim initialized to small random
-        var peWithPos = tf.layers.timeDistributed({
-          layer: tf.layers.dense({ units: peED, useBias: true, kernelInitializer: "zeros", biasInitializer: "randomNormal", name: _n + "_pos_inner" }),
-          name: _n + "_pos"
-        }).apply(peProjected);
-        return peWithPos;
+        };
+        _assignInitializer(peConvCfg, "kernelInitializer", tf, node.data, "kernel", "default");
+        if (peConvCfg.useBias) _assignInitializer(peConvCfg, "biasInitializer", tf, node.data, "bias", "default");
+        var peProjectedMap = tf.layers.conv2d(peConvCfg).apply(peImage);
+        return tf.layers.reshape({ targetShape: [peNumPatches, peED], name: _n + "_tokens" }).apply(peProjectedMap);
       }
 
       // TransformerBlock: [batch, seqLen, embedDim] → [batch, seqLen, embedDim]
@@ -901,11 +904,12 @@
         var tbHeads = Math.max(1, Number((node.data && node.data.numHeads) || 4));
         var tbFFN = Math.max(1, Number((node.data && node.data.ffnDim) || 128));
         var tbDrop = Number((node.data && node.data.dropout) || 0.1);
+        var tbEps = Math.max(1e-6, Number((node.data && node.data.epsilon) || 1e-3));
         var tbDim = inTensor.shape[inTensor.shape.length - 1]; // embedDim
         var tbSeqLen = inTensor.shape[inTensor.shape.length - 2]; // numPatches
 
         // LayerNorm 1
-        var tbNorm1 = tf.layers.layerNormalization({ name: _n + "_ln1" }).apply(inTensor);
+        var tbNorm1 = tf.layers.layerNormalization({ axis: -1, epsilon: tbEps, name: _n + "_ln1" }).apply(inTensor);
 
         // Multi-Head Self-Attention (implemented via Dense projections)
         // Q, K, V projections: [batch, seq, dim] → [batch, seq, dim]
@@ -931,7 +935,7 @@
         var tbRes1 = tf.layers.add({ name: _n + "_res1" }).apply([inTensor, tbAttnOut]);
 
         // LayerNorm 2
-        var tbNorm2 = tf.layers.layerNormalization({ name: _n + "_ln2" }).apply(tbRes1);
+        var tbNorm2 = tf.layers.layerNormalization({ axis: -1, epsilon: tbEps, name: _n + "_ln2" }).apply(tbRes1);
 
         // FFN: Dense(ffnDim, relu) → Dense(embedDim)
         var tbFFN1 = tf.layers.timeDistributed({

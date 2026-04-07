@@ -17,6 +17,11 @@ function getTfjsDistPath() {
     const full = path.join(base, candidates[i]);
     if (fs.existsSync(full)) return full;
   }
+  for (let j = 0; j < candidates.length; j += 1) {
+    try {
+      return require.resolve("@tensorflow/tfjs/dist/" + candidates[j]);
+    } catch (_) {}
+  }
   return path.join(base, "tf.js");
 }
 

@@ -706,7 +706,7 @@ def main():
         # Export in TF.js kernel layout based on tensor rank and layer type.
         if param.ndim == 2:
             param = param.T  # [out, in] → [in, out]
-        elif param.ndim == 4 and ".weight" in name and (name.startswith("conv2d_") or name.startswith("convt2d_")):
+        elif param.ndim == 4 and ".weight" in name and (name.startswith("conv2d_") or name.startswith("convt2d_") or name.startswith("pe_proj_")):
             param = np.transpose(param, (2, 3, 1, 0))
 
         flat = param.astype(np.float32).flatten()
@@ -938,13 +938,21 @@ def build_model_from_graph(graph, feature_size, target_size, num_classes=0):
                 elif name.startswith("bias"):
                     _apply_tensor_initializer(param, cfg, "bias", "zeros")
 
+    def _normalize_node_type(raw_name):
+        t = str(raw_name or "")
+        if t.endswith("_layer"):
+            t = t[:-6]
+        if t.endswith("_block") and t not in ("transformer_block",):
+            t = t[:-6]
+        return t
+
     # Parse nodes + edges
     nodes = {}
     edges_out = {}  # nid → [{ to, from_port, to_port }]
     edges_in = {}   # nid → [{ from, from_port, to_port }]
     for nid in sorted(raw.keys(), key=lambda k: int(k) if k.isdigit() else 0):
         n = raw[nid]
-        t = str(n.get("name", "")).replace("_layer", "").replace("_block", "")
+        t = _normalize_node_type(n.get("name", ""))
         nodes[nid] = {"type": t, "config": n.get("data", {})}
         edges_out[nid] = []
         edges_in.setdefault(nid, [])
@@ -1052,8 +1060,8 @@ def build_model_from_graph(graph, feature_size, target_size, num_classes=0):
                     setattr(self, f"bn_{nid}", bn_mod)
                     dim_map[nid] = in_dim
                 elif t == "layernorm":
-                    flat_dim = in_dim if isinstance(in_dim, int) else int(in_dim[0]) * int(in_dim[1]) * int(in_dim[2]) if isinstance(in_dim, list) and len(in_dim) == 3 else in_dim
-                    ln_mod = nn.LayerNorm(flat_dim, eps=max(1e-6, _cfg_float(c.get("epsilon", 1e-3), 1e-3)))
+                    ln_dim = in_dim if isinstance(in_dim, int) else int(in_dim[-1])
+                    ln_mod = nn.LayerNorm(ln_dim, eps=max(1e-6, _cfg_float(c.get("epsilon", 1e-3), 1e-3)))
                     _apply_module_initializers(ln_mod, c, t)
                     setattr(self, f"ln_{nid}", ln_mod)
                     dim_map[nid] = in_dim
@@ -1072,30 +1080,51 @@ def build_model_from_graph(graph, feature_size, target_size, num_classes=0):
                 elif t == "patch_embed":
                     ps = int(c.get("patchSize", 7))
                     ed = int(c.get("embedDim", 64))
-                    img_size = int(round(in_dim ** 0.5))
+                    flat_dim = int(in_dim if isinstance(in_dim, int) else np.prod(in_dim))
+                    img_size = int(round(flat_dim ** 0.5))
+                    if img_size <= 0 or img_size * img_size != flat_dim:
+                        raise ValueError(f"PatchEmbed expects square flattened image input, got featureSize={flat_dim}")
                     num_patches = (img_size // ps) ** 2
-                    patch_dim = ps * ps
-                    setattr(self, f"pe_proj_{nid}", nn.Linear(patch_dim, ed))
-                    setattr(self, f"pe_pos_{nid}", nn.Parameter(torch.randn(1, num_patches, ed) * 0.02))
+                    use_bias = _cfg_bool(c.get("useBias", True), True)
+                    pe_proj = nn.Conv2d(1, ed, kernel_size=ps, stride=ps, padding=0, bias=use_bias)
+                    _apply_module_initializers(pe_proj, c, "conv2d")
+                    setattr(self, f"pe_proj_{nid}", pe_proj)
                     setattr(self, f"pe_num_patches_{nid}", num_patches)
-                    setattr(self, f"pe_patch_dim_{nid}", patch_dim)
-                    dim_map[nid] = ed  # output is [batch, num_patches, embed_dim] but track embed_dim
+                    setattr(self, f"pe_img_size_{nid}", img_size)
+                    setattr(self, f"pe_embed_dim_{nid}", ed)
+                    dim_map[nid] = [num_patches, ed]
                 elif t == "transformer_block":
-                    heads = int(c.get("numHeads", 4))
+                    embed_dim = int(in_dim[-1] if isinstance(in_dim, list) else in_dim)
                     ffn = int(c.get("ffnDim", 128))
                     drop = float(c.get("dropout", 0.1))
-                    setattr(self, f"tb_ln1_{nid}", nn.LayerNorm(in_dim))
-                    setattr(self, f"tb_attn_{nid}", nn.MultiheadAttention(in_dim, heads, dropout=drop, batch_first=True))
-                    setattr(self, f"tb_ln2_{nid}", nn.LayerNorm(in_dim))
-                    setattr(self, f"tb_ffn_{nid}", nn.Sequential(
-                        nn.Linear(in_dim, ffn), nn.ReLU(), nn.Dropout(drop),
-                        nn.Linear(ffn, in_dim), nn.Dropout(drop)
-                    ))
-                    dim_map[nid] = in_dim
+                    ln_eps = max(1e-6, _cfg_float(c.get("epsilon", 1e-3), 1e-3))
+                    ln1 = nn.LayerNorm(embed_dim, eps=ln_eps)
+                    ln2 = nn.LayerNorm(embed_dim, eps=ln_eps)
+                    q = nn.Linear(embed_dim, embed_dim, bias=True)
+                    k = nn.Linear(embed_dim, embed_dim, bias=True)
+                    v = nn.Linear(embed_dim, embed_dim, bias=True)
+                    attn_proj = nn.Linear(embed_dim * 3, embed_dim, bias=True)
+                    ffn1 = nn.Linear(embed_dim, ffn, bias=True)
+                    ffn2 = nn.Linear(ffn, embed_dim, bias=True)
+                    for mod, kind in ((ln1, "layernorm"), (ln2, "layernorm")):
+                        _apply_module_initializers(mod, c, kind)
+                    for mod in (q, k, v, attn_proj, ffn1, ffn2):
+                        _apply_module_initializers(mod, c, "dense")
+                    setattr(self, f"tb_ln1_{nid}", ln1)
+                    setattr(self, f"tb_q_{nid}", q)
+                    setattr(self, f"tb_k_{nid}", k)
+                    setattr(self, f"tb_v_{nid}", v)
+                    setattr(self, f"tb_attn_proj_{nid}", attn_proj)
+                    setattr(self, f"tb_attn_drop_{nid}", nn.Dropout(drop))
+                    setattr(self, f"tb_ln2_{nid}", ln2)
+                    setattr(self, f"tb_ffn1_{nid}", ffn1)
+                    setattr(self, f"tb_ffn_drop_{nid}", nn.Dropout(drop))
+                    setattr(self, f"tb_ffn2_{nid}", ffn2)
+                    dim_map[nid] = list(in_dim) if isinstance(in_dim, list) else in_dim
                 elif t == "global_avg_pool1d":
-                    dim_map[nid] = in_dim
+                    dim_map[nid] = int(in_dim[-1]) if isinstance(in_dim, list) else in_dim
                 elif t == "global_avg_pool2d":
-                    dim_map[nid] = in_dim
+                    dim_map[nid] = int(in_dim[-1]) if isinstance(in_dim, list) else in_dim
                 elif t == "detach":
                     dim_map[nid] = in_dim
                 elif t == "concat_batch":
@@ -1336,13 +1365,10 @@ def build_model_from_graph(graph, feature_size, target_size, num_classes=0):
                 elif t == "batchnorm":
                     tensors[nid] = getattr(self, f"bn_{nid}")(inp)
                 elif t == "layernorm":
-                    # flatten 4D for LayerNorm using TF.js ordering, then reshape back
-                    if inp.dim() > 2:
-                        shape = inp.shape
-                        flat = _flatten_tf_layout(inp)
-                        ln_out = getattr(self, f"ln_{nid}")(flat)
-                        nhwc = ln_out.view(shape[0], shape[2], shape[3], shape[1])
-                        tensors[nid] = nhwc.permute(0, 3, 1, 2).contiguous()
+                    if inp.dim() == 4:
+                        nhwc = inp.permute(0, 2, 3, 1).contiguous()
+                        ln_out = getattr(self, f"ln_{nid}")(nhwc)
+                        tensors[nid] = ln_out.permute(0, 3, 1, 2).contiguous()
                     else:
                         tensors[nid] = getattr(self, f"ln_{nid}")(inp)
                 elif t == "relu":
@@ -1356,25 +1382,34 @@ def build_model_from_graph(graph, feature_size, target_size, num_classes=0):
                     else:
                         tensors[nid] = inp
                 elif t == "patch_embed":
-                    num_patches = getattr(self, f"pe_num_patches_{nid}")
-                    patch_dim = getattr(self, f"pe_patch_dim_{nid}")
-                    # [batch, H*W] → [batch, num_patches, patch_dim]
-                    patches = inp.view(inp.shape[0], num_patches, patch_dim)
-                    projected = getattr(self, f"pe_proj_{nid}")(patches)
-                    pos_embed = getattr(self, f"pe_pos_{nid}")
-                    tensors[nid] = projected + pos_embed
+                    img_size = getattr(self, f"pe_img_size_{nid}")
+                    embed_dim = getattr(self, f"pe_embed_dim_{nid}")
+                    if inp.dim() == 2:
+                        image = inp.view(inp.shape[0], 1, img_size, img_size)
+                    elif inp.dim() == 4:
+                        image = inp if inp.shape[1] == 1 else inp.permute(0, 3, 1, 2).contiguous()
+                    else:
+                        raise ValueError(f"PatchEmbed expects 2D flat input or 4D image tensor, got ndim={inp.dim()}")
+                    projected = getattr(self, f"pe_proj_{nid}")(image)
+                    tensors[nid] = projected.permute(0, 2, 3, 1).contiguous().view(inp.shape[0], -1, embed_dim)
                 elif t == "transformer_block":
                     ln1 = getattr(self, f"tb_ln1_{nid}")
-                    attn = getattr(self, f"tb_attn_{nid}")
+                    q = getattr(self, f"tb_q_{nid}")
+                    k = getattr(self, f"tb_k_{nid}")
+                    v = getattr(self, f"tb_v_{nid}")
+                    attn_proj = getattr(self, f"tb_attn_proj_{nid}")
+                    attn_drop = getattr(self, f"tb_attn_drop_{nid}")
                     ln2 = getattr(self, f"tb_ln2_{nid}")
-                    ffn = getattr(self, f"tb_ffn_{nid}")
-                    # Pre-norm attention + residual
+                    ffn1 = getattr(self, f"tb_ffn1_{nid}")
+                    ffn_drop = getattr(self, f"tb_ffn_drop_{nid}")
+                    ffn2 = getattr(self, f"tb_ffn2_{nid}")
                     normed = ln1(inp)
-                    attn_out, _ = attn(normed, normed, normed)
+                    qkv = torch.cat([q(normed), k(normed), v(normed)], dim=-1)
+                    attn_out = attn_drop(attn_proj(qkv))
                     res1 = inp + attn_out
-                    # Pre-norm FFN + residual
-                    res2 = res1 + ffn(ln2(res1))
-                    tensors[nid] = res2
+                    normed2 = ln2(res1)
+                    ffn_hidden = ffn_drop(torch.relu(ffn1(normed2)))
+                    tensors[nid] = res1 + ffn2(ffn_hidden)
                 elif t == "global_avg_pool1d":
                     # [batch, seq, dim] → [batch, dim]
                     if inp.dim() == 3:
