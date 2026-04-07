@@ -482,6 +482,7 @@
           var meta = [];
           if (r.weightSelection) meta.push("weights=" + String(r.weightSelection));
           if (r.checkpointRef) meta.push(String(r.checkpointRef));
+          if (r.generationRuntime) meta.push("runtime=" + String(r.generationRuntime));
           if (r.referenceSplit) meta.push("ref=" + String(r.referenceSplit));
           if (meta.length) {
             modelCell.appendChild(el("div", { style: "font-size:10px;color:#64748b;font-weight:400;margin-top:2px;" }, meta.join(" | ")));
@@ -541,7 +542,7 @@
         xaxis: { gridcolor: "#1e293b" }, yaxis: { title: "Value", gridcolor: "#1e293b" },
         legend: { orientation: "h", y: -0.2, font: { size: 9 } },
         margin: { t: 10, b: 60, l: 50, r: 10 },
-      }, { responsive: true });
+      }, { responsive: true, displayModeBar: false });
     }
 
     function _renderMetricLegend(container, metricKeys) {

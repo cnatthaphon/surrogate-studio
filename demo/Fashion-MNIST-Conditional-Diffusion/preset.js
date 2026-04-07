@@ -193,7 +193,7 @@
         name: "Per-Class Generation",
         schemaId: sid,
         datasetId: DS,
-        trainerIds: ["t-cond-ddpm-pre"],
+        trainerIds: ["t-cond-ddpm-pre", "t-cond-denoiser-pre"],
         evaluatorIds: ["mmd_rbf", "mean_gap", "diversity"],
         runMode: "generate",
         weightSelection: "last",

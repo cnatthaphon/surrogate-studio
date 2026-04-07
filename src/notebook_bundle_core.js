@@ -1516,8 +1516,27 @@
       "if not head_losses:\n" +
       "    loss_fn = nn.CrossEntropyLoss() if is_cls else nn.MSELoss()\n" +
       "    head_losses = [{'fn': loss_fn, 'weight': 1.0, 'phase': '', 'cls': is_cls}]\n\n" +
-      "train_dl = DataLoader(TensorDataset(x_train, y_train), batch_size=BATCH_SIZE, shuffle=True)\n" +
-      "val_dl = DataLoader(TensorDataset(x_val, y_val), batch_size=BATCH_SIZE)\n\n" +
+      "# Detect class_embed nodes — include labels in DataLoader if present\n" +
+      "_has_class_embed = any(str(n.get('name','')).replace('_layer','') == 'class_embed' for n in graph_data.values() if isinstance(n,dict))\n" +
+      "if _has_class_embed and hasattr(model, '_class_labels') is False:\n" +
+      "    # build one-hot labels from dataset label column\n" +
+      "    _nclasses = 10\n" +
+      "    for _n in graph_data.values():\n" +
+      "        if isinstance(_n, dict) and str(_n.get('name','')).replace('_layer','') == 'class_embed':\n" +
+      "            _nclasses = int((_n.get('data') or {}).get('numClasses', 10))\n" +
+      "    if 'label' in df.columns:\n" +
+      "        import torch.nn.functional as F\n" +
+      "        _lbl_train = F.one_hot(torch.tensor(df[df['split']=='train']['label'].values.astype(int)), _nclasses).float()\n" +
+      "        _lbl_val = F.one_hot(torch.tensor(df[df['split']=='val']['label'].values.astype(int)), _nclasses).float()\n" +
+      "        train_dl = DataLoader(TensorDataset(x_train, y_train, _lbl_train), batch_size=BATCH_SIZE, shuffle=True)\n" +
+      "        val_dl = DataLoader(TensorDataset(x_val, y_val, _lbl_val), batch_size=BATCH_SIZE)\n" +
+      "        print(f'Class conditioning: {_nclasses} classes')\n" +
+      "    else:\n" +
+      "        train_dl = DataLoader(TensorDataset(x_train, y_train), batch_size=BATCH_SIZE, shuffle=True)\n" +
+      "        val_dl = DataLoader(TensorDataset(x_val, y_val), batch_size=BATCH_SIZE)\n" +
+      "else:\n" +
+      "    train_dl = DataLoader(TensorDataset(x_train, y_train), batch_size=BATCH_SIZE, shuffle=True)\n" +
+      "    val_dl = DataLoader(TensorDataset(x_val, y_val), batch_size=BATCH_SIZE)\n\n" +
       "def compute_loss(pred, xb, yb, phase):\n" +
       "    total = torch.tensor(0.0, device=device)\n" +
       "    for hl in head_losses:\n" +
@@ -1534,8 +1553,9 @@
       "    for phase in phases:\n" +
       "        model.train()\n" +
       "        tl = 0; nb = 0\n" +
-      "        for xb, yb in train_dl:\n" +
-      "            xb, yb = xb.to(device), yb.to(device)\n" +
+      "        for _batch in train_dl:\n" +
+      "            xb, yb = _batch[0].to(device), _batch[1].to(device)\n" +
+      "            if len(_batch) > 2: model._class_labels = _batch[2].to(device)\n" +
       "            optimizer.zero_grad()\n" +
       "            loss = compute_loss(model(xb), xb, yb, phase)\n" +
       "            loss.backward()\n" +
@@ -1546,8 +1566,9 @@
       "    model.eval()\n" +
       "    vl = 0; nv = 0\n" +
       "    with torch.no_grad():\n" +
-      "        for xb, yb in val_dl:\n" +
-      "            xb, yb = xb.to(device), yb.to(device)\n" +
+      "        for _batchv in val_dl:\n" +
+      "            xb, yb = _batchv[0].to(device), _batchv[1].to(device)\n" +
+      "            if len(_batchv) > 2: model._class_labels = _batchv[2].to(device)\n" +
       "            vl += compute_loss(model(xb), xb, yb, 0).item(); nv += 1\n" +
       "    vl /= max(nv, 1)\n" +
       "    scheduler.step(vl)\n\n" +
