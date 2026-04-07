@@ -10,6 +10,8 @@
 
 Build datasets, design neural network architectures visually, train models, generate samples, and benchmark results from a single page. It works fully in the browser, with an optional PyTorch server for faster training and cross-runtime checks.
 
+Each demo folder also includes its own README with a `How to Use` section, so the root README can stay high-level while the demo README explains the exact trainer/generation/evaluation flow.
+
 ![Demo Workflow](demo/Fashion-MNIST-Benchmark/images/demo_workflow.gif)
 
 ---
@@ -29,6 +31,8 @@ Build datasets, design neural network architectures visually, train models, gene
 
 ### [Fashion-MNIST Benchmark](demo/Fashion-MNIST-Benchmark/) — 7 Architectures Compared
 
+Live: [GitHub Pages](https://cnatthaphon.github.io/surrogate-studio/demo/Fashion-MNIST-Benchmark/) | Guide: [README](demo/Fashion-MNIST-Benchmark/README.md)
+
 A visual survey of 35 years of neural network research, trained and evaluated on the same dataset.
 
 | Model | Training | Test | Generation |
@@ -46,6 +50,8 @@ A visual survey of 35 years of neural network research, trained and evaluated on
 | 7 | Denoising AE | ~734K | Ho et al. 2020 |
 
 ### [Fashion-MNIST GAN](demo/Fashion-MNIST-GAN/) — 3 Adversarial Architectures
+
+Live: [GitHub Pages](https://cnatthaphon.github.io/surrogate-studio/demo/Fashion-MNIST-GAN/) | Guide: [README](demo/Fashion-MNIST-GAN/README.md)
 
 Real adversarial training with no hardcoded GAN logic — everything from Drawflow graph blocks (ConcatBatch, PhaseSwitch, Constant, weight tags).
 
@@ -65,6 +71,8 @@ The GAN demo also includes blank trainer cards alongside the pre-trained ones. U
 
 ### [Fashion-MNIST Diffusion](demo/Fashion-MNIST-Diffusion/) — 4 Denoising Models
 
+Live: [GitHub Pages](https://cnatthaphon.github.io/surrogate-studio/demo/Fashion-MNIST-Diffusion/) | Guide: [README](demo/Fashion-MNIST-Diffusion/README.md)
+
 Iterative denoising from noise to images. Standard supervised MSE training — no adversarial dynamics.
 
 | # | Architecture | Method | Paper |
@@ -75,6 +83,8 @@ Iterative denoising from noise to images. Standard supervised MSE training — n
 | 4 | Score SDE (skip connections, cosine schedule) | SDE sampling | Song et al. 2021 |
 
 ### [LSTM-VAE for Dominant Motion Extraction](demo/LSTM-VAE-for-dominant-motion-extraction/)
+
+Live: [GitHub Pages](https://cnatthaphon.github.io/surrogate-studio/demo/LSTM-VAE-for-dominant-motion-extraction/) | Guide: [README](demo/LSTM-VAE-for-dominant-motion-extraction/README.md)
 
 Reproduces the LSTM-VAE from Jadhav & Barati Farimani (2022) for ant trajectory reconstruction.
 
@@ -90,6 +100,8 @@ Reproduces the LSTM-VAE from Jadhav & Barati Farimani (2022) for ant trajectory 
 > Paper: *"Dominant motion identification of multi-particle system using deep learning from video"* — Jadhav & Barati Farimani, 2022. [arXiv:2104.12722](https://arxiv.org/abs/2104.12722)
 
 ### [Oscillator Surrogate](demo/Oscillator-Surrogate/)
+
+Live: [GitHub Pages](https://cnatthaphon.github.io/surrogate-studio/demo/Oscillator-Surrogate/) | Guide: [README](demo/Oscillator-Surrogate/README.md)
 
 5 model architectures on physics-based trajectory data (spring, pendulum, bouncing ball). Demonstrates every feature of the platform: Direct-MLP, AR-GRU, VAE, VAE+Classifier, Denoising AE.
 
@@ -139,6 +151,24 @@ Reproduces the LSTM-VAE from Jadhav & Barati Farimani (2022) for ant trajectory 
 ## Quick Start
 
 ### Browser / GitHub Pages
+
+Open the full app on GitHub Pages:
+
+```text
+https://cnatthaphon.github.io/surrogate-studio/
+```
+
+Direct demo entrypoints:
+
+```text
+https://cnatthaphon.github.io/surrogate-studio/demo/Fashion-MNIST-Benchmark/
+https://cnatthaphon.github.io/surrogate-studio/demo/Fashion-MNIST-GAN/
+https://cnatthaphon.github.io/surrogate-studio/demo/Fashion-MNIST-Diffusion/
+https://cnatthaphon.github.io/surrogate-studio/demo/LSTM-VAE-for-dominant-motion-extraction/
+https://cnatthaphon.github.io/surrogate-studio/demo/Oscillator-Surrogate/
+```
+
+Each demo README linked above explains how to use that demo inside the app.
 
 ```
 Open `index.html` in Chrome/Edge (works on `file://`)

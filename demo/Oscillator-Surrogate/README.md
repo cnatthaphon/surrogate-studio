@@ -34,3 +34,12 @@ RK4-simulated oscillator trajectories (generated at runtime):
 - **Spring**: m·x'' + c·x' + k·x = 0
 - **Pendulum**: θ'' + (c/m)·θ' + (g/L)·sin(θ) = 0
 - **Bouncing ball**: y'' = -g with impact restitution
+
+## How to Use
+
+1. Open `index.html` in a browser
+2. Generate the oscillator dataset in the Dataset tab
+3. Train any of the five preset trainers in the Trainer tab
+4. Use the Generation tab to compare reconstruct, random sampling, classifier-guided generation, or Langevin generation depending on the selected model
+5. Use the Evaluation tab to benchmark all trained models on the same reference split
+6. Open the Model tab to inspect how each architecture is built in the graph editor
