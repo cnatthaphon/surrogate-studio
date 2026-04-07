@@ -410,6 +410,14 @@
       return editor.addNode("time_embed_layer", 0, 1, x, y, "time_embed_layer", { dim: dim }, html);
     }
 
+    function addClassEmbedNode(editor, x, y, cfg) {
+      var numClasses = Math.max(2, Number((cfg && cfg.numClasses) || 10));
+      var html =
+        "<div><div style='font-weight:700'>ClassEmbed</div>" +
+        "<div class='node-summary' style='font-size:11px;color:#94a3b8;'>classes=" + numClasses + "</div></div>";
+      return editor.addNode("class_embed_layer", 0, 1, x, y, "class_embed_layer", { numClasses: numClasses }, html);
+    }
+
     // --- Embedding node ---
     function addEmbeddingNode(editor, x, y, cfg) {
       var weightTag = String((cfg && cfg.weightTag) || "");
@@ -555,6 +563,7 @@
         phase_switch: addPhaseSwitchNode,
         noise_injection: addNoiseInjectionNode,
         time_embed: addTimeEmbedNode,
+        class_embed: addClassEmbedNode,
         embedding: addEmbeddingNode,
         conv2d: addConv2dNode,
         maxpool2d: addMaxPool2dNode,
@@ -912,6 +921,10 @@
       // --- TimeEmbed node ---
       if (node.name === "time_embed_layer") {
         addField({ kind: "number", key: "dim", label: "Embed dim", value: Math.max(1, Number(d.dim || 64)), min: 1, step: 1 });
+        return spec;
+      }
+      if (node.name === "class_embed_layer") {
+        addField({ kind: "number", key: "numClasses", label: "Num classes", value: Math.max(2, Number(d.numClasses || 10)), min: 2, step: 1 });
         return spec;
       }
       if (node.name === "image_source_block" || node.name === "image_source_layer") {

@@ -250,11 +250,27 @@ def main():
     else:
         loss_fn = nn.BCELoss() if _any_bce else nn.MSELoss()
 
+    # --- Detect class_embed nodes to include label data in DataLoader ---
+    _has_class_embed = any(
+        str(n.get("name", "")).replace("_layer", "") == "class_embed"
+        for n in graph_data.values() if isinstance(n, dict)
+    )
+    _class_num = 10
+    for n in graph_data.values():
+        if isinstance(n, dict) and str(n.get("name", "")).replace("_layer", "") == "class_embed":
+            _class_num = int((n.get("data") or {}).get("numClasses", 10))
+
     # --- DataLoaders (after label conversion) ---
-    train_ds = TensorDataset(torch.tensor(x_train), torch.tensor(y_train))
+    if _has_class_embed and labels_train is not None and len(labels_train) > 0:
+        # Include class labels as 3rd tensor for class-conditional models
+        train_ds = TensorDataset(torch.tensor(x_train), torch.tensor(y_train), torch.tensor(labels_train))
+        val_ds = TensorDataset(torch.tensor(x_val), torch.tensor(y_val),
+                               torch.tensor(labels_val) if labels_val is not None else torch.zeros(len(x_val), _class_num))
+    else:
+        train_ds = TensorDataset(torch.tensor(x_train), torch.tensor(y_train))
+        val_ds = TensorDataset(torch.tensor(x_val), torch.tensor(y_val))
     shuffle_train = bool(config.get("shuffleTrain", True))
     train_dl = DataLoader(train_ds, batch_size=batch_size, shuffle=shuffle_train)
-    val_ds = TensorDataset(torch.tensor(x_val), torch.tensor(y_val))
     val_dl = DataLoader(val_ds, batch_size=batch_size, shuffle=False)
 
     # --- Detect phases from headConfigs ---
@@ -460,11 +476,13 @@ def main():
             train_loss = 0.0
             n_batches = 0
             opt_all = _get_optimizer("all")
-            for xb, yb in train_dl:
+            for _batch in train_dl:
                 if _should_stop():
                     stopped_by_user = True
                     break
-                xb, yb = xb.to(device), yb.to(device)
+                xb, yb = _batch[0].to(device), _batch[1].to(device)
+                if len(_batch) > 2:
+                    model._class_labels = _batch[2].to(device)
                 opt_all.zero_grad()
                 pred = model(xb)
                 loss = compute_loss(pred, xb, yb, "")
@@ -505,8 +523,10 @@ def main():
                             if _should_stop():
                                 stopped_by_user = True
                             break
-                        xb, yb = next(train_iter)
-                        xb, yb = xb.to(device), yb.to(device)
+                        _batch2 = next(train_iter)
+                        xb, yb = _batch2[0].to(device), _batch2[1].to(device)
+                        if len(_batch2) > 2:
+                            model._class_labels = _batch2[2].to(device)
                         step_opt.zero_grad()
                         pred = model(xb)
                         loss = compute_loss(pred, xb, yb, phase_name)
@@ -549,11 +569,13 @@ def main():
                         if _should_stop():
                             stopped_by_user = True
                             break
-                        for xb, yb in train_dl:
+                        for _batch3 in train_dl:
                             if _should_stop():
                                 stopped_by_user = True
                                 break
-                            xb, yb = xb.to(device), yb.to(device)
+                            xb, yb = _batch3[0].to(device), _batch3[1].to(device)
+                            if len(_batch3) > 2:
+                                model._class_labels = _batch3[2].to(device)
                             step_opt.zero_grad()
                             pred = model(xb)
                             loss = compute_loss(pred, xb, yb, phase_name)
@@ -593,8 +615,10 @@ def main():
             val_loss = 0.0
             n_val = 0
             with torch.no_grad():
-                for xb, yb in val_dl:
-                    xb, yb = xb.to(device), yb.to(device)
+                for _batchv in val_dl:
+                    xb, yb = _batchv[0].to(device), _batchv[1].to(device)
+                    if len(_batchv) > 2:
+                        model._class_labels = _batchv[2].to(device)
                     pred = model(xb)
                     loss = compute_loss(pred, xb, yb, "")
                     val_loss += loss.item()
@@ -1062,6 +1086,9 @@ def build_model_from_graph(graph, feature_size, target_size, num_classes=0):
                 elif t == "time_embed":
                     tdim = int(c.get("dim", 64))
                     dim_map[nid] = max(1, tdim)
+                elif t == "class_embed":
+                    nclasses = int(c.get("numClasses", 10))
+                    dim_map[nid] = max(2, nclasses)
                 elif t == "image_source":
                     # image input — like input node
                     dim_map[nid] = int(c.get("featureSize", feature_size))
@@ -1232,6 +1259,15 @@ def build_model_from_graph(graph, feature_size, target_size, num_classes=0):
                     if runtime_time is None:
                         runtime_time = torch.rand(x.shape[0], 1, device=x.device, dtype=x.dtype)
                     tensors[nid] = _make_time_embedding(runtime_time, tdim)
+                    continue
+                if t == "class_embed":
+                    # one-hot class label: use labels from _custom_labels or random
+                    nclasses = int(self.node_configs[nid].get("numClasses", 10))
+                    if hasattr(self, "_class_labels") and self._class_labels is not None:
+                        tensors[nid] = self._class_labels
+                    else:
+                        rand_cls = torch.randint(0, nclasses, (x.shape[0],), device=x.device)
+                        tensors[nid] = torch.nn.functional.one_hot(rand_cls, nclasses).float()
                     continue
 
                 # get input tensor (first parent)

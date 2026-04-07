@@ -83,9 +83,11 @@
 
     var timeInputIndex = cfg && cfg.timeInputIndex != null ? Number(cfg.timeInputIndex) : -1;
     var dataInputIndex = cfg && cfg.dataInputIndex != null ? Number(cfg.dataInputIndex) : -1;
+    var classVector = cfg && cfg.classVector ? cfg.classVector : null; // one-hot [numSamples, numClasses]
     var prepared = [];
     var usedData = false;
     var usedTime = false;
+    var usedClass = false;
     for (var ii = 0; ii < inputs.length; ii++) {
       var inputShape = inputs[ii].shape || [];
       var inputDim = inputShape[inputShape.length - 1];
@@ -94,7 +96,18 @@
         usedData = true;
         continue;
       }
-      if ((ii === timeInputIndex) || (!usedTime && (inputDim === tDim || inputDim === 1 || inputDim > 1))) {
+      // class embed: match by classVector dimension or input name pattern
+      if (!usedClass && classVector) {
+        var cvDim = classVector.shape ? classVector.shape[classVector.shape.length - 1] : 0;
+        var inputName = inputs[ii].name || "";
+        if (inputDim === cvDim || inputName.indexOf("class_input") === 0) {
+          var cvTensor = classVector instanceof tf.Tensor ? classVector : tf.tensor(classVector);
+          prepared.push(cvTensor);
+          usedClass = true;
+          continue;
+        }
+      }
+      if ((ii === timeInputIndex) || (!usedTime && !usedClass && (inputDim === tDim || inputDim === 1 || inputDim > 1))) {
         var tPrepared = inputDim === tDim ? tTensor : _makeSinusoidalTimeEmbedding(tf, tTensor, inputDim);
         prepared.push(tPrepared);
         if (tPrepared !== tTensor) extraToDispose.push(tPrepared);

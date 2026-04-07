@@ -286,6 +286,18 @@
         if (name === "time_embed_layer") {
           return makeSyntheticTimeInput(tf, count, _inferModelInputDim(idx));
         }
+        if (name === "class_embed_layer") {
+          // one-hot class labels from dataset — or random if not available
+          var nCls = _inferModelInputDim(idx);
+          if (dataset.labelsTrain && Array.isArray(dataset.labelsTrain)) {
+            return tf.tensor2d(dataset.labelsTrain.slice(0, count));
+          }
+          // random one-hot fallback
+          var randClasses = tf.randomUniform([count], 0, nCls, "int32");
+          var oneHot = tf.oneHot(randClasses, nCls).cast("float32");
+          randClasses.dispose();
+          return oneHot;
+        }
         return baseTensor;
       });
     }
@@ -691,6 +703,10 @@
           _inputBatchMeta[idx] = { kind: "time_embed", dim: _inferSampleZDim(idx) };
           return null;
         }
+        if (inp.name === "class_embed_layer") {
+          _inputBatchMeta[idx] = { kind: "class_embed", dim: _inferSampleZDim(idx) };
+          return null;
+        }
         _inputBatchMeta[idx] = { kind: "dataset" };
         return _sharedTrainInput;
       });
@@ -848,6 +864,17 @@
           if (meta && meta.kind === "phase_flag") return tf.fill([batchN, 1], _currentPhaseFlagValue);
           if (meta && meta.kind === "sample_z") return tf.randomNormal([batchN, meta.dim]);
           if (meta && meta.kind === "time_embed") return makeSyntheticTimeInput(tf, batchN, meta.dim);
+          if (meta && meta.kind === "class_embed") {
+            // one-hot from dataset labels or random
+            if (dataset.labelsTrain && Array.isArray(dataset.labelsTrain)) {
+              var lblSlice = dataset.labelsTrain.slice(start, end);
+              return tf.tensor2d(lblSlice);
+            }
+            var rc = tf.randomUniform([batchN], 0, meta.dim, "int32");
+            var oh = tf.oneHot(rc, meta.dim).cast("float32");
+            rc.dispose();
+            return oh;
+          }
           return _sliceOrGather(x);
         }) : _sliceOrGather(xFull);
         var yArrays = Array.isArray(yFull) ? yFull.map(function (y) { return _sliceOrGather(y); }) : _sliceOrGather(yFull);

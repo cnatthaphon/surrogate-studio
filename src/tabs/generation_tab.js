@@ -610,9 +610,22 @@
         { key: "temperature", label: "Temperature", value: g.config.temperature || 1.0, min: 0.01, max: 5, step: 0.1 },
         { key: "seed", label: "Seed", value: g.config.seed || 42, min: 1, step: 1 },
       ];
-      // classifier guidance fields
+      // class conditioning: show targetClass if model has class_embed or method is classifier_guided
+      var _hasClassEmbed = false;
+      var _classEmbedMax = 9;
+      if (selectedModel && selectedModel.graph && modelBuilder.extractGraphData) {
+        var _egd = modelBuilder.extractGraphData(selectedModel.graph);
+        if (_egd) Object.keys(_egd).forEach(function (nid) {
+          if (_egd[nid].name === "class_embed_layer") {
+            _hasClassEmbed = true;
+            _classEmbedMax = Math.max(1, Number((_egd[nid].data && _egd[nid].data.numClasses) || 10)) - 1;
+          }
+        });
+      }
+      if (_hasClassEmbed || currentMethod === "classifier_guided") {
+        fields.push({ key: "targetClass", label: "Target class", value: g.config.targetClass || 0, min: 0, max: _classEmbedMax, step: 1 });
+      }
       if (currentMethod === "classifier_guided") {
-        fields.push({ key: "targetClass", label: "Target class", value: g.config.targetClass || 0, min: 0, max: 99, step: 1 });
         fields.push({ key: "guidanceWeight", label: "Guidance weight", value: g.config.guidanceWeight || 1.0, min: 0.01, max: 10, step: 0.1 });
       }
       fields.forEach(function (f) {
@@ -902,6 +915,24 @@
           outputIndex: outputIndex, sampleInputIndex: sampleInputIndex,
           onStep: function (step, loss) { if (step % 10 === 0) onStatus("Step " + step + " loss=" + (typeof loss === "number" ? loss.toExponential(3) : "?")); },
         };
+
+        // class conditioning: if model has class_embed input, provide one-hot classVector
+        if (built.inputNodes && built.inputNodes.some(function (n) { return n.name === "class_embed_layer"; })) {
+          var ceNode = built.inputNodes.find(function (n) { return n.name === "class_embed_layer"; });
+          var ceIdx = built.inputNodes.indexOf(ceNode);
+          var ceShape = built.model.inputs[ceIdx] ? built.model.inputs[ceIdx].shape : [];
+          var numCls = ceShape[ceShape.length - 1] || 10;
+          var targetCls = Math.max(0, Math.min(numCls - 1, Number(config.targetClass || 0)));
+          var nSamp = config.numSamples || 16;
+          // build one-hot: [nSamp, numCls] with targetCls=1
+          var cvArr = [];
+          for (var ci = 0; ci < nSamp; ci++) {
+            var row = new Array(numCls).fill(0);
+            row[targetCls] = 1;
+            cvArr.push(row);
+          }
+          genConfig.classVector = tf.tensor2d(cvArr);
+        }
 
         // for classifier_guided: extract classifier from model's classification output
         if (method === "classifier_guided") {
