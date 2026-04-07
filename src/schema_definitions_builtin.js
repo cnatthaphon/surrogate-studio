@@ -3508,6 +3508,44 @@
     }
   });
 
+  // ===== AIS TRAJECTORY =====
+  registerSchema({
+    id: "ais_trajectory",
+    label: "ais_trajectory",
+    description: "AIS vessel trajectory data — autoregressive position prediction",
+    dataset: {
+      id: "ais_trajectory",
+      label: "AIS Maritime Trajectories",
+      sampleType: "trajectory",
+      splitUnit: "trajectory",
+      splitDefaults: { mode: "random", train: 0.80, val: 0.10, test: 0.10 },
+      metadata: {
+        ui: { sidebarMode: "generic", viewer: "trajectory" },
+        splitModes: [
+          { id: "random", label: "Random", stratifyKey: "" },
+          { id: "original", label: "Original (pre-split)", stratifyKey: "" },
+        ],
+        display: { chartType: "trajectory_map" },
+      },
+    },
+    model: {
+      outputs: [
+        { key: "position", label: "Next position (lat,lon,sog,cog)", headType: "regression" },
+      ],
+      defaultPreset: null,
+      metadata: {
+        featureNodes: {
+          oneHot: [],
+          policy: { allowHistory: true, allowWindowHistory: true, allowParams: false, allowOneHot: false, allowImageSource: false },
+          palette: { items: _trajectoryPaletteItems() },
+        },
+      },
+    },
+    preconfig: {
+      dataset: { defaultModuleId: "ais_dma" },
+    },
+  });
+
   var exports = {
     registeredSchemaIds: schemaRegistry.listSchemas().map(function (x) { return String(x.id || ""); }),
     trajectoryPaletteItems: _trajectoryPaletteItems,
