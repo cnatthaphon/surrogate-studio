@@ -19,7 +19,7 @@ var preset = window.FASHION_MNIST_COND_DIFFUSION_PRESET;
 
 var DEMO_DIR = path.resolve(__dirname, "../demo/Fashion-MNIST-Conditional-Diffusion");
 var DATA_DIR = path.resolve(__dirname, "../data/fashion-mnist");
-var EPOCHS = 30;
+var EPOCHS = 80;
 var BATCH = 64;
 var LR = 0.001;
 var CLASS_FILTER = [0, 1, 7]; // T-shirt, Trouser, Sneaker

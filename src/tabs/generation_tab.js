@@ -946,7 +946,7 @@
         var genConfig = {
           method: method, model: genModel, latentDim: genLatentDim,
           numSamples: config.numSamples || 16, steps: config.steps || 0,
-          lr: config.lr || 0.01, temperature: config.temperature || 1.0, seed: config.seed || 42,
+          lr: config.lr || 0.01, temperature: config.temperature || 1.0, seed: (config.seed || 42) + (g.runs ? g.runs.length : 0),
           outputIndex: outputIndex, sampleInputIndex: sampleInputIndex,
           onStep: function (step, loss) { if (step % 10 === 0) onStatus("Step " + step + " loss=" + (typeof loss === "number" ? loss.toExponential(3) : "?")); },
         };

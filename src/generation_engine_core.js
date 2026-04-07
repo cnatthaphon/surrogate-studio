@@ -398,9 +398,9 @@
       var lossHistory = [];
       var predMode = cfg.ddpmPredMode || "x0"; // default to x0-prediction for sigmoid denoisers
 
-      // linear beta schedule
+      // linear beta schedule — scale betaEnd for fewer steps (standard DDPM uses T=1000, betaEnd=0.02)
       var betaStart = cfg.betaStart || 0.0001;
-      var betaEnd = cfg.betaEnd || 0.02;
+      var betaEnd = cfg.betaEnd || Math.min(0.5, 0.02 * 1000 / Math.max(1, T));
       var betas = [];
       for (var i = 0; i < T; i++) betas.push(betaStart + (betaEnd - betaStart) * i / (T - 1));
       var alphas = betas.map(function (b) { return 1 - b; });
