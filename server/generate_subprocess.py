@@ -57,6 +57,26 @@ def _pick_output(pred, output_index):
         return pred[idx]
     return pred
 
+def _make_time_embedding_gen(t_scalar, dim, batch, device):
+    """Sinusoidal time embedding for generation (matches training engine)."""
+    half = max(1, dim // 2)
+    freqs = torch.exp(-np.log(10000) * torch.arange(half, dtype=torch.float32, device=device) / max(1, half - 1))
+    t = torch.full((batch, 1), t_scalar, dtype=torch.float32, device=device)
+    angles = t * freqs.unsqueeze(0)
+    emb = torch.cat([torch.sin(angles), torch.cos(angles)], dim=1)
+    if emb.shape[1] > dim:
+        emb = emb[:, :dim]
+    elif emb.shape[1] < dim:
+        emb = torch.cat([emb, torch.zeros(batch, dim - emb.shape[1], device=device)], dim=1)
+    return emb
+
+def _forward_with_time(model, x, t_norm, batch, graph_data, device, output_index=0):
+    """Forward pass that sets time_embed and class_embed before model(x)."""
+    # Set time embedding as model attribute (forward() checks _runtime_time)
+    model._runtime_time = torch.full((batch, 1), t_norm, dtype=torch.float32, device=device)
+    # class_labels already set in main generate()
+    return model(x)
+
 def _resolve_output_index(model, graph, output_node_id=""):
     output_ids = [str(x) for x in getattr(model, "output_ids", []) or []]
     if not output_ids:
@@ -129,6 +149,9 @@ def main():
             cls_tensor = torch.nn.functional.one_hot(rand_cls, _nclasses).float()
         model._class_labels = cls_tensor
 
+    # Set time=0 for reconstruct (clean input)
+    model._runtime_time = torch.zeros(num_samples, 1, dtype=torch.float32, device=device)
+
     if method == "reconstruct":
         originals = np.array(config.get("originals", []), dtype=np.float32)
         if originals.size == 0:
@@ -136,6 +159,7 @@ def main():
             sys.exit(1)
         n = min(num_samples, len(originals))
         x = torch.tensor(originals[:n], dtype=torch.float32).to(device)
+        model._runtime_time = torch.zeros(n, 1, dtype=torch.float32, device=device)
         with torch.no_grad():
             pred = _pick_output(model(x), output_index).cpu().numpy()
         # per-sample MSE
@@ -250,19 +274,23 @@ def main():
         }}))
 
     elif method == "langevin":
-        # Langevin dynamics: iterative denoising from noise
+        # Annealed iterative denoising: denoise + re-noise with decreasing noise
         steps = int(config.get("steps", 50))
-        lr = float(config.get("lr", 0.01))
-        x = torch.randn(num_samples, feature_size, device=device, requires_grad=True)
+        epsilon = float(config.get("lr", 0.3))
+        x = torch.randn(num_samples, feature_size, device=device) * temperature
         loss_history = []
-        for step in range(steps):
-            pred = _pick_output(model(x), output_index)
-            score = (pred - x).mean()
-            grad = torch.autograd.grad(score, x, create_graph=False)[0]
-            noise = torch.randn_like(x) * (lr ** 0.5) * temperature
-            x = (x + lr * grad + noise).detach().requires_grad_(True)
-            loss_history.append({"step": step, "loss": float(score.item())})
-        samples = x.detach().cpu().numpy()
+        with torch.no_grad():
+            for step in range(steps):
+                t_norm = (steps - 1 - step) / max(1, steps - 1)
+                x0_pred = _pick_output(_forward_with_time(model, x, t_norm, num_samples, graph_data, device, output_index), output_index)
+                mse = float(((x0_pred - x) ** 2).mean().item())
+                loss_history.append({"step": step, "loss": mse})
+                noise_level = max(0, (1 - (step + 1) / steps)) * epsilon
+                if noise_level > 0:
+                    x = x0_pred + torch.randn_like(x) * noise_level
+                else:
+                    x = x0_pred
+        samples = x.cpu().numpy()
         print(json.dumps({"kind": "result", "result": {
             "method": "langevin", "samples": samples.tolist(), "numSamples": num_samples,
             "latentDim": feature_size, "latents": [], "lossHistory": loss_history,
@@ -292,19 +320,23 @@ def main():
         }}))
 
     elif method == "ddpm":
-        # DDPM iterative denoising
+        # DDPM reverse process with x0-prediction (sigmoid denoisers predict clean image)
         T = int(config.get("steps", 50))
-        betas = np.linspace(0.0001, 0.02, T)
+        beta_end = min(0.5, 0.02 * 1000 / max(1, T))  # scale for fewer steps
+        betas = np.linspace(0.0001, beta_end, T)
         alphas = 1 - betas
         alpha_bar = np.cumprod(alphas)
         x_t = torch.randn(num_samples, feature_size, device=device)
         with torch.no_grad():
             for t in reversed(range(T)):
-                pred = _pick_output(model(x_t), output_index)
-                noise_pred = (x_t - pred * alpha_bar[t]**0.5) / max((1 - alpha_bar[t])**0.5, 1e-8)
-                x_prev = (x_t - betas[t] / max((1 - alpha_bar[t])**0.5, 1e-8) * noise_pred) / alphas[t]**0.5
+                x0_pred = _pick_output(_forward_with_time(model, x_t, t / T, num_samples, graph_data, device, output_index), output_index)
+                alpha_bar_prev = alpha_bar[t - 1] if t > 0 else 1.0
+                coeff1 = (alpha_bar_prev ** 0.5) * betas[t] / (1 - alpha_bar[t])
+                coeff2 = (alphas[t] ** 0.5) * (1 - alpha_bar_prev) / (1 - alpha_bar[t])
+                x_prev = x0_pred * coeff1 + x_t * coeff2
                 if t > 0:
-                    x_prev = x_prev + betas[t]**0.5 * torch.randn_like(x_prev)
+                    sigma = (betas[t] * (1 - alpha_bar_prev) / (1 - alpha_bar[t])) ** 0.5
+                    x_prev = x_prev + sigma * torch.randn_like(x_prev)
                 x_t = x_prev
         samples = x_t.cpu().numpy()
         print(json.dumps({"kind": "result", "result": {

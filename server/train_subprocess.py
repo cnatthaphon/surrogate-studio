@@ -1256,6 +1256,8 @@ def build_model_from_graph(graph, feature_size, target_size, num_classes=0):
                     continue
                 if t == "time_embed":
                     tdim = int(self.node_configs[nid].get("dim", 64))
+                    if hasattr(self, "_runtime_time") and self._runtime_time is not None:
+                        runtime_time = self._runtime_time
                     if runtime_time is None:
                         runtime_time = torch.rand(x.shape[0], 1, device=x.device, dtype=x.dtype)
                     tensors[nid] = _make_time_embedding(runtime_time, tdim)
