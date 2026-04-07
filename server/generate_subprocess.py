@@ -109,6 +109,26 @@ def main():
 
     torch.manual_seed(seed)
 
+    # Set class labels for class_embed nodes
+    graph_data = _extract_graph_data(graph)
+    _has_class_embed = any(
+        str(n.get("name", "")).replace("_layer", "") == "class_embed"
+        for n in graph_data.values() if isinstance(n, dict)
+    )
+    if _has_class_embed:
+        target_cls = int(config.get("targetClass", -1))
+        _nclasses = 10
+        for n in graph_data.values():
+            if isinstance(n, dict) and str(n.get("name", "")).replace("_layer", "") == "class_embed":
+                _nclasses = int((n.get("data") or {}).get("numClasses", 10))
+        if target_cls >= 0:
+            cls_tensor = torch.zeros(num_samples, _nclasses, device=device)
+            cls_tensor[:, min(target_cls, _nclasses - 1)] = 1.0
+        else:
+            rand_cls = torch.randint(0, _nclasses, (num_samples,), device=device)
+            cls_tensor = torch.nn.functional.one_hot(rand_cls, _nclasses).float()
+        model._class_labels = cls_tensor
+
     if method == "reconstruct":
         originals = np.array(config.get("originals", []), dtype=np.float32)
         if originals.size == 0:
