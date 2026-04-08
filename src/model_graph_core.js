@@ -1018,6 +1018,17 @@
         return spec;
       }
       if (node.name === "sliding_window_block" || node.name === "window_hist_block" || node.name === "window_hist_x_block" || node.name === "window_hist_v_block") {
+        // featureKey dropdown from schema historySeries
+        var _histSeries = (typeof api.getFeatureNodesMeta === "function") ? (api.getFeatureNodesMeta(sid) || {}).historySeries : [];
+        if (Array.isArray(_histSeries) && _histSeries.length) {
+          addField({
+            kind: "select", key: "featureKey", label: "Feature",
+            value: String(d.featureKey || _histSeries[0].key),
+            options: _histSeries.map(function (hs) { return { value: hs.key, label: hs.label || hs.key }; }),
+          });
+        } else {
+          addField({ kind: "text", key: "featureKey", label: "Feature key", value: String(d.featureKey || "x") });
+        }
         addField({ kind: "number", key: "windowSize", label: "Window size", value: Math.max(5, Number(d.windowSize || 20)), min: 5, step: 1 });
         addField({ kind: "number", key: "stride", label: "Stride", value: Math.max(1, Number(d.stride || 1)), min: 1, step: 1 });
         addField({
