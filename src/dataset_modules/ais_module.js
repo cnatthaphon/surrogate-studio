@@ -218,9 +218,14 @@
         L.control.layers(baseLayers, null, { collapsed: true, position: "topright" }).addTo(map);
 
         // Playground: show all trajectories as one set (no split)
+        var showSplits = !!(options && options.showSplits);
         var allTrajs = [];
+        var splitRanges = {}; // { train: [startIdx, endIdx], val: [...], test: [...] }
+        var idx = 0;
         ["train", "val", "test"].forEach(function (split) {
-          (data[split] || []).map(_extractTrajectory).forEach(function (t) { if (t.length) allTrajs.push(t); });
+          var start = idx;
+          (data[split] || []).map(_extractTrajectory).forEach(function (t) { if (t.length) { allTrajs.push(t); idx++; } });
+          splitRanges[split] = [start, idx];
         });
         allTrajs = allTrajs.slice(0, limit);
 
@@ -262,6 +267,19 @@
         var p75 = allSog[Math.floor(allSog.length * 0.75)] || 0;
 
         var allLats = [], allLons = [];
+        // Split layer groups for toggle
+        var splitLayerGroups = {};
+        if (showSplits) {
+          ["train", "val", "test"].forEach(function (s) { splitLayerGroups[s] = L.layerGroup().addTo(map); });
+        }
+        function getTargetLayer(trajIdx) {
+          if (!showSplits) return map;
+          for (var s in splitRanges) {
+            if (trajIdx >= splitRanges[s][0] && trajIdx < splitRanges[s][1]) return splitLayerGroups[s];
+          }
+          return map;
+        }
+
         // Draw trajectory segments + COG direction markers
         allTrajs.forEach(function (traj, trajIdx) {
           for (var i = 0; i < traj.length - 1; i++) {
@@ -287,7 +305,8 @@
                   "</table></div>";
               });
             })(traj[i], trajIdx, i, lat1, lon1, sog, cogDeg);
-            line.addTo(map);
+            var targetLayer = getTargetLayer(trajIdx);
+            line.addTo(targetLayer);
 
             // COG triangle marker every N steps
             if (i % 4 === 0 && sog > 0.01) {
@@ -296,7 +315,7 @@
                 html: "<div style='transform:rotate(" + (cogDeg - 90) + "deg);font-size:8px;color:" + sogColor(sog) + ";opacity:0.8;'>&#9654;</div>",
                 iconSize: [10, 10], iconAnchor: [5, 5],
               });
-              L.marker([lat1, lon1], { icon: triIcon, interactive: false }).addTo(map);
+              L.marker([lat1, lon1], { icon: triIcon, interactive: false }).addTo(targetLayer);
             }
 
             allLats.push(lat1); allLons.push(lon1);
@@ -332,6 +351,16 @@
           return div;
         };
         legend.addTo(map);
+
+        // Split toggle control (only on dataset tab)
+        if (showSplits && Object.keys(splitLayerGroups).length) {
+          var splitOverlays = {};
+          ["train", "val", "test"].forEach(function (s) {
+            var count = splitRanges[s] ? splitRanges[s][1] - splitRanges[s][0] : 0;
+            if (count > 0) splitOverlays[s + " (" + count + ")"] = splitLayerGroups[s];
+          });
+          L.control.layers(null, splitOverlays, { collapsed: false, position: "topright" }).addTo(map);
+        }
 
         // Store bounds for center button
         var dataBounds = allLats.length ? L.latLngBounds(
@@ -411,7 +440,7 @@
 
   var playgroundApi = {
     renderDataset: function (mountEl, deps) {
-      _renderTrajectoryMap(mountEl, deps, { title: "AIS Dataset Preview", limit: 80 });
+      _renderTrajectoryMap(mountEl, deps, { title: "AIS Dataset", limit: 100, showSplits: true });
     },
     renderPlayground: function (mountEl, deps) {
       _renderTrajectoryMap(mountEl, deps, { title: "AIS Trajectory Explorer", limit: 120 });
