@@ -462,10 +462,9 @@
         sections: [{
           title: "AIS Dataset",
           schema: [
-            { key: "totalCount", label: "Max trajectories", type: "number", default: 150, min: 10, max: 1000 },
-            { key: "useFullSource", label: "Use full source (load from JSON)", type: "checkbox", default: false },
+            { key: "totalCount", label: "Trajectories", type: "number", default: 150, min: 10, max: 1000 },
           ],
-          value: { totalCount: 150, useFullSource: false },
+          value: { totalCount: 150 },
         }],
       };
     },
