@@ -389,12 +389,14 @@
           // Show sample counts from generated data if available
           var dsData = (deps && deps.datasetData) || {};
           var splitOverlays = {};
+          var genCounts = dsData.numTrajectories || {};
           ["train", "val", "test"].forEach(function (s) {
-            var trajCount = splitRanges[s] ? splitRanges[s][1] - splitRanges[s][0] : 0;
+            var displayed = splitRanges[s] ? splitRanges[s][1] - splitRanges[s][0] : 0;
+            var actualTrajs = genCounts[s] || displayed;
             var sampleKey = "x" + s.charAt(0).toUpperCase() + s.slice(1);
             var sampleCount = dsData[sampleKey] ? dsData[sampleKey].length : 0;
-            var label = s + (sampleCount ? " (" + sampleCount + " samples, " + trajCount + " traj)" : " (" + trajCount + " traj)");
-            if (trajCount > 0 || sampleCount > 0) splitOverlays[label] = splitLayerGroups[s];
+            var label = s + " (" + actualTrajs + " traj" + (sampleCount ? ", " + sampleCount + " samples" : "") + ")";
+            if (displayed > 0 || sampleCount > 0) splitOverlays[label] = splitLayerGroups[s];
           });
           L.control.layers(null, splitOverlays, { collapsed: false, position: "topright" }).addTo(map);
         }
