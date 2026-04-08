@@ -1355,8 +1355,8 @@ def build_model_from_graph(graph, feature_size, target_size, num_classes=0):
                 inp = tensors[parents_sorted[0]["from"]] if parents_sorted else x
 
                 if t == "dense" or t in ("latent_mu", "latent_logvar", "latent"):
-                    # auto-flatten conv output using TF.js NHWC ordering
-                    if inp.dim() > 2:
+                    # auto-flatten 4D conv output (NCHW → flat), but NOT 3D sequence
+                    if inp.dim() == 4:
                         inp = _flatten_tf_layout(inp)
                     out = getattr(self, f"dense_{nid}")(inp)
                     act = getattr(self, f"act_{nid}", None)
@@ -1493,13 +1493,11 @@ def build_model_from_graph(graph, feature_size, target_size, num_classes=0):
                     shapes = getattr(self, '_reshape_shapes', {})
                     shape = shapes.get(nid, [28, 28, 1])
                     if len(shape) == 2:
-                        # 2D sequence: [batch, flat] → [batch, seq, dim]
                         tensors[nid] = inp.contiguous().view(inp.shape[0], shape[0], shape[1])
                     else:
-                        # 3D spatial: [batch, flat] → [batch, H, W, C] → NCHW
                         nhwc = inp.contiguous().view(inp.shape[0], shape[0], shape[1], shape[2])
                         tensors[nid] = nhwc.permute(0, 3, 1, 2).contiguous()
-                    continue
+                    continue  # must be outside if/else, at elif level
                 elif t == "conv2d":
                     out = getattr(self, f"conv2d_{nid}")(inp)
                     act = getattr(self, f"act_{nid}", None)
