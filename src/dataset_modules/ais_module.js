@@ -327,7 +327,7 @@
           btn.title = "Center on trajectories";
           btn.innerHTML = "&#8982;";
           L.DomEvent.disableClickPropagation(btn);
-          btn.addEventListener("click", function () { if (dataBounds) map.fitBounds(dataBounds, { padding: [20, 20] }); });
+          btn.addEventListener("click", function () { map.invalidateSize(); if (dataBounds) map.fitBounds(dataBounds, { padding: [20, 20], maxZoom: 12 }); });
           return btn;
         };
         centerCtrl.addTo(map);
@@ -347,8 +347,9 @@
               mapDiv.requestFullscreen();
             }
           });
-          // Resize map when entering/exiting fullscreen
           document.addEventListener("fullscreenchange", function () {
+            btn.innerHTML = document.fullscreenElement ? "&#x2715;" : "&#x26F6;";
+            btn.title = document.fullscreenElement ? "Exit fullscreen" : "Fullscreen (Esc to exit)";
             setTimeout(function () { map.invalidateSize(); }, 100);
           });
           return btn;
