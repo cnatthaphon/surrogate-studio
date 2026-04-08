@@ -120,10 +120,10 @@
   function build(config) {
     config = config || {};
     var windowSize = Math.max(1, Number(config.windowSize || 16));
-    var maxTrajs = Math.max(10, Number(config.totalCount || 150));
-    var useFullSource = Boolean(config.useFullSource);
+    var useFullSource = config.useFullSource != null ? Boolean(config.useFullSource) : true;
+    var maxTrajs = useFullSource ? 9999 : Math.max(10, Number(config.totalCount || 150));
 
-    var dataPromise = useFullSource ? _fetchJSON(DATA_URL).catch(function () { return loadData(); }) : loadData();
+    var dataPromise = loadData();
 
     return dataPromise.then(function (data) {
       if (!data || !data.train) {
@@ -462,9 +462,10 @@
         sections: [{
           title: "AIS Dataset",
           schema: [
-            { key: "totalCount", label: "Trajectories", type: "number", default: 150, min: 10, max: 1000 },
+            { key: "useFullSource", label: "Use all trajectories (180)", type: "checkbox" },
+            { key: "totalCount", label: "Total trajectories", type: "number", min: 10, max: 180, step: 10 },
           ],
-          value: { totalCount: 150 },
+          value: { useFullSource: true, totalCount: 180 },
         }],
       };
     },
