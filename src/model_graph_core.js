@@ -1023,12 +1023,11 @@
         if (Array.isArray(_histSeries) && _histSeries.length) {
           // Parse current selection: featureKeys (array) or featureKey (single, legacy)
           var _selectedKeys = {};
-          if (Array.isArray(d.featureKeys)) {
+          if (Array.isArray(d.featureKeys) && d.featureKeys.length) {
             d.featureKeys.forEach(function (k) { _selectedKeys[k] = true; });
-          } else if (d.featureKey) {
-            _selectedKeys[d.featureKey] = true;
           } else {
-            _histSeries.forEach(function (hs) { _selectedKeys[hs.key] = true; }); // default: all selected
+            // Default: all features selected (legacy featureKey or no selection)
+            _histSeries.forEach(function (hs) { _selectedKeys[hs.key] = true; });
           }
           addField({
             kind: "checkbox_grid", columns: Math.min(4, _histSeries.length),
