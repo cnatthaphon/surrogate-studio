@@ -245,7 +245,7 @@
         }
 
         var allLats = [], allLons = [];
-        var columns = data.columns || ["lat", "lon", "sog", "cog"];
+        // Draw trajectory segments + COG direction markers
         allTrajs.forEach(function (traj, trajIdx) {
           for (var i = 0; i < traj.length - 1; i++) {
             var lat1 = denormLat(Number(traj[i][0] || 0));
@@ -253,22 +253,35 @@
             var lat2 = denormLat(Number(traj[i + 1][0] || 0));
             var lon2 = denormLon(Number(traj[i + 1][1] || 0));
             var sog = Number(traj[i][2] || 0);
+            var cogNorm = Number(traj[i][3] || 0);
+            var cogDeg = cogNorm * 360;
             var line = L.polyline([[lat1, lon1], [lat2, lon2]], { color: sogColor(sog), weight: 1.5, opacity: 0.7 });
-            // Popup with actual values
-            (function (pt, ti, si) {
+
+            // Popup: clean format
+            (function (pt, ti, si, lat, lon, spd, cog) {
               line.bindPopup(function () {
-                var rows = columns.map(function (col, ci) {
-                  return "<b>" + col + ":</b> " + Number(pt[ci] || 0).toFixed(4);
-                }).join("<br>");
-                return "<div style='font-size:11px;line-height:1.5;'>" +
-                  "<b>Trajectory " + ti + " | Step " + si + "</b><br>" +
-                  rows +
-                  "<br><b>Lat:</b> " + denormLat(Number(pt[0] || 0)).toFixed(4) + "°N" +
-                  "<br><b>Lon:</b> " + denormLon(Number(pt[1] || 0)).toFixed(4) + "°E" +
-                  "</div>";
+                return "<div style='font-size:12px;line-height:1.6;font-family:monospace;'>" +
+                  "<div style='font-weight:700;margin-bottom:4px;border-bottom:1px solid #ccc;padding-bottom:2px;'>Vessel #" + ti + " — Step " + si + "/" + traj.length + "</div>" +
+                  "<table style='border-collapse:collapse;'>" +
+                  "<tr><td style='padding:1px 8px 1px 0;color:#666;'>Position</td><td>" + lat.toFixed(4) + "°N, " + lon.toFixed(4) + "°E</td></tr>" +
+                  "<tr><td style='padding:1px 8px 1px 0;color:#666;'></td><td style='font-size:10px;color:#999;'>(norm: " + Number(pt[0]).toFixed(4) + ", " + Number(pt[1]).toFixed(4) + ")</td></tr>" +
+                  "<tr><td style='padding:1px 8px 1px 0;color:#666;'>Speed</td><td>" + spd.toFixed(4) + " <span style='font-size:10px;color:#999;'>(norm)</span></td></tr>" +
+                  "<tr><td style='padding:1px 8px 1px 0;color:#666;'>Course</td><td>" + cog.toFixed(1) + "° <span style='font-size:10px;color:#999;'>(norm: " + Number(pt[3]).toFixed(4) + ")</span></td></tr>" +
+                  "</table></div>";
               });
-            })(traj[i], trajIdx, i);
+            })(traj[i], trajIdx, i, lat1, lon1, sog, cogDeg);
             line.addTo(map);
+
+            // COG triangle marker every N steps
+            if (i % 4 === 0 && sog > 0.01) {
+              var triIcon = L.divIcon({
+                className: "",
+                html: "<div style='transform:rotate(" + (cogDeg - 90) + "deg);font-size:8px;color:" + sogColor(sog) + ";opacity:0.8;'>&#9654;</div>",
+                iconSize: [10, 10], iconAnchor: [5, 5],
+              });
+              L.marker([lat1, lon1], { icon: triIcon, interactive: false }).addTo(map);
+            }
+
             allLats.push(lat1); allLons.push(lon1);
           }
           if (traj.length) {
@@ -282,6 +295,23 @@
           map.fitBounds([[Math.min.apply(null, allLats), Math.min.apply(null, allLons)],
                          [Math.max.apply(null, allLats), Math.max.apply(null, allLons)]], { padding: [20, 20] });
         }
+
+        // SOG color bar legend
+        var legend = L.control({ position: "bottomright" });
+        legend.onAdd = function () {
+          var div = L.DomUtil.create("div");
+          div.style.cssText = "background:rgba(0,0,0,0.7);padding:6px 10px;border-radius:4px;font-size:10px;color:#e2e8f0;line-height:1.4;";
+          var bar = "";
+          for (var gi = 0; gi <= 10; gi++) {
+            bar += "<span style='display:inline-block;width:16px;height:10px;background:" + sogColor(maxSog * gi / 10) + ";'></span>";
+          }
+          div.innerHTML = "<div style='margin-bottom:2px;font-weight:600;'>Speed (SOG)</div>" +
+            "<div>" + bar + "</div>" +
+            "<div style='display:flex;justify-content:space-between;font-size:9px;color:#94a3b8;'><span>0</span><span>" + maxSog.toFixed(2) + "</span></div>" +
+            "<div style='margin-top:4px;font-size:9px;color:#94a3b8;'>&#9654; = course (COG)</div>";
+          return div;
+        };
+        legend.addTo(map);
       } else {
         // Fallback: canvas rendering (no Leaflet loaded)
         var canvas = document.createElement("canvas");
