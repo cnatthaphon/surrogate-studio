@@ -392,6 +392,11 @@
           getPresetList: function (id) { return schemaRegistry ? schemaRegistry.getPresetList(id) : []; },
           getOutputKeys: function (id) { return schemaRegistry ? schemaRegistry.getOutputKeys(id) : []; },
           getParamDefs: function (id) { return schemaRegistry ? schemaRegistry.getParamDefs(id) : []; },
+          getFeatureNodesMeta: function (id) {
+            var schema = schemaRegistry ? schemaRegistry.getModelSchema(id) : null;
+            var meta = schema && schema.metadata && typeof schema.metadata === "object" ? schema.metadata : {};
+            return meta.featureNodes && typeof meta.featureNodes === "object" ? meta.featureNodes : {};
+          },
           getSchemaPresetDefById: function (schemaId, presetId) {
             var presets = schemaRegistry ? schemaRegistry.getPresetDefs(schemaId) : {};
             // presets may be array or object
