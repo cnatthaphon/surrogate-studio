@@ -17,8 +17,16 @@
   "use strict";
 
   // shared graph builder helpers
+  var _autoId = 0;
   function N(d, id, name, data, x, y) {
     d[String(id)] = { id: id, name: name + "_layer", data: data || {}, class: name + "_layer",
+      html: "<div><div>" + name + "</div></div>", typenode: false,
+      inputs: {}, outputs: {}, pos_x: x || 0, pos_y: y || 0 };
+    return String(id);
+  }
+  // Raw node (no _layer suffix, for _block nodes)
+  function NR(d, id, name, data, x, y) {
+    d[String(id)] = { id: id, name: name, data: data || {}, class: name,
       html: "<div><div>" + name + "</div></div>", typenode: false,
       inputs: {}, outputs: {}, pos_x: x || 0, pos_y: y || 0 };
     return String(id);
@@ -31,29 +39,43 @@
     d[to].inputs[ip].connections.push({ node: from, output: op });
   }
 
-  // 1. Direct-MLP: Input → Dense(64) → Dense(32) → Output(xv)
+  // Helper: add oscillator feature blocks → Input node
+  // Matches schema presets: Params + TimeSec + TimeNorm + WindowHist(x) + WindowHist(v) → Input
+  function _oscFeatures(d, inputId, baseId, startX, y) {
+    var params = N(d, baseId, "params", { paramMask: { m:true, c:true, k:true } }, startX, y - 40);
+    var whX = NR(d, baseId+1, "window_hist_block", { featureKey: "x", windowSize: 20, stride: 1, lagMode: "contiguous", padMode: "none" }, startX, y);
+    var whV = NR(d, baseId+2, "window_hist_block", { featureKey: "v", windowSize: 20, stride: 1, lagMode: "contiguous", padMode: "none" }, startX, y + 40);
+    C(d, params, inputId); C(d, whX, inputId); C(d, whV, inputId);
+  }
+
+  // 1. Direct-MLP: Features → Input → Dense(64) → Dense(32) → Output(xv)
   function _mlp() {
     var d = {};
-    C(d, N(d,1,"input",{mode:"flat"},60,100), N(d,2,"dense",{units:64,activation:"relu"},230,100));
-    C(d, "2", N(d,3,"dense",{units:32,activation:"relu"},400,100));
-    C(d, "3", N(d,4,"output",{target:"xv",loss:"mse",headType:"regression"},570,100));
+    var inp = N(d,1,"input",{mode:"flat"},240,100);
+    _oscFeatures(d, "1", 10, 60, 100);
+    C(d, "1", N(d,2,"dense",{units:64,activation:"relu"},400,100));
+    C(d, "2", N(d,3,"dense",{units:32,activation:"relu"},560,100));
+    C(d, "3", N(d,4,"output",{target:"xv",loss:"mse",headType:"regression"},720,100));
     return { drawflow: { Home: { data: d } } };
   }
 
-  // 2. AR-GRU: Input → GRU(64) → Dense(32) → Output(xv)
+  // 2. AR-GRU: Features → Input → GRU(64) → Dense(32) → Output(xv)
   function _gru() {
     var d = {};
-    C(d, N(d,1,"input",{mode:"flat"},60,100), N(d,2,"gru",{units:64,dropout:0.1,returnseq:"false"},260,100));
-    C(d, "2", N(d,3,"dense",{units:32,activation:"relu"},430,100));
-    C(d, "3", N(d,4,"output",{target:"xv",loss:"mse",headType:"regression"},600,100));
+    var inp = N(d,1,"input",{mode:"flat"},240,100);
+    _oscFeatures(d, "1", 10, 60, 100);
+    C(d, "1", N(d,2,"gru",{units:64,dropout:0.1,returnseq:"false"},420,100));
+    C(d, "2", N(d,3,"dense",{units:32,activation:"relu"},580,100));
+    C(d, "3", N(d,4,"output",{target:"xv",loss:"mse",headType:"regression"},740,100));
     return { drawflow: { Home: { data: d } } };
   }
 
-  // 3. VAE: Input → Dense(32) → μ(8)/logσ²(8) → Reparam → Dense(32) → Output(xv)
+  // 3. VAE: Features → Input → Dense(32) → μ(8)/logσ²(8) → Reparam → Dense(32) → Output(xv)
   function _vae() {
     var d = {};
-    var inp = N(d,1,"input",{mode:"flat"},60,100);
-    var e1 = N(d,2,"dense",{units:32,activation:"relu"},200,100);
+    var inp = N(d,1,"input",{mode:"flat"},240,100);
+    _oscFeatures(d, "1", 20, 60, 100);
+    var e1 = N(d,2,"dense",{units:32,activation:"relu"},380,100);
     var mu = N(d,3,"latent_mu",{units:8,group:"z"},350,50);
     var lv = N(d,4,"latent_logvar",{units:8,group:"z"},350,150);
     var rep = N(d,5,"reparam",{group:"z",beta:0.001},500,100);
@@ -69,7 +91,8 @@
   //    Classifier head enables guided generation toward specific physics
   function _vaeCls() {
     var d = {};
-    var inp = N(d,1,"input",{mode:"flat"},60,120);
+    var inp = N(d,1,"input",{mode:"flat"},240,120);
+    _oscFeatures(d, "1", 30, 60, 120);
     var e1 = N(d,2,"dense",{units:64,activation:"relu"},200,120);
     var e2 = N(d,3,"dense",{units:32,activation:"relu"},350,120);
     // VAE latent
@@ -95,8 +118,9 @@
   //    1D diffusion: learn to remove noise from trajectories
   function _denoiser() {
     var d = {};
-    var inp = N(d,1,"input",{mode:"flat"},60,100);
-    var noise = N(d,2,"noise_injection",{scale:0.2,schedule:"constant"},200,100);
+    var inp = N(d,1,"input",{mode:"flat"},240,100);
+    _oscFeatures(d, "1", 40, 60, 100);
+    var noise = N(d,2,"noise_injection",{scale:0.2,schedule:"constant"},380,100);
     var d1 = N(d,3,"dense",{units:64,activation:"relu"},370,100);
     var d2 = N(d,4,"dense",{units:32,activation:"relu"},540,100);
     var d3 = N(d,5,"dense",{units:64,activation:"relu"},710,100);

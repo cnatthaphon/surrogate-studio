@@ -101,10 +101,8 @@
 
   function _aisTrajectoryPaletteItems() {
     return [
-      _paletteItem("addWHLatBtn", "window_hist", "WH: Lat", "Features", { featureKey: "lat", windowSize: 16 }),
-      _paletteItem("addWHLonBtn", "window_hist", "WH: Lon", "Features", { featureKey: "lon", windowSize: 16 }),
-      _paletteItem("addWHSogBtn", "window_hist", "WH: SOG", "Features", { featureKey: "sog", windowSize: 16 }),
-      _paletteItem("addWHCogBtn", "window_hist", "WH: COG", "Features", { featureKey: "cog", windowSize: 16 }),
+      _paletteItem("addWindowHistBtn", "window_hist", "WindowHistory", "Feature Nodes", { featureKey: "lat", windowSize: 16, stride: 1, lagMode: "contiguous", padMode: "none" }),
+      _paletteItem("addHistBtn", "history", "History", "Feature Nodes", { featureKey: "lat" }),
       _paletteItem("addInputBtn", "input", "Input", "NN", { mode: "flat" }),
       _paletteItem("addReshapeBtn", "reshape", "Reshape", "NN", { targetShape: "16,4" }),
       _paletteItem("addDenseBtn", "dense", "Dense", "NN", { units: 64, activation: "relu" }),
