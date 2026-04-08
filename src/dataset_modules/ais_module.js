@@ -206,37 +206,25 @@
           subdomains: "abcd", maxZoom: 19,
         }).addTo(map);
 
-        // Split trajectories by train/val/test
-        var splitConfig = { train: { color: "#22d3ee", label: "Train", trajs: [] }, val: { color: "#4ade80", label: "Val", trajs: [] }, test: { color: "#f59e0b", label: "Test", trajs: [] } };
-        var trainTrajs = (data.train || []).map(_extractTrajectory).filter(function (t) { return t.length; });
-        var valTrajs = (data.val || []).map(_extractTrajectory).filter(function (t) { return t.length; });
-        var testTrajs = (data.test || []).map(_extractTrajectory).filter(function (t) { return t.length; });
-        splitConfig.train.trajs = trainTrajs.slice(0, limit);
-        splitConfig.val.trajs = valTrajs.slice(0, Math.floor(limit / 3));
-        splitConfig.test.trajs = testTrajs.slice(0, Math.floor(limit / 3));
-
-        // Create layer groups per split
-        var splitLayers = {};
-        var allLats = [], allLons = [];
-        Object.keys(splitConfig).forEach(function (split) {
-          var cfg = splitConfig[split];
-          var layerGroup = L.layerGroup();
-          cfg.trajs.forEach(function (traj) {
-            var latlngs = [];
-            for (var i = 0; i < traj.length; i++) {
-              var lat = denormLat(Number(traj[i][0] || 0));
-              var lon = denormLon(Number(traj[i][1] || 0));
-              latlngs.push([lat, lon]);
-              allLats.push(lat); allLons.push(lon);
-            }
-            L.polyline(latlngs, { color: cfg.color, weight: 1.5, opacity: 0.6 }).addTo(layerGroup);
-          });
-          layerGroup.addTo(map);
-          splitLayers[cfg.label + " (" + cfg.trajs.length + ")"] = layerGroup;
+        // Playground: show all trajectories as one set (no split)
+        var allTrajs = [];
+        ["train", "val", "test"].forEach(function (split) {
+          (data[split] || []).map(_extractTrajectory).forEach(function (t) { if (t.length) allTrajs.push(t); });
         });
+        allTrajs = allTrajs.slice(0, limit);
 
-        // Add layer control for show/hide
-        L.control.layers(null, splitLayers, { collapsed: false, position: "topright" }).addTo(map);
+        var colors = ["#22d3ee", "#4ade80", "#f59e0b", "#a78bfa", "#f43f5e", "#fb923c", "#34d399", "#818cf8"];
+        var allLats = [], allLons = [];
+        allTrajs.forEach(function (traj, ti) {
+          var latlngs = [];
+          for (var i = 0; i < traj.length; i++) {
+            var lat = denormLat(Number(traj[i][0] || 0));
+            var lon = denormLon(Number(traj[i][1] || 0));
+            latlngs.push([lat, lon]);
+            allLats.push(lat); allLons.push(lon);
+          }
+          L.polyline(latlngs, { color: colors[ti % colors.length], weight: 1.5, opacity: 0.6 }).addTo(map);
+        });
 
         if (allLats.length) {
           map.fitBounds([[Math.min.apply(null, allLats), Math.min.apply(null, allLons)],
@@ -269,7 +257,7 @@
       }
 
       mountEl.appendChild(el("div", { style: "font-size:11px;color:#94a3b8;margin-top:4px;" },
-        trajs.length + " vessel trajectories | Baltic Sea | Features: lat, lon, SOG, COG"));
+        allTrajs.length + " vessel trajectories | Baltic Sea | Features: lat, lon, SOG, COG"));
     }).catch(function (err) {
       statusEl.textContent = "AIS data load failed: " + String((err && err.message) || err || "unknown error");
       statusEl.style.color = "#fca5a5";
@@ -298,15 +286,7 @@
 
   var uiApi = {
     getDatasetConfigSpec: function () {
-      return {
-        sections: [{
-          title: "AIS Trajectory Config",
-          schema: [
-            { key: "windowSize", label: "Window size (timesteps)", type: "number", default: 16, min: 4, max: 30 },
-          ],
-          value: { windowSize: 16 },
-        }],
-      };
+      return { sections: [] };
     },
   };
 
