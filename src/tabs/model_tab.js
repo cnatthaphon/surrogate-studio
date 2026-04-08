@@ -523,20 +523,59 @@
             if (f.text) rightEl.appendChild(el("div", { style: "font-size:10px;color:#64748b;margin-bottom:4px;padding:2px 4px;border-left:2px solid #334155;" }, f.text));
             return;
           }
+          if (f.kind === "checkbox_grid" && Array.isArray(f.items) && f.items.length) {
+            // Generic checkbox grid — items from config spec (paramMask, featureKeys, etc.)
+            var gridDiv = el("div", { style: "margin-bottom:6px;" });
+            var gridEl = el("div", { style: "display:flex;flex-wrap:wrap;gap:4px;" });
+            f.items.forEach(function (item) {
+              var cb = el("input", { type: "checkbox" });
+              cb.checked = !!item.checked;
+              cb.style.cssText = "width:auto;margin:0;";
+              (function (itemKey) {
+                cb.addEventListener("change", function () {
+                  // For featureKeys: collect checked keys into array
+                  var checked = [];
+                  gridEl.querySelectorAll("input[type=checkbox]").forEach(function (c, idx) {
+                    if (c.checked) checked.push(f.items[idx].key.replace(/^fk_/, ""));
+                  });
+                  // Detect if this is paramMask (pm_ prefix) or featureKeys (fk_ prefix)
+                  if (itemKey.indexOf("pm_") === 0) {
+                    var newMask = {};
+                    gridEl.querySelectorAll("input[type=checkbox]").forEach(function (c, idx) {
+                      newMask[f.items[idx].key.replace(/^pm_/, "")] = c.checked;
+                    });
+                    if (_graphRuntime && typeof _graphRuntime.applyNodeConfigValue === "function") {
+                      _graphRuntime.applyNodeConfigValue(_editor, _selectedNodeId, "paramMask", newMask);
+                    }
+                  } else {
+                    if (_graphRuntime && typeof _graphRuntime.applyNodeConfigValue === "function") {
+                      _graphRuntime.applyNodeConfigValue(_editor, _selectedNodeId, "featureKeys", checked);
+                    }
+                  }
+                });
+              })(item.key);
+              var wrap = el("label", { style: "display:flex;align-items:center;gap:2px;font-size:10px;color:#94a3b8;cursor:pointer;" });
+              wrap.appendChild(cb);
+              wrap.appendChild(document.createTextNode(item.label || item.key));
+              gridEl.appendChild(wrap);
+            });
+            gridDiv.appendChild(gridEl);
+            rightEl.appendChild(gridDiv);
+            return;
+          }
+          // Legacy paramMask fallback (no items from spec)
           if (f.kind === "checkbox_grid") {
-            // render param mask as individual checkboxes from schema params
             var schemaId = _getSchemaId();
             var paramDefs = schemaRegistry ? schemaRegistry.getParamDefs(schemaId) : [];
             var mask = (nodeData.data && nodeData.data.paramMask) || {};
             if (paramDefs.length) {
               var maskDiv = el("div", { style: "margin-bottom:6px;" });
-              maskDiv.appendChild(el("div", { style: "font-size:10px;color:#94a3b8;margin-bottom:2px;font-weight:600;" }, "Parameter Mask"));
-              var grid = el("div", { style: "display:flex;flex-wrap:wrap;gap:4px;" });
+              var grid2 = el("div", { style: "display:flex;flex-wrap:wrap;gap:4px;" });
               paramDefs.forEach(function (pd) {
                 var key = pd.key || pd;
                 var label = pd.label || key;
                 var checked = mask[key] !== false;
-                var cb = el("input", { type: "checkbox", "data-param-key": key });
+                var cb = el("input", { type: "checkbox" });
                 cb.checked = checked;
                 cb.style.cssText = "width:auto;margin:0;";
                 cb.addEventListener("change", function () {
@@ -549,9 +588,9 @@
                 var wrap = el("label", { style: "display:flex;align-items:center;gap:2px;font-size:9px;color:#94a3b8;cursor:pointer;" });
                 wrap.appendChild(cb);
                 wrap.appendChild(document.createTextNode(label));
-                grid.appendChild(wrap);
+                grid2.appendChild(wrap);
               });
-              maskDiv.appendChild(grid);
+              maskDiv.appendChild(grid2);
               rightEl.appendChild(maskDiv);
             }
             return;
