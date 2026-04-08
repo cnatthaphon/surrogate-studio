@@ -152,11 +152,6 @@
       var train = buildSamples(trainTrajs);
       var val = buildSamples(valTrajs);
       var test = buildSamples(testTrajs);
-      if (!test.x.length && val.x.length) {
-        var testSplit = Math.floor(val.x.length * 0.6);
-        test = { x: val.x.slice(testSplit), y: val.y.slice(testSplit) };
-        val = { x: val.x.slice(0, testSplit), y: val.y.slice(0, testSplit) };
-      }
 
       return {
         schemaId: SCHEMA_ID,
