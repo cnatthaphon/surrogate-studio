@@ -432,15 +432,14 @@
       }
 
       // render each run (most recent first)
-      for (var ri = runs.length - 1; ri >= 0; ri--) {
-        var run = runs[ri];
+      for (var ri = runs.length - 1; ri >= 0; ri--) { (function (ri, run) {
         var runCard = el("div", { className: "osc-card", style: "margin-top:8px;overflow:hidden;" });
         var runTime = run.completedAt ? new Date(run.completedAt).toLocaleString() : "in progress";
         runCard.appendChild(el("div", { style: "font-size:12px;color:#67e8f9;font-weight:600;" },
           "Run #" + (ri + 1) + " \u2014 " + runTime));
 
         var results = run.results || [];
-        if (!results.length) { runCard.appendChild(el("div", { style: "color:#64748b;font-size:11px;" }, "No results.")); mainEl.appendChild(runCard); continue; }
+        if (!results.length) { runCard.appendChild(el("div", { style: "color:#64748b;font-size:11px;" }, "No results.")); mainEl.appendChild(runCard); return; }
 
         // collect all metric keys
         var metricKeys = [];
@@ -510,7 +509,7 @@
         _renderModuleViz(runCard, ev, run);
 
         mainEl.appendChild(runCard);
-      }
+      })(ri, runs[ri]); }
     }
 
     function _renderBarChart(container, results, metricKeys, mountId) {
