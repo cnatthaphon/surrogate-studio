@@ -332,25 +332,31 @@
         };
         centerCtrl.addTo(map);
 
-        // Fullscreen toggle button
+        // Fullscreen toggle
+        var isFs = false;
+        function exitFullscreen() {
+          if (!isFs) return;
+          isFs = false;
+          mapDiv.style.cssText = "width:100%;height:450px;border-radius:8px;border:1px solid #334155;";
+          map.invalidateSize();
+        }
+        function enterFullscreen() {
+          isFs = true;
+          mapDiv.style.cssText = "position:fixed;top:0;left:0;width:100vw;height:100vh;z-index:9999;border-radius:0;border:none;";
+          map.invalidateSize();
+        }
+        // Escape key exits fullscreen
+        document.addEventListener("keydown", function (e) { if (e.key === "Escape") exitFullscreen(); });
+
         var fsCtrl = L.control({ position: "topleft" });
         fsCtrl.onAdd = function () {
           var btn = L.DomUtil.create("div");
-          btn.style.cssText = "background:#fff;width:30px;height:30px;border-radius:4px;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:14px;box-shadow:0 1px 4px rgba(0,0,0,0.3);margin-top:4px;";
-          btn.title = "Toggle fullscreen";
+          btn.style.cssText = "background:#fff;width:30px;height:30px;border-radius:4px;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:16px;box-shadow:0 1px 4px rgba(0,0,0,0.3);margin-top:4px;user-select:none;";
+          btn.title = "Fullscreen (Esc to exit)";
           btn.innerHTML = "&#x26F6;";
           L.DomEvent.disableClickPropagation(btn);
-          var isFs = false;
           btn.addEventListener("click", function () {
-            isFs = !isFs;
-            if (isFs) {
-              mapDiv.style.cssText = "position:fixed;top:0;left:0;width:100vw;height:100vh;z-index:9999;border-radius:0;border:none;";
-              btn.innerHTML = "&#x2716;";
-            } else {
-              mapDiv.style.cssText = "width:100%;height:450px;border-radius:8px;border:1px solid #334155;";
-              btn.innerHTML = "&#x26F6;";
-            }
-            map.invalidateSize();
+            if (isFs) exitFullscreen(); else enterFullscreen();
           });
           return btn;
         };
