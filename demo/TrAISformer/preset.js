@@ -35,32 +35,54 @@
   var WINDOW = 16; // context window (timesteps)
   var FEAT = 4; // lat, lon, sog, cog
 
+  // Helper: add raw node (no _layer suffix)
+  function NR(d, name, data, x, y) {
+    _nid++;
+    d[String(_nid)] = {
+      id: _nid, name: name, data: data || {}, class: name,
+      html: "<div><div>" + name + "</div></div>", typenode: false,
+      inputs: {}, outputs: {}, pos_x: x, pos_y: y,
+    };
+    return String(_nid);
+  }
+
+  // Helper: add 4 AIS feature blocks → Input node
+  function _aisFeatures(d, inputId, startX, y) {
+    var lat = NR(d, "window_hist_block", { featureKey: "lat", windowSize: WINDOW, stride: 1, lagMode: "last", padMode: "zero" }, startX, y - 60);
+    var lon = NR(d, "window_hist_block", { featureKey: "lon", windowSize: WINDOW, stride: 1, lagMode: "last", padMode: "zero" }, startX, y - 20);
+    var sog = NR(d, "window_hist_block", { featureKey: "sog", windowSize: WINDOW, stride: 1, lagMode: "last", padMode: "zero" }, startX, y + 20);
+    var cog = NR(d, "window_hist_block", { featureKey: "cog", windowSize: WINDOW, stride: 1, lagMode: "last", padMode: "zero" }, startX, y + 60);
+    C(d, lat, inputId); C(d, lon, inputId); C(d, sog, inputId); C(d, cog, inputId);
+  }
+
   // ═══════════════════════════════════════════
   // Model 1: MLP Baseline — no attention, just Dense layers
   // ═══════════════════════════════════════════
   function _mlpBaseline() {
     _nid = 0; var d = {};
-    var inp = N(d, "input", { featureSize: WINDOW * FEAT }, 80, 100);
-    var d1 = N(d, "dense", { units: 128, activation: "relu" }, 240, 100);
-    var d2 = N(d, "dense", { units: 64, activation: "relu" }, 400, 100);
-    var d3 = N(d, "dense", { units: FEAT, activation: "linear" }, 560, 100);
-    var out = N(d, "output", { target: "position", targetType: "position", loss: "mse", headType: "regression" }, 720, 100);
+    var inp = N(d, "input", { mode: "flat" }, 280, 100);
+    _aisFeatures(d, inp, 60, 100);
+    var d1 = N(d, "dense", { units: 128, activation: "relu" }, 440, 100);
+    var d2 = N(d, "dense", { units: 64, activation: "relu" }, 600, 100);
+    var d3 = N(d, "dense", { units: FEAT, activation: "linear" }, 760, 100);
+    var out = N(d, "output", { target: "position", targetType: "position", loss: "mse", headType: "regression" }, 920, 100);
     C(d, inp, d1); C(d, d1, d2); C(d, d2, d3); C(d, d3, out);
     return graph(d);
   }
 
   // ═══════════════════════════════════════════
   // Model 2: Tiny TrAISformer — 1 transformer block
-  // Reshape [64] → [16, 4] (16 timesteps × 4 features) → project to embedDim → attention
+  // Feature blocks → Input → Reshape [16,4] → Attention → Pool → Output
   // ═══════════════════════════════════════════
   function _tinyTransformer() {
     _nid = 0; var d = {};
-    var inp = N(d, "input", { featureSize: WINDOW * FEAT }, 80, 100);
-    var resh = N(d, "reshape", { targetShape: WINDOW + "," + FEAT }, 220, 100);
-    var tb = N(d, "transformer_block", { numHeads: 2, ffnDim: 32, dropout: 0.1 }, 400, 100);
-    var gap = N(d, "global_avg_pool1d", {}, 560, 100);
-    var proj = N(d, "dense", { units: FEAT, activation: "linear" }, 700, 100);
-    var out = N(d, "output", { target: "position", targetType: "position", loss: "mse", headType: "regression" }, 840, 100);
+    var inp = N(d, "input", { mode: "flat" }, 280, 100);
+    _aisFeatures(d, inp, 60, 100);
+    var resh = N(d, "reshape", { targetShape: WINDOW + "," + FEAT }, 420, 100);
+    var tb = N(d, "transformer_block", { numHeads: 2, ffnDim: 32, dropout: 0.1 }, 580, 100);
+    var gap = N(d, "global_avg_pool1d", {}, 740, 100);
+    var proj = N(d, "dense", { units: FEAT, activation: "linear" }, 880, 100);
+    var out = N(d, "output", { target: "position", targetType: "position", loss: "mse", headType: "regression" }, 1020, 100);
     C(d, inp, resh); C(d, resh, tb); C(d, tb, gap); C(d, gap, proj); C(d, proj, out);
     return graph(d);
   }
@@ -70,13 +92,14 @@
   // ═══════════════════════════════════════════
   function _smallTransformer() {
     _nid = 0; var d = {};
-    var inp = N(d, "input", { featureSize: WINDOW * FEAT }, 80, 100);
-    var resh = N(d, "reshape", { targetShape: WINDOW + "," + FEAT }, 200, 100);
-    var tb1 = N(d, "transformer_block", { numHeads: 2, ffnDim: 32, dropout: 0.1 }, 360, 100);
-    var tb2 = N(d, "transformer_block", { numHeads: 2, ffnDim: 32, dropout: 0.1 }, 520, 100);
-    var gap = N(d, "global_avg_pool1d", {}, 660, 100);
-    var proj = N(d, "dense", { units: FEAT, activation: "linear" }, 780, 100);
-    var out = N(d, "output", { target: "position", targetType: "position", loss: "mse", headType: "regression" }, 900, 100);
+    var inp = N(d, "input", { mode: "flat" }, 280, 100);
+    _aisFeatures(d, inp, 60, 100);
+    var resh = N(d, "reshape", { targetShape: WINDOW + "," + FEAT }, 400, 100);
+    var tb1 = N(d, "transformer_block", { numHeads: 2, ffnDim: 32, dropout: 0.1 }, 540, 100);
+    var tb2 = N(d, "transformer_block", { numHeads: 2, ffnDim: 32, dropout: 0.1 }, 680, 100);
+    var gap = N(d, "global_avg_pool1d", {}, 820, 100);
+    var proj = N(d, "dense", { units: FEAT, activation: "linear" }, 940, 100);
+    var out = N(d, "output", { target: "position", targetType: "position", loss: "mse", headType: "regression" }, 1060, 100);
     C(d, inp, resh); C(d, resh, tb1); C(d, tb1, tb2); C(d, tb2, gap); C(d, gap, proj); C(d, proj, out);
     return graph(d);
   }
