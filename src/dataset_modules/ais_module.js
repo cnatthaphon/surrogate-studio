@@ -119,8 +119,10 @@
    */
   function build(config) {
     config = config || {};
+    console.log("[ais_module] build config:", JSON.stringify(config).substring(0, 200));
     var windowSize = Math.max(1, Number(config.windowSize || 16));
     var maxTrajs = Math.max(10, Number(config.maxTrajectories || config.totalCount || 180));
+    console.log("[ais_module] maxTrajs:", maxTrajs, "windowSize:", windowSize);
 
     var dataPromise = loadData();
 
