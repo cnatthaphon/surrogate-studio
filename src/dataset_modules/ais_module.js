@@ -267,7 +267,7 @@
 
   var playgroundApi = {
     renderDataset: function (mountEl, deps) {
-      _renderTrajectoryCanvas(mountEl, deps, { title: "AIS Dataset Preview", limit: 80 });
+      _renderTrajectoryMap(mountEl, deps, { title: "AIS Dataset Preview", limit: 80 });
     },
     renderPlayground: function (mountEl, deps) {
       var el = deps.el;
@@ -281,7 +281,7 @@
           el("div", {}, "Data source: Danish Maritime Authority"),
         ]));
       }
-      _renderTrajectoryCanvas(mountEl, deps, { title: "AIS Playground", limit: 120 });
+      _renderTrajectoryMap(mountEl, deps, { title: "AIS Playground", limit: 120 });
     },
   };
 
