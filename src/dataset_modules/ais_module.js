@@ -120,7 +120,7 @@
   function build(config) {
     config = config || {};
     var windowSize = Math.max(1, Number(config.windowSize || 16));
-    var maxTrajs = Math.max(10, Number(config.totalCount || 180));
+    var maxTrajs = Math.max(10, Number(config.maxTrajectories || config.totalCount || 180));
 
     var dataPromise = loadData();
 
@@ -456,9 +456,9 @@
         sections: [{
           title: "AIS Dataset",
           schema: [
-            { key: "totalCount", label: "Trajectories (max 180)", type: "number", min: 10, max: 180, step: 10 },
+            { key: "maxTrajectories", label: "Trajectories (max 180)", type: "number", min: 10, max: 180, step: 10 },
           ],
-          value: { totalCount: 180 },
+          value: { maxTrajectories: 180 },
         }],
       };
     },
