@@ -67,20 +67,23 @@
     return graph(d);
   }
 
+  var EMBED = 32; // embedding dimension for transformer (project 4 raw features → 32)
+
   // ═══════════════════════════════════════════
   // Model 2: Tiny TrAISformer — 1 transformer block
-  // Feature blocks → Input → Reshape [16,4] → Attention → Pool → Output
+  // Reshape [16,4] → Dense(32) projection → Attention → Pool → Output
   // ═══════════════════════════════════════════
   function _tinyTransformer() {
     _nid = 0; var d = {};
     var inp = N(d, "input", { mode: "flat" }, 280, 100);
     _aisFeatures(d, inp, 60, 100);
-    var resh = N(d, "reshape", { targetShape: WINDOW + "," + FEAT }, 420, 100);
-    var tb = N(d, "transformer_block", { numHeads: 2, ffnDim: 32, dropout: 0.1 }, 580, 100);
-    var gap = N(d, "global_avg_pool1d", {}, 740, 100);
-    var proj = N(d, "dense", { units: FEAT, activation: "linear" }, 880, 100);
-    var out = N(d, "output", { target: "position", targetType: "position", loss: "mse", headType: "regression" }, 1020, 100);
-    C(d, inp, resh); C(d, resh, tb); C(d, tb, gap); C(d, gap, proj); C(d, proj, out);
+    var resh = N(d, "reshape", { targetShape: WINDOW + "," + FEAT }, 400, 100);
+    var emb = N(d, "dense", { units: EMBED, activation: "relu" }, 520, 100);
+    var tb = N(d, "transformer_block", { numHeads: 4, ffnDim: 64, dropout: 0.1 }, 660, 100);
+    var gap = N(d, "global_avg_pool1d", {}, 800, 100);
+    var proj = N(d, "dense", { units: FEAT, activation: "linear" }, 920, 100);
+    var out = N(d, "output", { target: "position", targetType: "position", loss: "mse", headType: "regression" }, 1040, 100);
+    C(d, inp, resh); C(d, resh, emb); C(d, emb, tb); C(d, tb, gap); C(d, gap, proj); C(d, proj, out);
     return graph(d);
   }
 
@@ -91,13 +94,14 @@
     _nid = 0; var d = {};
     var inp = N(d, "input", { mode: "flat" }, 280, 100);
     _aisFeatures(d, inp, 60, 100);
-    var resh = N(d, "reshape", { targetShape: WINDOW + "," + FEAT }, 400, 100);
-    var tb1 = N(d, "transformer_block", { numHeads: 2, ffnDim: 32, dropout: 0.1 }, 540, 100);
-    var tb2 = N(d, "transformer_block", { numHeads: 2, ffnDim: 32, dropout: 0.1 }, 680, 100);
-    var gap = N(d, "global_avg_pool1d", {}, 820, 100);
-    var proj = N(d, "dense", { units: FEAT, activation: "linear" }, 940, 100);
+    var resh = N(d, "reshape", { targetShape: WINDOW + "," + FEAT }, 380, 100);
+    var emb = N(d, "dense", { units: EMBED, activation: "relu" }, 490, 100);
+    var tb1 = N(d, "transformer_block", { numHeads: 4, ffnDim: 64, dropout: 0.1 }, 610, 100);
+    var tb2 = N(d, "transformer_block", { numHeads: 4, ffnDim: 64, dropout: 0.1 }, 730, 100);
+    var gap = N(d, "global_avg_pool1d", {}, 850, 100);
+    var proj = N(d, "dense", { units: FEAT, activation: "linear" }, 950, 100);
     var out = N(d, "output", { target: "position", targetType: "position", loss: "mse", headType: "regression" }, 1060, 100);
-    C(d, inp, resh); C(d, resh, tb1); C(d, tb1, tb2); C(d, tb2, gap); C(d, gap, proj); C(d, proj, out);
+    C(d, inp, resh); C(d, resh, emb); C(d, emb, tb1); C(d, tb1, tb2); C(d, tb2, gap); C(d, gap, proj); C(d, proj, out);
     return graph(d);
   }
 
@@ -106,7 +110,7 @@
 
   window.TRAISFORMER_PRESET = {
     dataset: {
-      id: DS, name: "AIS DMA (1000 trajectories)", schemaId: sid, status: "draft",
+      id: DS, name: "AIS DMA (12126 trajectories)", schemaId: sid, status: "draft",
       config: { seed: 42, windowSize: WINDOW, maxTrajectories: 12126 },
       data: null, createdAt: Date.now(),
     },
