@@ -159,7 +159,6 @@
       var trainTrajs = allClean.train.slice(0, Math.max(1, Math.round(allClean.train.length * ratio)));
       var valTrajs = allClean.val.slice(0, Math.max(1, Math.round(allClean.val.length * ratio)));
       var testTrajs = allClean.test.slice(0, Math.max(1, Math.round(allClean.test.length * ratio)));
-      var testTrajs = (data.test || []).map(_extractTrajectory).filter(function (traj) { return Array.isArray(traj) && traj.length > windowSize; });
 
       function buildSamples(trajs) {
       var x = [], y = [];
