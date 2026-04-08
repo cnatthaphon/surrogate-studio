@@ -244,14 +244,11 @@
           return allSog.length > 1 ? lo / (allSog.length - 1) : 0.5;
         }
 
+        // 5 discrete colors: clearly distinct on any tile
+        var sogPalette = ["#0000ff", "#00ccff", "#00ff00", "#ffcc00", "#ff0000"];
         function sogColor(sog) {
-          var t = Math.max(0, Math.min(1, sogPercentile(sog))); // 0=slowest, 1=fastest
-          // Dark blue → cyan → yellow → red (high contrast on any background)
-          var r, g, b;
-          if (t < 0.33) { var s = t / 0.33; r = 0; g = Math.round(180 * s); b = Math.round(180 + 75 * (1 - s)); }
-          else if (t < 0.66) { var s = (t - 0.33) / 0.33; r = Math.round(255 * s); g = Math.round(180 + 75 * s); b = Math.round(75 * (1 - s)); }
-          else { var s = (t - 0.66) / 0.34; r = 255; g = Math.round(255 * (1 - s * 0.7)); b = 0; }
-          return "rgb(" + r + "," + g + "," + b + ")";
+          var t = Math.max(0, Math.min(0.999, sogPercentile(sog)));
+          return sogPalette[Math.floor(t * sogPalette.length)];
         }
         // For legend: show actual SOG values at percentile boundaries
         var p25 = allSog[Math.floor(allSog.length * 0.25)] || 0;
