@@ -224,17 +224,22 @@
         baseLayers["Satellite + Labels"].addTo(map);
         L.control.layers(baseLayers, null, { collapsed: true, position: "topright" }).addTo(map);
 
-        // Playground: show all trajectories as one set (no split)
         var showSplits = !!(options && options.showSplits);
+        var dsData = (deps && deps.datasetData) || {};
+        var genTrajCounts = dsData.numTrajectories || {};
+
         var allTrajs = [];
-        var splitRanges = {}; // { train: [startIdx, endIdx], val: [...], test: [...] }
+        var splitRanges = {};
         var idx = 0;
         ["train", "val", "test"].forEach(function (split) {
           var start = idx;
-          (data[split] || []).map(_extractTrajectory).forEach(function (t) { if (t.length) { allTrajs.push(t); idx++; } });
+          var raw = (data[split] || []).map(_extractTrajectory).filter(function (t) { return t.length; });
+          // If generated data exists, limit to the actual count used
+          var maxForSplit = genTrajCounts[split] != null ? genTrajCounts[split] : raw.length;
+          var sliced = raw.slice(0, Math.min(limit, maxForSplit));
+          sliced.forEach(function (t) { allTrajs.push(t); idx++; });
           splitRanges[split] = [start, idx];
         });
-        allTrajs = allTrajs.slice(0, limit);
 
         // Collect all SOG values for percentile-based color mapping
         var allSog = [];
