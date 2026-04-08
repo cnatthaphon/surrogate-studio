@@ -1182,7 +1182,8 @@ def build_model_from_graph(graph, feature_size, target_size, num_classes=0):
                     shape = [max(1, int(s.strip())) for s in shape_str.split(",")]
                     self._reshape_shapes = getattr(self, '_reshape_shapes', {})
                     self._reshape_shapes[nid] = shape
-                    dim_map[nid] = shape  # track as tuple for conv layers
+                    # For conv layers: track as list. For sequence [seq, dim]: track last dim as int.
+                    dim_map[nid] = shape[-1] if len(shape) == 2 else shape
                 elif t == "conv2d":
                     filters = int(c.get("filters", 32))
                     ks = int(c.get("kernelSize", 3))
