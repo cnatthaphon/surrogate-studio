@@ -201,32 +201,43 @@
 
         var map = L.map(mapDiv, { zoomControl: true, attributionControl: true, preferCanvas: true }).setView([56.75, 11.65], 7);
 
-        // Dark tile layer
         L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
           attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> &copy; <a href="https://carto.com/">CARTO</a>',
           subdomains: "abcd", maxZoom: 19,
         }).addTo(map);
 
-        var colors = ["#22d3ee", "#4ade80", "#f59e0b", "#a78bfa", "#f43f5e", "#fb923c", "#34d399", "#818cf8"];
+        // Split trajectories by train/val/test
+        var splitConfig = { train: { color: "#22d3ee", label: "Train", trajs: [] }, val: { color: "#4ade80", label: "Val", trajs: [] }, test: { color: "#f59e0b", label: "Test", trajs: [] } };
+        var trainTrajs = (data.train || []).map(_extractTrajectory).filter(function (t) { return t.length; });
+        var valTrajs = (data.val || []).map(_extractTrajectory).filter(function (t) { return t.length; });
+        var testTrajs = (data.test || []).map(_extractTrajectory).filter(function (t) { return t.length; });
+        splitConfig.train.trajs = trainTrajs.slice(0, limit);
+        splitConfig.val.trajs = valTrajs.slice(0, Math.floor(limit / 3));
+        splitConfig.test.trajs = testTrajs.slice(0, Math.floor(limit / 3));
 
-        trajs.forEach(function (traj, ti) {
-          var latlngs = [];
-          for (var i = 0; i < traj.length; i++) {
-            var lat = denormLat(Number(traj[i][0] || 0));
-            var lon = denormLon(Number(traj[i][1] || 0));
-            latlngs.push([lat, lon]);
-          }
-          L.polyline(latlngs, { color: colors[ti % colors.length], weight: 1.5, opacity: 0.6 }).addTo(map);
-        });
-
-        // Fit bounds to data
+        // Create layer groups per split
+        var splitLayers = {};
         var allLats = [], allLons = [];
-        trajs.forEach(function (traj) {
-          traj.forEach(function (p) {
-            allLats.push(denormLat(Number(p[0] || 0)));
-            allLons.push(denormLon(Number(p[1] || 0)));
+        Object.keys(splitConfig).forEach(function (split) {
+          var cfg = splitConfig[split];
+          var layerGroup = L.layerGroup();
+          cfg.trajs.forEach(function (traj) {
+            var latlngs = [];
+            for (var i = 0; i < traj.length; i++) {
+              var lat = denormLat(Number(traj[i][0] || 0));
+              var lon = denormLon(Number(traj[i][1] || 0));
+              latlngs.push([lat, lon]);
+              allLats.push(lat); allLons.push(lon);
+            }
+            L.polyline(latlngs, { color: cfg.color, weight: 1.5, opacity: 0.6 }).addTo(layerGroup);
           });
+          layerGroup.addTo(map);
+          splitLayers[cfg.label + " (" + cfg.trajs.length + ")"] = layerGroup;
         });
+
+        // Add layer control for show/hide
+        L.control.layers(null, splitLayers, { collapsed: false, position: "topright" }).addTo(map);
+
         if (allLats.length) {
           map.fitBounds([[Math.min.apply(null, allLats), Math.min.apply(null, allLons)],
                          [Math.max.apply(null, allLats), Math.max.apply(null, allLons)]], { padding: [20, 20] });
