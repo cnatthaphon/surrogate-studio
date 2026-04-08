@@ -370,7 +370,9 @@
     var fallback = typeof fallbackTarget === "object" ? _okKey(fallbackTarget) : String(fallbackTarget || "");
     if (!fallback && Array.isArray(allowedOutputKeys) && allowedOutputKeys.length) fallback = _okKey(allowedOutputKeys[0]);
     var ids = Object.keys(data || {});
-    var inputNodeNames = { "input_layer": true, "image_source_block": true, "image_source_layer": true, "sample_z_layer": true, "time_embed_layer": true, "class_embed_layer": true, "window_hist_block": true, "hist_block": true, "params_block": true };
+    var inputNodeNames = { "input_layer": true, "image_source_block": true, "image_source_layer": true, "sample_z_layer": true, "time_embed_layer": true, "class_embed_layer": true };
+    // Feature blocks are visual/declarative — they don't create model inputs
+    var featureBlockNames = { "window_hist_block": true, "window_hist_x_block": true, "window_hist_v_block": true, "hist_block": true, "params_block": true, "sliding_window_block": true };
     var inputIds = ids.filter(function (id) { return data[id] && inputNodeNames[data[id].name]; });
     if (!inputIds.length) return [{ id: "fallback", target: fallback, loss: "mse", headType: _lookupHeadType(fallback, allowedOutputKeys) }];
     var reachable = {};
@@ -479,16 +481,23 @@
     var ids = Object.keys(moduleData || {});
     if (!ids.length) throw new Error("Graph is empty.");
 
-    var inputNodeNames = { "input_layer": true, "image_source_block": true, "image_source_layer": true, "sample_z_layer": true, "time_embed_layer": true, "class_embed_layer": true, "window_hist_block": true, "hist_block": true, "params_block": true };
+    var inputNodeNames = { "input_layer": true, "image_source_block": true, "image_source_layer": true, "sample_z_layer": true, "time_embed_layer": true, "class_embed_layer": true };
+    // Feature blocks are visual/declarative — they don't create model inputs
+    var featureBlockNames = { "window_hist_block": true, "window_hist_x_block": true, "window_hist_v_block": true, "hist_block": true, "params_block": true, "sliding_window_block": true };
     // only nodes with NO incoming connections are true external inputs
     // (e.g., Input node connected FROM ImageSource is NOT an external input)
     var inputIds = ids.filter(function (id) {
       if (!moduleData[id] || !inputNodeNames[moduleData[id].name]) return false;
       var ins = moduleData[id].inputs || {};
-      var hasIncoming = Object.keys(ins).some(function (k) {
-        return ins[k] && ins[k].connections && ins[k].connections.length > 0;
+      // Ignore incoming connections from feature blocks (visual/declarative only)
+      var hasRealIncoming = Object.keys(ins).some(function (k) {
+        var conns = (ins[k] && ins[k].connections) || [];
+        return conns.some(function (c) {
+          var fromNode = moduleData[String(c.node)];
+          return fromNode && !featureBlockNames[fromNode.name];
+        });
       });
-      return !hasIncoming;
+      return !hasRealIncoming;
     });
     if (!inputIds.length) throw new Error("Graph must contain at least one Input/ImageSource/SampleZ node.");
     var inputId = String(inputIds[0]); // primary input
