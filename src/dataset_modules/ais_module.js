@@ -332,22 +332,7 @@
         };
         centerCtrl.addTo(map);
 
-        // Fullscreen toggle
-        var isFs = false;
-        function exitFullscreen() {
-          if (!isFs) return;
-          isFs = false;
-          mapDiv.style.cssText = "width:100%;height:450px;border-radius:8px;border:1px solid #334155;";
-          map.invalidateSize();
-        }
-        function enterFullscreen() {
-          isFs = true;
-          mapDiv.style.cssText = "position:fixed;top:0;left:0;width:100vw;height:100vh;z-index:9999;border-radius:0;border:none;";
-          map.invalidateSize();
-        }
-        // Escape key exits fullscreen
-        document.addEventListener("keydown", function (e) { if (e.key === "Escape") exitFullscreen(); });
-
+        // Fullscreen using browser Fullscreen API (Escape works natively)
         var fsCtrl = L.control({ position: "topleft" });
         fsCtrl.onAdd = function () {
           var btn = L.DomUtil.create("div");
@@ -356,7 +341,15 @@
           btn.innerHTML = "&#x26F6;";
           L.DomEvent.disableClickPropagation(btn);
           btn.addEventListener("click", function () {
-            if (isFs) exitFullscreen(); else enterFullscreen();
+            if (document.fullscreenElement) {
+              document.exitFullscreen();
+            } else {
+              mapDiv.requestFullscreen();
+            }
+          });
+          // Resize map when entering/exiting fullscreen
+          document.addEventListener("fullscreenchange", function () {
+            setTimeout(function () { map.invalidateSize(); }, 100);
           });
           return btn;
         };
