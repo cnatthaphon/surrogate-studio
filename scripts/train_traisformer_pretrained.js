@@ -194,8 +194,8 @@ aisModule.build({ windowSize: 16, maxTrajectories: MAX_TRAJS }).then(function (d
             var fullResult = JSON.parse(decoded.toString());
             var artifacts = fullResult.modelArtifacts || {};
             var specs = artifacts.weightSpecs || [];
-            var values = artifacts.weightValues || [];
-            if (!specs.length) { console.log("  No weights in result"); nextModel(); return; }
+            var values = artifacts.weightValues || artifacts.weightData || [];
+            if (!specs.length || !values.length) { console.log("  No weights (specs:" + specs.length + " vals:" + values.length + ")"); nextModel(); return; }
             exportWeights(cfg, m, specs, values, result, epochs);
           } catch (e) { console.log("  Weight error: " + e.message); }
           nextModel();
