@@ -160,6 +160,7 @@
       dataset: {
         mode: String(ds.mode || "direct"),
         featureSize: Number(ds.featureSize || 1),
+        targetSize: Number(ds.targetSize || (ds.yTrain && ds.yTrain[0] ? (Array.isArray(ds.yTrain[0]) ? ds.yTrain[0].length : 1) : 0)),
         targetMode: String(ds.targetMode || "xv"),
         xTrain: ds.xTrain || [], yTrain: ds.yTrain || [],
         xVal: ds.xVal || [], yVal: ds.yVal || [],
