@@ -250,6 +250,13 @@ def main():
     else:
         loss_fn = nn.BCELoss() if _any_bce else nn.MSELoss()
 
+    # --- Extract graph node data for class_embed detection ---
+    graph_data = {}
+    try:
+        graph_data = graph.get("drawflow", {}).get("Home", {}).get("data", {})
+    except Exception:
+        pass
+
     # --- Detect class_embed nodes to include label data in DataLoader ---
     _has_class_embed = any(
         str(n.get("name", "")).replace("_layer", "") == "class_embed"
