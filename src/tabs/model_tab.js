@@ -512,7 +512,7 @@
 
       // get config spec from modelGraphCore — pass full node object (not just name)
       if (_graphRuntime && typeof _graphRuntime.getNodeConfigSpec === "function") {
-        var rawSpec = _graphRuntime.getNodeConfigSpec(nodeData);
+        var rawSpec = _graphRuntime.getNodeConfigSpec(nodeData, _getSchemaId());
         var allFields = Array.isArray(rawSpec) ? rawSpec : (rawSpec && Array.isArray(rawSpec.fields) ? rawSpec.fields : []);
 
         // render messages as text, filter out unsupported kinds, map to renderConfigForm schema
