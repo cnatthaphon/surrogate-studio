@@ -100,14 +100,34 @@
     });
   }
 
+  // Resolve path for the inline data JS file (script tag works on file://)
+  var _inlineDataUrl = _dataBase.replace(/data\/ais-dma\/$/, "demo/TrAISformer/ais_inline_data.js");
+
+  function _loadViaScript(url) {
+    return new Promise(function (resolve, reject) {
+      var W = typeof window !== "undefined" ? window : {};
+      var script = document.createElement("script");
+      script.src = url;
+      script.onload = function () {
+        if (W._AIS_INLINE_DATA) { resolve(W._AIS_INLINE_DATA); }
+        else { reject(new Error("Script loaded but _AIS_INLINE_DATA not set")); }
+      };
+      script.onerror = function () { reject(new Error("Failed to load " + url)); };
+      document.head.appendChild(script);
+    });
+  }
+
   function loadData() {
     var W = typeof window !== "undefined" ? window : {};
     if (_inlineData) return Promise.resolve(_inlineData);
     if (W._AIS_INLINE_DATA) return Promise.resolve(W._AIS_INLINE_DATA);
     if (_cachedFetchedData) return Promise.resolve(_cachedFetchedData);
+    // Try XHR first (works on http://), fall back to script tag (works on file://)
     return _fetchJSON(DATA_URL).then(function (data) {
       _cachedFetchedData = data;
       return data;
+    }).catch(function () {
+      return _loadViaScript(_inlineDataUrl);
     });
   }
 
