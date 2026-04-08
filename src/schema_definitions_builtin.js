@@ -3544,7 +3544,7 @@
       metadata: {
         ui: { sidebarMode: "generic", viewer: "trajectory" },
         splitModes: [
-          { id: "original", label: "Original (paper split: 120/30/30)", stratifyKey: "" },
+          { id: "original", label: "Original (paper split: 9327/1318/1481)", stratifyKey: "" },
           { id: "random", label: "Random", stratifyKey: "" },
         ],
         display: { chartType: "trajectory_map" },

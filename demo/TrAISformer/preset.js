@@ -107,7 +107,7 @@
   window.TRAISFORMER_PRESET = {
     dataset: {
       id: DS, name: "AIS DMA (1000 trajectories)", schemaId: sid, status: "draft",
-      config: { seed: 42, windowSize: WINDOW, maxTrajectories: 180 },
+      config: { seed: 42, windowSize: WINDOW, maxTrajectories: 12126 },
       data: null, createdAt: Date.now(),
     },
     models: [

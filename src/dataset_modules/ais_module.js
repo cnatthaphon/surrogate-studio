@@ -72,7 +72,7 @@
   }
 
   var _dataBase = _resolveDataBase();
-  var DATA_URL = _dataBase + "ais_dma_small.json";
+  var DATA_URL = _dataBase + "ais_dma_full.json";
 
   function _extractTrajectory(entry) {
     if (!Array.isArray(entry)) return [];
@@ -470,9 +470,9 @@
         sections: [{
           title: "AIS Dataset",
           schema: [
-            { key: "maxTrajectories", label: "Trajectories (max 180)", type: "number", min: 10, max: 180, step: 10 },
+            { key: "maxTrajectories", label: "Trajectories (max 12126)", type: "number", min: 10, max: 12126, step: 100 },
           ],
-          value: { maxTrajectories: 180 },
+          value: { maxTrajectories: 12126 },
         }],
       };
     },
