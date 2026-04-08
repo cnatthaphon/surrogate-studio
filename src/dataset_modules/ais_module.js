@@ -120,13 +120,17 @@
   function build(config) {
     config = config || {};
     var windowSize = Math.max(1, Number(config.windowSize || 16));
+    var maxTrajs = Math.max(10, Number(config.totalCount || 150));
+    var useFullSource = Boolean(config.useFullSource);
 
-    return loadData().then(function (data) {
+    var dataPromise = useFullSource ? _fetchJSON(DATA_URL).catch(function () { return loadData(); }) : loadData();
+
+    return dataPromise.then(function (data) {
       if (!data || !data.train) {
         throw new Error("AIS data not loaded.");
       }
-      var trainTrajs = (data.train || []).map(_extractTrajectory).filter(function (traj) { return Array.isArray(traj) && traj.length > windowSize; });
-      var valTrajs = (data.val || []).map(_extractTrajectory).filter(function (traj) { return Array.isArray(traj) && traj.length > windowSize; });
+      var trainTrajs = (data.train || []).map(_extractTrajectory).filter(function (traj) { return Array.isArray(traj) && traj.length > windowSize; }).slice(0, maxTrajs);
+      var valTrajs = (data.val || []).map(_extractTrajectory).filter(function (traj) { return Array.isArray(traj) && traj.length > windowSize; }).slice(0, Math.max(5, Math.floor(maxTrajs * 0.2)));
       var testTrajs = (data.test || []).map(_extractTrajectory).filter(function (traj) { return Array.isArray(traj) && traj.length > windowSize; });
 
       function buildSamples(trajs) {
@@ -354,10 +358,15 @@
 
         // Split toggle control (only on dataset tab)
         if (showSplits && Object.keys(splitLayerGroups).length) {
+          // Show sample counts from generated data if available
+          var dsData = (deps && deps.datasetData) || {};
           var splitOverlays = {};
           ["train", "val", "test"].forEach(function (s) {
-            var count = splitRanges[s] ? splitRanges[s][1] - splitRanges[s][0] : 0;
-            if (count > 0) splitOverlays[s + " (" + count + ")"] = splitLayerGroups[s];
+            var trajCount = splitRanges[s] ? splitRanges[s][1] - splitRanges[s][0] : 0;
+            var sampleKey = "x" + s.charAt(0).toUpperCase() + s.slice(1);
+            var sampleCount = dsData[sampleKey] ? dsData[sampleKey].length : 0;
+            var label = s + (sampleCount ? " (" + sampleCount + " samples, " + trajCount + " traj)" : " (" + trajCount + " traj)");
+            if (trajCount > 0 || sampleCount > 0) splitOverlays[label] = splitLayerGroups[s];
           });
           L.control.layers(null, splitOverlays, { collapsed: false, position: "topright" }).addTo(map);
         }
@@ -449,7 +458,16 @@
 
   var uiApi = {
     getDatasetConfigSpec: function () {
-      return { sections: [] };
+      return {
+        sections: [{
+          title: "AIS Dataset",
+          schema: [
+            { key: "totalCount", label: "Max trajectories", type: "number", default: 150, min: 10, max: 1000 },
+            { key: "useFullSource", label: "Use full source (load from JSON)", type: "checkbox", default: false },
+          ],
+          value: { totalCount: 150, useFullSource: false },
+        }],
+      };
     },
   };
 
