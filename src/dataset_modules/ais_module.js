@@ -27,6 +27,27 @@
   var MODULE_ID = "ais_dma";
   var SCHEMA_ID = "ais_trajectory";
   var REGION = { latMin: 55.5, latMax: 58.0, lonMin: 10.3, lonMax: 13.0 };
+  var LEAFLET_JS = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js";
+  var LEAFLET_CSS = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css";
+  var _leafletLoaded = false;
+
+  function _ensureLeaflet() {
+    if (_leafletLoaded) return Promise.resolve();
+    var W = typeof window !== "undefined" ? window : {};
+    if (W.L && typeof W.L.map === "function") { _leafletLoaded = true; return Promise.resolve(); }
+    return new Promise(function (resolve) {
+      // Load CSS
+      var link = document.createElement("link");
+      link.rel = "stylesheet"; link.href = LEAFLET_CSS;
+      document.head.appendChild(link);
+      // Load JS
+      var script = document.createElement("script");
+      script.src = LEAFLET_JS;
+      script.onload = function () { _leafletLoaded = true; resolve(); };
+      script.onerror = function () { resolve(); }; // graceful fallback
+      document.head.appendChild(script);
+    });
+  }
   var _cachedFetchedData = null;
 
   function denormLat(v) { return REGION.latMin + v * (REGION.latMax - REGION.latMin); }
@@ -150,7 +171,7 @@
     });
   }
 
-  function _renderTrajectoryCanvas(mountEl, deps, opts) {
+  function _renderTrajectoryMap(mountEl, deps, opts) {
     var el = deps.el;
     var options = opts || {};
     var title = String(options.title || "AIS Trajectory Preview");
@@ -159,39 +180,85 @@
     mountEl.appendChild(el("div", { style: "font-size:12px;color:#cbd5e1;font-weight:600;margin-bottom:6px;" }, title));
     var statusEl = el("div", { style: "font-size:12px;color:#94a3b8;" }, "Loading AIS trajectories...");
     mountEl.appendChild(statusEl);
-    loadData().then(function (data) {
+
+    Promise.all([loadData(), _ensureLeaflet()]).then(function (results) {
+      var data = results[0];
       var trajs = (data.train || []).map(_extractTrajectory).filter(function (traj) { return Array.isArray(traj) && traj.length; }).slice(0, limit);
       statusEl.remove();
       if (!trajs.length) {
         mountEl.appendChild(el("div", { style: "color:#fca5a5;padding:12px;" }, "No AIS trajectories available."));
         return;
       }
-      var canvas = document.createElement("canvas");
-      canvas.width = 720; canvas.height = 440;
-      canvas.style.cssText = "width:100%;max-width:720px;height:auto;border:1px solid #334155;border-radius:8px;background:#0a1628;";
-      mountEl.appendChild(canvas);
-      var ctx = canvas.getContext("2d");
-      ctx.fillStyle = "#08111d";
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-      var colors = ["#22d3ee", "#4ade80", "#f59e0b", "#a78bfa", "#f43f5e", "#fb923c", "#34d399", "#818cf8"];
 
-      trajs.forEach(function (traj, ti) {
-        ctx.beginPath();
-        ctx.strokeStyle = colors[ti % colors.length];
-        ctx.lineWidth = 0.75;
-        ctx.globalAlpha = 0.55;
-        for (var i = 0; i < traj.length; i++) {
-          var x = Number(traj[i][1] || 0) * canvas.width;
-          var y = (1 - Number(traj[i][0] || 0)) * canvas.height;
-          if (i === 0) ctx.moveTo(x, y);
-          else ctx.lineTo(x, y);
+      var W = typeof window !== "undefined" ? window : {};
+      var L = W.L; // Leaflet
+
+      if (L && typeof L.map === "function") {
+        // Leaflet map
+        var mapDiv = document.createElement("div");
+        mapDiv.style.cssText = "width:100%;height:450px;border-radius:8px;border:1px solid #334155;";
+        mountEl.appendChild(mapDiv);
+
+        var map = L.map(mapDiv, { zoomControl: true, attributionControl: true }).setView([56.75, 11.65], 7);
+
+        // Dark tile layer
+        L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
+          attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> &copy; <a href="https://carto.com/">CARTO</a>',
+          subdomains: "abcd", maxZoom: 19,
+        }).addTo(map);
+
+        var colors = ["#22d3ee", "#4ade80", "#f59e0b", "#a78bfa", "#f43f5e", "#fb923c", "#34d399", "#818cf8"];
+
+        trajs.forEach(function (traj, ti) {
+          var latlngs = [];
+          for (var i = 0; i < traj.length; i++) {
+            var lat = denormLat(Number(traj[i][0] || 0));
+            var lon = denormLon(Number(traj[i][1] || 0));
+            latlngs.push([lat, lon]);
+          }
+          L.polyline(latlngs, { color: colors[ti % colors.length], weight: 1.5, opacity: 0.6 }).addTo(map);
+        });
+
+        // Fit bounds to data
+        var allLats = [], allLons = [];
+        trajs.forEach(function (traj) {
+          traj.forEach(function (p) {
+            allLats.push(denormLat(Number(p[0] || 0)));
+            allLons.push(denormLon(Number(p[1] || 0)));
+          });
+        });
+        if (allLats.length) {
+          map.fitBounds([[Math.min.apply(null, allLats), Math.min.apply(null, allLons)],
+                         [Math.max.apply(null, allLats), Math.max.apply(null, allLons)]], { padding: [20, 20] });
         }
-        ctx.stroke();
-      });
-      ctx.globalAlpha = 1;
+      } else {
+        // Fallback: canvas rendering (no Leaflet loaded)
+        var canvas = document.createElement("canvas");
+        canvas.width = 720; canvas.height = 440;
+        canvas.style.cssText = "width:100%;max-width:720px;height:auto;border:1px solid #334155;border-radius:8px;background:#0a1628;";
+        mountEl.appendChild(canvas);
+        var ctx = canvas.getContext("2d");
+        ctx.fillStyle = "#08111d";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        var colors2 = ["#22d3ee", "#4ade80", "#f59e0b", "#a78bfa", "#f43f5e", "#fb923c", "#34d399", "#818cf8"];
+        trajs.forEach(function (traj, ti) {
+          ctx.beginPath();
+          ctx.strokeStyle = colors2[ti % colors2.length];
+          ctx.lineWidth = 0.75;
+          ctx.globalAlpha = 0.55;
+          for (var i = 0; i < traj.length; i++) {
+            var x = Number(traj[i][1] || 0) * canvas.width;
+            var y = (1 - Number(traj[i][0] || 0)) * canvas.height;
+            if (i === 0) ctx.moveTo(x, y);
+            else ctx.lineTo(x, y);
+          }
+          ctx.stroke();
+        });
+        ctx.globalAlpha = 1;
+      }
 
       mountEl.appendChild(el("div", { style: "font-size:11px;color:#94a3b8;margin-top:4px;" },
-        trajs.length + " trajectories | Baltic Sea (55.5°N–58.0°N, 10.3°E–13.0°E) | Features: lat, lon, SOG, COG"));
+        trajs.length + " vessel trajectories | Baltic Sea | Features: lat, lon, SOG, COG"));
     }).catch(function (err) {
       statusEl.textContent = "AIS data load failed: " + String((err && err.message) || err || "unknown error");
       statusEl.style.color = "#fca5a5";
