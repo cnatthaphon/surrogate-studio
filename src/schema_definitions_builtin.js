@@ -3540,12 +3540,12 @@
       label: "AIS Maritime Trajectories",
       sampleType: "trajectory",
       splitUnit: "trajectory",
-      splitDefaults: { mode: "random", train: 0.80, val: 0.10, test: 0.10 },
+      splitDefaults: { mode: "original", train: 0.67, val: 0.17, test: 0.17 },
       metadata: {
         ui: { sidebarMode: "generic", viewer: "trajectory" },
         splitModes: [
+          { id: "original", label: "Original (paper split: 120/30/30)", stratifyKey: "" },
           { id: "random", label: "Random", stratifyKey: "" },
-          { id: "original", label: "Original (pre-split)", stratifyKey: "" },
         ],
         display: { chartType: "trajectory_map" },
       },
