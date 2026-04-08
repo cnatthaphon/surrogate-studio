@@ -1018,13 +1018,23 @@
         return spec;
       }
       if (node.name === "sliding_window_block" || node.name === "window_hist_block" || node.name === "window_hist_x_block" || node.name === "window_hist_v_block") {
-        // featureKey dropdown from schema historySeries
+        // Feature selection from schema historySeries — checkboxes for multi-select
         var _histSeries = (typeof api.getFeatureNodesMeta === "function") ? (api.getFeatureNodesMeta(sid) || {}).historySeries : [];
         if (Array.isArray(_histSeries) && _histSeries.length) {
+          // Parse current selection: featureKeys (array) or featureKey (single, legacy)
+          var _selectedKeys = {};
+          if (Array.isArray(d.featureKeys)) {
+            d.featureKeys.forEach(function (k) { _selectedKeys[k] = true; });
+          } else if (d.featureKey) {
+            _selectedKeys[d.featureKey] = true;
+          } else {
+            _histSeries.forEach(function (hs) { _selectedKeys[hs.key] = true; }); // default: all selected
+          }
           addField({
-            kind: "select", key: "featureKey", label: "Feature",
-            value: String(d.featureKey || _histSeries[0].key),
-            options: _histSeries.map(function (hs) { return { value: hs.key, label: hs.label || hs.key }; }),
+            kind: "checkbox_grid", columns: Math.min(4, _histSeries.length),
+            items: _histSeries.map(function (hs) {
+              return { key: "fk_" + hs.key, label: hs.label || hs.key, checked: !!_selectedKeys[hs.key] };
+            }),
           });
         } else {
           addField({ kind: "text", key: "featureKey", label: "Feature key", value: String(d.featureKey || "x") });

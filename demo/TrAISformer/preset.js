@@ -46,13 +46,10 @@
     return String(_nid);
   }
 
-  // Helper: add 4 AIS feature blocks → Input node
+  // Helper: add AIS feature block → Input node (one block, all features)
   function _aisFeatures(d, inputId, startX, y) {
-    var lat = NR(d, "window_hist_block", { featureKey: "lat", windowSize: WINDOW, stride: 1, lagMode: "last", padMode: "zero" }, startX, y - 60);
-    var lon = NR(d, "window_hist_block", { featureKey: "lon", windowSize: WINDOW, stride: 1, lagMode: "last", padMode: "zero" }, startX, y - 20);
-    var sog = NR(d, "window_hist_block", { featureKey: "sog", windowSize: WINDOW, stride: 1, lagMode: "last", padMode: "zero" }, startX, y + 20);
-    var cog = NR(d, "window_hist_block", { featureKey: "cog", windowSize: WINDOW, stride: 1, lagMode: "last", padMode: "zero" }, startX, y + 60);
-    C(d, lat, inputId); C(d, lon, inputId); C(d, sog, inputId); C(d, cog, inputId);
+    var wh = NR(d, "window_hist_block", { featureKeys: ["lat", "lon", "sog", "cog"], windowSize: WINDOW, stride: 1, lagMode: "last", padMode: "zero" }, startX, y);
+    C(d, wh, inputId);
   }
 
   // ═══════════════════════════════════════════

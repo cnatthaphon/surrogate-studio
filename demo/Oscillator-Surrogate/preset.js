@@ -40,12 +40,10 @@
   }
 
   // Helper: add oscillator feature blocks → Input node
-  // Matches schema presets: Params + TimeSec + TimeNorm + WindowHist(x) + WindowHist(v) → Input
   function _oscFeatures(d, inputId, baseId, startX, y) {
-    var params = N(d, baseId, "params", { paramMask: { m:true, c:true, k:true } }, startX, y - 40);
-    var whX = NR(d, baseId+1, "window_hist_block", { featureKey: "x", windowSize: 20, stride: 1, lagMode: "contiguous", padMode: "none" }, startX, y);
-    var whV = NR(d, baseId+2, "window_hist_block", { featureKey: "v", windowSize: 20, stride: 1, lagMode: "contiguous", padMode: "none" }, startX, y + 40);
-    C(d, params, inputId); C(d, whX, inputId); C(d, whV, inputId);
+    var params = N(d, baseId, "params", { paramMask: { m:true, c:true, k:true } }, startX, y - 30);
+    var wh = NR(d, baseId+1, "window_hist_block", { featureKeys: ["x", "v"], windowSize: 20, stride: 1, lagMode: "contiguous", padMode: "none" }, startX, y + 30);
+    C(d, params, inputId); C(d, wh, inputId);
   }
 
   // 1. Direct-MLP: Features → Input → Dense(64) → Dense(32) → Output(xv)
