@@ -244,11 +244,17 @@
           return allSog.length > 1 ? lo / (allSog.length - 1) : 0.5;
         }
 
-        // 5 discrete colors: clearly distinct on any tile
-        var sogPalette = ["#0000ff", "#00ccff", "#00ff00", "#ffcc00", "#ff0000"];
+        // Turbo colormap (from d3-scale-chromatic, inlined to avoid CDN dependency)
+        // Maps t ∈ [0,1] → rgb string. Perceptually uniform, high contrast.
+        function turboRgb(t) {
+          t = Math.max(0, Math.min(1, t));
+          var r = Math.max(0, Math.min(255, Math.round(34.61 + t * (1172.33 + t * (-10793.56 + t * (33300.12 + t * (-38394.49 + t * 14825.05)))))));
+          var g = Math.max(0, Math.min(255, Math.round(23.31 + t * (557.33 + t * (1225.33 + t * (-3574.96 + t * (1073.77 + t * 707.56)))))));
+          var b = Math.max(0, Math.min(255, Math.round(27.2 + t * (3211.1 + t * (-15327.97 + t * (27814 + t * (-22569.18 + t * 6838.66)))))));
+          return "rgb(" + r + "," + g + "," + b + ")";
+        }
         function sogColor(sog) {
-          var t = Math.max(0, Math.min(0.999, sogPercentile(sog)));
-          return sogPalette[Math.floor(t * sogPalette.length)];
+          return turboRgb(Math.max(0, Math.min(1, sogPercentile(sog))));
         }
         // For legend: show actual SOG values at percentile boundaries
         var p25 = allSog[Math.floor(allSog.length * 0.25)] || 0;
@@ -312,20 +318,17 @@
         legend.onAdd = function () {
           var div = L.DomUtil.create("div");
           div.style.cssText = "background:rgba(0,0,0,0.7);padding:6px 10px;border-radius:4px;font-size:10px;color:#e2e8f0;line-height:1.4;";
-          // 5 discrete color blocks matching sogPalette
-          var p20 = allSog[Math.floor(allSog.length * 0.2)] || 0;
-          var p40 = allSog[Math.floor(allSog.length * 0.4)] || 0;
-          var p60 = allSog[Math.floor(allSog.length * 0.6)] || 0;
-          var p80 = allSog[Math.floor(allSog.length * 0.8)] || 0;
-          var labels = ["0–" + p20.toFixed(2), p20.toFixed(2) + "–" + p40.toFixed(2), p40.toFixed(2) + "–" + p60.toFixed(2), p60.toFixed(2) + "–" + p80.toFixed(2), p80.toFixed(2) + "–" + maxSog.toFixed(2)];
-          var rows = "";
-          for (var ci = 0; ci < sogPalette.length; ci++) {
-            rows += "<div style='display:flex;align-items:center;gap:6px;'>" +
-              "<span style='display:inline-block;width:20px;height:10px;background:" + sogPalette[ci] + ";border-radius:2px;'></span>" +
-              "<span>" + labels[ci] + "</span></div>";
+          // Continuous gradient bar using turbo colormap
+          var bar = "";
+          for (var gi = 0; gi < 30; gi++) {
+            bar += "<span style='display:inline-block;width:5px;height:12px;background:" + turboRgb(gi / 29) + ";'></span>";
           }
-          div.innerHTML = "<div style='margin-bottom:4px;font-weight:600;'>Speed (SOG)</div>" + rows +
-            "<div style='margin-top:4px;font-size:9px;color:#94a3b8;'>&#9654; = course (COG)</div>";
+          div.innerHTML = "<div style='margin-bottom:3px;font-weight:600;'>Speed (SOG)</div>" +
+            "<div>" + bar + "</div>" +
+            "<div style='display:flex;justify-content:space-between;font-size:9px;color:#94a3b8;margin-top:1px;'>" +
+            "<span>0</span><span>" + p50.toFixed(2) + "</span><span>" + maxSog.toFixed(2) + "</span></div>" +
+            "<div style='display:flex;justify-content:space-between;font-size:8px;color:#64748b;'><span>slow</span><span>fast</span></div>" +
+            "<div style='margin-top:3px;font-size:9px;color:#94a3b8;'>&#9654; = course (COG)</div>";
           return div;
         };
         legend.addTo(map);
