@@ -204,14 +204,18 @@
         // Tile layers — user selects from layer control
         var attr_osm = '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a>';
         var attr_carto = attr_osm + ' &copy; <a href="https://carto.com/">CARTO</a>';
+        // Satellite + labels overlay (default)
+        var satTile = L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", { attribution: '&copy; Esri, Maxar, Earthstar', maxZoom: 18 });
+        var labelOverlay = L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_only_labels/{z}/{x}/{y}{r}.png", { attribution: attr_carto, subdomains: "abcd", maxZoom: 19, pane: "overlayPane" });
+
         var baseLayers = {
+          "Satellite + Labels": L.layerGroup([satTile, labelOverlay]),
           "Dark": L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", { attribution: attr_carto, subdomains: "abcd", maxZoom: 19 }),
           "Light": L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png", { attribution: attr_carto, subdomains: "abcd", maxZoom: 19 }),
           "OpenStreetMap": L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { attribution: attr_osm, maxZoom: 19 }),
-          "Satellite": L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", { attribution: '&copy; Esri, Maxar, Earthstar', maxZoom: 18 }),
           "Topo": L.tileLayer("https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png", { attribution: attr_osm + ' &copy; OpenTopoMap', maxZoom: 17 }),
         };
-        baseLayers["Dark"].addTo(map);
+        baseLayers["Satellite + Labels"].addTo(map);
         L.control.layers(baseLayers, null, { collapsed: true, position: "topright" }).addTo(map);
 
         // Playground: show all trajectories as one set (no split)
