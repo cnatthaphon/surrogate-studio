@@ -312,17 +312,19 @@
         legend.onAdd = function () {
           var div = L.DomUtil.create("div");
           div.style.cssText = "background:rgba(0,0,0,0.7);padding:6px 10px;border-radius:4px;font-size:10px;color:#e2e8f0;line-height:1.4;";
-          // Gradient bar using percentile-mapped colors
-          var bar = "";
-          for (var gi = 0; gi <= 20; gi++) {
-            var sogVal = allSog[Math.floor(allSog.length * gi / 20)] || 0;
-            bar += "<span style='display:inline-block;width:8px;height:10px;background:" + sogColor(sogVal) + ";'></span>";
+          // 5 discrete color blocks matching sogPalette
+          var p20 = allSog[Math.floor(allSog.length * 0.2)] || 0;
+          var p40 = allSog[Math.floor(allSog.length * 0.4)] || 0;
+          var p60 = allSog[Math.floor(allSog.length * 0.6)] || 0;
+          var p80 = allSog[Math.floor(allSog.length * 0.8)] || 0;
+          var labels = ["0–" + p20.toFixed(2), p20.toFixed(2) + "–" + p40.toFixed(2), p40.toFixed(2) + "–" + p60.toFixed(2), p60.toFixed(2) + "–" + p80.toFixed(2), p80.toFixed(2) + "–" + maxSog.toFixed(2)];
+          var rows = "";
+          for (var ci = 0; ci < sogPalette.length; ci++) {
+            rows += "<div style='display:flex;align-items:center;gap:6px;'>" +
+              "<span style='display:inline-block;width:20px;height:10px;background:" + sogPalette[ci] + ";border-radius:2px;'></span>" +
+              "<span>" + labels[ci] + "</span></div>";
           }
-          div.innerHTML = "<div style='margin-bottom:2px;font-weight:600;'>Speed (SOG) — percentile</div>" +
-            "<div>" + bar + "</div>" +
-            "<div style='display:flex;justify-content:space-between;font-size:9px;color:#94a3b8;'>" +
-            "<span>0</span><span>" + p25.toFixed(2) + "</span><span>" + p50.toFixed(2) + "</span><span>" + p75.toFixed(2) + "</span><span>" + maxSog.toFixed(2) + "</span></div>" +
-            "<div style='font-size:9px;color:#94a3b8;'>0% — 25% — 50% — 75% — 100%</div>" +
+          div.innerHTML = "<div style='margin-bottom:4px;font-weight:600;'>Speed (SOG)</div>" + rows +
             "<div style='margin-top:4px;font-size:9px;color:#94a3b8;'>&#9654; = course (COG)</div>";
           return div;
         };
