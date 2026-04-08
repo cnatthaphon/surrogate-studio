@@ -213,17 +213,42 @@
         });
         allTrajs = allTrajs.slice(0, limit);
 
-        var colors = ["#22d3ee", "#4ade80", "#f59e0b", "#a78bfa", "#f43f5e", "#fb923c", "#34d399", "#818cf8"];
-        var allLats = [], allLons = [];
-        allTrajs.forEach(function (traj, ti) {
-          var latlngs = [];
+        // Color by speed (SOG): blue=slow → red=fast, range from data
+        var maxSog = 0;
+        allTrajs.forEach(function (traj) {
           for (var i = 0; i < traj.length; i++) {
-            var lat = denormLat(Number(traj[i][0] || 0));
-            var lon = denormLon(Number(traj[i][1] || 0));
-            latlngs.push([lat, lon]);
-            allLats.push(lat); allLons.push(lon);
+            var s = Number(traj[i][2] || 0);
+            if (s > maxSog) maxSog = s;
           }
-          L.polyline(latlngs, { color: colors[ti % colors.length], weight: 1.5, opacity: 0.6 }).addTo(map);
+        });
+        if (maxSog < 0.001) maxSog = 1;
+
+        function sogColor(sog) {
+          var t = Math.min(1, Math.max(0, sog / maxSog));
+          var r, g, b;
+          if (t < 0.25) { r = 0; g = Math.round(255 * t * 4); b = 255; }
+          else if (t < 0.5) { r = 0; g = 255; b = Math.round(255 * (1 - (t - 0.25) * 4)); }
+          else if (t < 0.75) { r = Math.round(255 * (t - 0.5) * 4); g = 255; b = 0; }
+          else { r = 255; g = Math.round(255 * (1 - (t - 0.75) * 4)); b = 0; }
+          return "rgb(" + r + "," + g + "," + b + ")";
+        }
+
+        var allLats = [], allLons = [];
+        allTrajs.forEach(function (traj) {
+          for (var i = 0; i < traj.length - 1; i++) {
+            var lat1 = denormLat(Number(traj[i][0] || 0));
+            var lon1 = denormLon(Number(traj[i][1] || 0));
+            var lat2 = denormLat(Number(traj[i + 1][0] || 0));
+            var lon2 = denormLon(Number(traj[i + 1][1] || 0));
+            var sog = Number(traj[i][2] || 0);
+            L.polyline([[lat1, lon1], [lat2, lon2]], { color: sogColor(sog), weight: 1.5, opacity: 0.7 }).addTo(map);
+            allLats.push(lat1); allLons.push(lon1);
+          }
+          if (traj.length) {
+            var last = traj[traj.length - 1];
+            allLats.push(denormLat(Number(last[0] || 0)));
+            allLons.push(denormLon(Number(last[1] || 0)));
+          }
         });
 
         if (allLats.length) {
@@ -257,7 +282,7 @@
       }
 
       mountEl.appendChild(el("div", { style: "font-size:11px;color:#94a3b8;margin-top:4px;" },
-        allTrajs.length + " vessel trajectories | Baltic Sea | Features: lat, lon, SOG, COG"));
+        allTrajs.length + " trajectories | Color: speed (blue=slow, red=fast) | Max SOG: " + maxSog.toFixed(2)));
     }).catch(function (err) {
       statusEl.textContent = "AIS data load failed: " + String((err && err.message) || err || "unknown error");
       statusEl.style.color = "#fca5a5";
@@ -269,18 +294,7 @@
       _renderTrajectoryMap(mountEl, deps, { title: "AIS Dataset Preview", limit: 80 });
     },
     renderPlayground: function (mountEl, deps) {
-      var el = deps.el;
-      if (deps && deps.configEl) {
-        deps.configEl.innerHTML = "";
-        deps.configEl.appendChild(el("h3", {}, "AIS Info"));
-        deps.configEl.appendChild(el("div", { style: "font-size:12px;color:#94a3b8;line-height:1.5;" }, [
-          "Autoregressive vessel trajectory prediction.",
-          el("div", { style: "margin-top:6px;" }, "Input: 16-step window × 4 features"),
-          el("div", {}, "Target: next [lat, lon, sog, cog]"),
-          el("div", {}, "Data source: Danish Maritime Authority"),
-        ]));
-      }
-      _renderTrajectoryMap(mountEl, deps, { title: "AIS Playground", limit: 120 });
+      _renderTrajectoryMap(mountEl, deps, { title: "AIS Trajectory Explorer", limit: 120 });
     },
   };
 
