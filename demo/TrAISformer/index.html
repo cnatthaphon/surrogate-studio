@@ -72,7 +72,7 @@
       if (preset.generations) preset.generations.forEach(function (g) { store.save({ table: "generationRuns", values: [g] }); });
       if (preset.evaluations) preset.evaluations.forEach(function (e) { store.save({ table: "evaluations", values: [e] }); });
     }
-    SurrogateStudio.init({ mountEl: document.getElementById("app"), defaultSchemaId: "ais_trajectory", defaultTab: "model", store: store });
+    SurrogateStudio.init({ mountEl: document.getElementById("app"), defaultSchemaId: "ais_trajectory", defaultTab: "dataset", store: store });
   </script>
 </body>
 </html>
