@@ -153,23 +153,55 @@ aisModule.build({ windowSize: 16, maxTrajectories: MAX_TRAJS }).then(function (d
         nextModel(); return;
       }
       console.log("  Job: " + resp.jobId + " — streaming epochs...");
-      return streamSSE(SERVER + "/api/train/" + resp.jobId);
+      var _jobId = resp.jobId;
+      return streamSSE(SERVER + "/api/train/" + _jobId).then(function (r) { r._jobId = _jobId; return r; });
     }).then(function (sse) {
       if (!sse) { nextModel(); return; }
       var result = sse.result || {};
       var epochs = sse.epochs || [];
+
+      function exportWeights(cfg, m, specs, values, result, epochs) {
+        var meta = {
+          name: m.name + " (pre-trained)", status: "done",
+          config: trainPayload.config,
+          metrics: { bestEpoch: result.bestEpoch, bestValLoss: result.bestValLoss, testMae: result.testMae, testRmse: result.testRmse, testR2: result.testR2 },
+          backend: "pytorch",
+          epochs: epochs.map(function (e) { return { epoch: e.epoch, loss: e.loss, val_loss: e.val_loss, current_lr: e.current_lr }; }),
+        };
+        var packed = packBinary(meta, specs, values);
+        var b64 = packed.toString("base64");
+        fs.writeFileSync(path.join(DEMO_DIR, cfg.file),
+          "// Pre-trained " + m.name + " (PyTorch CUDA)\nwindow." + cfg.varName + " = \"" + b64 + "\";\n");
+        console.log("  Saved: " + cfg.file + " (" + (packed.length / 1024).toFixed(0) + " KB)");
+      }
       console.log("  Done. " + epochs.length + " epochs");
       if (result.testMae != null) console.log("  Test MAE: " + result.testMae.toFixed(6));
       if (result.testRmse != null) console.log("  Test RMSE: " + result.testRmse.toFixed(6));
       if (result.testR2 != null) console.log("  Test R²: " + result.testR2.toFixed(6));
 
-      // Extract weights from result
-      var specs = result.weightSpecs || [];
-      var values = result.weightValues || [];
-      if (!specs.length || !values.length) {
-        console.log("  No weights in result, skipping export");
-        nextModel(); return;
-      }
+      // Fetch full result with weights from /api/train/:id/result
+      var jobId = sse._jobId;
+      if (!jobId) { console.log("  No jobId, skipping export"); nextModel(); return; }
+      console.log("  Fetching weights...");
+      var zlib = require("zlib");
+      http.get(SERVER + "/api/train/" + jobId + "/result", function (wRes) {
+        var chunks = [];
+        wRes.on("data", function (c) { chunks.push(c); });
+        wRes.on("end", function () {
+          var raw = Buffer.concat(chunks);
+          try {
+            var decoded = wRes.headers["content-encoding"] === "gzip" ? zlib.gunzipSync(raw) : raw;
+            var fullResult = JSON.parse(decoded.toString());
+            var artifacts = fullResult.modelArtifacts || {};
+            var specs = artifacts.weightSpecs || [];
+            var values = artifacts.weightValues || [];
+            if (!specs.length) { console.log("  No weights in result"); nextModel(); return; }
+            exportWeights(cfg, m, specs, values, result, epochs);
+          } catch (e) { console.log("  Weight error: " + e.message); }
+          nextModel();
+        });
+      }).on("error", function (e) { console.log("  Fetch error: " + e.message); nextModel(); });
+      return; // don't fall through to nextModel
 
       var meta = {
         name: m.name + " (pre-trained)", status: "done",
