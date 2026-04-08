@@ -953,13 +953,19 @@ def build_model_from_graph(graph, feature_size, target_size, num_classes=0):
             t = t[:-6]
         return t
 
-    # Parse nodes + edges
+    # Feature blocks are visual/declarative only — skip them
+    _feature_block_types = {"window_hist", "hist", "params", "sliding_window", "window_hist_x", "window_hist_v"}
+
+    # Parse nodes + edges (skip feature blocks)
     nodes = {}
     edges_out = {}  # nid → [{ to, from_port, to_port }]
     edges_in = {}   # nid → [{ from, from_port, to_port }]
     for nid in sorted(raw.keys(), key=lambda k: int(k) if k.isdigit() else 0):
         n = raw[nid]
         t = _normalize_node_type(n.get("name", ""))
+        # Skip feature blocks (visual/declarative only)
+        if t in _feature_block_types:
+            continue
         nodes[nid] = {"type": t, "config": n.get("data", {})}
         edges_out[nid] = []
         edges_in.setdefault(nid, [])
@@ -967,6 +973,11 @@ def build_model_from_graph(graph, feature_size, target_size, num_classes=0):
             for conn in (ov or {}).get("connections", []):
                 to_id = str(conn.get("node", ""))
                 to_port = str(conn.get("input", "input_1"))
+                # Skip connections from feature blocks
+                target_name = _normalize_node_type((raw.get(to_id) or {}).get("name", ""))
+                source_name = t
+                if target_name in _feature_block_types or source_name in _feature_block_types:
+                    continue
                 edges_out[nid].append({"to": to_id, "from_port": ok, "to_port": to_port})
                 edges_in.setdefault(to_id, [])
                 edges_in[to_id].append({"from": nid, "from_port": ok, "to_port": to_port})
