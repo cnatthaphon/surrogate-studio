@@ -954,7 +954,7 @@ def build_model_from_graph(graph, feature_size, target_size, num_classes=0):
         return t
 
     # Feature blocks are visual/declarative only — skip them
-    _feature_block_types = {"window_hist", "hist", "params", "sliding_window", "window_hist_x", "window_hist_v"}
+    _feature_block_types = {"window_hist", "hist", "params", "sliding_window", "window_hist_x", "window_hist_v", "time_sec", "time_norm", "sin_norm", "cos_norm", "onehot"}
 
     # Parse nodes + edges (skip feature blocks)
     nodes = {}

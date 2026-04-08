@@ -372,7 +372,7 @@
     var ids = Object.keys(data || {});
     var inputNodeNames = { "input_layer": true, "image_source_block": true, "image_source_layer": true, "sample_z_layer": true, "time_embed_layer": true, "class_embed_layer": true };
     // Feature blocks are visual/declarative — they don't create model inputs
-    var featureBlockNames = { "window_hist_block": true, "window_hist_x_block": true, "window_hist_v_block": true, "hist_block": true, "params_block": true, "sliding_window_block": true };
+    var featureBlockNames = { "window_hist_block": true, "window_hist_x_block": true, "window_hist_v_block": true, "hist_block": true, "params_block": true, "params_layer": true, "sliding_window_block": true, "time_sec_layer": true, "time_norm_layer": true, "sin_norm_layer": true, "cos_norm_layer": true, "onehot_layer": true };
     var inputIds = ids.filter(function (id) { return data[id] && inputNodeNames[data[id].name]; });
     if (!inputIds.length) return [{ id: "fallback", target: fallback, loss: "mse", headType: _lookupHeadType(fallback, allowedOutputKeys) }];
     var reachable = {};
@@ -483,7 +483,7 @@
 
     var inputNodeNames = { "input_layer": true, "image_source_block": true, "image_source_layer": true, "sample_z_layer": true, "time_embed_layer": true, "class_embed_layer": true };
     // Feature blocks are visual/declarative — they don't create model inputs
-    var featureBlockNames = { "window_hist_block": true, "window_hist_x_block": true, "window_hist_v_block": true, "hist_block": true, "params_block": true, "sliding_window_block": true };
+    var featureBlockNames = { "window_hist_block": true, "window_hist_x_block": true, "window_hist_v_block": true, "hist_block": true, "params_block": true, "params_layer": true, "sliding_window_block": true, "time_sec_layer": true, "time_norm_layer": true, "sin_norm_layer": true, "cos_norm_layer": true, "onehot_layer": true };
     // only nodes with NO incoming connections are true external inputs
     // (e.g., Input node connected FROM ImageSource is NOT an external input)
     var inputIds = ids.filter(function (id) {
