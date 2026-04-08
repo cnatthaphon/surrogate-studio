@@ -120,8 +120,7 @@
   function build(config) {
     config = config || {};
     var windowSize = Math.max(1, Number(config.windowSize || 16));
-    var useFullSource = config.useFullSource != null ? Boolean(config.useFullSource) : true;
-    var maxTrajs = useFullSource ? 9999 : Math.max(10, Number(config.totalCount || 150));
+    var maxTrajs = Math.max(10, Number(config.totalCount || 180));
 
     var dataPromise = loadData();
 
@@ -457,10 +456,9 @@
         sections: [{
           title: "AIS Dataset",
           schema: [
-            { key: "useFullSource", label: "Use all trajectories (180)", type: "checkbox" },
-            { key: "totalCount", label: "Total trajectories", type: "number", min: 10, max: 180, step: 10 },
+            { key: "totalCount", label: "Trajectories (max 180)", type: "number", min: 10, max: 180, step: 10 },
           ],
-          value: { useFullSource: true, totalCount: 180 },
+          value: { totalCount: 180 },
         }],
       };
     },
