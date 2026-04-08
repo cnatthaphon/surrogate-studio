@@ -99,6 +99,26 @@
     ];
   }
 
+  function _aisTrajectoryPaletteItems() {
+    return [
+      _paletteItem("addInputBtn", "input", "Input", "NN", { mode: "flat" }),
+      _paletteItem("addReshapeBtn", "reshape", "Reshape", "NN", { targetShape: "16,4" }),
+      _paletteItem("addDenseBtn", "dense", "Dense", "NN", { units: 64, activation: "relu" }),
+      _paletteItem("addRnnBtn", "rnn", "RNN", "NN", { units: 64, dropout: 0.1, returnseq: "auto" }),
+      _paletteItem("addGruBtn", "gru", "GRU", "NN", { units: 64, dropout: 0.1, returnseq: "auto" }),
+      _paletteItem("addLstmBtn", "lstm", "LSTM", "NN", { units: 64, dropout: 0.1, returnseq: "auto" }),
+      _paletteItem("addConv1dBtn", "conv1d", "Conv1D", "NN", { filters: 64, kernelSize: 3, stride: 1, activation: "relu" }),
+      _paletteItem("addDropoutBtn", "dropout", "Dropout", "NN", { rate: 0.1 }),
+      _paletteItem("addReLUBtn", "relu", "ReLU", "NN", {}),
+      _paletteItem("addBatchNormBtn", "batchnorm", "BatchNorm", "NN", { momentum: 0.99, epsilon: 1e-3 }),
+      _paletteItem("addLayerNormBtn", "layernorm", "LayerNorm", "NN", { epsilon: 1e-3 }),
+      _paletteItem("addConcatBtn", "concat", "Concat", "Utils", { numInputs: 2 }),
+      _paletteItem("addTransformerBlockBtn", "transformer_block", "TransformerBlock", "Transformer", { numHeads: 2, ffnDim: 32, dropout: 0.1 }),
+      _paletteItem("addGlobalAvgPool1dBtn", "global_avg_pool1d", "GlobalAvgPool1D", "Transformer", {}),
+      _paletteItem("addOutputMultiBtn", "output", "Output", "Output", { target: "position", targetType: "position", loss: "mse" }),
+    ];
+  }
+
   registerSchema({
     id: "oscillator",
     label: "oscillator",
@@ -3529,15 +3549,19 @@
       },
     },
     model: {
+      inputKeys: [
+        { key: "trajectory_window", label: "trajectory window (lat,lon,sog,cog)" },
+      ],
       outputs: [
         { key: "position", label: "Next position (lat,lon,sog,cog)", headType: "regression" },
       ],
       defaultPreset: null,
       metadata: {
         featureNodes: {
+          historySeries: [],
           oneHot: [],
-          policy: { allowHistory: true, allowWindowHistory: true, allowParams: false, allowOneHot: false, allowImageSource: false },
-          palette: { items: _trajectoryPaletteItems() },
+          policy: { allowHistory: false, allowWindowHistory: false, allowParams: false, allowOneHot: false, allowImageSource: false },
+          palette: { items: _aisTrajectoryPaletteItems() },
         },
       },
     },

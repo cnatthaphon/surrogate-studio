@@ -12,21 +12,22 @@
  * AIS trajectory prediction", arXiv:2109.03958
  */
 (function (root, factory) {
+  var descriptor = factory(root);
   if (typeof module === "object" && module.exports) {
-    module.exports = factory(root);
+    module.exports = descriptor;
     return;
   }
-  var mod = factory(root);
-  if (root.OSCDatasetModules && typeof root.OSCDatasetModules.register === "function") {
-    root.OSCDatasetModules.register(mod);
+  if (root.OSCDatasetModules && typeof root.OSCDatasetModules.registerModule === "function") {
+    root.OSCDatasetModules.registerModule(descriptor);
   }
-  root.OSCDatasetModuleAis = mod;
+  root.OSCDatasetModuleAis = descriptor;
 })(typeof globalThis !== "undefined" ? globalThis : this, function (root) {
   "use strict";
 
   var MODULE_ID = "ais_dma";
   var SCHEMA_ID = "ais_trajectory";
   var REGION = { latMin: 55.5, latMax: 58.0, lonMin: 10.3, lonMax: 13.0 };
+  var _cachedFetchedData = null;
 
   function denormLat(v) { return REGION.latMin + v * (REGION.latMax - REGION.latMin); }
   function denormLon(v) { return REGION.lonMin + v * (REGION.lonMax - REGION.lonMin); }
@@ -35,6 +36,59 @@
   var _inlineData = null;
 
   function setInlineData(data) { _inlineData = data; }
+
+  function _resolveDataBase() {
+    if (typeof document !== "undefined") {
+      var scripts = document.getElementsByTagName("script");
+      for (var i = scripts.length - 1; i >= 0; i--) {
+        var src = scripts[i].src || "";
+        if (src.indexOf("ais_module.js") >= 0) {
+          return src.replace(/src\/dataset_modules\/ais_module\.js.*$/, "data/ais-dma/");
+        }
+      }
+    }
+    return "../../data/ais-dma/";
+  }
+
+  var _dataBase = _resolveDataBase();
+  var DATA_URL = _dataBase + "ais_dma_small.json";
+
+  function _extractTrajectory(entry) {
+    if (!Array.isArray(entry)) return [];
+    if (entry.length === 2 && Array.isArray(entry[1]) && Array.isArray(entry[1][0])) return entry[1];
+    return entry;
+  }
+
+  function _fetchJSON(url) {
+    return new Promise(function (resolve, reject) {
+      var xhr = new XMLHttpRequest();
+      xhr.open("GET", url, true);
+      xhr.responseType = "text";
+      xhr.onload = function () {
+        var text = xhr.responseText || "";
+        if (!text) {
+          reject(new Error("Empty response from " + url));
+          return;
+        }
+        try { resolve(JSON.parse(text)); } catch (err) { reject(err); }
+      };
+      xhr.onerror = function () {
+        reject(new Error("Network error loading " + url));
+      };
+      xhr.send();
+    });
+  }
+
+  function loadData() {
+    var W = typeof window !== "undefined" ? window : {};
+    if (_inlineData) return Promise.resolve(_inlineData);
+    if (W._AIS_INLINE_DATA) return Promise.resolve(W._AIS_INLINE_DATA);
+    if (_cachedFetchedData) return Promise.resolve(_cachedFetchedData);
+    return _fetchJSON(DATA_URL).then(function (data) {
+      _cachedFetchedData = data;
+      return data;
+    });
+  }
 
   /**
    * Build dataset for training.
@@ -46,86 +100,89 @@
     config = config || {};
     var windowSize = Math.max(1, Number(config.windowSize || 16));
 
-    var data = _inlineData;
-    if (!data) {
-      // Try global inline data
-      var W = typeof window !== "undefined" ? window : {};
-      data = W._AIS_INLINE_DATA || null;
-    }
-    if (!data || !data.train) {
-      return Promise.reject(new Error("AIS data not loaded. Ensure ais_inline_data.js is included before preset.js"));
-    }
-
-    var trainTrajs = data.train || [];
-    var valTrajs = data.val || [];
-
-    function buildSamples(trajs) {
-      var x = [], y = [];
-      for (var ti = 0; ti < trajs.length; ti++) {
-        var traj = trajs[ti]; // [[lat,lon,sog,cog], ...]
-        for (var t = windowSize; t < traj.length; t++) {
-          var input = [];
-          for (var w = t - windowSize; w < t; w++) {
-            for (var d = 0; d < 4; d++) input.push(traj[w][d]);
-          }
-          x.push(input);
-          y.push(traj[t]);
-        }
+    return loadData().then(function (data) {
+      if (!data || !data.train) {
+        throw new Error("AIS data not loaded.");
       }
-      return { x: x, y: y };
-    }
+      var trainTrajs = (data.train || []).map(_extractTrajectory).filter(function (traj) { return Array.isArray(traj) && traj.length > windowSize; });
+      var valTrajs = (data.val || []).map(_extractTrajectory).filter(function (traj) { return Array.isArray(traj) && traj.length > windowSize; });
+      var testTrajs = (data.test || []).map(_extractTrajectory).filter(function (traj) { return Array.isArray(traj) && traj.length > windowSize; });
 
-    var train = buildSamples(trainTrajs);
-    var val = buildSamples(valTrajs);
-    // use last 20% of val as test
-    var testSplit = Math.floor(val.x.length * 0.6);
-    var test = { x: val.x.slice(testSplit), y: val.y.slice(testSplit) };
-    val = { x: val.x.slice(0, testSplit), y: val.y.slice(0, testSplit) };
+      function buildSamples(trajs) {
+      var x = [], y = [];
+        for (var ti = 0; ti < trajs.length; ti++) {
+          var traj = trajs[ti];
+          for (var t = windowSize; t < traj.length; t++) {
+            var input = [];
+            for (var w = t - windowSize; w < t; w++) {
+              for (var d = 0; d < 4; d++) input.push(traj[w][d]);
+            }
+            x.push(input);
+            y.push(traj[t]);
+          }
+        }
+        return { x: x, y: y };
+      }
 
-    var result = {
-      schemaId: SCHEMA_ID,
-      name: "AIS DMA (" + trainTrajs.length + " trajectories)",
-      mode: "regression",
-      featureSize: windowSize * 4,
-      targetSize: 4,
-      windowSize: windowSize,
-      xTrain: train.x, yTrain: train.y,
-      xVal: val.x, yVal: val.y,
-      xTest: test.x, yTest: test.y,
-      region: REGION,
-      columns: ["lat", "lon", "sog", "cog"],
-      numTrajectories: { train: trainTrajs.length, val: valTrajs.length },
-    };
+      var train = buildSamples(trainTrajs);
+      var val = buildSamples(valTrajs);
+      var test = buildSamples(testTrajs);
+      if (!test.x.length && val.x.length) {
+        var testSplit = Math.floor(val.x.length * 0.6);
+        test = { x: val.x.slice(testSplit), y: val.y.slice(testSplit) };
+        val = { x: val.x.slice(0, testSplit), y: val.y.slice(0, testSplit) };
+      }
 
-    return Promise.resolve(result);
+      return {
+        schemaId: SCHEMA_ID,
+        name: "AIS DMA (" + trainTrajs.length + " trajectories)",
+        mode: "regression",
+        featureSize: windowSize * 4,
+        targetSize: 4,
+        windowSize: windowSize,
+        xTrain: train.x, yTrain: train.y,
+        xVal: val.x, yVal: val.y,
+        xTest: test.x, yTest: test.y,
+        region: REGION,
+        columns: ["lat", "lon", "sog", "cog"],
+        numTrajectories: { train: trainTrajs.length, val: valTrajs.length, test: testTrajs.length },
+      };
+    });
   }
 
-  var playgroundApi = {
-    renderDataset: function (mountEl, deps) {
-      var el = deps.el;
-      var data = _inlineData || (typeof window !== "undefined" ? window._AIS_INLINE_DATA : null);
-      if (!data || !data.train) {
-        mountEl.appendChild(el("div", { style: "color:#f59e0b;padding:12px;" }, "AIS data not loaded. Open demo/TrAISformer/index.html to use this module."));
+  function _renderTrajectoryCanvas(mountEl, deps, opts) {
+    var el = deps.el;
+    var options = opts || {};
+    var title = String(options.title || "AIS Trajectory Preview");
+    var limit = Math.max(1, Number(options.limit || 80));
+    mountEl.innerHTML = "";
+    mountEl.appendChild(el("div", { style: "font-size:12px;color:#cbd5e1;font-weight:600;margin-bottom:6px;" }, title));
+    var statusEl = el("div", { style: "font-size:12px;color:#94a3b8;" }, "Loading AIS trajectories...");
+    mountEl.appendChild(statusEl);
+    loadData().then(function (data) {
+      var trajs = (data.train || []).map(_extractTrajectory).filter(function (traj) { return Array.isArray(traj) && traj.length; }).slice(0, limit);
+      statusEl.remove();
+      if (!trajs.length) {
+        mountEl.appendChild(el("div", { style: "color:#fca5a5;padding:12px;" }, "No AIS trajectories available."));
         return;
       }
-
-      var trajs = data.train.slice(0, 80);
       var canvas = document.createElement("canvas");
-      canvas.width = 600; canvas.height = 400;
-      canvas.style.cssText = "width:100%;max-width:600px;height:auto;border:1px solid #334155;border-radius:6px;background:#0a1628;";
+      canvas.width = 720; canvas.height = 440;
+      canvas.style.cssText = "width:100%;max-width:720px;height:auto;border:1px solid #334155;border-radius:8px;background:#0a1628;";
       mountEl.appendChild(canvas);
-
       var ctx = canvas.getContext("2d");
+      ctx.fillStyle = "#08111d";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
       var colors = ["#22d3ee", "#4ade80", "#f59e0b", "#a78bfa", "#f43f5e", "#fb923c", "#34d399", "#818cf8"];
 
       trajs.forEach(function (traj, ti) {
         ctx.beginPath();
         ctx.strokeStyle = colors[ti % colors.length];
-        ctx.lineWidth = 0.8;
-        ctx.globalAlpha = 0.5;
+        ctx.lineWidth = 0.75;
+        ctx.globalAlpha = 0.55;
         for (var i = 0; i < traj.length; i++) {
-          var x = traj[i][1] * canvas.width;  // lon → x
-          var y = (1 - traj[i][0]) * canvas.height; // lat → y (flip)
+          var x = Number(traj[i][1] || 0) * canvas.width;
+          var y = (1 - Number(traj[i][0] || 0)) * canvas.height;
           if (i === 0) ctx.moveTo(x, y);
           else ctx.lineTo(x, y);
         }
@@ -135,6 +192,29 @@
 
       mountEl.appendChild(el("div", { style: "font-size:11px;color:#94a3b8;margin-top:4px;" },
         trajs.length + " trajectories | Baltic Sea (55.5°N–58.0°N, 10.3°E–13.0°E) | Features: lat, lon, SOG, COG"));
+    }).catch(function (err) {
+      statusEl.textContent = "AIS data load failed: " + String((err && err.message) || err || "unknown error");
+      statusEl.style.color = "#fca5a5";
+    });
+  }
+
+  var playgroundApi = {
+    renderDataset: function (mountEl, deps) {
+      _renderTrajectoryCanvas(mountEl, deps, { title: "AIS Dataset Preview", limit: 80 });
+    },
+    renderPlayground: function (mountEl, deps) {
+      var el = deps.el;
+      if (deps && deps.configEl) {
+        deps.configEl.innerHTML = "";
+        deps.configEl.appendChild(el("h3", {}, "AIS Info"));
+        deps.configEl.appendChild(el("div", { style: "font-size:12px;color:#94a3b8;line-height:1.5;" }, [
+          "Autoregressive vessel trajectory prediction.",
+          el("div", { style: "margin-top:6px;" }, "Input: 16-step window × 4 features"),
+          el("div", {}, "Target: next [lat, lon, sog, cog]"),
+          el("div", {}, "Data source: Danish Maritime Authority"),
+        ]));
+      }
+      _renderTrajectoryCanvas(mountEl, deps, { title: "AIS Playground", limit: 120 });
     },
   };
 
@@ -157,6 +237,7 @@
     schemaId: SCHEMA_ID,
     label: "AIS Maritime Trajectories (DMA)",
     description: "Danish Maritime Authority vessel tracking data — Baltic Sea region",
+    kind: "panel_builder",
     build: build,
     playgroundApi: playgroundApi,
     uiApi: uiApi,
