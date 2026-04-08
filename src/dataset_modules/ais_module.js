@@ -224,18 +224,28 @@
         });
         allTrajs = allTrajs.slice(0, limit);
 
-        // Color by speed (SOG): blue=slow → red=fast, range from data
-        var maxSog = 0;
+        // Collect all SOG values for percentile-based color mapping
+        var allSog = [];
         allTrajs.forEach(function (traj) {
-          for (var i = 0; i < traj.length; i++) {
-            var s = Number(traj[i][2] || 0);
-            if (s > maxSog) maxSog = s;
-          }
+          for (var i = 0; i < traj.length; i++) allSog.push(Number(traj[i][2] || 0));
         });
+        allSog.sort(function (a, b) { return a - b; });
+        var maxSog = allSog.length ? allSog[allSog.length - 1] : 1;
         if (maxSog < 0.001) maxSog = 1;
 
+        // Percentile thresholds: map each SOG to its rank in the data
+        function sogPercentile(sog) {
+          // Binary search for rank
+          var lo = 0, hi = allSog.length - 1;
+          while (lo <= hi) {
+            var mid = (lo + hi) >> 1;
+            if (allSog[mid] <= sog) lo = mid + 1; else hi = mid - 1;
+          }
+          return allSog.length > 1 ? lo / (allSog.length - 1) : 0.5;
+        }
+
         function sogColor(sog) {
-          var t = Math.min(1, Math.max(0, sog / maxSog));
+          var t = sogPercentile(sog); // 0=slowest in data, 1=fastest
           var r, g, b;
           if (t < 0.25) { r = 0; g = Math.round(255 * t * 4); b = 255; }
           else if (t < 0.5) { r = 0; g = 255; b = Math.round(255 * (1 - (t - 0.25) * 4)); }
@@ -243,6 +253,10 @@
           else { r = 255; g = Math.round(255 * (1 - (t - 0.75) * 4)); b = 0; }
           return "rgb(" + r + "," + g + "," + b + ")";
         }
+        // For legend: show actual SOG values at percentile boundaries
+        var p25 = allSog[Math.floor(allSog.length * 0.25)] || 0;
+        var p50 = allSog[Math.floor(allSog.length * 0.5)] || 0;
+        var p75 = allSog[Math.floor(allSog.length * 0.75)] || 0;
 
         var allLats = [], allLons = [];
         // Draw trajectory segments + COG direction markers
@@ -301,13 +315,17 @@
         legend.onAdd = function () {
           var div = L.DomUtil.create("div");
           div.style.cssText = "background:rgba(0,0,0,0.7);padding:6px 10px;border-radius:4px;font-size:10px;color:#e2e8f0;line-height:1.4;";
+          // Gradient bar using percentile-mapped colors
           var bar = "";
-          for (var gi = 0; gi <= 10; gi++) {
-            bar += "<span style='display:inline-block;width:16px;height:10px;background:" + sogColor(maxSog * gi / 10) + ";'></span>";
+          for (var gi = 0; gi <= 20; gi++) {
+            var sogVal = allSog[Math.floor(allSog.length * gi / 20)] || 0;
+            bar += "<span style='display:inline-block;width:8px;height:10px;background:" + sogColor(sogVal) + ";'></span>";
           }
-          div.innerHTML = "<div style='margin-bottom:2px;font-weight:600;'>Speed (SOG)</div>" +
+          div.innerHTML = "<div style='margin-bottom:2px;font-weight:600;'>Speed (SOG) — percentile</div>" +
             "<div>" + bar + "</div>" +
-            "<div style='display:flex;justify-content:space-between;font-size:9px;color:#94a3b8;'><span>0</span><span>" + maxSog.toFixed(2) + "</span></div>" +
+            "<div style='display:flex;justify-content:space-between;font-size:9px;color:#94a3b8;'>" +
+            "<span>0</span><span>" + p25.toFixed(2) + "</span><span>" + p50.toFixed(2) + "</span><span>" + p75.toFixed(2) + "</span><span>" + maxSog.toFixed(2) + "</span></div>" +
+            "<div style='font-size:9px;color:#94a3b8;'>0% — 25% — 50% — 75% — 100%</div>" +
             "<div style='margin-top:4px;font-size:9px;color:#94a3b8;'>&#9654; = course (COG)</div>";
           return div;
         };
