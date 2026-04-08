@@ -212,8 +212,7 @@
           "Satellite + Labels": L.layerGroup([satTile, labelOverlay]),
           "Dark": L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", { attribution: attr_carto, subdomains: "abcd", maxZoom: 19 }),
           "Light": L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png", { attribution: attr_carto, subdomains: "abcd", maxZoom: 19 }),
-          "OpenStreetMap": L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { attribution: attr_osm, maxZoom: 19 }),
-          "Topo": L.tileLayer("https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png", { attribution: attr_osm + ' &copy; OpenTopoMap', maxZoom: 17 }),
+          "Voyager": L.tileLayer("https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png", { attribution: attr_carto, subdomains: "abcd", maxZoom: 19 }),
         };
         baseLayers["Satellite + Labels"].addTo(map);
         L.control.layers(baseLayers, null, { collapsed: true, position: "topright" }).addTo(map);
