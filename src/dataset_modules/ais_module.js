@@ -128,8 +128,15 @@
       if (!data || !data.train) {
         throw new Error("AIS data not loaded.");
       }
-      var trainTrajs = (data.train || []).map(_extractTrajectory).filter(function (traj) { return Array.isArray(traj) && traj.length > windowSize; }).slice(0, maxTrajs);
-      var valTrajs = (data.val || []).map(_extractTrajectory).filter(function (traj) { return Array.isArray(traj) && traj.length > windowSize; }).slice(0, Math.max(5, Math.floor(maxTrajs * 0.2)));
+      var allClean = { train: [], val: [], test: [] };
+      ["train", "val", "test"].forEach(function (s) {
+        allClean[s] = (data[s] || []).map(_extractTrajectory).filter(function (t) { return Array.isArray(t) && t.length > windowSize; });
+      });
+      var totalAvail = allClean.train.length + allClean.val.length + allClean.test.length;
+      var ratio = Math.min(1, maxTrajs / Math.max(1, totalAvail));
+      var trainTrajs = allClean.train.slice(0, Math.max(1, Math.round(allClean.train.length * ratio)));
+      var valTrajs = allClean.val.slice(0, Math.max(1, Math.round(allClean.val.length * ratio)));
+      var testTrajs = allClean.test.slice(0, Math.max(1, Math.round(allClean.test.length * ratio)));
       var testTrajs = (data.test || []).map(_extractTrajectory).filter(function (traj) { return Array.isArray(traj) && traj.length > windowSize; });
 
       function buildSamples(trajs) {
