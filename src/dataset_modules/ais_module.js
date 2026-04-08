@@ -199,7 +199,7 @@
         mapDiv.style.cssText = "width:100%;height:450px;border-radius:8px;border:1px solid #334155;";
         mountEl.appendChild(mapDiv);
 
-        var map = L.map(mapDiv, { zoomControl: true, attributionControl: true }).setView([56.75, 11.65], 7);
+        var map = L.map(mapDiv, { zoomControl: true, attributionControl: true, preferCanvas: true }).setView([56.75, 11.65], 7);
 
         // Dark tile layer
         L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
