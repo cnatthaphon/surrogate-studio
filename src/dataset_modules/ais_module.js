@@ -201,10 +201,18 @@
 
         var map = L.map(mapDiv, { zoomControl: true, attributionControl: true, preferCanvas: true }).setView([56.75, 11.65], 7);
 
-        L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
-          attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> &copy; <a href="https://carto.com/">CARTO</a>',
-          subdomains: "abcd", maxZoom: 19,
-        }).addTo(map);
+        // Tile layers — user selects from layer control
+        var attr_osm = '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a>';
+        var attr_carto = attr_osm + ' &copy; <a href="https://carto.com/">CARTO</a>';
+        var baseLayers = {
+          "Dark": L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", { attribution: attr_carto, subdomains: "abcd", maxZoom: 19 }),
+          "Light": L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png", { attribution: attr_carto, subdomains: "abcd", maxZoom: 19 }),
+          "OpenStreetMap": L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { attribution: attr_osm, maxZoom: 19 }),
+          "Satellite": L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", { attribution: '&copy; Esri, Maxar, Earthstar', maxZoom: 18 }),
+          "Topo": L.tileLayer("https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png", { attribution: attr_osm + ' &copy; OpenTopoMap', maxZoom: 17 }),
+        };
+        baseLayers["Dark"].addTo(map);
+        L.control.layers(baseLayers, null, { collapsed: true, position: "topright" }).addTo(map);
 
         // Playground: show all trajectories as one set (no split)
         var allTrajs = [];
@@ -234,14 +242,30 @@
         }
 
         var allLats = [], allLons = [];
-        allTrajs.forEach(function (traj) {
+        var columns = data.columns || ["lat", "lon", "sog", "cog"];
+        allTrajs.forEach(function (traj, trajIdx) {
           for (var i = 0; i < traj.length - 1; i++) {
             var lat1 = denormLat(Number(traj[i][0] || 0));
             var lon1 = denormLon(Number(traj[i][1] || 0));
             var lat2 = denormLat(Number(traj[i + 1][0] || 0));
             var lon2 = denormLon(Number(traj[i + 1][1] || 0));
             var sog = Number(traj[i][2] || 0);
-            L.polyline([[lat1, lon1], [lat2, lon2]], { color: sogColor(sog), weight: 1.5, opacity: 0.7 }).addTo(map);
+            var line = L.polyline([[lat1, lon1], [lat2, lon2]], { color: sogColor(sog), weight: 1.5, opacity: 0.7 });
+            // Popup with actual values
+            (function (pt, ti, si) {
+              line.bindPopup(function () {
+                var rows = columns.map(function (col, ci) {
+                  return "<b>" + col + ":</b> " + Number(pt[ci] || 0).toFixed(4);
+                }).join("<br>");
+                return "<div style='font-size:11px;line-height:1.5;'>" +
+                  "<b>Trajectory " + ti + " | Step " + si + "</b><br>" +
+                  rows +
+                  "<br><b>Lat:</b> " + denormLat(Number(pt[0] || 0)).toFixed(4) + "°N" +
+                  "<br><b>Lon:</b> " + denormLon(Number(pt[1] || 0)).toFixed(4) + "°E" +
+                  "</div>";
+              });
+            })(traj[i], trajIdx, i);
+            line.addTo(map);
             allLats.push(lat1); allLons.push(lon1);
           }
           if (traj.length) {
