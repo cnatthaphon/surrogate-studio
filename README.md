@@ -217,11 +217,17 @@ https://cnatthaphon.github.io/surrogate-studio/demo/Fashion-MNIST-GAN/
 https://cnatthaphon.github.io/surrogate-studio/demo/Fashion-MNIST-Diffusion/
 https://cnatthaphon.github.io/surrogate-studio/demo/Fashion-MNIST-Conditional-Diffusion/
 https://cnatthaphon.github.io/surrogate-studio/demo/Fashion-MNIST-Transformer/
+https://cnatthaphon.github.io/surrogate-studio/demo/TrAISformer/
 https://cnatthaphon.github.io/surrogate-studio/demo/LSTM-VAE-for-dominant-motion-extraction/
 https://cnatthaphon.github.io/surrogate-studio/demo/Oscillator-Surrogate/
 ```
 
 Each demo README linked above explains how to use that demo inside the app.
+
+Notebook execution is different from the pure browser demos:
+- the `Run Notebook` UI is available from GitHub Pages
+- actual execution still targets a local training server, usually `http://localhost:3777`
+- if you want notebook cells to run, start the local backend first with `node server/training_server.js`
 
 ```
 Open `index.html` in Chrome/Edge (works on `file://`)
