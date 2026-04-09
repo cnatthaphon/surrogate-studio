@@ -30,6 +30,23 @@
     return W.OSCCheckpointFormatCore || null;
   }
 
+  function _isLoopbackServer(url) {
+    return /^http:\/\/(?:127\.0\.0\.1|localhost|0\.0\.0\.0|\[::1\])(?::\d+)?(?:\/|$)/i.test(String(url || ""));
+  }
+
+  function _formatServerAccessError(serverUrl, err, actionLabel) {
+    var raw = String((err && err.message) || err || "Unknown error");
+    var onSecurePage = typeof window !== "undefined" && String(window.location.protocol || "") === "https:";
+    if (onSecurePage && _isLoopbackServer(serverUrl) && /Failed to fetch|ERR_FAILED|NetworkError/i.test(raw)) {
+      return [
+        "Cannot reach the local " + actionLabel + " server from this HTTPS page.",
+        "Your browser may be blocking loopback/local network access.",
+        "Open Surrogate Studio from " + String(serverUrl || DEFAULT_SERVER).replace(/\/$/, "") + " instead of GitHub Pages, or allow local network access for this site."
+      ].join(" ");
+    }
+    return raw;
+  }
+
   function stopTrainingOnServer(jobId, serverUrl) {
     var url = String(serverUrl || DEFAULT_SERVER).replace(/\/$/, "");
     var id = String(jobId || "").trim();
@@ -40,6 +57,8 @@
     }).then(function (res) {
       if (!res.ok) throw new Error("Server stop returned " + res.status);
       return res.json();
+    }).catch(function (err) {
+      throw new Error(_formatServerAccessError(url, err, "training"));
     });
   }
 
@@ -73,6 +92,8 @@
       }).then(function (res) {
         if (!res.ok) throw new Error("Server returned " + res.status);
         return res.json();
+      }).catch(function (err) {
+        throw new Error(_formatServerAccessError(url, err, "training"));
       });
     }
 
@@ -142,6 +163,8 @@
     }).then(function (res) {
       if (!res.ok) throw new Error("Server returned " + res.status);
       return res.json();
+    }).catch(function (err) {
+      throw new Error(_formatServerAccessError(url, err, "training"));
     });
   }
 
@@ -332,7 +355,7 @@
         evtSource.addEventListener("status", resetSseTimeout);
 
       }).catch(function (err) {
-        reject(new Error("Cannot reach training server at " + serverUrl + ": " + err.message));
+        reject(new Error(_formatServerAccessError(serverUrl, err, "training")));
       });
     });
     cancelFn = function () {
@@ -363,6 +386,8 @@
     }).then(function (res) {
       if (!res.ok) throw new Error("Server test returned " + res.status);
       return res.json();
+    }).catch(function (err) {
+      throw new Error(_formatServerAccessError(url, err, "test"));
     });
   }
 
@@ -376,6 +401,8 @@
     }).then(function (res) {
       if (!res.ok) throw new Error("Server predict returned " + res.status);
       return res.json();
+    }).catch(function (err) {
+      throw new Error(_formatServerAccessError(url, err, "prediction"));
     });
   }
 
@@ -389,6 +416,8 @@
     }).then(function (res) {
       if (!res.ok) throw new Error("Server generate returned " + res.status);
       return res.json();
+    }).catch(function (err) {
+      throw new Error(_formatServerAccessError(url, err, "generation"));
     });
   }
 
