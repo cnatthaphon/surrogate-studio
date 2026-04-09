@@ -39,6 +39,7 @@
   <script src="../../src/notebook_bundle_core.js"></script>
   <script src="../../src/notebook_runtime_assets.js"></script>
   <script src="../../src/notebook_runner_ui.js"></script>
+  <script src="../../src/pretrained_loader.js"></script>
   <script src="../../src/model_builder_core.js"></script>
   <script src="../../src/training_engine_core.js"></script>
   <script src="../../src/prediction_core.js"></script>
@@ -70,44 +71,7 @@
     if (preset) {
       if (preset.dataset) store.upsertDataset(preset.dataset);
       if (preset.models) preset.models.forEach(function (m) { store.upsertModel(m); });
-      if (preset.trainers) preset.trainers.forEach(function (t) {
-        // Load pre-trained data from base64 binary (same format as Export Trainer)
-        if (t._pretrainedVar && t.status === "done" && window[t._pretrainedVar]) {
-          (function (trainer) {
-            try {
-              var b64 = window[trainer._pretrainedVar];
-              var bin = atob(b64);
-              var bytes = new Uint8Array(bin.length);
-              for (var bi = 0; bi < bin.length; bi++) bytes[bi] = bin.charCodeAt(bi);
-              var buf = bytes.buffer;
-              // Same parse as Import Trainer _parseBinary()
-              var view = new DataView(buf);
-              var metaLen = view.getUint32(0, true);
-              var metaBytes = new Uint8Array(buf, 4, metaLen);
-              var meta = JSON.parse(new TextDecoder().decode(metaBytes));
-              var weightStart = 4 + metaLen;
-              var specs = meta.weightSpecs || [];
-              var totalFloats = specs.reduce(function (s, sp) { return s + sp.shape.reduce(function (a, b) { return a * b; }, 1); }, 0);
-              // Copy to aligned buffer (meta length may not be multiple of 4)
-              var weightBytes = new Uint8Array(buf, weightStart, totalFloats * 4);
-              var alignedBuf = new ArrayBuffer(totalFloats * 4);
-              new Uint8Array(alignedBuf).set(weightBytes);
-              var weightValues = Array.from(new Float32Array(alignedBuf));
-              var fmt = window.OSCCheckpointFormatCore || null;
-              trainer.modelArtifacts = fmt && typeof fmt.normalizeArtifacts === "function"
-                ? fmt.normalizeArtifacts({ weightSpecs: specs, weightValues: weightValues }, { producerRuntime: meta.backend || "" })
-                : { weightSpecs: specs, weightValues: weightValues };
-              trainer.modelArtifactsLast = trainer.modelArtifacts;
-              if (meta.config) trainer.config = Object.assign(trainer.config || {}, meta.config);
-              if (meta.metrics) trainer.metrics = meta.metrics;
-              if (meta.epochs && meta.epochs.length) store.replaceTrainerEpochs(trainer.id, meta.epochs);
-              store.upsertTrainerCard(trainer);
-              console.log("[preset] Loaded pre-trained:", trainer.name, "(" + totalFloats + " weights, " + (meta.epochs || []).length + " epochs)");
-            } catch (e) { console.warn("[preset] Pre-trained load failed:", trainer.name, e.message); }
-          })(t);
-        }
-        store.upsertTrainerCard(t);
-      });
+      if (preset.trainers) OSCPretrainedLoader.loadAll(store, preset.trainers);
       store.initTables({ tables: ["generationRuns", "evaluations"] });
       if (preset.generations) preset.generations.forEach(function (g) { store.save({ table: "generationRuns", values: [g] }); });
       if (preset.evaluations) preset.evaluations.forEach(function (e) { store.save({ table: "evaluations", values: [e] }); });

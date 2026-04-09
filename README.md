@@ -315,6 +315,8 @@ node scripts/test_benchmark_full.js
 # Notebook export verification
 node scripts/test_headless_notebook_export.js
 node scripts/test_headless_export_verify.js
+node scripts/test_notebook_kernel_api.js
+node scripts/test_browser_notebook_runner.js
 
 # Capture demo screenshots + GIF
 node scripts/capture_demo_assets.js demo/Fashion-MNIST-Benchmark 5
@@ -338,18 +340,6 @@ node scripts/test_cross_runtime_weights.js
 | Radford, Metz, Chintala — "Unsupervised Representation Learning with DCGANs" | 2015 | GAN |
 | Ho, Jain, Abbeel — "Denoising Diffusion Probabilistic Models" | 2020 | Benchmark |
 | Jadhav & Barati Farimani — "LSTM-VAE for dominant motion extraction" | 2022 | LSTM-VAE |
-
----
-
-## GitHub Pages
-
-The public site is served directly from this repository:
-
-```text
-https://cnatthaphon.github.io/surrogate-studio/
-```
-
----
 
 ## Adding a New Demo
 
