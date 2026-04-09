@@ -1,5 +1,7 @@
 # Fashion-MNIST Transformer — Vision Transformer (ViT) Classification
 
+![Demo Workflow](images/demo_workflow.gif)
+
 Attention-based image classification on Fashion-MNIST without convolutions. Split images into patches, embed them as tokens, apply self-attention, and classify — all built from drag-and-drop nodes in the visual graph editor.
 
 ![Model Graph](images/model_graph.png)

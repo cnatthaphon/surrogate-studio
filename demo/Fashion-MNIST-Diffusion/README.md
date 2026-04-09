@@ -1,5 +1,7 @@
 # Fashion-MNIST Diffusion — Denoising Generative Models
 
+![Demo Workflow](images/demo_workflow.gif)
+
 **Train denoising models that generate images by iteratively removing noise — all defined in the visual graph editor.**
 
 Same engine as GAN and supervised demos. No hardcoded diffusion logic — the graph defines noise injection, timestep conditioning, and denoising network using composable building blocks.

@@ -1,5 +1,7 @@
 # Fashion-MNIST Conditional Diffusion Demo
 
+![Demo Workflow](images/demo_workflow.gif)
+
 Class-conditioned denoising: the model receives a one-hot class label alongside the noisy image, enabling targeted generation of specific Fashion-MNIST classes.
 
 **3 classes**: T-shirt/top (0), Trouser (1), Sneaker (7)

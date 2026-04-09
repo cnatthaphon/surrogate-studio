@@ -1,5 +1,7 @@
 # TrAISformer Demo — Transformer-based AIS Trajectory Prediction
 
+![Demo Workflow](images/demo_workflow.gif)
+
 Predict future vessel positions from historical AIS (Automatic Identification System) data using attention-based models built entirely in the Surrogate Studio visual graph editor — no code required.
 
 ![Leaflet Map with Vessel Trajectories](images/map_trajectories.gif)

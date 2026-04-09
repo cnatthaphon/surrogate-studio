@@ -1,5 +1,7 @@
 # Fashion-MNIST GAN — Real Adversarial Training
 
+![Demo Workflow](images/demo_workflow.gif)
+
 **Train a GAN with real adversarial structure — all defined in the visual graph editor.**
 
 No hardcoded GAN logic in the engine. The graph defines the full adversarial architecture using composable building blocks: ConcatBatch (merge real+fake), PhaseSwitch (label routing by phase), Constant (label values), weight tags (freeze control).
