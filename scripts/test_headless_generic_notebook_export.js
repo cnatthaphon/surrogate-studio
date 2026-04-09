@@ -84,6 +84,9 @@ async function main() {
     return Array.isArray(cell.source) ? cell.source.join("") : String(cell.source || "");
   });
   var joined = cellTexts.join("\n\n");
+  var codeCells = result.notebook.cells.filter(function (cell) { return cell.cell_type === "code"; });
+  var setupCell = codeCells[0];
+  var loaderCell = codeCells[3];
 
   assert(joined.indexOf("oscillator_surrogate_pipeline") < 0, "generic notebook must not embed oscillator pipeline");
   assert(joined.indexOf("load_trajectory_csv(") < 0, "generic notebook must not include oscillator CSV loader");
@@ -93,6 +96,9 @@ async function main() {
   assert(joined.indexOf("if EMBEDDED_GRAPH_JSON_B64:") >= 0, "generic notebook should load embedded graph when present");
   assert(joined.indexOf("graph_data = graph.get('drawflow', {}).get('Home', {}).get('data', graph)") >= 0, "generic notebook should define graph_data");
   assert(joined.indexOf("plt.tight_layout(); plt.show()\\\\n") < 0, "generic notebook should not emit stray literal newline escapes");
+  assert(joined.indexOf("Reconstruction MSE: skipped (model output does not match input space)") >= 0, "generic notebook summary should explain skipped reconstruction");
+  assert(setupCell && setupCell.metadata && setupCell.metadata.surrogate && setupCell.metadata.surrogate.hideSource, "setup cell should request hidden source");
+  assert(loaderCell && loaderCell.metadata && loaderCell.metadata.surrogate && loaderCell.metadata.surrogate.hideSource, "runtime loader cell should request hidden source");
 
   console.log("PASS test_headless_generic_notebook_export");
 }

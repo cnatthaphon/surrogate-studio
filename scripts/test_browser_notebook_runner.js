@@ -175,10 +175,14 @@ async function main() {
     var notebookState = await page.evaluate(function () {
       var overlay = document.body.textContent.indexOf("Notebook Runner") >= 0;
       var codeCells = document.querySelectorAll("textarea").length;
-      return { overlay: overlay, codeCells: codeCells };
+      var toggles = Array.from(document.querySelectorAll("button")).filter(function (b) {
+        return b.textContent.trim() === "Show Source";
+      }).length;
+      return { overlay: overlay, codeCells: codeCells, toggles: toggles };
     });
     ok(notebookState.overlay, "Notebook runner still visible");
     ok(notebookState.codeCells > 0, "Notebook includes editable code cells (" + notebookState.codeCells + ")");
+    ok(notebookState.toggles > 0, "Notebook hides setup/runtime source by default (" + notebookState.toggles + " toggles)");
 
     await page.evaluate(function () {
       var btns = document.querySelectorAll("button");

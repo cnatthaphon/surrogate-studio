@@ -527,23 +527,23 @@
     };
   }
 
-  function makeMarkdownCell(markdownText) {
+  function makeMarkdownCell(markdownText, metadata) {
     CELL_SEQ += 1;
     return {
       cell_type: "markdown",
       id: "md_" + String(CELL_SEQ),
-      metadata: {},
+      metadata: metadata || {},
       source: toSourceLines(markdownText),
     };
   }
 
-  function makeCodeCell(codeText) {
+  function makeCodeCell(codeText, metadata) {
     CELL_SEQ += 1;
     return {
       cell_type: "code",
       id: "code_" + String(CELL_SEQ),
       execution_count: null,
-      metadata: {},
+      metadata: metadata || {},
       outputs: [],
       source: toSourceLines(codeText),
     };
@@ -1414,8 +1414,15 @@
       "EPOCHS = " + (trainCfg.epochs || 20) + "\n" +
       "BATCH_SIZE = " + (trainCfg.batchSize || 32) + "\n" +
       "LR = " + (trainCfg.learningRate || 0.001) + "\n" +
-      "SEED = 42\n"
-    ));
+      "SEED = 42\n",
+    {
+      surrogate: {
+        role: "setup",
+        collapsed: true,
+        hideSource: true,
+        summary: "Notebook configuration and embedded payload references"
+      }
+    }));
 
     // Cell 2: Imports + data loading
     cells.push(makeCodeCell(
@@ -1471,8 +1478,15 @@
         "graph_data = graph.get('drawflow', {}).get('Home', {}).get('data', graph)\n\n" +
         "model = _mod.build_model_from_graph(graph, x_train.shape[1], y_train.shape[1])\n" +
         "model = model.to(device)\n" +
-        "print(f'Model: {sum(p.numel() for p in model.parameters())} params (graph-based builder)')\n"
-      ));
+        "print(f'Model: {sum(p.numel() for p in model.parameters())} params (graph-based builder)')\n",
+      {
+        surrogate: {
+          role: "runtime-loader",
+          collapsed: true,
+          hideSource: true,
+          summary: "Embedded runtime loader from train_subprocess.py"
+        }
+      }));
     } else {
       // fallback: simple Sequential builder (no branching support)
       cells.push(makeCodeCell(
@@ -1502,8 +1516,15 @@
         "    elif t=='reparam': layers.append(nn.Linear(in_dim,in_dim))\n" +
         "    elif t=='output': layers.append(nn.Linear(in_dim, out_dim))\n" +
         "model = nn.Sequential(*layers).to(device)\n" +
-        "print(f'Model: {sum(p.numel() for p in model.parameters())} params')\n"
-      ));
+        "print(f'Model: {sum(p.numel() for p in model.parameters())} params')\n",
+      {
+        surrogate: {
+          role: "runtime-loader",
+          collapsed: true,
+          hideSource: true,
+          summary: "Fallback embedded graph/model loader"
+        }
+      }));
     }
 
     // Cell 5: Train (with phase detection for GAN)
@@ -1671,13 +1692,15 @@
       "    x_recon = x_recon.cpu().numpy()\n" +
       "    x_orig = x_test[:n_show].numpy()\n\n" +
       "can_sample_input_space = bool(x_recon.shape == x_orig.shape)\n" +
-      "recon_mse = float('nan')\n" +
+      "recon_mse = None\n" +
+      "recon_status = 'skipped'\n" +
       "dim = x_orig.shape[1]\n" +
       "is_image = dim in (784, 1024, 3072)\n" +
       "img_h = {784: 28, 1024: 32, 3072: 32}.get(dim, int(dim**0.5))\n" +
       "img_w = dim // img_h if img_h > 0 else dim\n\n" +
       "if can_sample_input_space:\n" +
       "    recon_mse = np.mean((x_orig - x_recon) ** 2)\n" +
+      "    recon_status = 'ok'\n" +
       "    print(f'Reconstruction MSE ({n_show} samples): {recon_mse:.6f}')\n" +
       "    if is_image:\n" +
       "        fig, axes = plt.subplots(2, n_show, figsize=(n_show * 1.5, 3))\n" +
@@ -1955,11 +1978,14 @@
       "print(f'Model: {sum(p.numel() for p in model.parameters())} parameters')\n" +
       "print(f'Test MAE:  {mae:.6f}')\n" +
       "print(f'Test R²:   {r2:.6f}')\n" +
-      "print(f'Reconstruction MSE: {recon_mse:.6f}')\n" +
+      "if recon_mse is None:\n" +
+      "    print('Reconstruction MSE: skipped (model output does not match input space)')\n" +
+      "else:\n" +
+      "    print(f'Reconstruction MSE: {recon_mse:.6f}')\n" +
       "if is_cls:\n" +
       "    print(f'Test Accuracy: {accuracy:.4f}')\n" +
       "print(f'\\nGeneration methods tested:')\n" +
-      "print(f'  Reconstruction: ✓')\n" +
+      "print('  Reconstruction: ✓' if recon_status == 'ok' else '  Reconstruction: skipped')\n" +
       "if 'samples' in dir(): print(f'  Random Sampling: ✓ ({len(samples)} samples)')\n" +
       "if 'ddpm_samples' in dir(): print(f'  DDPM: ✓ ({len(ddpm_samples)} samples)')\n" +
       "if 'guided_samples' in dir(): print(f'  Classifier-Guided: ✓')\n" +
