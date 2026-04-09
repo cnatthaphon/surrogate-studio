@@ -209,65 +209,43 @@
     var testY = Array.isArray(testRecs.y) ? testRecs.y : [];
 
     var classNames = Array.isArray(ds.classNames) ? ds.classNames.slice() : [];
-    if (classNames.length !== 10) {
-      classNames = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"];
+    var classCount = Number(ds.classCount) || classNames.length || 10;
+    if (!classNames.length) {
+      for (var ci = 0; ci < classCount; ci++) classNames.push(String(ci));
     }
 
-    var rows = ["trajectory,split,step,t,x,v,scenario,m,c,k_slg,k_slg_role,g_global,restitution,x0,v0,ground,c_g,k_g,seed,mode,label,class_name,pixel_values"];
+    // Determine feature/target dimensions from first sample
+    var sampleX = trainX[0] || valX[0] || testX[0] || [];
+    var featureSize = Array.isArray(sampleX) ? sampleX.length : 0;
+    if (!featureSize) return null;
+
+    // Build header: f0..fN for pixels, t0..t(C-1) for one-hot class labels, split column
+    var headerParts = ["split"];
+    for (var fi = 0; fi < featureSize; fi++) headerParts.push("f" + fi);
+    for (var ti = 0; ti < classCount; ti++) headerParts.push("t" + ti);
+    var rows = [headerParts.join(",")];
     var splitCounts = { train: 0, val: 0, test: 0 };
-    var trajectoryIndex = 0;
-    var seedValue = Number(ds.seed == null ? 42 : ds.seed);
-    if (!Number.isFinite(seedValue)) seedValue = 42;
 
     function appendRows(splitName, xs, ys) {
       var n = Math.min(Array.isArray(xs) ? xs.length : 0, Array.isArray(ys) ? ys.length : 0);
       for (var i = 0; i < n; i += 1) {
-        var label = clamp(Math.round(Number(ys[i])), 0, 9);
-        var clsName = classNames[label] != null ? classNames[label] : String(label);
         var raw = Array.isArray(xs[i]) ? xs[i] : [];
-        var px = [];
-        var sum = 0;
-        for (var k = 0; k < raw.length; k += 1) {
-          var vv = Number(raw[k]);
+        var parts = [splitName];
+        // Features (pixel values normalized to 0-1)
+        for (var k = 0; k < featureSize; k++) {
+          var vv = Number(raw[k] || 0);
           if (!Number.isFinite(vv)) vv = 0;
           if (vv > 1) vv = vv / 255;
-          vv = clamp(vv, 0, 1);
-          px.push(vv);
-          sum += vv;
+          parts.push(clamp(vv, 0, 1));
         }
-        var mean = px.length ? (sum / px.length) : 0;
-        var varAccum = 0;
-        for (var j = 0; j < px.length; j += 1) {
-          var d = px[j] - mean;
-          varAccum += d * d;
+        // Target: one-hot encoding from label index
+        var label = Number(ys[i]);
+        if (!Number.isFinite(label)) label = 0;
+        label = clamp(Math.round(label), 0, classCount - 1);
+        for (var tc = 0; tc < classCount; tc++) {
+          parts.push(tc === label ? 1 : 0);
         }
-        var std = px.length ? Math.sqrt(varAccum / px.length) : 0;
-        rows.push([
-          trajectoryIndex,
-          splitName,
-          0,
-          0,
-          mean,
-          std,
-          "spring",
-          1,
-          0,
-          1,
-          "k",
-          9.81,
-          0.8,
-          0,
-          0,
-          "rigid",
-          90,
-          2500,
-          seedValue,
-          "mnist_like",
-          label,
-          clsName,
-          "\"" + _toSafePixelList(px) + "\"",
-        ].join(","));
-        trajectoryIndex += 1;
+        rows.push(parts.join(","));
       }
       splitCounts[splitName] = n;
     }
@@ -279,7 +257,7 @@
     var total = splitCounts.train + splitCounts.val + splitCounts.test;
     var manifest = {
       version: 1,
-      source: "oscillator-surrogate-dataset-bundle-adapter",
+      source: "surrogate-studio-dataset-bundle-adapter",
       datasetFile: "dataset.csv",
       splitConfig: normalizeSplitConfig(ds.splitConfig || { mode: "random", train: 0.7, val: 0.15, test: 0.15 }),
       splitCounts: {
@@ -289,7 +267,9 @@
         total: total,
       },
       labelsHistogram: ds.labelsHistogram || {},
-      classCount: 10,
+      classCount: classCount,
+      featureSize: featureSize,
+      mode: "classification",
       schemaId: normalizeSchemaId(ds && ds.schemaId, ds),
       seed: Number(ds.seed == null ? 42 : ds.seed),
     };

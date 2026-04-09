@@ -564,16 +564,31 @@ function buildMnistAdapter() {
       const cfg = input || {};
       const ds = cfg.dataset || {};
       const schemaId = String(cfg.schemaId || ds.schemaId || "mnist").trim().toLowerCase();
-      if (schemaId !== "mnist") return null;
+      if (schemaId !== "mnist" && schemaId !== "fashion_mnist") return null;
 
-      const name = sanitizeName(cfg.datasetName || ds.name || "mnist", "dataset");
-      const rows = [
-        "trajectory,split,step,t,x,v,scenario,m,c,k_slg,k_slg_role,g_global,restitution,x0,v0,ground,c_g,k_g,seed,mode,label,class_name,pixel_values",
-      ];
+      const name = sanitizeName(cfg.datasetName || ds.name || schemaId, "dataset");
+      const classCount = Number(ds.classCount) || 10;
+      const srcReg = bootstrapRuntime().sourceRegistry;
+
+      // Determine feature size from first sample
+      let sampleX = null;
+      ["train", "val", "test"].some(function (s) {
+        let split = (ds.records && ds.records[s]) || {};
+        if ((!split.x || !split.x.length) && srcReg && typeof srcReg.resolveDatasetSplit === "function") {
+          split = srcReg.resolveDatasetSplit(ds, s);
+        }
+        if (split.x && split.x.length) { sampleX = split.x[0]; return true; }
+        return false;
+      });
+      const featureSize = Array.isArray(sampleX) ? sampleX.length : 784;
+
+      // Build header: split, f0..fN, t0..tC
+      const headerParts = ["split"];
+      for (let fi = 0; fi < featureSize; fi++) headerParts.push("f" + fi);
+      for (let ti = 0; ti < classCount; ti++) headerParts.push("t" + ti);
+      const rows = [headerParts.join(",")];
       const splitCfg = bootstrapRuntime().core.normalizeSplitConfig(ds.splitConfig || { mode: "random", train: 0.8, val: 0.1, test: 0.1 });
       const splitCounts = { train: 0, val: 0, test: 0 };
-      const srcReg = bootstrapRuntime().sourceRegistry;
-      let idx = 0;
       ["train", "val", "test"].forEach(function (splitName) {
         let split = (ds.records && ds.records[splitName]) || {};
         if ((!split.x || !split.x.length) && srcReg && typeof srcReg.resolveDatasetSplit === "function") {
@@ -584,41 +599,16 @@ function buildMnistAdapter() {
         const n = Math.min(xs.length, ys.length);
         for (let i = 0; i < n; i += 1) {
           const x = xs[i] || [];
-          let mean = 0;
-          for (let j = 0; j < x.length; j += 1) mean += Number(x[j] || 0);
-          mean = x.length ? mean / x.length : 0;
-          let vr = 0;
-          for (let j = 0; j < x.length; j += 1) {
-            const d = Number(x[j] || 0) - mean;
-            vr += d * d;
+          const parts = [splitName];
+          for (let k = 0; k < featureSize; k++) {
+            let vv = Number(x[k] || 0);
+            if (!Number.isFinite(vv)) vv = 0;
+            if (vv > 1) vv = vv / 255;
+            parts.push(Math.max(0, Math.min(1, vv)));
           }
-          vr = x.length ? Math.sqrt(vr / x.length) : 0;
-          rows.push([
-            idx,
-            splitName,
-            0,
-            0,
-            mean / 255,
-            vr / 255,
-            "spring",
-            1,
-            0,
-            1,
-            "k",
-            9.81,
-            0.8,
-            0,
-            0,
-            "rigid",
-            90,
-            2500,
-            ds.seed == null ? 42 : ds.seed,
-            "mnist_like",
-            ys[i],
-            String(ys[i]),
-            "\"" + String((x.slice(0, 12) || []).join("|")) + "\"",
-          ].join(","));
-          idx += 1;
+          const label = Math.max(0, Math.min(classCount - 1, Math.round(Number(ys[i]) || 0)));
+          for (let tc = 0; tc < classCount; tc++) parts.push(tc === label ? 1 : 0);
+          rows.push(parts.join(","));
           splitCounts[splitName] = (splitCounts[splitName] || 0) + 1;
         }
       });
