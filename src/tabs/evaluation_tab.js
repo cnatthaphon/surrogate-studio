@@ -422,6 +422,27 @@
       header.appendChild(el("div", { style: "font-size:13px;color:#67e8f9;font-weight:600;" }, escapeHtml(ev.name)));
       header.appendChild(el("div", { style: "font-size:11px;color:#94a3b8;margin-top:2px;" },
         "Schema: " + (ev.schemaId || "none") + " | Models: " + (ev.trainerIds || []).length + " | Runs: " + (ev.runs || []).length));
+
+      // spinner style
+      if (!document.getElementById("osc-spin-style")) {
+        var style = document.createElement("style");
+        style.id = "osc-spin-style";
+        style.textContent = "@keyframes spin { to { transform: rotate(360deg); } }";
+        document.head.appendChild(style);
+      }
+
+      // running indicator
+      if (_isRunning) {
+        var runningBar = el("div", { style: "display:flex;align-items:center;gap:8px;margin-top:6px;" });
+        var spinner = el("div", { style: "width:14px;height:14px;border:2px solid #334155;border-top-color:#67e8f9;border-radius:50%;animation:spin 0.8s linear infinite;" });
+        runningBar.appendChild(spinner);
+        var latestRun = ev.runs && ev.runs.length ? ev.runs[ev.runs.length - 1] : null;
+        var doneCount = latestRun ? latestRun.results.filter(function (r) { return r.status === "done" || r.status === "error" || r.status === "skipped"; }).length : 0;
+        var totalCount = latestRun ? latestRun.results.length : 0;
+        runningBar.appendChild(el("span", { style: "font-size:11px;color:#fbbf24;" },
+          "Evaluating model " + (doneCount + 1) + " of " + totalCount + "..."));
+        header.appendChild(runningBar);
+      }
       mainEl.appendChild(header);
 
       // show latest run results
@@ -512,7 +533,7 @@
       })(ri, runs[ri]); }
     }
 
-    function _renderBarChart(container, results, metricKeys, mountId) {
+    function _renderBarChart(container, results, metricKeys) {
       var Plotly = (typeof window !== "undefined" && window.Plotly) ? window.Plotly : null;
       if (!Plotly || !results.length || !metricKeys.length) return;
 
@@ -522,26 +543,40 @@
       var chartDiv = el("div", { style: "height:280px;margin-top:8px;max-width:100%;overflow:hidden;" });
       container.appendChild(chartDiv);
 
+      // snapshot data now (avoid closure issues with mutable results)
       var names = doneResults.map(function (r) { return r.trainerName || r.modelName || "?"; });
       var colors = ["#22d3ee", "#4ade80", "#f59e0b", "#a78bfa", "#f43f5e", "#fb923c"];
       var traces = [];
 
       metricKeys.forEach(function (k, ki) {
+        var yVals = doneResults.map(function (r) {
+          return r.metrics && r.metrics[k] != null ? Number(r.metrics[k]) : 0;
+        });
         traces.push({
-          x: names,
-          y: doneResults.map(function (r) { return r.metrics && r.metrics[k] != null ? r.metrics[k] : 0; }),
+          x: names.slice(),
+          y: yVals.slice(),
           type: "bar", name: k.toUpperCase(),
           marker: { color: colors[ki % colors.length] },
+          text: yVals.map(function (v) { return v !== 0 ? (Math.abs(v) < 0.01 || Math.abs(v) > 1000 ? v.toExponential(3) : v.toFixed(4)) : ""; }),
+          textposition: "outside",
+          textfont: { size: 8, color: "#94a3b8" },
         });
       });
 
-      Plotly.newPlot(chartDiv, traces, {
+      var layoutCopy = {
         paper_bgcolor: "#0b1220", plot_bgcolor: "#0b1220", font: { color: "#e2e8f0", size: 10 },
         barmode: "group", bargap: 0.15,
         xaxis: { gridcolor: "#1e293b" }, yaxis: { title: "Value", gridcolor: "#1e293b" },
         legend: { orientation: "h", y: -0.2, font: { size: 9 } },
         margin: { t: 10, b: 60, l: 50, r: 10 },
-      }, { responsive: true, displayModeBar: false });
+      };
+
+      // defer Plotly render to next frame to avoid race between multiple charts
+      requestAnimationFrame(function () {
+        if (chartDiv.offsetParent !== null) { // still in DOM
+          Plotly.newPlot(chartDiv, traces, layoutCopy, { responsive: true, displayModeBar: false });
+        }
+      });
     }
 
     function _renderMetricLegend(container, metricKeys) {
@@ -943,13 +978,17 @@
         _saveEval(ev);
         _renderMainPanel();
 
-        _evaluateOneModel(tf, pc, ev, r, tid).then(function () {
-          _saveEval(ev);
-          _renderMainPanel();
-          onStatus("Evaluated " + (idx + 1) + "/" + ev.trainerIds.length + ": " + r.trainerName);
-          idx++;
-          setTimeout(evalNext, 50);
-        });
+        // use setTimeout to yield to browser for repaint before heavy work
+        setTimeout(function () {
+          if (currentMountId !== _mountId) return;
+          _evaluateOneModel(tf, pc, ev, r, tid).then(function () {
+            _saveEval(ev);
+            _renderMainPanel();
+            onStatus("Evaluated " + (idx + 1) + "/" + ev.trainerIds.length + ": " + r.trainerName);
+            idx++;
+            setTimeout(evalNext, 80);
+          });
+        }, 30);
       }
       evalNext();
     }

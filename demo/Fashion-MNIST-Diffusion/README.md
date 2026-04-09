@@ -6,6 +6,30 @@ Same engine as GAN and supervised demos. No hardcoded diffusion logic — the gr
 
 Pre-trained weights are included for all four diffusion models, so you can generate and evaluate immediately before training from scratch.
 
+## Pretrained Results
+
+Trained on Fashion-MNIST T-shirt class (6K images), PyTorch CUDA:
+
+| Model | Params | Val Loss | Generation |
+|-------|:------:|:--------:|:----------:|
+| MLP Denoiser (baseline) | ~810K | ~0.008 | Single-pass reconstruction |
+| MLP DDPM (Ho 2020) | ~930K | ~0.007 | DDPM 50-step reverse process |
+| NCSN (Song & Ermon 2019) | ~1.3M | ~0.007 | Langevin dynamics |
+| Score SDE (Song et al. 2021) | ~1.3M | ~0.007 | DDPM or Langevin |
+
+### Comparison with Original Papers
+
+| Aspect | Original DDPM (Ho et al.) | Our Simplified Version |
+|--------|--------------------------|----------------------|
+| **Architecture** | UNet with residual blocks + attention | MLP (Dense layers + LayerNorm) |
+| **Image size** | 32x32 (CIFAR-10), 256x256 (LSUN) | 28x28 (Fashion-MNIST, flattened) |
+| **Diffusion steps** | T=1000 | T=50 |
+| **Prediction** | Noise prediction (epsilon) | Clean image prediction (x0, sigmoid) |
+| **Parameters** | ~35M | ~1M |
+| **Training** | Days on 8 V100s | Minutes on single GPU |
+
+Our x0-prediction variant with sigmoid output works for normalized images in [0,1] and avoids the numerical instability of noise-prediction at low timesteps.
+
 ## Presets
 
 ### 1. MLP Denoiser (baseline)

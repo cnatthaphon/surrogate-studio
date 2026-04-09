@@ -99,15 +99,29 @@ Generate specific Fashion-MNIST classes by conditioning the denoiser on a one-ho
 
 Live: [GitHub Pages](https://cnatthaphon.github.io/surrogate-studio/demo/Fashion-MNIST-Transformer/) | Guide: [README](demo/Fashion-MNIST-Transformer/README.md)
 
-Patch-based image classification on Fashion-MNIST using the graph editor's `PatchEmbed`, `TransformerBlock`, and `GlobalAvgPool1D` nodes.
+Attention-based image classification without convolutions using the graph editor's `PatchEmbed`, `TransformerBlock`, and `GlobalAvgPool1D` nodes. Pretrained on PyTorch CUDA, evaluated in TF.js browser.
 
-| # | Architecture | Backbone | Evaluation |
-|---|---|---|---|
-| 1 | Tiny ViT | 1 transformer block | Accuracy, Macro-F1 |
-| 2 | Small ViT | 2 transformer blocks | Accuracy, Macro-F1 |
-| 3 | ViT + MLP Head | 2 transformer blocks + dense head | Accuracy, Macro-F1 |
+| Model | Params | Test Accuracy | Macro F1 |
+|-------|:------:|:-------------:|:--------:|
+| Tiny ViT (1 block) | 45,624 | 80.70% | 0.8058 |
+| **Small ViT (2 blocks)** | 87,288 | **82.50%** | **0.8260** |
+| ViT + MLP Head (2 blocks) | 96,248 | 81.30% | 0.8141 |
 
-This demo is evaluation-first. Generate the dataset, train one of the transformer trainers, then compare models in the `Evaluation` tab.
+> Paper: *"An Image is Worth 16x16 Words: Transformers for Image Recognition at Scale"* — Dosovitskiy et al., ICLR 2021. [arXiv:2010.11929](https://arxiv.org/abs/2010.11929)
+
+### [TrAISformer](demo/TrAISformer/) — Transformer-based AIS Trajectory Prediction
+
+Live: [GitHub Pages](https://cnatthaphon.github.io/surrogate-studio/demo/TrAISformer/) | Guide: [README](demo/TrAISformer/README.md)
+
+Predict vessel positions in the Baltic Sea from AIS (Automatic Identification System) data using transformer-based sequence models. Interactive Leaflet map with satellite tiles, speed-colored trajectories, and course-heading markers.
+
+| Model | Params | Test MAE | Test RMSE | Test R² |
+|-------|:------:|:--------:|:---------:|:-------:|
+| **MLP Baseline** | 16,836 | **0.0225** | **0.0741** | **0.924** |
+| Tiny TrAISformer (1 block) | 10,884 | 0.0382 | 0.0884 | 0.891 |
+| Small TrAISformer (2 blocks) | 21,476 | 0.0400 | 0.0893 | 0.889 |
+
+> Paper: *"TrAISformer — A generative transformer for AIS trajectory prediction"* — Nguyen et al., 2021. [arXiv:2109.03958](https://arxiv.org/abs/2109.03958)
 
 ### [LSTM-VAE for Dominant Motion Extraction](demo/LSTM-VAE-for-dominant-motion-extraction/)
 
@@ -130,7 +144,15 @@ Reproduces the LSTM-VAE from Jadhav & Barati Farimani (2022) for ant trajectory 
 
 Live: [GitHub Pages](https://cnatthaphon.github.io/surrogate-studio/demo/Oscillator-Surrogate/) | Guide: [README](demo/Oscillator-Surrogate/README.md)
 
-5 model architectures on physics-based trajectory data (spring, pendulum, bouncing ball). Demonstrates every feature of the platform: Direct-MLP, AR-GRU, VAE, VAE+Classifier, Denoising AE.
+5 model architectures on RK4-simulated physics trajectories (spring, pendulum, bouncing ball). Full platform showcase: training, generation (reconstruct, random, classifier-guided, Langevin), and evaluation.
+
+| Model | Params | Test MAE | Test R² |
+|-------|:------:|:--------:|:-------:|
+| Direct-MLP | 4,962 | 0.0282 | 0.963 |
+| AR-GRU | 22,882 | 0.0277 | 0.966 |
+| VAE (8-dim latent) | 2,362 | 0.0278 | 0.949 |
+| **VAE+Classifier** | 8,605 | **0.0251** | **0.970** |
+| Denoising AE | 7,138 | 0.0420 | 0.944 |
 
 ---
 
@@ -155,6 +177,7 @@ Live: [GitHub Pages](https://cnatthaphon.github.io/surrogate-studio/demo/Oscilla
 | `mnist` | Image | 28x28 grayscale, 10 classes | Lazy-fetch from CDN |
 | `fashion_mnist` | Image | 28x28 grayscale, 10 classes | Lazy-fetch from CDN |
 | `cifar10` | Image | 32x32 RGB, 10 classes | Lazy-fetch from CDN |
+| `ais_trajectory` | Trajectory | Window of (lat, lon, sog, cog), predict next position | Built-in |
 | `ant_trajectory` | Trajectory | 20 ants x (x,y), 40 features | Demo plugin |
 
 ---

@@ -267,18 +267,15 @@ def main():
         if isinstance(n, dict) and str(n.get("name", "")).replace("_layer", "") == "class_embed":
             _class_num = int((n.get("data") or {}).get("numClasses", 10))
 
-    # --- DataLoaders (after label conversion) ---
-    if _has_class_embed and labels_train is not None and len(labels_train) > 0:
-        # Include class labels as 3rd tensor for class-conditional models
-        train_ds = TensorDataset(torch.tensor(x_train), torch.tensor(y_train), torch.tensor(labels_train))
-        val_ds = TensorDataset(torch.tensor(x_val), torch.tensor(y_val),
-                               torch.tensor(labels_val) if labels_val is not None else torch.zeros(len(x_val), _class_num))
-    else:
-        train_ds = TensorDataset(torch.tensor(x_train), torch.tensor(y_train))
-        val_ds = TensorDataset(torch.tensor(x_val), torch.tensor(y_val))
-    shuffle_train = bool(config.get("shuffleTrain", True))
-    train_dl = DataLoader(train_ds, batch_size=batch_size, shuffle=shuffle_train)
-    val_dl = DataLoader(val_ds, batch_size=batch_size, shuffle=False)
+    # --- Check if any head needs classification labels (evaluated after labels_train is set below) ---
+    _any_cls_head = any(
+        str((hc.get("loss") or hc.get("headType") or "")).lower()
+        in ("categoricalcrossentropy", "categorical_crossentropy", "cross_entropy",
+            "sparsecategoricalcrossentropy", "classification")
+        for hc in (head_configs or [])
+    )
+
+    # (DataLoaders built after labels_train is loaded — see below)
 
     # --- Detect phases from headConfigs ---
     phases = sorted(set(str(h.get("phase", "")).strip() for h in head_configs)) if head_configs else [""]
@@ -315,10 +312,23 @@ def main():
     labels_train = np.array(ds.get("labelsTrain", []), dtype=np.float32) if ds.get("labelsTrain") else None
     labels_val = np.array(ds.get("labelsVal", []), dtype=np.float32) if ds.get("labelsVal") else None
 
+    # --- Build DataLoaders (now that labels_train is available) ---
+    _include_labels = (_has_class_embed or _any_cls_head) and labels_train is not None and len(labels_train) > 0
+    if _include_labels:
+        train_ds = TensorDataset(torch.tensor(x_train), torch.tensor(y_train), torch.tensor(labels_train))
+        val_ds = TensorDataset(torch.tensor(x_val), torch.tensor(y_val),
+                               torch.tensor(labels_val) if labels_val is not None else torch.zeros(len(x_val), _class_num))
+    else:
+        train_ds = TensorDataset(torch.tensor(x_train), torch.tensor(y_train))
+        val_ds = TensorDataset(torch.tensor(x_val), torch.tensor(y_val))
+    shuffle_train = bool(config.get("shuffleTrain", True))
+    train_dl = DataLoader(train_ds, batch_size=batch_size, shuffle=shuffle_train)
+    val_dl = DataLoader(val_ds, batch_size=batch_size, shuffle=False)
+
     n_heads = len(head_losses)
 
-    def compute_loss(pred, xb, yb, active_phase):
-        """Compute weighted loss across heads."""
+    def compute_loss(pred, xb, yb, active_phase, lb=None):
+        """Compute weighted loss across heads. lb = label batch for classification heads."""
         total = torch.tensor(0.0, device=device)
         preds = pred if isinstance(pred, list) else [pred]
         for i, hl in enumerate(head_losses):
@@ -327,7 +337,6 @@ def main():
             # with schedule: all losses active (weight freeze handles updates)
             # without schedule: filter by phase name
             if not _use_schedule and hl["phase"] != active_phase and hl["phase"] != "" and active_phase != "":
-                continue
                 continue
             # get this head's prediction (by index, or first if single-output)
             head_pred = preds[i] if i < len(preds) else preds[0]
@@ -338,13 +347,18 @@ def main():
                 oid = model.output_ids[i] if i < len(model.output_ids) else None
                 if oid and oid in custom_labels:
                     target = custom_labels[oid]
-                    # Match shape to prediction (graph ConcatBatch should already do this)
                     if target.shape[0] != head_pred.shape[0]:
                         target = target.expand_as(head_pred)
                 else:
                     target = torch.ones_like(head_pred)
             elif hl["cls"]:
-                target = yb.long().squeeze(-1) if yb.dtype != torch.long else yb.squeeze(-1)
+                # Classification head: use label batch if available, else fall back to yb
+                cls_src = lb if lb is not None else yb
+                # Convert one-hot to integer indices if needed
+                if cls_src.dim() > 1 and cls_src.shape[-1] > 1:
+                    target = cls_src.argmax(dim=-1).long()
+                else:
+                    target = cls_src.long().squeeze(-1)
                 total = total + hl["weight"] * hl["fn"](head_pred, target)
                 continue
             else:
@@ -488,11 +502,12 @@ def main():
                     stopped_by_user = True
                     break
                 xb, yb = _batch[0].to(device), _batch[1].to(device)
-                if len(_batch) > 2:
-                    model._class_labels = _batch[2].to(device)
+                lb = _batch[2].to(device) if len(_batch) > 2 else None
+                if lb is not None:
+                    model._class_labels = lb
                 opt_all.zero_grad()
                 pred = model(xb)
-                loss = compute_loss(pred, xb, yb, "")
+                loss = compute_loss(pred, xb, yb, "", lb=lb)
                 loss.backward()
                 if grad_clip > 0:
                     torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
@@ -532,11 +547,12 @@ def main():
                             break
                         _batch2 = next(train_iter)
                         xb, yb = _batch2[0].to(device), _batch2[1].to(device)
-                        if len(_batch2) > 2:
-                            model._class_labels = _batch2[2].to(device)
+                        lb = _batch2[2].to(device) if len(_batch2) > 2 else None
+                        if lb is not None:
+                            model._class_labels = lb
                         step_opt.zero_grad()
                         pred = model(xb)
-                        loss = compute_loss(pred, xb, yb, phase_name)
+                        loss = compute_loss(pred, xb, yb, phase_name, lb=lb)
                         if loss.requires_grad:
                             loss.backward()
                             if grad_clip > 0:
@@ -581,11 +597,12 @@ def main():
                                 stopped_by_user = True
                                 break
                             xb, yb = _batch3[0].to(device), _batch3[1].to(device)
-                            if len(_batch3) > 2:
-                                model._class_labels = _batch3[2].to(device)
+                            lb = _batch3[2].to(device) if len(_batch3) > 2 else None
+                            if lb is not None:
+                                model._class_labels = lb
                             step_opt.zero_grad()
                             pred = model(xb)
-                            loss = compute_loss(pred, xb, yb, phase_name)
+                            loss = compute_loss(pred, xb, yb, phase_name, lb=lb)
                             if loss.requires_grad:
                                 loss.backward()
                                 if grad_clip > 0:
@@ -624,10 +641,11 @@ def main():
             with torch.no_grad():
                 for _batchv in val_dl:
                     xb, yb = _batchv[0].to(device), _batchv[1].to(device)
-                    if len(_batchv) > 2:
-                        model._class_labels = _batchv[2].to(device)
+                    lb = _batchv[2].to(device) if len(_batchv) > 2 else None
+                    if lb is not None:
+                        model._class_labels = lb
                     pred = model(xb)
-                    loss = compute_loss(pred, xb, yb, "")
+                    loss = compute_loss(pred, xb, yb, "", lb=lb)
                     val_loss += loss.item()
                     n_val += 1
             val_loss /= max(n_val, 1)

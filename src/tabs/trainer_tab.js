@@ -121,6 +121,17 @@
     var _lossChartDiv = null;
     var _epochTableBody = null;
     var _subTab = "train"; // "train" | "test"
+    var _testCache = {}; // { trainerId: { preds, ySlice, testN, featureSize, nCls, isClassification, ... } }
+
+    function _resolveBackendLabel(t) {
+      if (t.backend) return String(t.backend);
+      var arts = t.modelArtifacts || t.modelArtifactsLast || t.modelArtifactsBest || null;
+      var runtime = arts && (arts.producerRuntime || (arts.checkpoint && arts.checkpoint.producerRuntime)) || "";
+      if (/python|pytorch|server/i.test(runtime)) return "PyTorch";
+      if (/js|tfjs|client/i.test(runtime)) return "TF.js";
+      if (t.trainedOnServer || (t.config && t.config.useServer)) return "PyTorch (server)";
+      return "";
+    }
 
     function _isCurrentTrainingRun(trainerId, runId) {
       return _activeTrainingId === trainerId && _trainingRunId === runId;
@@ -375,9 +386,10 @@
       var activeId = stateApi ? stateApi.getActiveTrainer() : "";
       var items = trainers.map(function (t) {
         var icon = t.status === "done" ? "\u2713 " : (t.status === "running" ? "\u23f3 " : "");
+        var backend = _resolveBackendLabel(t);
         return {
           id: t.id, title: t.name || t.id, active: t.id === activeId,
-          metaLines: [t.schemaId || "", icon + (t.status || "draft")].filter(Boolean),
+          metaLines: [t.schemaId || "", icon + (t.status || "draft"), backend].filter(Boolean),
           actions: [{ id: "rename", label: "\u270e" }, { id: "delete", label: "\u2715" }],
         };
       });
@@ -473,7 +485,7 @@
           return label;
         })() : "") +
         (t.modelId ? " | Model: " + (function () { var m = store.getModel(t.modelId); return m ? m.name : t.modelId; })() : "") +
-        (t.backend ? " | Backend: " + String(t.backend) : "") +
+        (function () { var bl = _resolveBackendLabel(t); return bl ? " | Backend: " + bl : ""; })() +
         (t.metrics && t.metrics.paramCount ? " | Params: " + Number(t.metrics.paramCount).toLocaleString() : "")));
       var family = _inferTrainerFamily(t);
       if (t.metrics && family !== "gan" && family !== "diffusion") {
@@ -604,8 +616,9 @@
       // --- check if server returned raw predictions (full charts) ---
       var m = t.metrics || {};
       if (m.testPredictions && m.testTruth && m.testPredictions.length) {
+        var bl = _resolveBackendLabel(t) || "server";
         var statusEl = el("div", { style: "font-size:11px;color:#94a3b8;padding:4px 8px;" },
-          "Evaluated " + m.testPredictions.length + " test samples (" + (t.backend || "server") + ").");
+          "Evaluated " + m.testPredictions.length + " test samples (backend: " + bl + ").");
         mainEl.appendChild(statusEl);
         var metricsContainer = el("div", {});
         mainEl.appendChild(metricsContainer);
@@ -617,6 +630,24 @@
           _renderRegressionMetrics(metricsContainer, m.testPredictions, m.testTruth, m.testPredictions.length, Plotly, _darkLayout, pc);
         }
         return;
+      }
+
+      // --- show stored summary metrics if available (pretrained weights without dataset) ---
+      var m2 = t.metrics || {};
+      var hasStoredMetrics = m2.testMae != null || m2.testRmse != null || m2.testR2 != null || m2.bestValLoss != null;
+      if (hasStoredMetrics) {
+        var bl2 = _resolveBackendLabel(t);
+        var summaryCard = el("div", { className: "osc-card", style: "margin-bottom:8px;" });
+        summaryCard.appendChild(el("div", { style: "font-size:11px;color:#67e8f9;font-weight:600;margin-bottom:4px;" },
+          "Stored Test Metrics" + (bl2 ? " (trained on " + bl2 + ")" : "")));
+        var metricsLine = [];
+        if (m2.testMae != null) metricsLine.push("MAE: " + Number(m2.testMae).toFixed(6));
+        if (m2.testRmse != null) metricsLine.push("RMSE: " + Number(m2.testRmse).toFixed(6));
+        if (m2.testR2 != null) metricsLine.push("R\u00B2: " + Number(m2.testR2).toFixed(6));
+        if (m2.bestValLoss != null) metricsLine.push("Best Val Loss: " + Number(m2.bestValLoss).toFixed(6));
+        if (m2.bestEpoch != null) metricsLine.push("Best Epoch: " + m2.bestEpoch);
+        summaryCard.appendChild(el("div", { style: "font-size:12px;color:#e2e8f0;" }, metricsLine.join(" | ")));
+        mainEl.appendChild(summaryCard);
       }
 
       // --- client-side evaluation (TF.js rebuild + inference — full charts) ---
@@ -644,132 +675,184 @@
         }
       }
 
-      var statusEl = el("div", { style: "font-size:11px;color:#94a3b8;padding:4px 8px;" }, "Running inference on full test set (TF.js)...");
-      mainEl.appendChild(statusEl);
+      var backendLabel = _resolveBackendLabel(t);
 
-      try {
-        var dataset = store ? store.getDataset(t.datasetId) : null;
-        var modelRec = store ? store.getModel(t.modelId) : null;
-        if (!dataset || !dataset.data || !modelRec || !modelRec.graph) {
-          statusEl.textContent = "Dataset or model not found.";
-          return;
-        }
-
-        var dsData = dataset.data;
-        var isBundle = dsData.kind === "dataset_bundle" && dsData.datasets;
-        var activeDs = isBundle ? dsData.datasets[dsData.activeVariantId || Object.keys(dsData.datasets)[0]] : dsData;
-        var rawRecords = activeDs.records || null;
-        var nCls = activeDs.classCount || 10;
-        var imgShape = Array.isArray(activeDs.imageShape) ? activeDs.imageShape : [28, 28, 1];
-
-        // resolve test data via source registry or legacy records
-        if (!activeDs.xTest) {
-          var W2 = typeof window !== "undefined" ? window : {};
-          var srcReg2 = W2.OSCDatasetSourceRegistry || null;
-          var oh = function (l, n) { var a = new Array(n).fill(0); a[l] = 1; return a; };
-          var isRecon3 = defaultHeadType === "reconstruction" || defaultHeadType === "regression";
-          var testSplit;
-          if (srcReg2 && typeof srcReg2.resolveDatasetSplit === "function") {
-            testSplit = srcReg2.resolveDatasetSplit(activeDs, "test");
-          } else {
-            var rec = activeDs.records && activeDs.records.test;
-            testSplit = rec ? { x: rec.x || [], y: rec.y || [], length: (rec.x || []).length } : { x: [], y: [], length: 0 };
-          }
-          var resolvedFS = (srcReg2 && typeof srcReg2.getFeatureSize === "function") ? srcReg2.getFeatureSize(activeDs) : 0;
-          if (!resolvedFS && testSplit.x.length) resolvedFS = testSplit.x[0].length;
-          activeDs = {
-            xTest: testSplit.x,
-            yTest: isClassification ? testSplit.y.map(function (l) { return typeof l === "number" ? oh(l, nCls) : l; })
-              : isRecon3 ? testSplit.x : testSplit.y,
-            yTestRaw: testSplit.y,
-            featureSize: resolvedFS || 1,
-            numClasses: nCls,
-          };
-        }
-
-        // rebuild model
-        var graphMode = modelBuilder.inferGraphMode(modelRec.graph, "direct");
-        var featureSize = Number(activeDs.featureSize || (activeDs.xTest && activeDs.xTest[0] && activeDs.xTest[0].length) || 1);
-        var rebuiltModel = modelBuilder.buildModelFromGraph(tf, modelRec.graph, {
-          mode: graphMode, featureSize: featureSize, windowSize: 1, seqFeatureSize: featureSize,
-          allowedOutputKeys: allowedOutputKeys, defaultTarget: defaultTarget, numClasses: activeDs.numClasses || nCls,
-        });
-
-        // load saved weights
-        var hasWeights = t.modelArtifacts && t.modelArtifacts.weightSpecs &&
-          (t.modelArtifacts.weightData || t.modelArtifacts.weightValues);
-        if (hasWeights) {
-          try {
-            var converter = (typeof window !== "undefined" && window.OSCWeightConverter) ? window.OSCWeightConverter : null;
-            if (!converter || typeof converter.loadArtifactsIntoModel !== "function") {
-              throw new Error("Weight converter not available");
-            }
-            var loadResult = converter.loadArtifactsIntoModel(tf, rebuiltModel.model, t.modelArtifacts);
-            if (!loadResult || !loadResult.loaded) {
-              throw new Error(loadResult && loadResult.reason ? loadResult.reason : "weight_load_failed");
-            }
-          } catch (e) {
-            console.warn("[test] Weight load failed:", e.message);
-          }
-        }
-
-        var maxAvailable = (activeDs.xTest || []).length;
-
-        // --- run inference on ALL test data (metrics computed on full set) ---
-        var allX = activeDs.xTest;
-        var allY = activeDs.yTest;
-        var allPreds;
-        // check if model has multiple inputs (e.g., GAN with SampleZ + ImageSource)
-        var modelInputCount = rebuiltModel.model.inputs ? rebuiltModel.model.inputs.length : 1;
-        // batch predict to avoid OOM
-        var batchSize = 256;
-        var allPredsArr = [];
-        for (var bi = 0; bi < maxAvailable; bi += batchSize) {
-          var bEnd = Math.min(bi + batchSize, maxAvailable);
-          var batchX = allX.slice(bi, bEnd);
-          var bTensor = tf.tensor2d(batchX);
-          var inputTensors = bTensor;
-          // multi-input: provide matching tensors for each input
-          if (modelInputCount > 1) {
-            var inputArr = [];
-            var batchN = bEnd - bi;
-            for (var ii = 0; ii < modelInputCount; ii++) {
-              var inputShape = rebuiltModel.model.inputs[ii].shape;
-              var inputDim = inputShape[inputShape.length - 1];
-              if (inputDim === featureSize) {
-                inputArr.push(bTensor); // real data input
-              } else {
-                inputArr.push(tf.randomNormal([batchN, inputDim])); // SampleZ input
-              }
-            }
-            inputTensors = inputArr;
-          }
-          var bRaw = rebuiltModel.model.predict(inputTensors);
-          var bData = (Array.isArray(bRaw) ? bRaw[0] : bRaw).arraySync();
-          allPredsArr = allPredsArr.concat(bData);
-          if (Array.isArray(inputTensors)) inputTensors.forEach(function (t) { if (t !== bTensor) t.dispose(); });
-          bTensor.dispose();
-          if (Array.isArray(bRaw)) bRaw.forEach(function (pt) { pt.dispose(); }); else bRaw.dispose();
-        }
-        allPreds = allPredsArr;
-
-        statusEl.textContent = "Evaluated " + maxAvailable + " test samples.";
-
-        // container for all metric charts
-        var metricsContainer = el("div", {});
-        mainEl.appendChild(metricsContainer);
-
-        if (isClassification) {
-          _renderClassificationMetrics(metricsContainer, allPreds, allY, maxAvailable, nCls, rawRecords, imgShape, activeDs, Plotly, _darkLayout, pc);
+      // --- check cache first ---
+      var cached = _testCache[activeId];
+      if (cached) {
+        var statusEl2 = el("div", { style: "font-size:11px;color:#94a3b8;padding:4px 8px;" },
+          "Evaluated " + cached.testN + " test samples" + (backendLabel ? " (weights: " + backendLabel + ", inference: TF.js)" : "") + ".");
+        mainEl.appendChild(statusEl2);
+        var metricsContainer2 = el("div", {});
+        mainEl.appendChild(metricsContainer2);
+        if (cached.isClassification) {
+          _renderClassificationMetrics(metricsContainer2, cached.preds, cached.ySlice, cached.testN, cached.nCls, cached.rawRecords, cached.imgShape, cached.activeDs, Plotly, _darkLayout, pc);
         } else {
-          _renderRegressionMetrics(metricsContainer, allPreds, allY, maxAvailable, Plotly, _darkLayout, pc);
+          _renderRegressionMetrics(metricsContainer2, cached.preds, cached.ySlice, cached.testN, Plotly, _darkLayout, pc);
         }
-
-        rebuiltModel.model.dispose();
-
-      } catch (e) {
-        statusEl.textContent = "Inference error: " + e.message;
+        return;
       }
+
+      // --- show loading spinner ---
+      var loaderWrap = el("div", { style: "display:flex;align-items:center;gap:8px;padding:12px 8px;" });
+      var spinner = el("div", { style: "width:18px;height:18px;border:2px solid #334155;border-top-color:#67e8f9;border-radius:50%;animation:spin 0.8s linear infinite;" });
+      loaderWrap.appendChild(spinner);
+      loaderWrap.appendChild(el("span", { style: "font-size:12px;color:#94a3b8;" }, "Running inference on test set (TF.js)..."));
+      mainEl.appendChild(loaderWrap);
+
+      // ensure @keyframes spin exists
+      if (!document.getElementById("osc-spin-style")) {
+        var style = document.createElement("style");
+        style.id = "osc-spin-style";
+        style.textContent = "@keyframes spin { to { transform: rotate(360deg); } }";
+        document.head.appendChild(style);
+      }
+
+      var capturedMountId = _mountId;
+
+      // defer heavy work to let spinner render
+      setTimeout(function () {
+        if (_mountId !== capturedMountId) return; // tab switched away
+
+        try {
+          var dataset = store ? store.getDataset(t.datasetId) : null;
+          var modelRec = store ? store.getModel(t.modelId) : null;
+          if (!dataset || !dataset.data || !modelRec || !modelRec.graph) {
+            loaderWrap.innerHTML = "";
+            loaderWrap.appendChild(el("span", { style: "font-size:12px;color:#f43f5e;" }, "Dataset or model not found."));
+            return;
+          }
+
+          var dsData = dataset.data;
+          var isBundle = dsData.kind === "dataset_bundle" && dsData.datasets;
+          var activeDs = isBundle ? dsData.datasets[dsData.activeVariantId || Object.keys(dsData.datasets)[0]] : dsData;
+          var rawRecords = activeDs.records || null;
+          var nCls = activeDs.classCount || 10;
+          var imgShape = Array.isArray(activeDs.imageShape) ? activeDs.imageShape : [28, 28, 1];
+
+          // resolve test data via source registry or legacy records
+          if (!activeDs.xTest) {
+            var W2 = typeof window !== "undefined" ? window : {};
+            var srcReg2 = W2.OSCDatasetSourceRegistry || null;
+            var oh = function (l, n) { var a = new Array(n).fill(0); a[l] = 1; return a; };
+            var isRecon3 = defaultHeadType === "reconstruction" || defaultHeadType === "regression";
+            var testSplit;
+            if (srcReg2 && typeof srcReg2.resolveDatasetSplit === "function") {
+              testSplit = srcReg2.resolveDatasetSplit(activeDs, "test");
+            } else {
+              var rec = activeDs.records && activeDs.records.test;
+              testSplit = rec ? { x: rec.x || [], y: rec.y || [], length: (rec.x || []).length } : { x: [], y: [], length: 0 };
+            }
+            var resolvedFS = (srcReg2 && typeof srcReg2.getFeatureSize === "function") ? srcReg2.getFeatureSize(activeDs) : 0;
+            if (!resolvedFS && testSplit.x.length) resolvedFS = testSplit.x[0].length;
+            activeDs = {
+              xTest: testSplit.x,
+              yTest: isClassification ? testSplit.y.map(function (l) { return typeof l === "number" ? oh(l, nCls) : l; })
+                : isRecon3 ? testSplit.x : testSplit.y,
+              yTestRaw: testSplit.y,
+              featureSize: resolvedFS || 1,
+              numClasses: nCls,
+            };
+          }
+
+          // rebuild model
+          var graphMode = modelBuilder.inferGraphMode(modelRec.graph, "direct");
+          var featureSize = Number(activeDs.featureSize || (activeDs.xTest && activeDs.xTest[0] && activeDs.xTest[0].length) || 1);
+          var rebuiltModel = modelBuilder.buildModelFromGraph(tf, modelRec.graph, {
+            mode: graphMode, featureSize: featureSize, windowSize: 1, seqFeatureSize: featureSize,
+            allowedOutputKeys: allowedOutputKeys, defaultTarget: defaultTarget, numClasses: activeDs.numClasses || nCls,
+          });
+
+          // load saved weights
+          var hasWeights = t.modelArtifacts && t.modelArtifacts.weightSpecs &&
+            (t.modelArtifacts.weightData || t.modelArtifacts.weightValues);
+          if (hasWeights) {
+            try {
+              var converter = (typeof window !== "undefined" && window.OSCWeightConverter) ? window.OSCWeightConverter : null;
+              if (!converter || typeof converter.loadArtifactsIntoModel !== "function") {
+                throw new Error("Weight converter not available");
+              }
+              var loadResult = converter.loadArtifactsIntoModel(tf, rebuiltModel.model, t.modelArtifacts);
+              if (!loadResult || !loadResult.loaded) {
+                throw new Error(loadResult && loadResult.reason ? loadResult.reason : "weight_load_failed");
+              }
+            } catch (e) {
+              console.warn("[test] Weight load failed:", e.message);
+            }
+          }
+
+          var maxAvailable = (activeDs.xTest || []).length;
+
+          // --- run inference on ALL test data (metrics computed on full set) ---
+          var allX = activeDs.xTest;
+          var allY = activeDs.yTest;
+          var allPreds;
+          // check if model has multiple inputs (e.g., GAN with SampleZ + ImageSource)
+          var modelInputCount = rebuiltModel.model.inputs ? rebuiltModel.model.inputs.length : 1;
+          // batch predict to avoid OOM
+          var batchSize = 256;
+          var allPredsArr = [];
+          for (var bi = 0; bi < maxAvailable; bi += batchSize) {
+            var bEnd = Math.min(bi + batchSize, maxAvailable);
+            var batchX = allX.slice(bi, bEnd);
+            var bTensor = tf.tensor2d(batchX);
+            var inputTensors = bTensor;
+            // multi-input: provide matching tensors for each input
+            if (modelInputCount > 1) {
+              var inputArr = [];
+              var batchN = bEnd - bi;
+              for (var ii = 0; ii < modelInputCount; ii++) {
+                var inputShape = rebuiltModel.model.inputs[ii].shape;
+                var inputDim = inputShape[inputShape.length - 1];
+                if (inputDim === featureSize) {
+                  inputArr.push(bTensor); // real data input
+                } else {
+                  inputArr.push(tf.randomNormal([batchN, inputDim])); // SampleZ input
+                }
+              }
+              inputTensors = inputArr;
+            }
+            var bRaw = rebuiltModel.model.predict(inputTensors);
+            var bData = (Array.isArray(bRaw) ? bRaw[0] : bRaw).arraySync();
+            allPredsArr = allPredsArr.concat(bData);
+            if (Array.isArray(inputTensors)) inputTensors.forEach(function (t) { if (t !== bTensor) t.dispose(); });
+            bTensor.dispose();
+            if (Array.isArray(bRaw)) bRaw.forEach(function (pt) { pt.dispose(); }); else bRaw.dispose();
+          }
+          allPreds = allPredsArr;
+
+          rebuiltModel.model.dispose();
+
+          // cache results
+          _testCache[activeId] = {
+            preds: allPreds, ySlice: allY, testN: maxAvailable, nCls: nCls,
+            isClassification: isClassification, rawRecords: rawRecords, imgShape: imgShape, activeDs: activeDs,
+          };
+
+          if (_mountId !== capturedMountId) return; // tab switched during inference
+
+          // replace loader with results
+          loaderWrap.innerHTML = "";
+          loaderWrap.style.cssText = "padding:0;";
+          var statusEl = el("div", { style: "font-size:11px;color:#94a3b8;padding:4px 8px;" },
+            "Evaluated " + maxAvailable + " test samples" + (backendLabel ? " (weights: " + backendLabel + ", inference: TF.js)" : "") + ".");
+          loaderWrap.appendChild(statusEl);
+
+          var metricsContainer = el("div", {});
+          mainEl.appendChild(metricsContainer);
+
+          if (isClassification) {
+            _renderClassificationMetrics(metricsContainer, allPreds, allY, maxAvailable, nCls, rawRecords, imgShape, activeDs, Plotly, _darkLayout, pc);
+          } else {
+            _renderRegressionMetrics(metricsContainer, allPreds, allY, maxAvailable, Plotly, _darkLayout, pc);
+          }
+
+        } catch (e) {
+          if (_mountId !== capturedMountId) return;
+          loaderWrap.innerHTML = "";
+          loaderWrap.appendChild(el("span", { style: "font-size:12px;color:#f43f5e;" }, "Inference error: " + e.message));
+        }
+      }, 30); // small delay to let the spinner paint
     }
 
     // === Classification metrics ===
@@ -1612,6 +1695,10 @@
       var exportBtn = el("button", { className: "osc-btn secondary", style: "flex:1;" }, "Export Notebook");
       exportBtn.addEventListener("click", function () { _handleExport(); });
       btnRow.appendChild(exportBtn);
+
+      var runNbBtn = el("button", { className: "osc-btn secondary", style: "flex:1;" }, "Run Notebook");
+      runNbBtn.addEventListener("click", function () { _handleRunNotebook(); });
+      btnRow.appendChild(runNbBtn);
       rightEl.appendChild(btnRow);
 
       if (isStopping) {
@@ -1941,6 +2028,7 @@
       }
       _isTraining = true;
       _trainingRunId++;
+      delete _testCache[activeId]; // invalidate cached test results
       var currentRunId = _trainingRunId;
       var runtimeRunId = activeId + "--run-" + currentRunId + "-" + Date.now().toString(36);
       _activeTrainingCancel = null;
@@ -2571,6 +2659,89 @@
       } catch (err) {
         onStatus("Export error: " + err.message);
       }
+    }
+
+    function _handleRunNotebook() {
+      var W = typeof window !== "undefined" ? window : {};
+      var runner = W.OSCNotebookRunnerUI || null;
+      if (!runner || typeof runner.open !== "function") { onStatus("Notebook runner module not loaded"); return; }
+
+      var activeId = stateApi ? stateApi.getActiveTrainer() : "";
+      var tCard = activeId && store ? store.getTrainerCard(activeId) : null;
+      if (!tCard) { onStatus("Select a trainer"); return; }
+      if (!tCard.datasetId || !tCard.modelId) { onStatus("Set dataset + model first"); return; }
+
+      var dataset = store ? store.getDataset(tCard.datasetId) : null;
+      var model = store ? store.getModel(tCard.modelId) : null;
+      if (!dataset || !dataset.data) { onStatus("Generate the dataset first"); return; }
+      if (!model || !model.graph) { onStatus("Model has no graph"); return; }
+
+      var NBC = W.OSCNotebookCore || null;
+      if (!NBC || typeof NBC.createSingleNotebookFileFromConfig !== "function") {
+        onStatus("Notebook export module not available"); return;
+      }
+
+      onStatus("Generating notebook...");
+      var config = _configFormApi && typeof _configFormApi.getConfig === "function" ? _configFormApi.getConfig() : {};
+      var NRA = W.OSCNotebookRuntimeAssets || null;
+      var runtimeFiles = NRA && NRA.files ? Object.keys(NRA.files) : [];
+      var runtimeLoader = NRA && NRA.files ? function (name) { return NRA.files[name] || ""; } : null;
+
+      // Resolve source registry data
+      var exportDsData = dataset.data;
+      var srcReg4 = W.OSCDatasetSourceRegistry || null;
+      if (exportDsData && exportDsData.sourceId && srcReg4 && typeof srcReg4.resolveDatasetSplit === "function") {
+        var eTrain2 = srcReg4.resolveDatasetSplit(exportDsData, "train");
+        var eVal2 = srcReg4.resolveDatasetSplit(exportDsData, "val");
+        var eTest2 = srcReg4.resolveDatasetSplit(exportDsData, "test");
+        exportDsData = Object.assign({}, exportDsData, {
+          records: {
+            train: { x: eTrain2.x, y: eTrain2.y },
+            val: { x: eVal2.x, y: eVal2.y },
+            test: { x: eTest2.x, y: eTest2.y },
+          },
+        });
+      }
+
+      NBC.createSingleNotebookFileFromConfig({
+        seed: 42,
+        runtimeFiles: runtimeFiles,
+        runtimeLoader: runtimeLoader,
+        sessions: [{
+          id: tCard.id,
+          name: tCard.name || "session",
+          schemaId: tCard.schemaId,
+          graph: model.graph,
+          runtime: "python_server",
+          epochs: Number(config.epochs || 20),
+          batchSize: Number(config.batchSize || 32),
+          learningRate: Number(config.learningRate || 0.001),
+          datasetData: exportDsData,
+        }],
+      }).then(function (result) {
+        if (!result) { onStatus("Notebook generation returned empty"); return; }
+        // Parse the notebook JSON from the result
+        var notebookObj = null;
+        if (result.buffer) {
+          try { notebookObj = JSON.parse(typeof result.buffer === "string" ? result.buffer : new TextDecoder().decode(result.buffer)); } catch (e) {}
+        }
+        if (!notebookObj && result.blob) {
+          result.blob.text().then(function (text) {
+            try { notebookObj = JSON.parse(text); } catch (e) {}
+            if (notebookObj) {
+              var sra = getServerAdapter();
+              runner.open({ notebook: notebookObj, serverUrl: sra ? (sra.DEFAULT_SERVER || "http://localhost:3777") : "http://localhost:3777" });
+              onStatus("Notebook opened");
+            } else { onStatus("Failed to parse notebook"); }
+          });
+          return;
+        }
+        if (notebookObj) {
+          var sra2 = getServerAdapter();
+          runner.open({ notebook: notebookObj, serverUrl: sra2 ? (sra2.DEFAULT_SERVER || "http://localhost:3777") : "http://localhost:3777" });
+          onStatus("Notebook opened");
+        } else { onStatus("Failed to parse notebook"); }
+      }).catch(function (err) { onStatus("Notebook error: " + err.message); });
     }
 
     function mount() {

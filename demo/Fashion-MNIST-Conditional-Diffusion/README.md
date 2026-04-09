@@ -57,3 +57,13 @@ This node works across all three runtimes:
 | Generation Quality | MMD, Mean Gap, Std Gap, NN Precision/Coverage, Diversity | Compare generated vs real distribution |
 | Reconstruction Quality | MSE | How well the model denoises |
 | Per-Class Generation | MMD, Mean Gap, Diversity | Quality per target class |
+
+## References
+
+1. Ho, Jain, Abbeel. **"Denoising Diffusion Probabilistic Models."** *NeurIPS 2020*. [arXiv:2006.11239](https://arxiv.org/abs/2006.11239) — Foundation for DDPM reverse process.
+
+2. Dhariwal, Nichol. **"Diffusion Models Beat GANs on Image Synthesis."** *NeurIPS 2021*. [arXiv:2105.05233](https://arxiv.org/abs/2105.05233) — Classifier-free guidance and class conditioning.
+
+3. Ho, Salimans. **"Classifier-Free Diffusion Guidance."** *NeurIPS 2022 Workshop*. [arXiv:2207.12598](https://arxiv.org/abs/2207.12598) — Direct class conditioning without a separate classifier.
+
+Our approach embeds class labels as one-hot vectors concatenated with the noisy image (and timestep), following the label-concatenation conditioning strategy. This is simpler than classifier-free guidance but effective for small label sets.

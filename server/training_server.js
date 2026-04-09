@@ -42,6 +42,15 @@ if (!PYTHON) {
 
 // --- job storage ---
 var jobs = {}; // jobId → { status, process, clients[], result }
+var _kernels = {}; // kernelId → { process, execute(), shutdown(), alive() }
+
+function _readBody(req, callback) {
+  var stream = _getBodyStream(req);
+  var chunks = [];
+  stream.on("data", function (c) { chunks.push(c); });
+  stream.on("end", function () { callback(Buffer.concat(chunks).toString()); });
+  stream.on("error", function () { callback(""); });
+}
 
 function createJob(jobId, config) {
   jobs[jobId] = {
@@ -353,6 +362,111 @@ var server = http.createServer(function (req, res) {
   // POST /api/generate — generation on server (reconstruct/random)
   if (req.method === "POST" && pathname === "/api/generate") {
     _runSyncSubprocess(req, res, "generate_subprocess.py", "generate");
+    return;
+  }
+
+  // ─── Notebook Kernel Endpoints ───
+
+  // POST /api/notebook/start — start a persistent Python kernel
+  if (req.method === "POST" && pathname === "/api/notebook/start") {
+    var kernelId = "kernel-" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+    var kernelProc = spawn(PYTHON, [path.join(__dirname, "notebook_kernel.py")], {
+      stdio: ["pipe", "pipe", "pipe"],
+      cwd: path.resolve(__dirname, ".."),
+    });
+    var kernelBuf = "";
+    var kernelCallbacks = [];
+    var kernelAlive = true;
+
+    kernelProc.stdout.on("data", function (chunk) {
+      kernelBuf += chunk.toString();
+      var lines = kernelBuf.split("\n");
+      kernelBuf = lines.pop();
+      lines.forEach(function (line) {
+        if (!line.trim()) return;
+        try {
+          var msg = JSON.parse(line);
+          if (kernelCallbacks.length) kernelCallbacks.shift()(msg);
+        } catch (e) {}
+      });
+    });
+    kernelProc.stderr.on("data", function () {});
+    kernelProc.on("exit", function () {
+      kernelAlive = false;
+      delete _kernels[kernelId];
+      // flush pending callbacks with error
+      kernelCallbacks.forEach(function (cb) { cb({ kind: "error", message: "Kernel exited" }); });
+      kernelCallbacks = [];
+    });
+
+    _kernels[kernelId] = {
+      id: kernelId,
+      process: kernelProc,
+      alive: function () { return kernelAlive; },
+      execute: function (code, callback) {
+        if (!kernelAlive) { callback({ kind: "error", message: "Kernel not running" }); return; }
+        kernelCallbacks.push(callback);
+        kernelProc.stdin.write(JSON.stringify({ kind: "execute", code: code }) + "\n");
+      },
+      shutdown: function () {
+        if (!kernelAlive) return;
+        try { kernelProc.stdin.write(JSON.stringify({ kind: "shutdown" }) + "\n"); } catch (e) {}
+        setTimeout(function () { try { kernelProc.kill(); } catch (e) {} }, 2000);
+      },
+    };
+
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ kernelId: kernelId, status: "running" }));
+    return;
+  }
+
+  // POST /api/notebook/execute — execute a code cell in an existing kernel
+  if (req.method === "POST" && pathname === "/api/notebook/execute") {
+    _readBody(req, function (body) {
+      try {
+        var payload = JSON.parse(body);
+        var kId = payload.kernelId;
+        var code = payload.code || "";
+        var kernel = _kernels[kId];
+        if (!kernel || !kernel.alive()) {
+          res.writeHead(404, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: "Kernel not found or not running" }));
+          return;
+        }
+        kernel.execute(code, function (result) {
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(JSON.stringify(result));
+        });
+      } catch (e) {
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: e.message }));
+      }
+    });
+    return;
+  }
+
+  // POST /api/notebook/stop — stop a kernel
+  if (req.method === "POST" && pathname === "/api/notebook/stop") {
+    _readBody(req, function (body) {
+      try {
+        var payload = JSON.parse(body);
+        var kernel = _kernels[payload.kernelId];
+        if (kernel) { kernel.shutdown(); delete _kernels[payload.kernelId]; }
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ ok: true }));
+      } catch (e) {
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: e.message }));
+      }
+    });
+    return;
+  }
+
+  // GET /api/notebook/kernels — list active kernels
+  if (req.method === "GET" && pathname === "/api/notebook/kernels") {
+    var list = Object.keys(_kernels).map(function (id) { return { id: id, alive: _kernels[id].alive() }; });
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ kernels: list }));
     return;
   }
 
