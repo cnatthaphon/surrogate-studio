@@ -22,7 +22,7 @@ Trained on 8,000 Fashion-MNIST images (10 classes), 20 epochs, PyTorch CUDA:
 | **Small ViT (2 blocks)** | 87,288 | **82.50%** | **0.8260** | **0.5594** |
 | ViT + MLP Head (2 blocks) | 96,248 | 81.30% | 0.8141 | 0.5638 |
 
-![Evaluation Benchmark](images/evaluation_benchmark.png)
+![Pre-trained Trainer Metrics](images/trainer_pretrained.png)
 
 ### Comparison with Original Paper
 

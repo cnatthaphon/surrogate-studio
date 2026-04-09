@@ -4,8 +4,6 @@
 
 Predict future vessel positions from historical AIS (Automatic Identification System) data using attention-based models built entirely in the Surrogate Studio visual graph editor — no code required.
 
-![Leaflet Map with Vessel Trajectories](images/map_trajectories.gif)
-
 ## What This Demo Shows
 
 - **Schema-driven architecture**: same platform, same training engine, same graph editor — applied to maritime trajectory prediction instead of oscillators or image classification
@@ -23,7 +21,7 @@ Trained on 2,000 trajectories (89K training samples), 20 epochs, PyTorch CUDA:
 | Tiny TrAISformer (1 block) | 10,884 | 0.0382 | 0.0884 | 0.891 | 18 |
 | Small TrAISformer (2 blocks) | 21,476 | 0.0400 | 0.0893 | 0.889 | 17 |
 
-![Evaluation Benchmark](images/evaluation_benchmark.gif)
+![Pre-trained Trainer Metrics](images/trainer_pretrained.png)
 
 ### Comparison with Original Paper
 
@@ -81,8 +79,6 @@ Two stacked transformer blocks for deeper cross-timestep reasoning.
 
 Pre-processed per the paper: min 36 steps, max 120 steps, normalized [0,1], no NaN.
 
-![Dataset Explorer](images/dataset_explorer.gif)
-
 ## How to Use
 
 1. **Dataset** tab — explore vessel trajectories on interactive Leaflet map (satellite + speed coloring), toggle train/val/test splits, click points for coordinates
@@ -90,7 +86,7 @@ Pre-processed per the paper: min 36 steps, max 120 steps, normalized [0,1], no N
 3. **Trainer** tab — use pre-trained cards for immediate test metrics, or train from scratch via PyTorch server
 4. **Evaluation** tab — benchmark all 3 models side-by-side on test set with MAE, RMSE, R² metrics
 
-![Model Graph](images/model_graph.gif)
+![Model Graph](images/model_graph.png)
 
 ## Reference
 
