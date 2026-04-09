@@ -1382,9 +1382,15 @@
     var sessions = opts.sessions || [];
     var schemaId = opts.schemaId || "generic";
     var datasetCsvPath = opts.datasetCsvPath || "dataset.csv";
+    var datasetCsvText = String(opts.datasetCsvText || "");
     var firstSession = sessions[0] || {};
     var trainCfg = firstSession.trainCfg || {};
     var graphPath = firstSession.modelGraphPath || "model.graph.json";
+    var graphPayload = opts.graphPayload || firstSession.drawflowGraph || firstSession.graph || null;
+    var embedDataset = !!opts.embedDataset && !!datasetCsvText;
+    var embedGraph = !!opts.embedGraph && !!graphPayload;
+    var embeddedDatasetCsvB64 = embedDataset ? toBase64Utf8(datasetCsvText) : "";
+    var embeddedGraphJsonB64 = embedGraph ? toBase64Utf8(JSON.stringify(graphPayload)) : "";
 
     var cells = [];
 
@@ -1401,8 +1407,10 @@
     // Cell 1: Setup
     cells.push(makeCodeCell(
       "# Configuration — edit paths here\n" +
-      "DATASET_CSV = '" + datasetCsvPath + "'\n" +
-      "MODEL_GRAPH = '" + graphPath + "'\n" +
+      "DATASET_CSV = '" + (embedDataset ? "(embedded)" : datasetCsvPath) + "'\n" +
+      "MODEL_GRAPH = '" + (embedGraph ? "(embedded)" : graphPath) + "'\n" +
+      "EMBEDDED_DATASET_CSV_B64 = '" + embeddedDatasetCsvB64 + "'\n" +
+      "EMBEDDED_GRAPH_JSON_B64 = '" + embeddedGraphJsonB64 + "'\n" +
       "EPOCHS = " + (trainCfg.epochs || 20) + "\n" +
       "BATCH_SIZE = " + (trainCfg.batchSize || 32) + "\n" +
       "LR = " + (trainCfg.learningRate || 0.001) + "\n" +
@@ -1411,7 +1419,7 @@
 
     // Cell 2: Imports + data loading
     cells.push(makeCodeCell(
-      "import json, torch, torch.nn as nn, numpy as np, pandas as pd\n" +
+      "import base64, io, json, torch, torch.nn as nn, numpy as np, pandas as pd\n" +
       "from torch.utils.data import DataLoader, TensorDataset\n" +
       "import matplotlib.pyplot as plt\n\n" +
       "torch.manual_seed(SEED)\n" +
@@ -1422,7 +1430,10 @@
 
     // Cell 3: Load CSV
     cells.push(makeCodeCell(
-      "df = pd.read_csv(DATASET_CSV)\n" +
+      "if EMBEDDED_DATASET_CSV_B64:\n" +
+      "    df = pd.read_csv(io.StringIO(base64.b64decode(EMBEDDED_DATASET_CSV_B64).decode('utf-8')))\n" +
+      "else:\n" +
+      "    df = pd.read_csv(DATASET_CSV)\n" +
       "print(f'Dataset: {len(df)} rows, columns: {list(df.columns[:5])}...')\n\n" +
       "# Split by 'split' column\n" +
       "feature_cols = [c for c in df.columns if c.startswith('f')]\n" +
@@ -1452,8 +1463,12 @@
         "_subprocess_src = base64.b64decode('" + b64src + "').decode('utf-8')\n" +
         "_mod = types.ModuleType('train_subprocess')\n" +
         "exec(compile(_subprocess_src, 'train_subprocess.py', 'exec'), _mod.__dict__)\n\n" +
-        "with open(MODEL_GRAPH) as f:\n" +
-        "    graph = json.load(f)\n\n" +
+        "if EMBEDDED_GRAPH_JSON_B64:\n" +
+        "    graph = json.loads(base64.b64decode(EMBEDDED_GRAPH_JSON_B64).decode('utf-8'))\n" +
+        "else:\n" +
+        "    with open(MODEL_GRAPH) as f:\n" +
+        "        graph = json.load(f)\n" +
+        "graph_data = graph.get('drawflow', {}).get('Home', {}).get('data', graph)\n\n" +
         "model = _mod.build_model_from_graph(graph, x_train.shape[1], y_train.shape[1])\n" +
         "model = model.to(device)\n" +
         "print(f'Model: {sum(p.numel() for p in model.parameters())} params (graph-based builder)')\n"
@@ -1461,9 +1476,13 @@
     } else {
       // fallback: simple Sequential builder (no branching support)
       cells.push(makeCodeCell(
-        "with open(MODEL_GRAPH) as f:\n" +
-        "    graph = json.load(f)\n\n" +
-        "data = graph.get('drawflow', {}).get('Home', {}).get('data', graph)\n" +
+        "if EMBEDDED_GRAPH_JSON_B64:\n" +
+        "    graph = json.loads(base64.b64decode(EMBEDDED_GRAPH_JSON_B64).decode('utf-8'))\n" +
+        "else:\n" +
+        "    with open(MODEL_GRAPH) as f:\n" +
+        "        graph = json.load(f)\n\n" +
+        "graph_data = graph.get('drawflow', {}).get('Home', {}).get('data', graph)\n" +
+        "data = graph_data\n" +
         "nodes = sorted(data.keys(), key=lambda k: int(k) if k.isdigit() else 0)\n" +
         "layers = []\n" +
         "in_dim = x_train.shape[1]\n" +
@@ -1517,11 +1536,11 @@
       "    loss_fn = nn.CrossEntropyLoss() if is_cls else nn.MSELoss()\n" +
       "    head_losses = [{'fn': loss_fn, 'weight': 1.0, 'phase': '', 'cls': is_cls}]\n\n" +
       "# Detect class_embed nodes — include labels in DataLoader if present\n" +
-      "_has_class_embed = any(str(n.get('name','')).replace('_layer','') == 'class_embed' for n in graph_data.values() if isinstance(n,dict))\n" +
+      "_has_class_embed = any(str(n.get('name','')).replace('_layer','') == 'class_embed' for n in data.values() if isinstance(n,dict))\n" +
       "if _has_class_embed and hasattr(model, '_class_labels') is False:\n" +
       "    # build one-hot labels from dataset label column\n" +
       "    _nclasses = 10\n" +
-      "    for _n in graph_data.values():\n" +
+      "    for _n in data.values():\n" +
       "        if isinstance(_n, dict) and str(_n.get('name','')).replace('_layer','') == 'class_embed':\n" +
       "            _nclasses = int((_n.get('data') or {}).get('numClasses', 10))\n" +
       "    if 'label' in df.columns:\n" +
@@ -2081,24 +2100,49 @@
     var sessions = sessionsIn.map(function (s, idx) {
       return normalizeSession(s, idx, seed, includeModelGraph);
     });
-    var runtime = await loadRuntimeSources(cfg);
-    var pipelineSource = pickPipelineSource(runtime);
-    if (!pipelineSource) {
-      throw new Error("Runtime pipeline source is empty. Provide runtimeLoader or runtimeFiles.");
-    }
     var datasetPack = resolveDatasetCsvFromSessions(sessions, adapter);
+    var schemaId = String(datasetPack.schemaId || "").trim().toLowerCase();
+    var isOscillator = schemaId === "oscillator";
+    var notebook;
+    var runtime = { loaded: 0, total: 0 };
 
-    var notebook = buildNotebookObject({
-      packageLabel: "single file",
-      sessions: sessions.map(function (s) {
-        var out = jsonClone(s);
-        delete out.datasetData;
-        return out;
-      }),
-      pipelineSource: pipelineSource,
-      embedDataset: true,
-      datasetCsvText: datasetPack.csvText,
-    });
+    if (isOscillator) {
+      runtime = await loadRuntimeSources(cfg);
+      var pipelineSource = pickPipelineSource(runtime);
+      if (!pipelineSource) {
+        throw new Error("Runtime pipeline source is empty. Provide runtimeLoader or runtimeFiles.");
+      }
+      notebook = buildNotebookObject({
+        packageLabel: "single file",
+        sessions: sessions.map(function (s) {
+          var out = jsonClone(s);
+          delete out.datasetData;
+          return out;
+        }),
+        pipelineSource: pipelineSource,
+        embedDataset: true,
+        datasetCsvText: datasetPack.csvText,
+      });
+    } else {
+      var trainSubprocessSource = "";
+      try {
+        var runtimeLoader = typeof cfg.runtimeLoader === "function" ? cfg.runtimeLoader : null;
+        if (runtimeLoader) trainSubprocessSource = runtimeLoader("train_subprocess.py") || "";
+      } catch (e) { /* not available */ }
+      if (!trainSubprocessSource && isNode && FS) {
+        try { trainSubprocessSource = FS.readFileSync(PATH.resolve(PATH.dirname(__filename || "."), "..", "server", "train_subprocess.py"), "utf8"); } catch (e) { /* */ }
+      }
+      notebook = buildGenericNotebook({
+        sessions: sessions,
+        schemaId: schemaId,
+        datasetCsvPath: "dataset.csv",
+        datasetCsvText: datasetPack.csvText,
+        embedDataset: true,
+        embedGraph: true,
+        graphPayload: sessions[0] && sessions[0].drawflowGraph ? sessions[0].drawflowGraph : null,
+        trainSubprocessSource: trainSubprocessSource,
+      });
+    }
     var notebookText = JSON.stringify(notebook, null, 2);
     var fileName = String(cfg.notebookFileName || ("notebook_" + Date.now() + ".ipynb"));
     var outPath = cfg.outputNotebookPath ? String(cfg.outputNotebookPath) : "";
