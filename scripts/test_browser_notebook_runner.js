@@ -158,6 +158,16 @@ async function main() {
     ok(true, "Notebook overlay opened");
 
     await page.waitForFunction(function () {
+      var text = document.body.textContent || "";
+      return text.indexOf("Preparing notebook") >= 0 ||
+        text.indexOf("Checking server") >= 0 ||
+        text.indexOf("Starting kernel") >= 0 ||
+        text.indexOf("Notebook opened") >= 0 ||
+        text.indexOf("Kernel ready") >= 0;
+    }, { timeout: 20000 });
+    ok(true, "Notebook provides immediate feedback");
+
+    await page.waitForFunction(function () {
       return document.body.textContent.indexOf("Kernel ready") >= 0;
     }, { timeout: 20000 });
     ok(true, "Notebook kernel became ready");

@@ -25,6 +25,11 @@
   var _overlay = null;
   var _kernelId = null;
   var _serverUrl = "";
+  var _busyStatusEl = null;
+
+  function _normalizeServerUrl(url) {
+    return String(url || "http://localhost:3777").trim().replace(/\/$/, "");
+  }
 
   function _el(tag, attrs, children) {
     var e = document.createElement(tag);
@@ -138,11 +143,52 @@
     }
   }
 
+  function showBusy(opts) {
+    if (_overlay) close();
+    _serverUrl = _normalizeServerUrl(opts && opts.serverUrl);
+    var message = String((opts && opts.message) || "Preparing notebook...");
+    _busyStatusEl = null;
+
+    if (!document.getElementById("osc-notebook-runner-spin-style")) {
+      var styleEl = document.createElement("style");
+      styleEl.id = "osc-notebook-runner-spin-style";
+      styleEl.textContent = "@keyframes oscNotebookSpin{to{transform:rotate(360deg)}}";
+      document.head.appendChild(styleEl);
+    }
+
+    _overlay = _el("div", { style: "position:fixed;top:0;left:0;right:0;bottom:0;z-index:10000;background:#0b1220;overflow:hidden;display:flex;align-items:center;justify-content:center;padding:24px;" });
+    var card = _el("div", { style: "width:min(520px,100%);background:#111827;border:1px solid #1e293b;border-radius:10px;box-shadow:0 20px 80px rgba(0,0,0,0.45);overflow:hidden;" });
+    var header = _el("div", { style: "display:flex;align-items:center;gap:8px;padding:10px 14px;background:#0f172a;border-bottom:1px solid #1e293b;" });
+    header.appendChild(_el("span", { style: "font-size:14px;color:#67e8f9;font-weight:600;" }, "Notebook Runner"));
+    var closeBtn = _el("button", { style: "margin-left:auto;padding:4px 12px;background:#334155;color:#e2e8f0;border:none;border-radius:4px;cursor:pointer;font-size:12px;" }, "Close");
+    closeBtn.addEventListener("click", function () { close(); });
+    header.appendChild(closeBtn);
+    card.appendChild(header);
+
+    var body = _el("div", { style: "padding:18px 16px;display:flex;gap:12px;align-items:flex-start;" });
+    body.appendChild(_el("div", { style: "width:18px;height:18px;border:2px solid #334155;border-top-color:#67e8f9;border-radius:50%;animation:oscNotebookSpin 0.8s linear infinite;flex:0 0 auto;margin-top:2px;" }));
+    var textWrap = _el("div", { style: "min-width:0;" });
+    textWrap.appendChild(_el("div", { style: "font-size:13px;color:#e2e8f0;font-weight:600;margin-bottom:6px;" }, "Preparing notebook"));
+    _busyStatusEl = _el("div", { style: "font-size:12px;color:#cbd5e1;line-height:1.5;" }, message);
+    textWrap.appendChild(_busyStatusEl);
+    textWrap.appendChild(_el("div", { style: "font-size:11px;color:#64748b;margin-top:10px;" }, "Large datasets can take a while to package for the interactive runner."));
+    body.appendChild(textWrap);
+    card.appendChild(body);
+    _overlay.appendChild(card);
+    document.body.appendChild(_overlay);
+  }
+
+  function updateBusy(message, tone) {
+    if (!_busyStatusEl) return;
+    _busyStatusEl.textContent = String(message || "");
+    _busyStatusEl.style.color = tone === "error" ? "#fbbf24" : (tone === "success" ? "#4ade80" : "#cbd5e1");
+  }
+
   function open(opts) {
     if (_overlay) close();
 
     var notebook = opts.notebook || { cells: [] };
-    _serverUrl = (opts.serverUrl || "http://localhost:3777").replace(/\/$/, "");
+    _serverUrl = _normalizeServerUrl(opts.serverUrl);
     var cells = notebook.cells || [];
 
     // Create fullscreen overlay
@@ -285,9 +331,10 @@
     _stopKernel();
     if (_overlay && _overlay.parentNode) _overlay.parentNode.removeChild(_overlay);
     _overlay = null;
+    _busyStatusEl = null;
   }
 
   function isOpen() { return !!_overlay; }
 
-  return { open: open, close: close, isOpen: isOpen };
+  return { open: open, close: close, isOpen: isOpen, showBusy: showBusy, updateBusy: updateBusy };
 });

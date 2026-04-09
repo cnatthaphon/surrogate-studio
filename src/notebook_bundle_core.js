@@ -2131,6 +2131,7 @@
       notebookPath: outPath || null,
       summary: summary,
     };
+    if (cfg.returnObject) result.notebook = notebook;
     if (blob) result.blob = blob;
     if (buffer) result.buffer = buffer;
     return result;

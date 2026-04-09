@@ -31,6 +31,7 @@
     var _mountId = 0;
     var _configFormApi = null;
     var _isTraining = false;
+    var _isNotebookPreparing = false;
     var _trainingRunId = 0; // increments on each training start — old runs detect new run and stop
     var _activeModel = null; // reference to model during training (for weight save on stop)
     var _activeTrainingCancel = null; // best-effort cancel for worker/server runs
@@ -110,6 +111,122 @@
         return { loaded: false, reason: "converter_unavailable" };
       }
       return converter.loadArtifactsIntoModel(tf, model, artifacts);
+    }
+
+    function _sampleArrayEvenly(arr, count) {
+      var src = Array.isArray(arr) ? arr : [];
+      var n = src.length;
+      var need = Math.max(0, Math.floor(Number(count) || 0));
+      if (!n || need <= 0) return [];
+      if (need >= n) return src.slice();
+      if (need === 1) return [src[0]];
+      var out = [];
+      for (var i = 0; i < need; i += 1) {
+        var idx = Math.round(i * (n - 1) / (need - 1));
+        out.push(src[idx]);
+      }
+      return out;
+    }
+
+    function _limitNotebookDatasetRows(ds, maxRows) {
+      var limit = Math.max(0, Math.floor(Number(maxRows) || 0));
+      if (!ds || typeof ds !== "object" || !limit) return { dataset: ds, truncated: false, totalRows: 0, keptRows: 0 };
+
+      function _allocate(counts, cap) {
+        var total = (counts.train || 0) + (counts.val || 0) + (counts.test || 0);
+        if (!total || total <= cap) return { train: counts.train || 0, val: counts.val || 0, test: counts.test || 0, total: total };
+        var raw = {
+          train: total ? ((counts.train || 0) / total) * cap : 0,
+          val: total ? ((counts.val || 0) / total) * cap : 0,
+          test: total ? ((counts.test || 0) / total) * cap : 0,
+        };
+        var alloc = { train: Math.floor(raw.train), val: Math.floor(raw.val), test: Math.floor(raw.test) };
+        ["train", "val", "test"].forEach(function (split) {
+          if ((counts[split] || 0) > 0 && alloc[split] < 1) alloc[split] = 1;
+          if (alloc[split] > (counts[split] || 0)) alloc[split] = counts[split] || 0;
+        });
+        var used = alloc.train + alloc.val + alloc.test;
+        while (used > cap) {
+          var reduced = false;
+          ["train", "val", "test"].forEach(function (split) {
+            if (!reduced && used > cap && alloc[split] > 1) {
+              alloc[split] -= 1;
+              used -= 1;
+              reduced = true;
+            }
+          });
+          if (!reduced) break;
+        }
+        var order = ["train", "val", "test"].map(function (split) {
+          return { split: split, frac: raw[split] - Math.floor(raw[split]) };
+        }).sort(function (a, b) { return b.frac - a.frac; });
+        while (used < cap) {
+          var added = false;
+          for (var i = 0; i < order.length && used < cap; i += 1) {
+            var split = order[i].split;
+            if (alloc[split] < (counts[split] || 0)) {
+              alloc[split] += 1;
+              used += 1;
+              added = true;
+            }
+          }
+          if (!added) break;
+        }
+        alloc.total = total;
+        return alloc;
+      }
+
+      if (ds.records && typeof ds.records === "object") {
+        var recordCounts = ["train", "val", "test"].reduce(function (acc, split) {
+          var rec = ds.records[split] || {};
+          acc[split] = Array.isArray(rec.x) ? rec.x.length : 0;
+          return acc;
+        }, { train: 0, val: 0, test: 0 });
+        var recordTotal = recordCounts.train + recordCounts.val + recordCounts.test;
+        if (!recordTotal || recordTotal <= limit) return { dataset: ds, truncated: false, totalRows: recordTotal, keptRows: recordTotal };
+        var recordAlloc = _allocate(recordCounts, limit);
+        var nextRecords = {};
+        ["train", "val", "test"].forEach(function (split) {
+          var rec = ds.records[split] || {};
+          var keep = recordAlloc[split] || 0;
+          nextRecords[split] = Object.assign({}, rec, {
+            x: _sampleArrayEvenly(rec.x, keep),
+            y: _sampleArrayEvenly(rec.y, keep),
+          });
+        });
+        return {
+          dataset: Object.assign({}, ds, { records: nextRecords }),
+          truncated: true,
+          totalRows: recordTotal,
+          keptRows: (recordAlloc.train || 0) + (recordAlloc.val || 0) + (recordAlloc.test || 0),
+        };
+      }
+
+      if (Array.isArray(ds.xTrain) || Array.isArray(ds.xVal) || Array.isArray(ds.xTest)) {
+        var arrayCounts = {
+          train: Array.isArray(ds.xTrain) ? ds.xTrain.length : 0,
+          val: Array.isArray(ds.xVal) ? ds.xVal.length : 0,
+          test: Array.isArray(ds.xTest) ? ds.xTest.length : 0,
+        };
+        var total = arrayCounts.train + arrayCounts.val + arrayCounts.test;
+        if (!total || total <= limit) return { dataset: ds, truncated: false, totalRows: total, keptRows: total };
+        var alloc = _allocate(arrayCounts, limit);
+        return {
+          dataset: Object.assign({}, ds, {
+            xTrain: _sampleArrayEvenly(ds.xTrain, alloc.train),
+            yTrain: _sampleArrayEvenly(ds.yTrain, alloc.train),
+            xVal: _sampleArrayEvenly(ds.xVal, alloc.val),
+            yVal: _sampleArrayEvenly(ds.yVal, alloc.val),
+            xTest: _sampleArrayEvenly(ds.xTest, alloc.test),
+            yTest: _sampleArrayEvenly(ds.yTest, alloc.test),
+          }),
+          truncated: true,
+          totalRows: total,
+          keptRows: (alloc.train || 0) + (alloc.val || 0) + (alloc.test || 0),
+        };
+      }
+
+      return { dataset: ds, truncated: false, totalRows: 0, keptRows: 0 };
     }
     function _inferTrainerFamily(tCard) {
       if (!tCard || !store || !modelBuilder) return "supervised";
@@ -1696,8 +1813,18 @@
       exportBtn.addEventListener("click", function () { _handleExport(); });
       btnRow.appendChild(exportBtn);
 
-      var runNbBtn = el("button", { className: "osc-btn secondary", style: "flex:1;" }, "Run Notebook");
-      runNbBtn.addEventListener("click", function () { _handleRunNotebook(); });
+      var runNbBtn = el("button", { className: "osc-btn secondary", style: "flex:1;" }, _isNotebookPreparing ? "Preparing..." : "Run Notebook");
+      if (_isNotebookPreparing) {
+        runNbBtn.disabled = true;
+        runNbBtn.style.opacity = "0.6";
+        runNbBtn.style.cursor = "not-allowed";
+      }
+      runNbBtn.addEventListener("click", function () {
+        if (runNbBtn.disabled || _isNotebookPreparing) return;
+        runNbBtn.disabled = true;
+        runNbBtn.textContent = "Preparing...";
+        _handleRunNotebook();
+      });
       btnRow.appendChild(runNbBtn);
       rightEl.appendChild(btnRow);
 
@@ -2665,6 +2792,7 @@
       var W = typeof window !== "undefined" ? window : {};
       var runner = W.OSCNotebookRunnerUI || null;
       if (!runner || typeof runner.open !== "function") { onStatus("Notebook runner module not loaded"); return; }
+      if (_isNotebookPreparing) { onStatus("Notebook is already being prepared"); return; }
 
       var activeId = stateApi ? stateApi.getActiveTrainer() : "";
       var tCard = activeId && store ? store.getTrainerCard(activeId) : null;
@@ -2681,67 +2809,96 @@
         onStatus("Notebook export module not available"); return;
       }
 
-      onStatus("Generating notebook...");
       var config = _configFormApi && typeof _configFormApi.getConfig === "function" ? _configFormApi.getConfig() : {};
+      var sra0 = getServerAdapter();
+      var runnerServerUrl0 = String((config && config.serverUrl) || (tCard && tCard.config && tCard.config.serverUrl) || (sra0 ? (sra0.DEFAULT_SERVER || "http://localhost:3777") : "http://localhost:3777"));
+      _isNotebookPreparing = true;
+      onStatus("Preparing notebook...");
+      if (runner && typeof runner.showBusy === "function") {
+        runner.showBusy({
+          serverUrl: runnerServerUrl0,
+          message: "Packaging trainer, graph, runtime, and dataset for the notebook runner..."
+        });
+      }
+      if (stateApi && stateApi.getActiveTrainer && stateApi.getActiveTrainer() === activeId) _renderRightPanel();
+
       var NRA = W.OSCNotebookRuntimeAssets || null;
       var runtimeFiles = NRA && NRA.files ? Object.keys(NRA.files) : [];
       var runtimeLoader = NRA && NRA.files ? function (name) { return NRA.files[name] || ""; } : null;
 
-      // Resolve source registry data
-      var exportDsData = dataset.data;
-      var srcReg4 = W.OSCDatasetSourceRegistry || null;
-      if (exportDsData && exportDsData.sourceId && srcReg4 && typeof srcReg4.resolveDatasetSplit === "function") {
-        var eTrain2 = srcReg4.resolveDatasetSplit(exportDsData, "train");
-        var eVal2 = srcReg4.resolveDatasetSplit(exportDsData, "val");
-        var eTest2 = srcReg4.resolveDatasetSplit(exportDsData, "test");
-        exportDsData = Object.assign({}, exportDsData, {
-          records: {
-            train: { x: eTrain2.x, y: eTrain2.y },
-            val: { x: eVal2.x, y: eVal2.y },
-            test: { x: eTest2.x, y: eTest2.y },
-          },
-        });
-      }
-
-      NBC.createSingleNotebookFileFromConfig({
-        seed: 42,
-        runtimeFiles: runtimeFiles,
-        runtimeLoader: runtimeLoader,
-        sessions: [{
-          id: tCard.id,
-          name: tCard.name || "session",
-          schemaId: tCard.schemaId,
-          graph: model.graph,
-          runtime: "python_server",
-          epochs: Number(config.epochs || 20),
-          batchSize: Number(config.batchSize || 32),
-          learningRate: Number(config.learningRate || 0.001),
-          datasetData: exportDsData,
-        }],
-      }).then(function (result) {
-        if (!result) { onStatus("Notebook generation returned empty"); return; }
-        // Parse the notebook JSON from the result
-        var notebookObj = null;
-        if (result.buffer) {
-          try { notebookObj = JSON.parse(typeof result.buffer === "string" ? result.buffer : new TextDecoder().decode(result.buffer)); } catch (e) {}
-        }
-        if (!notebookObj && result.blob) {
-          result.blob.text().then(function (text) {
-            try { notebookObj = JSON.parse(text); } catch (e) {}
-            if (notebookObj) {
-              var sra = getServerAdapter();
-              runner.open({ notebook: notebookObj, serverUrl: sra ? (sra.DEFAULT_SERVER || "http://localhost:3777") : "http://localhost:3777" });
-              onStatus("Notebook opened");
-            } else { onStatus("Failed to parse notebook"); }
+      setTimeout(function () {
+        var exportDsData = dataset.data;
+        var srcReg4 = W.OSCDatasetSourceRegistry || null;
+        if (exportDsData && exportDsData.sourceId && srcReg4 && typeof srcReg4.resolveDatasetSplit === "function") {
+          var eTrain2 = srcReg4.resolveDatasetSplit(exportDsData, "train");
+          var eVal2 = srcReg4.resolveDatasetSplit(exportDsData, "val");
+          var eTest2 = srcReg4.resolveDatasetSplit(exportDsData, "test");
+          exportDsData = Object.assign({}, exportDsData, {
+            records: {
+              train: { x: eTrain2.x, y: eTrain2.y },
+              val: { x: eVal2.x, y: eVal2.y },
+              test: { x: eTest2.x, y: eTest2.y },
+            },
           });
-          return;
         }
-        if (notebookObj) {
-          var sra2 = getServerAdapter();
-          runner.open({ notebook: notebookObj, serverUrl: sra2 ? (sra2.DEFAULT_SERVER || "http://localhost:3777") : "http://localhost:3777" });
-          onStatus("Notebook opened");
-        } else { onStatus("Failed to parse notebook"); }
-      }).catch(function (err) { onStatus("Notebook error: " + err.message); });
+
+        var notebookRowLimit = Math.max(1000, Math.floor(Number((config && config.notebookRowLimit) || (tCard && tCard.config && tCard.config.notebookRowLimit) || 10000) || 10000));
+        var preview = _limitNotebookDatasetRows(exportDsData, notebookRowLimit);
+        var notebookDsData = preview.dataset || exportDsData;
+        if (runner && typeof runner.updateBusy === "function") {
+          runner.updateBusy(
+            preview.truncated
+              ? ("Building interactive notebook with a preview subset (" + preview.keptRows + " of " + preview.totalRows + " rows)...")
+              : "Building interactive notebook..."
+          );
+        }
+
+        NBC.createSingleNotebookFileFromConfig({
+          seed: 42,
+          runtimeFiles: runtimeFiles,
+          runtimeLoader: runtimeLoader,
+          returnObject: true,
+          sessions: [{
+            id: tCard.id,
+            name: tCard.name || "session",
+            schemaId: tCard.schemaId,
+            graph: model.graph,
+            runtime: "python_server",
+            epochs: Number(config.epochs || 20),
+            batchSize: Number(config.batchSize || 32),
+            learningRate: Number(config.learningRate || 0.001),
+            datasetData: notebookDsData,
+          }],
+        }).then(function (result) {
+          if (!result) throw new Error("Notebook generation returned empty");
+          var notebookObj = result.notebook || null;
+          if (!notebookObj && result.buffer) {
+            try { notebookObj = JSON.parse(typeof result.buffer === "string" ? result.buffer : new TextDecoder().decode(result.buffer)); } catch (e) {}
+          }
+          if (!notebookObj && result.blob) {
+            return result.blob.text().then(function (text) {
+              try { notebookObj = JSON.parse(text); } catch (e) {}
+              return notebookObj;
+            });
+          }
+          return notebookObj;
+        }).then(function (notebookObj) {
+          _isNotebookPreparing = false;
+          if (stateApi && stateApi.getActiveTrainer && stateApi.getActiveTrainer() === activeId) _renderRightPanel();
+          if (!notebookObj) {
+            if (runner && typeof runner.updateBusy === "function") runner.updateBusy("Failed to parse notebook", "error");
+            onStatus("Failed to parse notebook");
+            return;
+          }
+          runner.open({ notebook: notebookObj, serverUrl: runnerServerUrl0 });
+          onStatus(preview.truncated ? ("Notebook opened (preview dataset: " + preview.keptRows + " rows)") : "Notebook opened");
+        }).catch(function (err) {
+          _isNotebookPreparing = false;
+          if (stateApi && stateApi.getActiveTrainer && stateApi.getActiveTrainer() === activeId) _renderRightPanel();
+          if (runner && typeof runner.updateBusy === "function") runner.updateBusy("Notebook error: " + err.message, "error");
+          onStatus("Notebook error: " + err.message);
+        });
+      }, 30);
     }
 
     function mount() {
