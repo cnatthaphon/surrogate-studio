@@ -1582,7 +1582,7 @@
       "    for hl in head_losses:\n" +
       "        if hl['phase'] != phase and hl['phase'] != '' and phase != '': continue\n" +
       "        t = yb\n" +
-      "        if hl['cls']: total = total + hl['weight'] * hl['fn'](pred, t.long().squeeze(-1))\n" +
+      "        if hl['cls']: total = total + hl['weight'] * hl['fn'](pred, t.argmax(dim=-1) if t.ndim > 1 and t.shape[-1] > 1 else t.long().squeeze(-1))\n" +
       "        else: total = total + hl['weight'] * hl['fn'](pred, t)\n" +
       "    return total\n\n" +
       "history = {'train_loss': [], 'val_loss': []}\n" +
