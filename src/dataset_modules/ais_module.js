@@ -203,7 +203,14 @@
     var limit = Math.max(1, Number(options.limit || 80));
     mountEl.innerHTML = "";
     mountEl.appendChild(el("div", { style: "font-size:12px;color:#cbd5e1;font-weight:600;margin-bottom:6px;" }, title));
-    var statusEl = el("div", { style: "font-size:12px;color:#94a3b8;" }, "Loading AIS trajectories...");
+    if (!document.getElementById("osc-spin-style")) {
+      var _ss = document.createElement("style"); _ss.id = "osc-spin-style";
+      _ss.textContent = "@keyframes spin{to{transform:rotate(360deg)}}";
+      document.head.appendChild(_ss);
+    }
+    var statusEl = el("div", { style: "display:flex;align-items:center;gap:8px;" });
+    statusEl.appendChild(el("div", { style: "width:16px;height:16px;border:2px solid #334155;border-top-color:#67e8f9;border-radius:50%;animation:spin 0.8s linear infinite;" }));
+    statusEl.appendChild(el("span", { style: "font-size:12px;color:#94a3b8;" }, "Loading AIS trajectories..."));
     mountEl.appendChild(statusEl);
 
     Promise.all([loadData(), _ensureLeaflet()]).then(function (results) {
@@ -221,7 +228,7 @@
       if (L && typeof L.map === "function") {
         // Leaflet map
         var mapDiv = document.createElement("div");
-        mapDiv.style.cssText = "width:100%;height:450px;border-radius:8px;border:1px solid #334155;";
+        mapDiv.style.cssText = "width:100%;height:calc(100vh - 200px);min-height:450px;border-radius:8px;border:1px solid #334155;";
         mountEl.appendChild(mapDiv);
 
         var map = L.map(mapDiv, { zoomControl: true, attributionControl: true, preferCanvas: true }).setView([56.75, 11.65], 7);

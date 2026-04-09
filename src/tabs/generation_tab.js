@@ -723,7 +723,10 @@
         var generatingMsg = el("div", {
           style: "padding:10px 12px;background:#0f172a;border:1px solid #475569;border-radius:8px;color:#e2e8f0;font-size:12px;text-align:center;max-width:220px;cursor:not-allowed;"
         }, [
-          el("div", { style: "font-weight:600;color:#38bdf8;margin-bottom:4px;" }, "Generating"),
+          el("div", { style: "display:flex;align-items:center;gap:6px;justify-content:center;font-weight:600;color:#38bdf8;margin-bottom:4px;" }, [
+            el("div", { style: "width:14px;height:14px;border:2px solid #334155;border-top-color:#38bdf8;border-radius:50%;animation:spin 0.8s linear infinite;" }),
+            "Generating"
+          ]),
           el("div", { style: "font-size:11px;color:#cbd5e1;" }, "Wait until this run finishes before changing settings or starting another generation.")
         ]);
         generatingOverlay.appendChild(generatingMsg);

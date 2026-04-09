@@ -861,7 +861,15 @@
       }
 
       // playground: fetch preview and show all samples (no split)
-      mountEl.appendChild(elF("div", { style: "color:#67e8f9;font-size:13px;" }, "Loading " + label + " data..."));
+      if (!document.getElementById("osc-spin-style")) {
+        var _ss = document.createElement("style"); _ss.id = "osc-spin-style";
+        _ss.textContent = "@keyframes spin{to{transform:rotate(360deg)}}";
+        document.head.appendChild(_ss);
+      }
+      var _ldWrap = elF("div", { style: "display:flex;align-items:center;gap:8px;padding:12px 0;" });
+      _ldWrap.appendChild(elF("div", { style: "width:18px;height:18px;border:2px solid #334155;border-top-color:#67e8f9;border-radius:50%;animation:spin 0.8s linear infinite;" }));
+      _ldWrap.appendChild(elF("span", { style: "color:#94a3b8;font-size:13px;" }, "Loading " + label + " data..."));
+      mountEl.appendChild(_ldWrap);
       buildMnistDataset({ seed: 42, totalCount: 999999, variant: variant }).then(function (res) {
         if (!isCurrent()) return;
         if (core) {

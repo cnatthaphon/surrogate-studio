@@ -202,7 +202,15 @@
       var srcReg = W.OSCDatasetSourceRegistry || null;
       if (d.sourceId && srcReg && !srcReg.has(d.sourceId)) {
         // source not loaded yet — trigger load via module build (which fetches + registers)
-        previewMount.appendChild(el("div", { style: "color:#fbbf24;font-size:12px;" }, "Loading source data..."));
+        if (!document.getElementById("osc-spin-style")) {
+          var _ss = document.createElement("style"); _ss.id = "osc-spin-style";
+          _ss.textContent = "@keyframes spin{to{transform:rotate(360deg)}}";
+          document.head.appendChild(_ss);
+        }
+        var _ldW = el("div", { style: "display:flex;align-items:center;gap:8px;padding:12px 0;" });
+        _ldW.appendChild(el("div", { style: "width:16px;height:16px;border:2px solid #334155;border-top-color:#67e8f9;border-radius:50%;animation:spin 0.8s linear infinite;" }));
+        _ldW.appendChild(el("span", { style: "font-size:12px;color:#94a3b8;" }, "Loading source data..."));
+        previewMount.appendChild(_ldW);
         if (mod && typeof mod.build === "function") {
           mod.build({ seed: 42, totalCount: 1, variant: d.datasetModuleId || ds.schemaId }).then(function () {
             if (currentMountId !== _mountId) return;

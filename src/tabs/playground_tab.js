@@ -135,14 +135,31 @@
       if (mod && mod.playgroundApi && typeof mod.playgroundApi.renderPlayground === "function") {
         var currentMountId = _mountId;
         layout.rightEl.innerHTML = ""; // clear right panel for module to render config
-        mod.playgroundApi.renderPlayground(mainEl, {
-          el: el,
-          escapeHtml: escapeHtml,
-          Plotly: (typeof window !== "undefined" && window.Plotly) ? window.Plotly : null,
-          configEl: layout.rightEl,
-          mountId: currentMountId,
-          isCurrent: function () { return currentMountId === _mountId; },
-        });
+
+        // show spinner while module loads (e.g. CDN fetch)
+        if (!document.getElementById("osc-spin-style")) {
+          var ss = document.createElement("style"); ss.id = "osc-spin-style";
+          ss.textContent = "@keyframes spin{to{transform:rotate(360deg)}}";
+          document.head.appendChild(ss);
+        }
+        var _loaderWrap = el("div", { style: "display:flex;align-items:center;gap:8px;padding:24px;" });
+        var _spinner = el("div", { style: "width:20px;height:20px;border:2px solid #334155;border-top-color:#67e8f9;border-radius:50%;animation:spin 0.8s linear infinite;" });
+        _loaderWrap.appendChild(_spinner);
+        _loaderWrap.appendChild(el("span", { style: "font-size:13px;color:#94a3b8;" }, "Loading preview..."));
+        mainEl.appendChild(_loaderWrap);
+
+        setTimeout(function () {
+          if (currentMountId !== _mountId) return;
+          mainEl.innerHTML = "";
+          mod.playgroundApi.renderPlayground(mainEl, {
+            el: el,
+            escapeHtml: escapeHtml,
+            Plotly: (typeof window !== "undefined" && window.Plotly) ? window.Plotly : null,
+            configEl: layout.rightEl,
+            mountId: currentMountId,
+            isCurrent: function () { return currentMountId === _mountId; },
+          });
+        }, 30);
         return;
       }
 
