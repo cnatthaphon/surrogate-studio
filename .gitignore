@@ -4,4 +4,6 @@ legacy/
 __tmp_probe/
 *.pyc
 __pycache__/
-node_modules/
+debug.html
+index_legacy.html
+*.bkp

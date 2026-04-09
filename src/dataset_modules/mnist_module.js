@@ -624,6 +624,23 @@
     var rng = createRng(seed);
     var totalAvailable = Math.max(1, Number(source.numExamples) || 0);
 
+    // register source in source registry for zero-copy resolution
+    var _srcReg = (typeof root !== "undefined" && root.OSCDatasetSourceRegistry) || null;
+    if (_srcReg && source.pixelsUint8 && typeof _srcReg.createFromUint8 === "function") {
+      var _sid = String(source.variant || source.schemaId || "mnist") + "_source";
+      if (!_srcReg.has(_sid)) {
+        _srcReg.createFromUint8({
+          id: _sid,
+          pixelsUint8: source.pixelsUint8,
+          labelsUint8: source.labelsUint8,
+          numExamples: source.numExamples,
+          imageSize: source.imageSize || IMAGE_SIZE,
+          classCount: source.classCount || CLASS_COUNT,
+          imageShape: source.imageShape || [28, 28, 1],
+        });
+      }
+    }
+
     // --- "original" split: use source's actual train/test boundary ---
     if (splitMode === "original") {
       // source.originalTrainCount = exact boundary from the original dataset

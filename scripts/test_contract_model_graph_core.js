@@ -43,11 +43,11 @@ function normalizeOutputTargetsList(rawTargets, fallbackTargets, schemaId) {
   const values = Array.isArray(rawTargets) ? rawTargets : String(rawTargets == null ? "" : rawTargets).split(",");
   const normalized = values
     .map((item) => String(item || "").trim().toLowerCase())
-    .filter((item) => item && allowed.includes(item));
+    .filter((item) => item && allowed.map(function(o){return typeof o === "object" ? o.key : o;}).includes(item));
   if (normalized.length) return normalized;
   return fallback
     .map((item) => String(item || "").trim().toLowerCase())
-    .filter((item) => item && allowed.includes(item));
+    .filter((item) => item && allowed.map(function(o){return typeof o === "object" ? o.key : o;}).includes(item));
 }
 
 function outputTargetsSummaryText(targets, schemaId) {

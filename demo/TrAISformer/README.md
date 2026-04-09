@@ -4,6 +4,10 @@
 
 Predict future vessel positions from historical AIS (Automatic Identification System) data using attention-based models built entirely in the Surrogate Studio visual graph editor — no code required.
 
+| Dataset (Leaflet Map) | Model Graph | Trainer | Evaluation |
+|:---:|:---:|:---:|:---:|
+| ![Dataset](images/01_dataset.png) | ![Model](images/02_model.png) | ![Trainer](images/03_trainer.png) | ![Eval](images/05_generation.png) |
+
 ## What This Demo Shows
 
 - **Schema-driven architecture**: same platform, same training engine, same graph editor — applied to maritime trajectory prediction instead of oscillators or image classification

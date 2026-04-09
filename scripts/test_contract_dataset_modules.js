@@ -2,6 +2,8 @@
 "use strict";
 
 const assert = require("assert");
+const srcReg = require("../src/dataset_source_registry.js");
+globalThis.OSCDatasetSourceRegistry = srcReg;
 const datasetModules = require("../src/dataset_modules.js");
 
 function makeMockSourceRecords(count) {
@@ -50,9 +52,10 @@ async function main() {
     sourceRecords: makeMockSourceRecords(300),
   });
   assert.strictEqual(String(mnistDs.schemaId), "mnist", "mnist dataset schema mismatch");
-  assert(mnistDs.records && mnistDs.records.train, "mnist records.train missing");
-  assert(Array.isArray(mnistDs.records.train.x), "mnist records.train.x must be array");
-  assert(Array.isArray(mnistDs.records.train.y), "mnist records.train.y must be array");
+  assert(mnistDs.splitIndices && mnistDs.splitIndices.train, "mnist splitIndices.train missing");
+  var mnistTrainResolved = srcReg.resolveDatasetSplit(mnistDs, "train");
+  assert(Array.isArray(mnistTrainResolved.x), "mnist resolved train.x must be array");
+  assert(Array.isArray(mnistTrainResolved.y), "mnist resolved train.y must be array");
   assert(Number.isFinite(Number(mnistDs.trainCount)) && Number(mnistDs.trainCount) > 0, "mnist trainCount missing");
   assert(Number.isFinite(Number(mnistDs.valCount)) && Number(mnistDs.valCount) > 0, "mnist valCount missing");
   assert(Number.isFinite(Number(mnistDs.testCount)) && Number(mnistDs.testCount) > 0, "mnist testCount missing");
@@ -101,9 +104,9 @@ async function main() {
     },
     getPlaygroundSource(schemaId) {
       const classNames = String(schemaId) === "fashion_mnist" ? fashionDs.classNames : mnistDs.classNames;
-      const train = String(schemaId) === "fashion_mnist" ? fashionDs.records.train : mnistDs.records.train;
-      const x = train.x;
-      const y = train.y;
+      const trainResolved = srcReg.resolveDatasetSplit(String(schemaId) === "fashion_mnist" ? fashionDs : mnistDs, "train");
+      const x = trainResolved.x;
+      const y = trainResolved.y;
       const pixels = new Uint8Array(x.length * 28 * 28);
       for (let i = 0; i < x.length; i += 1) {
         const row = x[i];

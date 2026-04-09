@@ -387,6 +387,20 @@
       };
     }
 
+    // zero-copy: materialize records from source registry if needed
+    if (isImageSchema(schemaId, ds) && ds && typeof ds === "object" && !ds.records && ds.splitIndices) {
+      var _srcReg = (typeof globalThis !== "undefined" && globalThis.OSCDatasetSourceRegistry) ||
+                    (typeof window !== "undefined" && window.OSCDatasetSourceRegistry) || null;
+      if (_srcReg && typeof _srcReg.resolveDatasetSplit === "function") {
+        var _tr = _srcReg.resolveDatasetSplit(ds, "train");
+        var _va = _srcReg.resolveDatasetSplit(ds, "val");
+        var _te = _srcReg.resolveDatasetSplit(ds, "test");
+        if (_tr.length > 0) {
+          ds = Object.assign({}, ds, { records: { train: _tr, val: _va, test: _te } });
+        }
+      }
+    }
+
     if (isImageSchema(schemaId, ds) && ds && typeof ds === "object" && ds.records) {
       var builtMnist = buildMnistCsvAndManifest(ds);
       if (!builtMnist || !builtMnist.csv) return null;

@@ -23,7 +23,7 @@ function main() {
   assert.strictEqual(oscDs.sampleType, "trajectory");
 
   const oscOutputs = schemaRegistry.getOutputKeys("oscillator");
-  assert(Array.isArray(oscOutputs) && oscOutputs.includes("x"), "oscillator outputs should include x");
+  assert(Array.isArray(oscOutputs) && oscOutputs.map(function(o){return typeof o === "object" ? o.key : o;}).includes("x"), "oscillator outputs should include x");
 
   ids.forEach(function (sid) {
     const modelSchema = schemaRegistry.getModelSchema(sid);

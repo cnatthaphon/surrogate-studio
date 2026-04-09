@@ -30,6 +30,8 @@ function bootstrapRuntime() {
   const notebookResultCore = require(path.join(PROJECT_ROOT, "src", "notebook_result_core.js"));
   require(path.join(PROJECT_ROOT, "src", "notebook_runtime_assets.js"));
   const notebookRuntimeAssets = globalThis.OSCNotebookRuntimeAssets || null;
+  const sourceRegistry = require(path.join(PROJECT_ROOT, "src", "dataset_source_registry.js"));
+  globalThis.OSCDatasetSourceRegistry = sourceRegistry;
 
   bootstrapState = {
     projectRoot: PROJECT_ROOT,
@@ -44,6 +46,7 @@ function bootstrapRuntime() {
     tfjsHeadlessCore,
     notebookResultCore,
     notebookRuntimeAssets,
+    sourceRegistry,
   };
   return bootstrapState;
 }
@@ -163,7 +166,7 @@ function record_trainner_result(rawCfg) {
 function resolveStoreDataset(store, rawDatasetOrRef) {
   const src = rawDatasetOrRef || null;
   if (!src) return null;
-  if (src.records || src.trajectories) return src;
+  if (src.records || src.trajectories || src.splitIndices) return src;
   const id = String(src.id || src.datasetId || "").trim();
   if (!id || !store || typeof store.getDataset !== "function") return null;
   const row = store.getDataset(id);
@@ -569,10 +572,13 @@ function buildMnistAdapter() {
       ];
       const splitCfg = bootstrapRuntime().core.normalizeSplitConfig(ds.splitConfig || { mode: "random", train: 0.8, val: 0.1, test: 0.1 });
       const splitCounts = { train: 0, val: 0, test: 0 };
+      const srcReg = bootstrapRuntime().sourceRegistry;
       let idx = 0;
-      [["train", ds.records && ds.records.train], ["val", ds.records && ds.records.val], ["test", ds.records && ds.records.test]].forEach(function (pair) {
-        const splitName = pair[0];
-        const split = pair[1] || {};
+      ["train", "val", "test"].forEach(function (splitName) {
+        let split = (ds.records && ds.records[splitName]) || {};
+        if ((!split.x || !split.x.length) && srcReg && typeof srcReg.resolveDatasetSplit === "function") {
+          split = srcReg.resolveDatasetSplit(ds, splitName);
+        }
         const xs = Array.isArray(split.x) ? split.x : [];
         const ys = Array.isArray(split.y) ? split.y : [];
         const n = Math.min(xs.length, ys.length);

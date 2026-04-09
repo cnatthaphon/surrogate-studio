@@ -59,7 +59,7 @@ const api = require("../src/workflow_api_core.js");
     },
     runTrainingInWorker: async function (spec) {
       assert.strictEqual(String(spec.runId), String(trainer.id), "runId should match trainer id");
-      assert.ok(spec.dataset && spec.dataset.records && spec.dataset.records.train, "dataset payload should come from store");
+      assert.ok(spec.dataset && (spec.dataset.splitIndices || (spec.dataset.records && spec.dataset.records.train)), "dataset payload should come from store");
       return {
         metrics: { mae: 0.1, testMae: 0.2, bestValLoss: 0.05, bestEpoch: 2, finalLr: 1e-4, stoppedEarly: false },
         history: {

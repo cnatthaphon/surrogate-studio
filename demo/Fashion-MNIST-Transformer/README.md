@@ -4,7 +4,9 @@
 
 Attention-based image classification on Fashion-MNIST without convolutions. Split images into patches, embed them as tokens, apply self-attention, and classify — all built from drag-and-drop nodes in the visual graph editor.
 
-![Model Graph](images/model_graph.png)
+| Dataset | Model Graph | Trainer | Test | Evaluation |
+|:---:|:---:|:---:|:---:|:---:|
+| ![Dataset](images/01_dataset.png) | ![Model](images/02_model.png) | ![Trainer](images/03_trainer.png) | ![Test](images/04_test.png) | ![Eval](images/05_generation.png) |
 
 ## What This Demo Shows
 

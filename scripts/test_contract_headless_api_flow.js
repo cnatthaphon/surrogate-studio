@@ -24,9 +24,9 @@ const api = require("../src/workflow_api_core.js");
     testFrac: 0.15,
   });
   assert.strictEqual(String(dataset.schemaId), "fashion_mnist");
-  assert.ok(dataset.records && dataset.records.train && Array.isArray(dataset.records.train.x), "dataset train split must exist");
-  assert.ok(dataset.records && dataset.records.val && Array.isArray(dataset.records.val.x), "dataset val split must exist");
-  assert.ok(dataset.records && dataset.records.test && Array.isArray(dataset.records.test.x), "dataset test split must exist");
+  assert.ok(dataset.splitIndices && Array.isArray(dataset.splitIndices.train), "dataset train splitIndices must exist");
+  assert.ok(dataset.splitIndices && Array.isArray(dataset.splitIndices.val), "dataset val splitIndices must exist");
+  assert.ok(dataset.splitIndices && Array.isArray(dataset.splitIndices.test), "dataset test splitIndices must exist");
   assert.ok(dataset.trainCount > 0, "dataset train rows must be > 0");
   assert.ok(dataset.valCount > 0, "dataset val rows must be > 0");
   assert.ok(dataset.testCount > 0, "dataset test rows must be > 0");

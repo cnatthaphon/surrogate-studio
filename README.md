@@ -101,6 +101,10 @@ Live: [GitHub Pages](https://cnatthaphon.github.io/surrogate-studio/demo/Fashion
 
 Attention-based image classification without convolutions using the graph editor's `PatchEmbed`, `TransformerBlock`, and `GlobalAvgPool1D` nodes. Pretrained on PyTorch CUDA, evaluated in TF.js browser.
 
+| Dataset | Model | Test | Evaluation |
+|:---:|:---:|:---:|:---:|
+| ![Dataset](demo/Fashion-MNIST-Transformer/images/01_dataset.png) | ![Model](demo/Fashion-MNIST-Transformer/images/02_model.png) | ![Test](demo/Fashion-MNIST-Transformer/images/04_test.png) | ![Eval](demo/Fashion-MNIST-Transformer/images/05_generation.png) |
+
 | Model | Params | Test Accuracy | Macro F1 |
 |-------|:------:|:-------------:|:--------:|
 | Tiny ViT (1 block) | 45,624 | 80.70% | 0.8058 |
@@ -114,6 +118,10 @@ Attention-based image classification without convolutions using the graph editor
 Live: [GitHub Pages](https://cnatthaphon.github.io/surrogate-studio/demo/TrAISformer/) | Guide: [README](demo/TrAISformer/README.md)
 
 Predict vessel positions in the Baltic Sea from AIS (Automatic Identification System) data using transformer-based sequence models. Interactive Leaflet map with satellite tiles, speed-colored trajectories, and course-heading markers.
+
+| Dataset (Leaflet Map) | Model Graph | Evaluation |
+|:---:|:---:|:---:|
+| ![Dataset](demo/TrAISformer/images/01_dataset.png) | ![Model](demo/TrAISformer/images/02_model.png) | ![Eval](demo/TrAISformer/images/05_generation.png) |
 
 | Model | Params | Test MAE | Test RMSE | Test R² |
 |-------|:------:|:--------:|:---------:|:-------:|

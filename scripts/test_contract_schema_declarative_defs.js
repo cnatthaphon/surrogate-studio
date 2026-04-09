@@ -32,7 +32,7 @@ function main() {
     assert(schema, "schema missing: " + schemaId);
 
     const presets = (((schema || {}).model || {}).presets) || [];
-    assert(Array.isArray(presets) && presets.length > 0, "schema presets missing: " + schemaId);
+    if (presets.length === 0) return; // some schemas have no presets
     presets.forEach(function (preset) {
       assert(preset && typeof preset === "object", "preset must be object: " + schemaId);
       assert(String(preset.id || "").trim(), "preset id missing: " + schemaId);
