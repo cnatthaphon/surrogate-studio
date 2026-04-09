@@ -1643,7 +1643,7 @@
       "    plt.imshow(cm, cmap='Blues')\n" +
       "    plt.colorbar(); plt.xlabel('Predicted'); plt.ylabel('True')\n" +
       "    plt.title(f'Confusion Matrix (Accuracy={accuracy:.2%})')\n" +
-      "    plt.tight_layout(); plt.show()\\n\n" +
+      "    plt.tight_layout(); plt.show()\n\n" +
       "# Pred vs Truth scatter (first target dimension)\n" +
       "plt.figure(figsize=(6, 6))\n" +
       "plt.scatter(truth[:, 0], pred[:, 0], alpha=0.5, s=10)\n" +
@@ -1791,32 +1791,35 @@
       "# --- Latent Optimization ---\n" +
       "# Find z that produces output closest to a target\n" +
       "model.eval()\n\n" +
-      "try:\n" +
-      "    # target: first test sample\n" +
-      "    target = x_test[:1].to(device)\n" +
-      "    z = torch.randn(1, latent_dim, device=device, requires_grad=True)\n" +
-      "    opt_z = torch.optim.Adam([z], lr=0.01)\n\n" +
-      "    for step in range(100):\n" +
-      "        opt_z.zero_grad()\n" +
-      "        recon = decoder(z) if 'decoder' in dir() else model(z)\n" +
-      "        loss = nn.MSELoss()(recon, target)\n" +
-      "        loss.backward()\n" +
-      "        opt_z.step()\n" +
-      "        if step % 20 == 0:\n" +
-      "            print(f'Step {step}: loss={loss.item():.6f}')\n\n" +
-      "    optimized = recon.detach().cpu().numpy()[0]\n" +
-      "    original = target.cpu().numpy()[0]\n\n" +
-      "    if is_image:\n" +
-      "        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(4, 2))\n" +
-      "        ax1.imshow(original.reshape(img_h, img_w), cmap='gray'); ax1.set_title('Target'); ax1.axis('off')\n" +
-      "        ax2.imshow(optimized.reshape(img_h, img_w), cmap='gray'); ax2.set_title('Optimized'); ax2.axis('off')\n" +
-      "        plt.tight_layout(); plt.show()\n" +
-      "    else:\n" +
-      "        plt.plot(original, label='Target', alpha=0.8)\n" +
-      "        plt.plot(optimized, '--', label='Optimized', alpha=0.8)\n" +
-      "        plt.legend(); plt.title('Latent Optimization'); plt.show()\n" +
-      "except Exception as e:\n" +
-      "    print(f'Latent optimization skipped: {e}')\n"
+      "if not bool(globals().get('can_sample_input_space', False)):\n" +
+      "    print('Latent optimization skipped: model output space does not match input space.')\n" +
+      "else:\n" +
+      "    try:\n" +
+      "        # target: first test sample\n" +
+      "        target = x_test[:1].to(device)\n" +
+      "        z = torch.randn(1, latent_dim, device=device, requires_grad=True)\n" +
+      "        opt_z = torch.optim.Adam([z], lr=0.01)\n\n" +
+      "        for step in range(100):\n" +
+      "            opt_z.zero_grad()\n" +
+      "            recon = decoder(z) if 'decoder' in dir() else model(z)\n" +
+      "            loss = nn.MSELoss()(recon, target)\n" +
+      "            loss.backward()\n" +
+      "            opt_z.step()\n" +
+      "            if step % 20 == 0:\n" +
+      "                print(f'Step {step}: loss={loss.item():.6f}')\n\n" +
+      "        optimized = recon.detach().cpu().numpy()[0]\n" +
+      "        original = target.cpu().numpy()[0]\n\n" +
+      "        if is_image:\n" +
+      "            fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(4, 2))\n" +
+      "            ax1.imshow(original.reshape(img_h, img_w), cmap='gray'); ax1.set_title('Target'); ax1.axis('off')\n" +
+      "            ax2.imshow(optimized.reshape(img_h, img_w), cmap='gray'); ax2.set_title('Optimized'); ax2.axis('off')\n" +
+      "            plt.tight_layout(); plt.show()\n" +
+      "        else:\n" +
+      "            plt.plot(original, label='Target', alpha=0.8)\n" +
+      "            plt.plot(optimized, '--', label='Optimized', alpha=0.8)\n" +
+      "            plt.legend(); plt.title('Latent Optimization'); plt.show()\n" +
+      "    except Exception as e:\n" +
+      "        print(f'Latent optimization skipped: {e}')\n"
     ));
 
     // Cell 12: Generation evaluation summary
@@ -1826,42 +1829,45 @@
       "# --- Classifier-Guided Generation ---\n" +
       "# Requires a model with both reconstruction and classification outputs.\n" +
       "# If model has only reconstruction, this cell is skipped.\n" +
-      "try:\n" +
-      "    # check if model has classification output (>1 output or softmax layer)\n" +
-      "    model.eval()\n" +
-      "    test_out = model(x_test[:1].to(device))\n" +
-      "    has_classifier = isinstance(test_out, (tuple, list)) and len(test_out) > 1\n" +
-      "    if not has_classifier and test_out.shape[-1] < 20:  # small output = likely classifier\n" +
-      "        has_classifier = True\n\n" +
-      "    if has_classifier:\n" +
-      "        target_class = 0  # change this to target different classes\n" +
-      "        n_guided = 8\n" +
-      "        z = torch.randn(n_guided, latent_dim, device=device, requires_grad=True)\n" +
-      "        opt = torch.optim.Adam([z], lr=0.01)\n\n" +
-      "        for step in range(100):\n" +
-      "            opt.zero_grad()\n" +
-      "            dec = decoder(z) if 'decoder' in dir() else model(z)\n" +
-      "            cls_out = model(dec)\n" +
-      "            if isinstance(cls_out, (tuple, list)): cls_out = cls_out[-1]  # last output = classifier\n" +
-      "            guidance_loss = -torch.log(cls_out[:, target_class] + 1e-8).mean()\n" +
-      "            guidance_loss.backward()\n" +
-      "            opt.step()\n" +
-      "            if step % 25 == 0: print(f'Step {step}: guidance_loss={guidance_loss.item():.4f}')\n\n" +
-      "        guided_samples = (decoder(z) if 'decoder' in dir() else model(z)).detach().cpu().numpy()\n" +
-      "        if is_image:\n" +
-      "            fig, axes = plt.subplots(1, n_guided, figsize=(n_guided*1.5, 2))\n" +
-      "            for i in range(n_guided):\n" +
-      "                axes[i].imshow(np.clip(guided_samples[i].reshape(img_h, img_w), 0, 1), cmap='gray')\n" +
-      "                axes[i].axis('off')\n" +
-      "            plt.suptitle(f'Classifier-Guided (class={target_class})'); plt.tight_layout(); plt.show()\n" +
+      "if not bool(globals().get('can_sample_input_space', False)):\n" +
+      "    print('Classifier-guided generation skipped: model output space does not match input space.')\n" +
+      "else:\n" +
+      "    try:\n" +
+      "        # check if model has classification output (>1 output or softmax layer)\n" +
+      "        model.eval()\n" +
+      "        test_out = model(x_test[:1].to(device))\n" +
+      "        has_classifier = isinstance(test_out, (tuple, list)) and len(test_out) > 1\n" +
+      "        if not has_classifier and test_out.shape[-1] < 20:  # small output = likely classifier\n" +
+      "            has_classifier = True\n\n" +
+      "        if has_classifier:\n" +
+      "            target_class = 0  # change this to target different classes\n" +
+      "            n_guided = 8\n" +
+      "            z = torch.randn(n_guided, latent_dim, device=device, requires_grad=True)\n" +
+      "            opt = torch.optim.Adam([z], lr=0.01)\n\n" +
+      "            for step in range(100):\n" +
+      "                opt.zero_grad()\n" +
+      "                dec = decoder(z) if 'decoder' in dir() else model(z)\n" +
+      "                cls_out = model(dec)\n" +
+      "                if isinstance(cls_out, (tuple, list)): cls_out = cls_out[-1]  # last output = classifier\n" +
+      "                guidance_loss = -torch.log(cls_out[:, target_class] + 1e-8).mean()\n" +
+      "                guidance_loss.backward()\n" +
+      "                opt.step()\n" +
+      "                if step % 25 == 0: print(f'Step {step}: guidance_loss={guidance_loss.item():.4f}')\n\n" +
+      "            guided_samples = (decoder(z) if 'decoder' in dir() else model(z)).detach().cpu().numpy()\n" +
+      "            if is_image:\n" +
+      "                fig, axes = plt.subplots(1, n_guided, figsize=(n_guided*1.5, 2))\n" +
+      "                for i in range(n_guided):\n" +
+      "                    axes[i].imshow(np.clip(guided_samples[i].reshape(img_h, img_w), 0, 1), cmap='gray')\n" +
+      "                    axes[i].axis('off')\n" +
+      "                plt.suptitle(f'Classifier-Guided (class={target_class})'); plt.tight_layout(); plt.show()\n" +
+      "            else:\n" +
+      "                plt.figure(figsize=(10, 3))\n" +
+      "                for i in range(n_guided): plt.plot(guided_samples[i], alpha=0.7)\n" +
+      "                plt.title(f'Classifier-Guided (class={target_class})'); plt.tight_layout(); plt.show()\n" +
       "        else:\n" +
-      "            plt.figure(figsize=(10, 3))\n" +
-      "            for i in range(n_guided): plt.plot(guided_samples[i], alpha=0.7)\n" +
-      "            plt.title(f'Classifier-Guided (class={target_class})'); plt.tight_layout(); plt.show()\n" +
-      "    else:\n" +
-      "        print('Model has no classifier head — skipping guided generation.')\n" +
-      "except Exception as e:\n" +
-      "    print(f'Classifier-guided generation skipped: {e}')\n"
+      "            print('Model has no classifier head — skipping guided generation.')\n" +
+      "    except Exception as e:\n" +
+      "        print(f'Classifier-guided generation skipped: {e}')\n"
     ));
 
     // Cell 13: Inverse optimization
@@ -1869,34 +1875,37 @@
     cells.push(makeCodeCell(
       "# --- Inverse: find input that produces target output ---\n" +
       "model.eval()\n" +
-      "try:\n" +
-      "    target_output = x_test[:1].to(device)\n" +
-      "    x_opt = torch.randn(1, x_train.shape[1], device=device, requires_grad=True)\n" +
-      "    opt = torch.optim.Adam([x_opt], lr=0.01)\n\n" +
-      "    losses = []\n" +
-      "    for step in range(200):\n" +
-      "        opt.zero_grad()\n" +
-      "        pred = model(x_opt)\n" +
-      "        if isinstance(pred, (tuple, list)): pred = pred[0]\n" +
-      "        loss = nn.MSELoss()(pred, target_output)\n" +
-      "        loss.backward()\n" +
-      "        opt.step()\n" +
-      "        losses.append(loss.item())\n" +
-      "        if step % 50 == 0: print(f'Step {step}: loss={loss.item():.6f}')\n\n" +
-      "    plt.figure(figsize=(8, 3))\n" +
-      "    plt.subplot(1, 2, 1)\n" +
-      "    plt.plot(losses); plt.title('Inverse Optimization Loss'); plt.xlabel('Step')\n" +
-      "    plt.subplot(1, 2, 2)\n" +
-      "    inv_result = x_opt.detach().cpu().numpy()[0]\n" +
-      "    target_np = target_output.cpu().numpy()[0]\n" +
-      "    if is_image:\n" +
-      "        plt.imshow(inv_result.reshape(img_h, img_w), cmap='gray'); plt.title('Inverse Result')\n" +
-      "    else:\n" +
-      "        plt.plot(target_np, label='Target'); plt.plot(inv_result, '--', label='Inverse')\n" +
-      "        plt.legend(); plt.title('Inverse Optimization')\n" +
-      "    plt.tight_layout(); plt.show()\n" +
-      "except Exception as e:\n" +
-      "    print(f'Inverse optimization skipped: {e}')\n"
+      "if not bool(globals().get('can_sample_input_space', False)):\n" +
+      "    print('Inverse optimization skipped: model output space does not match input space.')\n" +
+      "else:\n" +
+      "    try:\n" +
+      "        target_output = x_test[:1].to(device)\n" +
+      "        x_opt = torch.randn(1, x_train.shape[1], device=device, requires_grad=True)\n" +
+      "        opt = torch.optim.Adam([x_opt], lr=0.01)\n\n" +
+      "        losses = []\n" +
+      "        for step in range(200):\n" +
+      "            opt.zero_grad()\n" +
+      "            pred = model(x_opt)\n" +
+      "            if isinstance(pred, (tuple, list)): pred = pred[0]\n" +
+      "            loss = nn.MSELoss()(pred, target_output)\n" +
+      "            loss.backward()\n" +
+      "            opt.step()\n" +
+      "            losses.append(loss.item())\n" +
+      "            if step % 50 == 0: print(f'Step {step}: loss={loss.item():.6f}')\n\n" +
+      "        plt.figure(figsize=(8, 3))\n" +
+      "        plt.subplot(1, 2, 1)\n" +
+      "        plt.plot(losses); plt.title('Inverse Optimization Loss'); plt.xlabel('Step')\n" +
+      "        plt.subplot(1, 2, 2)\n" +
+      "        inv_result = x_opt.detach().cpu().numpy()[0]\n" +
+      "        target_np = target_output.cpu().numpy()[0]\n" +
+      "        if is_image:\n" +
+      "            plt.imshow(inv_result.reshape(img_h, img_w), cmap='gray'); plt.title('Inverse Result')\n" +
+      "        else:\n" +
+      "            plt.plot(target_np, label='Target'); plt.plot(inv_result, '--', label='Inverse')\n" +
+      "            plt.legend(); plt.title('Inverse Optimization')\n" +
+      "        plt.tight_layout(); plt.show()\n" +
+      "    except Exception as e:\n" +
+      "        print(f'Inverse optimization skipped: {e}')\n"
     ));
 
     // Cell 14: DDPM iterative denoising

@@ -211,13 +211,13 @@
     _overlay.appendChild(toolbar);
 
     // Cell container (scrollable)
-    var cellContainer = _el("div", { style: "flex:1;overflow-y:auto;padding:16px;max-width:900px;margin:0 auto;width:100%;" });
+    var cellContainer = _el("div", { style: "flex:1;overflow-y:auto;padding:16px 20px 16px 16px;width:100%;max-width:none;box-sizing:border-box;" });
     _overlay.appendChild(cellContainer);
 
     // Render cells
     var cellEls = [];
     cells.forEach(function (cell, idx) {
-      var cellWrap = _el("div", { style: "margin-bottom:12px;border:1px solid #1e293b;border-radius:6px;overflow:hidden;" });
+      var cellWrap = _el("div", { style: "margin:0 auto 12px;max-width:1280px;border:1px solid #1e293b;border-radius:6px;overflow:hidden;" });
 
       var isCode = cell.cell_type === "code";
       var source = Array.isArray(cell.source) ? cell.source.join("") : (cell.source || "");

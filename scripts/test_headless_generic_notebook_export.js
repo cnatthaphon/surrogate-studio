@@ -92,6 +92,7 @@ async function main() {
   assert(joined.indexOf("if EMBEDDED_DATASET_CSV_B64:") >= 0, "generic notebook should load embedded dataset when present");
   assert(joined.indexOf("if EMBEDDED_GRAPH_JSON_B64:") >= 0, "generic notebook should load embedded graph when present");
   assert(joined.indexOf("graph_data = graph.get('drawflow', {}).get('Home', {}).get('data', graph)") >= 0, "generic notebook should define graph_data");
+  assert(joined.indexOf("plt.tight_layout(); plt.show()\\\\n") < 0, "generic notebook should not emit stray literal newline escapes");
 
   console.log("PASS test_headless_generic_notebook_export");
 }
