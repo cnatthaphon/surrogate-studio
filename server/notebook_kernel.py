@@ -18,8 +18,56 @@ import traceback
 import base64
 import types
 
+
+def _display(*objs):
+    """Minimal notebook-compatible display() shim.
+
+    The browser runner currently renders stdout/stderr plus captured matplotlib
+    images, so this helper degrades rich objects to readable text instead of
+    failing with NameError like a raw Python REPL would.
+    """
+    if not objs:
+        return None
+    for obj in objs:
+        try:
+            if obj is None:
+                print("None")
+                continue
+            if isinstance(obj, str):
+                print(obj)
+                continue
+
+            module_name = str(getattr(getattr(obj, "__class__", None), "__module__", "") or "")
+            if module_name.startswith("pandas"):
+                to_string = getattr(obj, "to_string", None)
+                if callable(to_string):
+                    try:
+                        print(to_string())
+                    except TypeError:
+                        print(str(obj))
+                    continue
+
+            if hasattr(obj, "tolist") and callable(getattr(obj, "tolist")):
+                try:
+                    print(json.dumps(obj.tolist(), ensure_ascii=False))
+                    continue
+                except Exception:
+                    pass
+
+            print(str(obj))
+        except Exception:
+            try:
+                print(repr(obj))
+            except Exception:
+                print("<unrenderable object>")
+    return None
+
 # Persistent namespace for all cell executions
-_NAMESPACE = {"__name__": "__main__", "__builtins__": __builtins__}
+_NAMESPACE = {
+    "__name__": "__main__",
+    "__builtins__": __builtins__,
+    "display": _display,
+}
 
 
 def _capture_matplotlib():

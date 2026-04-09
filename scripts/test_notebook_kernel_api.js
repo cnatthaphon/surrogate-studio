@@ -90,6 +90,13 @@ async function main() {
     assert.strictEqual(String(second.stdout || "").trim(), "5", "kernel state should persist across cells");
     assert.ok(!second.error, "second cell should not error");
 
+    var third = await requestJson("POST", "/api/notebook/execute", {
+      kernelId: started.kernelId,
+      code: "display({'status': 'ok', 'value': x})",
+    });
+    assert.ok(!third.error, "display() shim should not error");
+    assert.ok(String(third.stdout || "").indexOf("status") >= 0, "display() output should be captured");
+
     var stopped = await requestJson("POST", "/api/notebook/stop", { kernelId: started.kernelId });
     assert.strictEqual(stopped.ok, true, "stop endpoint must return ok");
 
