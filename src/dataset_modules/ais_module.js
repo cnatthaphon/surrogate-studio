@@ -100,8 +100,9 @@
     });
   }
 
-  // Resolve path for the inline data JS file (script tag works on file://)
-  var _inlineDataUrl = _dataBase.replace(/data\/ais-dma\/$/, "demo/TrAISformer/ais_inline_data.js");
+  // Resolve path for the inline data JS file (script tag works on file://).
+  // Keep the fallback beside the dataset assets, not inside a specific demo.
+  var _inlineDataUrl = _dataBase + "ais_dma_full_inline.js";
 
   function _loadViaScript(url) {
     return new Promise(function (resolve, reject) {
@@ -139,10 +140,8 @@
    */
   function build(config) {
     config = config || {};
-    console.log("[ais_module] build config:", JSON.stringify(config).substring(0, 200));
     var windowSize = Math.max(1, Number(config.windowSize || 16));
     var maxTrajs = Math.max(10, Number(config.maxTrajectories || config.totalCount || 180));
-    console.log("[ais_module] maxTrajs:", maxTrajs, "windowSize:", windowSize);
 
     var dataPromise = loadData();
 

@@ -14,7 +14,7 @@ var mb = require("../src/model_builder_core.js");
 require("../src/schema_registry.js");
 require("../src/schema_definitions_builtin.js");
 
-eval(fs.readFileSync("demo/TrAISformer/ais_inline_data.js", "utf8"));
+eval(fs.readFileSync("data/ais-dma/ais_dma_full_inline.js", "utf8"));
 eval(fs.readFileSync("demo/TrAISformer/preset.js", "utf8"));
 var preset = window.TRAISFORMER_PRESET;
 var aisModule = require("../src/dataset_modules/ais_module.js");
