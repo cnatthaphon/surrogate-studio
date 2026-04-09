@@ -50,6 +50,23 @@
     }).then(function (r) { return r.json(); });
   }
 
+  function _isLoopbackServer(url) {
+    return /^http:\/\/(?:127\.0\.0\.1|localhost|0\.0\.0\.0|\[::1\])(?::\d+)?(?:\/|$)/i.test(String(url || ""));
+  }
+
+  function _formatKernelStartError(err) {
+    var raw = String((err && err.message) || err || "Unknown error");
+    var onSecurePage = typeof window !== "undefined" && String(window.location.protocol || "") === "https:";
+    if (onSecurePage && _isLoopbackServer(_serverUrl) && /Failed to fetch/i.test(raw)) {
+      return [
+        "Failed to reach local notebook server.",
+        "This page is running over HTTPS and the browser may be blocking loopback/local network access.",
+        "Start the local app from " + _serverUrl + " and open Surrogate Studio there, or allow local network access for this site."
+      ].join(" ");
+    }
+    return raw;
+  }
+
   function _escapeHtml(s) {
     return String(s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   }
@@ -72,7 +89,9 @@
     _postJSON(_serverUrl + "/api/notebook/start", {}).then(function (r) {
       _kernelId = r.kernelId;
       callback(null, r.kernelId);
-    }).catch(function (e) { callback(e); });
+    }).catch(function (e) {
+      callback(new Error(_formatKernelStartError(e)));
+    });
   }
 
   function _executeCell(code, callback) {

@@ -44,6 +44,19 @@ if (!PYTHON) {
 var jobs = {}; // jobId → { status, process, clients[], result }
 var _kernels = {}; // kernelId → { process, execute(), shutdown(), alive() }
 
+function _applyCorsHeaders(req, res) {
+  var origin = String((req && req.headers && req.headers.origin) || "").trim();
+  // Private Network Access from HTTPS pages to loopback/local backends requires
+  // explicit opt-in headers. Reflect the origin when available so Pages-hosted
+  // demos can reach the local notebook/training server.
+  res.setHeader("Access-Control-Allow-Origin", origin || "*");
+  res.setHeader("Vary", "Origin, Access-Control-Request-Private-Network");
+  res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Content-Encoding");
+  res.setHeader("Access-Control-Allow-Private-Network", "true");
+  res.setHeader("Access-Control-Max-Age", "600");
+}
+
 function _readBody(req, callback) {
   var stream = _getBodyStream(req);
   var chunks = [];
@@ -257,10 +270,7 @@ function _runSyncSubprocess(req, res, scriptName, label) {
 }
 
 var server = http.createServer(function (req, res) {
-  // CORS headers
-  res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Content-Encoding");
+  _applyCorsHeaders(req, res);
 
   if (req.method === "OPTIONS") {
     res.writeHead(204);

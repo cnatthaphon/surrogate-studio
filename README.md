@@ -1,10 +1,10 @@
 # Surrogate Studio
 
-![Status](https://img.shields.io/badge/status-active%20development-brightgreen) ![Models](https://img.shields.io/badge/models-25-blue) ![Demos](https://img.shields.io/badge/demos-7-orange)
+![Status](https://img.shields.io/badge/status-active%20development-brightgreen) ![Models](https://img.shields.io/badge/models-25-blue) ![Demos](https://img.shields.io/badge/demos-8-orange)
 
 **A schema-driven, browser-first ML experimentation platform.**
 
-**[Live Demo](https://cnatthaphon.github.io/surrogate-studio/)** | [Benchmark](https://cnatthaphon.github.io/surrogate-studio/demo/Fashion-MNIST-Benchmark/) | [GAN](https://cnatthaphon.github.io/surrogate-studio/demo/Fashion-MNIST-GAN/) | [Diffusion](https://cnatthaphon.github.io/surrogate-studio/demo/Fashion-MNIST-Diffusion/) | [Conditional Diffusion](https://cnatthaphon.github.io/surrogate-studio/demo/Fashion-MNIST-Conditional-Diffusion/) | [Transformer](https://cnatthaphon.github.io/surrogate-studio/demo/Fashion-MNIST-Transformer/) | [LSTM-VAE](https://cnatthaphon.github.io/surrogate-studio/demo/LSTM-VAE-for-dominant-motion-extraction/) | [Oscillator](https://cnatthaphon.github.io/surrogate-studio/demo/Oscillator-Surrogate/)
+**[Live Demo](https://cnatthaphon.github.io/surrogate-studio/)** | [Benchmark](https://cnatthaphon.github.io/surrogate-studio/demo/Fashion-MNIST-Benchmark/) | [GAN](https://cnatthaphon.github.io/surrogate-studio/demo/Fashion-MNIST-GAN/) | [Diffusion](https://cnatthaphon.github.io/surrogate-studio/demo/Fashion-MNIST-Diffusion/) | [Conditional Diffusion](https://cnatthaphon.github.io/surrogate-studio/demo/Fashion-MNIST-Conditional-Diffusion/) | [Transformer](https://cnatthaphon.github.io/surrogate-studio/demo/Fashion-MNIST-Transformer/) | [TrAISformer](https://cnatthaphon.github.io/surrogate-studio/demo/TrAISformer/) | [LSTM-VAE](https://cnatthaphon.github.io/surrogate-studio/demo/LSTM-VAE-for-dominant-motion-extraction/) | [Oscillator](https://cnatthaphon.github.io/surrogate-studio/demo/Oscillator-Surrogate/)
 
 **[Contributing](CONTRIBUTING.md)** | **[Developer Docs](docs/README.md)** | **[Server Notes](server/README.md)** | **[Schema Notes](schemas/README.md)**
 
@@ -227,7 +227,8 @@ Each demo README linked above explains how to use that demo inside the app.
 Notebook execution is different from the pure browser demos:
 - the `Run Notebook` UI is available from GitHub Pages
 - actual execution still targets a local training server, usually `http://localhost:3777`
-- if you want notebook cells to run, start the local backend first with `node server/training_server.js`
+- some browsers block public HTTPS pages from reaching loopback addresses like `127.0.0.1`
+- if you want notebook cells to run reliably, start the local backend first with `node server/training_server.js` and open Surrogate Studio from that local server
 
 ```
 Open `index.html` in Chrome/Edge (works on `file://`)
@@ -345,7 +346,12 @@ node scripts/test_cross_runtime_weights.js
 | Kingma & Welling — "Auto-Encoding Variational Bayes" | 2013 | Benchmark |
 | Goodfellow et al. — "Generative Adversarial Nets" | 2014 | GAN |
 | Radford, Metz, Chintala — "Unsupervised Representation Learning with DCGANs" | 2015 | GAN |
-| Ho, Jain, Abbeel — "Denoising Diffusion Probabilistic Models" | 2020 | Benchmark |
+| Arjovsky, Chintala, Bottou — "Wasserstein GAN" | 2017 | GAN |
+| Song & Ermon — "Generative Modeling by Estimating Gradients of the Data Distribution" | 2019 | Diffusion |
+| Ho, Jain, Abbeel — "Denoising Diffusion Probabilistic Models" | 2020 | Benchmark, Diffusion |
+| Dosovitskiy et al. — "An Image is Worth 16x16 Words" | 2021 | Transformer |
+| Nguyen et al. — "TrAISformer — A generative transformer for AIS trajectory prediction" | 2021 | TrAISformer |
+| Song et al. — "Score-Based Generative Modeling through Stochastic Differential Equations" | 2021 | Diffusion |
 | Jadhav & Barati Farimani — "LSTM-VAE for dominant motion extraction" | 2022 | LSTM-VAE |
 
 ## Adding a New Demo
