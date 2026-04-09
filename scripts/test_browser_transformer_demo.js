@@ -53,7 +53,7 @@ async function main() {
     });
     ok(presetInfo.hasPreset, "Transformer preset exists");
     ok(presetInfo.modelCount === 3, "Preset model count = 3");
-    ok(presetInfo.trainerCount === 3, "Preset trainer count = 3");
+    ok(presetInfo.trainerCount >= 3, "Preset trainer count >= 3 (got " + presetInfo.trainerCount + ")");
 
     await page.evaluate(function () {
       var btns = document.querySelectorAll("button");

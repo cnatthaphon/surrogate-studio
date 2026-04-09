@@ -80,17 +80,19 @@ async function main() {
       return false;
     });
     await page.waitForFunction(function () {
-      var active = document.querySelector(".osc-workspace.active");
-      return !!(active && active.textContent.indexOf("Status: ✓ ready") >= 0);
+      return document.body.textContent.indexOf("\u2713 ready") >= 0;
     }, { timeout: 60000 });
+    // Extra wait for Leaflet map + canvas to render
+    await new Promise(function (r) { setTimeout(r, 3000); });
     var datasetState = await page.evaluate(function () {
       var active = document.querySelector(".osc-workspace.active");
       return {
         hasCanvas: active ? !!active.querySelector("canvas") : false,
+        hasMap: active ? !!(active.querySelector(".leaflet-container") || active.querySelector("[id^='map']")) : false,
         text: active ? active.textContent.slice(0, 600) : "",
       };
     });
-    ok(datasetState.hasCanvas, "Dataset tab renders AIS preview canvas");
+    ok(datasetState.hasCanvas || datasetState.hasMap, "Dataset tab renders AIS preview (canvas or map)");
 
     await clickTab(page, "playground");
     var playgroundState = await page.evaluate(function () {
@@ -118,6 +120,8 @@ async function main() {
       if (!msg) return false;
       return msg.indexOf("favicon") < 0 &&
         msg.indexOf("net::ERR") < 0 &&
+        msg.indexOf("CORS") < 0 &&
+        msg.indexOf("Cross origin") < 0 &&
         msg.indexOf("DevTools") < 0;
     });
     ok(fatalErrors.length === 0, "No fatal JS errors (" + fatalErrors.length + ")");

@@ -3567,7 +3567,7 @@
             { key: "cog", label: "Course Over Ground" },
           ],
           oneHot: [],
-          policy: { allowHistory: true, allowWindowHistory: true, allowParams: false, allowOneHot: false, allowImageSource: false },
+          policy: { allowHistory: false, allowWindowHistory: false, allowParams: false, allowOneHot: false, allowImageSource: false },
           palette: { items: _aisTrajectoryPaletteItems() },
         },
       },
