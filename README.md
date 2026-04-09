@@ -305,6 +305,7 @@ npm test
 
 # Browser UI checks
 npm run test:browser
+node scripts/test_browser_demo_matrix.js
 
 # Headless multi-schema pipeline
 npm run test:pipeline
