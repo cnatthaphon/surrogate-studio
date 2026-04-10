@@ -36,6 +36,15 @@ var DEMOS = [
     minEvaluations: 2,
   },
   {
+    name: "Fashion-MNIST UNet",
+    file: path.join(ROOT, "demo", "Fashion-MNIST-UNet", "index.html"),
+    presetKey: "FASHION_MNIST_UNET_PRESET",
+    minModels: 2,
+    minTrainers: 2,
+    minGenerations: 2,
+    minEvaluations: 1,
+  },
+  {
     name: "Oscillator Surrogate",
     file: path.join(ROOT, "demo", "Oscillator-Surrogate", "index.html"),
     presetKey: "OSCILLATOR_DEMO_PRESET",

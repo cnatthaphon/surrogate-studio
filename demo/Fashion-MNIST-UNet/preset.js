@@ -105,20 +105,25 @@
   }
 
   // ─── Simple Conv AE (baseline, no skip connections) ───
+  // Uses MaxPool for downsampling and UpSample+Conv for upsampling (avoids ConvTranspose dim issues)
   function buildConvAE() {
     _nid = 100;
     var d = {};
-    var inp     = N(d, "input",     { featureSize: 784 },          50,  300);
-    var reshape = N(d, "reshape",   { targetShape: "28,28,1" },   200,  300);
-    var e1      = N(d, "conv2d",    { filters: 16, kernelSize: 3, strides: 2, padding: "same", activation: "relu" }, 380, 300);
-    var e2      = N(d, "conv2d",    { filters: 32, kernelSize: 3, strides: 2, padding: "same", activation: "relu" }, 550, 300);
-    var d1      = N(d, "conv2d_transpose", { filters: 16, kernelSize: 3, strides: 2, padding: "same", activation: "relu" }, 720, 300);
-    var d2      = N(d, "conv2d_transpose", { filters: 1,  kernelSize: 3, strides: 2, padding: "same", activation: "sigmoid" }, 900, 300);
-    var flat    = N(d, "flatten",   {},                           1080, 300);
-    var out     = N(d, "output",    { targetType: "x", matchWeight: 1, headType: "reconstruction" }, 1250, 300);
+    var inp     = N(d, "input",      { featureSize: 784 },          50,  300);
+    var reshape = N(d, "reshape",    { targetShape: "28,28,1" },   200,  300);
+    var e1      = N(d, "conv2d",     { filters: 16, kernelSize: 3, strides: 1, padding: "same", activation: "relu" }, 380, 300);
+    var pool1   = N(d, "maxpool2d",  { poolSize: 2, strides: 2 },  550, 300);
+    var e2      = N(d, "conv2d",     { filters: 32, kernelSize: 3, strides: 1, padding: "same", activation: "relu" }, 720, 300);
+    var pool2   = N(d, "maxpool2d",  { poolSize: 2, strides: 2 },  890, 300);
+    var up1     = N(d, "upsample2d", { size: 2 },                 1060, 300);
+    var d1      = N(d, "conv2d",     { filters: 16, kernelSize: 3, strides: 1, padding: "same", activation: "relu" }, 1230, 300);
+    var up2     = N(d, "upsample2d", { size: 2 },                 1400, 300);
+    var d2      = N(d, "conv2d",     { filters: 1,  kernelSize: 1, strides: 1, padding: "same", activation: "sigmoid" }, 1570, 300);
+    var flat    = N(d, "flatten",    {},                           1740, 300);
+    var out     = N(d, "output",     { targetType: "x", matchWeight: 1, headType: "reconstruction" }, 1910, 300);
 
-    C(d, inp, reshape); C(d, reshape, e1); C(d, e1, e2);
-    C(d, e2, d1); C(d, d1, d2); C(d, d2, flat); C(d, flat, out);
+    C(d, inp, reshape); C(d, reshape, e1); C(d, e1, pool1); C(d, pool1, e2); C(d, e2, pool2);
+    C(d, pool2, up1); C(d, up1, d1); C(d, d1, up2); C(d, up2, d2); C(d, d2, flat); C(d, flat, out);
     return graph(d);
   }
 

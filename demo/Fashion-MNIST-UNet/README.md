@@ -21,7 +21,7 @@ Input(784) → Reshape(28,28,1)
   → UpSample → Concat(skip1) → Conv(16) → Conv(1,sigmoid)
   → Flatten → Output(x)
 ```
-~42K parameters. Skip connections preserve spatial detail from encoder.
+~116K parameters. Skip connections preserve spatial detail from encoder.
 
 ### 2. Conv Autoencoder (baseline)
 ```
@@ -30,7 +30,7 @@ Input(784) → Reshape(28,28,1)
   → ConvTranspose(16, stride=2) → ConvTranspose(1, stride=2, sigmoid)
   → Flatten → Output(x)
 ```
-~5K parameters. No skip connections — bottleneck must encode everything.
+~9K parameters. No skip connections — bottleneck must encode everything.
 
 ## How to Use
 
