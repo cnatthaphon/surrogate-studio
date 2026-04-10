@@ -31,6 +31,14 @@
     return (GLOBAL && GLOBAL.OSCSchemaRegistry) || null;
   }
 
+  function getDatasetSourceDescriptorHelper() {
+    if (GLOBAL && GLOBAL.OSCDatasetSourceDescriptor) return GLOBAL.OSCDatasetSourceDescriptor;
+    if (typeof module === "object" && module.exports && typeof require === "function") {
+      try { return require("./dataset_source_descriptor.js"); } catch (_err) { /* */ }
+    }
+    return null;
+  }
+
   function isImageSchema(schemaId, dataset) {
     // detect from schema metadata or data format — no hardcoded schema names
     var sid = normalizeSchemaId(schemaId, dataset);
@@ -341,6 +349,42 @@
     var splitCfg = normalizeSplitConfig(
       (ds && ds.splitConfig) || { mode: "random", train: 0.80, val: 0.10, test: 0.10 }
     );
+    var sourceDescHelper = getDatasetSourceDescriptorHelper();
+    var sourceDescriptor = sourceDescHelper && typeof sourceDescHelper.normalize === "function"
+      ? sourceDescHelper.normalize(ds && ds.sourceDescriptor)
+      : (ds && ds.sourceDescriptor ? ds.sourceDescriptor : null);
+    var useSourceDescriptor = !!(sourceDescriptor && sourceDescHelper && typeof sourceDescHelper.shouldUseServerReference === "function"
+      ? sourceDescHelper.shouldUseServerReference(sourceDescriptor)
+      : sourceDescriptor);
+
+    if (useSourceDescriptor) {
+      var sourceName = stem + ".source_descriptor.json";
+      var sourceManifestName = stem + ".dataset_manifest.json";
+      var sourceManifest = {
+        version: 1,
+        source: sourceTag,
+        schemaId: schemaId,
+        format: "source_descriptor",
+        sourceDescriptorFile: sourceName,
+        splitConfig: splitCfg,
+        mode: String((ds && ds.mode) || ""),
+        seed: Number(ds && ds.seed == null ? 42 : ds.seed),
+      };
+      return {
+        schemaId: schemaId,
+        datasetName: datasetName,
+        format: "source_descriptor",
+        datasetRef: "",
+        splitRef: "dataset/" + sourceManifestName,
+        sourceDescriptorRef: "dataset/" + sourceName,
+        sourceDescriptor: sourceDescriptor,
+        files: [
+          { path: "dataset/" + sourceName, content: JSON.stringify(sourceDescriptor, null, 2), contentType: "application/json;charset=utf-8;" },
+          { path: "dataset/" + sourceManifestName, content: JSON.stringify(sourceManifest, null, 2), contentType: "application/json;charset=utf-8;" },
+        ],
+        manifest: sourceManifest,
+      };
+    }
 
     // trajectory datasets with trajectories array (oscillator-like format)
     if (Array.isArray(ds.trajectories) && ds.trajectories.length) {

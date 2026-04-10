@@ -18,6 +18,7 @@ const baseSuite = [
   "test_contract_config_panel_module.js",
   "test_contract_image_render_core.js",
   "test_contract_notebook_result_core.js",
+  "test_contract_notebook_source_descriptor.js",
   "test_contract_tab_manager_core.js",
   "test_contract_workspace_tab_effects_core.js",
   "test_contract_workspace_controllers_core.js",

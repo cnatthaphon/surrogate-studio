@@ -228,6 +228,34 @@
 
       return { dataset: ds, truncated: false, totalRows: 0, keptRows: 0 };
     }
+
+    function _prepareDatasetForNotebookExport(ds, W) {
+      if (!ds || typeof ds !== "object") return { dataset: ds, usesServerReference: false };
+      var win = W || (typeof window !== "undefined" ? window : {});
+      var sourceDescriptorHelper = win.OSCDatasetSourceDescriptor || null;
+      var normalizedSourceDescriptor = sourceDescriptorHelper && typeof sourceDescriptorHelper.normalize === "function"
+        ? sourceDescriptorHelper.normalize(ds.sourceDescriptor)
+        : (ds.sourceDescriptor ? ds.sourceDescriptor : null);
+      var usesServerReference = !!(normalizedSourceDescriptor && sourceDescriptorHelper && typeof sourceDescriptorHelper.shouldUseServerReference === "function"
+        ? sourceDescriptorHelper.shouldUseServerReference(normalizedSourceDescriptor)
+        : normalizedSourceDescriptor);
+      var nextDs = Object.assign({}, ds);
+      if (normalizedSourceDescriptor) nextDs.sourceDescriptor = normalizedSourceDescriptor;
+      if (usesServerReference) return { dataset: nextDs, usesServerReference: true };
+
+      var srcReg = win.OSCDatasetSourceRegistry || null;
+      if (nextDs.sourceId && srcReg && typeof srcReg.resolveDatasetSplit === "function") {
+        var train = srcReg.resolveDatasetSplit(nextDs, "train");
+        var val = srcReg.resolveDatasetSplit(nextDs, "val");
+        var test = srcReg.resolveDatasetSplit(nextDs, "test");
+        nextDs.records = {
+          train: { x: train.x, y: train.y },
+          val: { x: val.x, y: val.y },
+          test: { x: test.x, y: test.y },
+        };
+      }
+      return { dataset: nextDs, usesServerReference: false };
+    }
     function _inferTrainerFamily(tCard) {
       if (!tCard || !store || !modelBuilder) return "supervised";
       var modelRec = store.getModel(tCard.modelId);
@@ -2761,21 +2789,8 @@
         var runtimeFiles = NRA && NRA.files ? Object.keys(NRA.files) : [];
         var runtimeLoader = NRA && NRA.files ? function (name) { return NRA.files[name] || ""; } : null;
 
-        // Resolve source registry data into records format for notebook export
-        var exportDsData = dataset.data;
-        var srcReg3 = W.OSCDatasetSourceRegistry || null;
-        if (exportDsData && exportDsData.sourceId && srcReg3 && typeof srcReg3.resolveDatasetSplit === "function") {
-          var eTrain = srcReg3.resolveDatasetSplit(exportDsData, "train");
-          var eVal = srcReg3.resolveDatasetSplit(exportDsData, "val");
-          var eTest = srcReg3.resolveDatasetSplit(exportDsData, "test");
-          exportDsData = Object.assign({}, exportDsData, {
-            records: {
-              train: { x: eTrain.x, y: eTrain.y },
-              val: { x: eVal.x, y: eVal.y },
-              test: { x: eTest.x, y: eTest.y },
-            },
-          });
-        }
+        var exportPrepared = _prepareDatasetForNotebookExport(dataset.data, W);
+        var exportDsData = exportPrepared.dataset;
 
         NBC.createNotebookBundleZipFromConfig({
           seed: 42,
@@ -2859,23 +2874,13 @@
       var runtimeLoader = NRA && NRA.files ? function (name) { return NRA.files[name] || ""; } : null;
 
       setTimeout(function () {
-        var exportDsData = dataset.data;
-        var srcReg4 = W.OSCDatasetSourceRegistry || null;
-        if (exportDsData && exportDsData.sourceId && srcReg4 && typeof srcReg4.resolveDatasetSplit === "function") {
-          var eTrain2 = srcReg4.resolveDatasetSplit(exportDsData, "train");
-          var eVal2 = srcReg4.resolveDatasetSplit(exportDsData, "val");
-          var eTest2 = srcReg4.resolveDatasetSplit(exportDsData, "test");
-          exportDsData = Object.assign({}, exportDsData, {
-            records: {
-              train: { x: eTrain2.x, y: eTrain2.y },
-              val: { x: eVal2.x, y: eVal2.y },
-              test: { x: eTest2.x, y: eTest2.y },
-            },
-          });
-        }
+        var exportPrepared = _prepareDatasetForNotebookExport(dataset.data, W);
+        var exportDsData = exportPrepared.dataset;
 
         var notebookRowLimit = Math.max(1000, Math.floor(Number((config && config.notebookRowLimit) || (tCard && tCard.config && tCard.config.notebookRowLimit) || 10000) || 10000));
-        var preview = _limitNotebookDatasetRows(exportDsData, notebookRowLimit);
+        var preview = exportPrepared.usesServerReference
+          ? { dataset: exportDsData, truncated: false, totalRows: 0, keptRows: 0 }
+          : _limitNotebookDatasetRows(exportDsData, notebookRowLimit);
         var notebookDsData = preview.dataset || exportDsData;
         if (runner && typeof runner.updateBusy === "function") {
           runner.updateBusy(

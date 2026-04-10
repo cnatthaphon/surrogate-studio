@@ -497,6 +497,17 @@
     return null;
   }
 
+  function pickJsonFromBundle(bundle, pattern) {
+    if (!bundle || !Array.isArray(bundle.files)) return null;
+    var rx = pattern instanceof RegExp ? pattern : null;
+    for (var i = 0; i < bundle.files.length; i += 1) {
+      var f = bundle.files[i] || {};
+      var path = String(f.path || "");
+      if (rx ? rx.test(path) : /\.json$/i.test(path)) return String(f.content || "");
+    }
+    return null;
+  }
+
   function resolveDatasetCsvFromSessions(sessions, adapter) {
     var first = sessions[0] || null;
     if (!first || !first.datasetData) {
@@ -517,14 +528,24 @@
       throw new Error("Dataset adapter failed to build notebook dataset files for schema='" + schemaId + "'.");
     }
     var csv = pickCsvFromBundle(built);
-    if (!csv) throw new Error("Dataset adapter did not provide a CSV file for schema='" + schemaId + "'.");
+    var sourceDescriptor = built.sourceDescriptor || null;
+    if (!sourceDescriptor) {
+      var sourceJson = pickJsonFromBundle(built, /\.source_descriptor\.json$/i);
+      if (sourceJson) {
+        try { sourceDescriptor = JSON.parse(sourceJson); } catch (_err) { sourceDescriptor = null; }
+      }
+    }
+    if (!csv && !sourceDescriptor) throw new Error("Dataset adapter did not provide a CSV file or source descriptor for schema='" + schemaId + "'.");
     return {
       schemaId: schemaId,
       datasetName: dsName,
-      csvText: csv,
-      rowCount: countCsvRows(csv),
+      csvText: csv || "",
+      rowCount: csv ? countCsvRows(csv) : 0,
       manifest: built.manifest || null,
       bundle: built,
+      datasetRef: String((built && built.datasetRef) || "").trim(),
+      sourceDescriptor: sourceDescriptor || null,
+      sourceDescriptorRef: String((built && built.sourceDescriptorRef) || "").trim(),
     };
   }
 
@@ -1384,7 +1405,7 @@
       trainSubprocessSource: "",
       helperSources: {}
     };
-    var helperNames = ["checkpoint_format.py", "runtime_weight_loader.py"];
+    var helperNames = ["checkpoint_format.py", "runtime_weight_loader.py", "dataset_source_loader.py"];
     try {
       var runtimeLoader = typeof cfg.runtimeLoader === "function" ? cfg.runtimeLoader : null;
       if (runtimeLoader) {
@@ -1419,12 +1440,15 @@
     var schemaId = opts.schemaId || "generic";
     var datasetCsvPath = opts.datasetCsvPath || "dataset.csv";
     var datasetCsvText = String(opts.datasetCsvText || "");
+    var datasetSourceDescriptor = (opts.datasetSourceDescriptor && typeof opts.datasetSourceDescriptor === "object") ? opts.datasetSourceDescriptor : null;
+    var datasetSourceDescriptorPath = String(opts.datasetSourceDescriptorPath || "");
     var firstSession = sessions[0] || {};
     var trainCfg = firstSession.trainCfg || {};
     var graphPath = firstSession.modelGraphPath || "model.graph.json";
     var graphPayload = opts.graphPayload || firstSession.drawflowGraph || firstSession.graph || null;
     var initialArtifacts = firstSession.modelArtifacts || opts.modelArtifacts || null;
     var embedDataset = !!opts.embedDataset && !!datasetCsvText;
+    var embeddedSourceDescriptorB64 = datasetSourceDescriptor ? toBase64Utf8(JSON.stringify(datasetSourceDescriptor)) : "";
     var embedGraph = !!opts.embedGraph && !!graphPayload;
     var embeddedDatasetCsvB64 = embedDataset ? toBase64Utf8(datasetCsvText) : "";
     var embeddedGraphJsonB64 = embedGraph ? toBase64Utf8(JSON.stringify(graphPayload)) : "";
@@ -1453,8 +1477,10 @@
     cells.push(makeCodeCell(
       "# Configuration — edit paths here\n" +
       "DATASET_CSV = '" + (embedDataset ? "(embedded)" : datasetCsvPath) + "'\n" +
+      "DATASET_SOURCE_DESCRIPTOR_PATH = '" + datasetSourceDescriptorPath + "'\n" +
       "MODEL_GRAPH = '" + (embedGraph ? "(embedded)" : graphPath) + "'\n" +
       "EMBEDDED_DATASET_CSV_B64 = '" + embeddedDatasetCsvB64 + "'\n" +
+      "EMBEDDED_SOURCE_DESCRIPTOR_B64 = '" + embeddedSourceDescriptorB64 + "'\n" +
       "EMBEDDED_GRAPH_JSON_B64 = '" + embeddedGraphJsonB64 + "'\n" +
       "EMBEDDED_ARTIFACTS_B64 = '" + embeddedArtifactsB64 + "'\n" +
       "EPOCHS = " + (trainCfg.epochs || 20) + "\n" +
@@ -1481,28 +1507,62 @@
       "print(f'PyTorch {torch.__version__} on {device}')\n"
     ));
 
-    // Cell 3: Load CSV
+    // Cell 3: Load dataset
     cells.push(makeCodeCell(
-      "if EMBEDDED_DATASET_CSV_B64:\n" +
-      "    df = pd.read_csv(io.StringIO(base64.b64decode(EMBEDDED_DATASET_CSV_B64).decode('utf-8')))\n" +
+      "labels_train_tensor = None\n" +
+      "labels_val_tensor = None\n" +
+      "labels_test_tensor = None\n" +
+      "_source_desc = None\n" +
+      "if EMBEDDED_SOURCE_DESCRIPTOR_B64:\n" +
+      "    _source_desc = json.loads(base64.b64decode(EMBEDDED_SOURCE_DESCRIPTOR_B64).decode('utf-8'))\n" +
+      "elif DATASET_SOURCE_DESCRIPTOR_PATH:\n" +
+      "    from pathlib import Path\n" +
+      "    _src_path = Path(DATASET_SOURCE_DESCRIPTOR_PATH)\n" +
+      "    if _src_path.exists():\n" +
+      "        _source_desc = json.loads(_src_path.read_text(encoding='utf-8'))\n\n" +
+      "if _source_desc is not None:\n" +
+      "    from dataset_source_loader import load_dataset_from_source_descriptor\n" +
+      "    _payload = load_dataset_from_source_descriptor(_source_desc)\n" +
+      "    df = None\n" +
+      "    feature_cols = ['f' + str(i) for i in range(int(_payload.get('featureSize', 0) or 0))]\n" +
+      "    target_cols = ['t' + str(i) for i in range(int(_payload.get('targetSize', 0) or 0))]\n" +
+      "    x_train = torch.tensor(np.array(_payload.get('xTrain', []), dtype=np.float32))\n" +
+      "    y_train = torch.tensor(np.array(_payload.get('yTrain', []), dtype=np.float32))\n" +
+      "    x_val = torch.tensor(np.array(_payload.get('xVal', []), dtype=np.float32))\n" +
+      "    y_val = torch.tensor(np.array(_payload.get('yVal', []), dtype=np.float32))\n" +
+      "    x_test = torch.tensor(np.array(_payload.get('xTest', []), dtype=np.float32))\n" +
+      "    y_test = torch.tensor(np.array(_payload.get('yTest', []), dtype=np.float32))\n" +
+      "    if _payload.get('labelsTrain'):\n" +
+      "        labels_train_tensor = torch.tensor(np.array(_payload.get('labelsTrain', []), dtype=np.float32))\n" +
+      "    if _payload.get('labelsVal'):\n" +
+      "        labels_val_tensor = torch.tensor(np.array(_payload.get('labelsVal', []), dtype=np.float32))\n" +
+      "    if _payload.get('labelsTest'):\n" +
+      "        labels_test_tensor = torch.tensor(np.array(_payload.get('labelsTest', []), dtype=np.float32))\n" +
+      "    print(f\"Dataset loaded from source descriptor: {_source_desc.get('kind', 'unknown')}\")\n" +
       "else:\n" +
-      "    df = pd.read_csv(DATASET_CSV)\n" +
-      "print(f'Dataset: {len(df)} rows, columns: {list(df.columns[:5])}...')\n\n" +
-      "# Split by 'split' column\n" +
-      "feature_cols = [c for c in df.columns if c.startswith('f')]\n" +
-      "target_cols = [c for c in df.columns if c.startswith('t')]\n" +
-      "print(f'Features: {len(feature_cols)}, Targets: {len(target_cols)}')\n\n" +
-      "train_df = df[df['split'] == 'train']\n" +
-      "val_df = df[df['split'] == 'val']\n" +
-      "test_df = df[df['split'] == 'test'] if 'test' in df['split'].values else val_df\n\n" +
-      "x_train = torch.tensor(train_df[feature_cols].values, dtype=torch.float32)\n" +
-      "y_train = torch.tensor(train_df[target_cols].values, dtype=torch.float32)\n" +
-      "x_val = torch.tensor(val_df[feature_cols].values, dtype=torch.float32)\n" +
-      "y_val = torch.tensor(val_df[target_cols].values, dtype=torch.float32)\n" +
-      "x_test = torch.tensor(test_df[feature_cols].values, dtype=torch.float32)\n" +
-      "y_test = torch.tensor(test_df[target_cols].values, dtype=torch.float32)\n\n" +
+      "    if EMBEDDED_DATASET_CSV_B64:\n" +
+      "        df = pd.read_csv(io.StringIO(base64.b64decode(EMBEDDED_DATASET_CSV_B64).decode('utf-8')))\n" +
+      "    else:\n" +
+      "        df = pd.read_csv(DATASET_CSV)\n" +
+      "    print(f'Dataset: {len(df)} rows, columns: {list(df.columns[:5])}...')\n\n" +
+      "    # Split by 'split' column\n" +
+      "    feature_cols = [c for c in df.columns if c.startswith('f')]\n" +
+      "    target_cols = [c for c in df.columns if c.startswith('t')]\n" +
+      "    print(f'Features: {len(feature_cols)}, Targets: {len(target_cols)}')\n\n" +
+      "    train_df = df[df['split'] == 'train']\n" +
+      "    val_df = df[df['split'] == 'val']\n" +
+      "    test_df = df[df['split'] == 'test'] if 'test' in df['split'].values else val_df\n\n" +
+      "    x_train = torch.tensor(train_df[feature_cols].values, dtype=torch.float32)\n" +
+      "    y_train = torch.tensor(train_df[target_cols].values, dtype=torch.float32)\n" +
+      "    x_val = torch.tensor(val_df[feature_cols].values, dtype=torch.float32)\n" +
+      "    y_val = torch.tensor(val_df[target_cols].values, dtype=torch.float32)\n" +
+      "    x_test = torch.tensor(test_df[feature_cols].values, dtype=torch.float32)\n" +
+      "    y_test = torch.tensor(test_df[target_cols].values, dtype=torch.float32)\n" +
+      "    labels_train_tensor = y_train.clone() if y_train.ndim > 1 and y_train.shape[-1] > 1 else None\n" +
+      "    labels_val_tensor = y_val.clone() if y_val.ndim > 1 and y_val.shape[-1] > 1 else None\n" +
+      "    labels_test_tensor = y_test.clone() if y_test.ndim > 1 and y_test.shape[-1] > 1 else None\n\n" +
       "print(f'Train: {len(x_train)}, Val: {len(x_val)}, Test: {len(x_test)}')\n" +
-      "print(f'Feature dim: {x_train.shape[1]}, Target dim: {y_train.shape[1]}')\n"
+      "print(f'Feature dim: {x_train.shape[1] if x_train.ndim > 1 else 1}, Target dim: {y_train.shape[1] if y_train.ndim > 1 else 1}')\n"
     ));
 
     // Cell 4: Load graph + build model (same builder as server runtime)
@@ -1644,12 +1704,15 @@
       "# Detect class_embed nodes — include labels in DataLoader if present\n" +
       "_has_class_embed = any(str(n.get('name','')).replace('_layer','') == 'class_embed' for n in data.values() if isinstance(n,dict))\n" +
       "if _has_class_embed and hasattr(model, '_class_labels') is False:\n" +
-      "    # build one-hot labels from dataset label column\n" +
       "    _nclasses = 10\n" +
       "    for _n in data.values():\n" +
       "        if isinstance(_n, dict) and str(_n.get('name','')).replace('_layer','') == 'class_embed':\n" +
       "            _nclasses = int((_n.get('data') or {}).get('numClasses', 10))\n" +
-      "    if 'label' in df.columns:\n" +
+      "    if labels_train_tensor is not None and labels_val_tensor is not None:\n" +
+      "        train_dl = DataLoader(TensorDataset(x_train, y_train, labels_train_tensor), batch_size=BATCH_SIZE, shuffle=True)\n" +
+      "        val_dl = DataLoader(TensorDataset(x_val, y_val, labels_val_tensor), batch_size=BATCH_SIZE)\n" +
+      "        print(f'Class conditioning: {_nclasses} classes')\n" +
+      "    elif 'df' in globals() and df is not None and 'label' in df.columns:\n" +
       "        import torch.nn.functional as F\n" +
       "        _lbl_train = F.one_hot(torch.tensor(df[df['split']=='train']['label'].values.astype(int)), _nclasses).float()\n" +
       "        _lbl_val = F.one_hot(torch.tensor(df[df['split']=='val']['label'].values.astype(int)), _nclasses).float()\n" +
@@ -2167,18 +2230,30 @@
       notebook = buildGenericNotebook({
         sessions: sessionPayloads,
         schemaId: schemaId,
-        datasetCsvPath: "dataset.csv",
+        datasetCsvPath: datasetPack.datasetRef || "dataset.csv",
+        datasetSourceDescriptorPath: datasetPack.sourceDescriptorRef || "",
         trainSubprocessSource: genericRuntime.trainSubprocessSource,
         serverHelperSources: genericRuntime.helperSources,
       });
     }
 
     var notebookText = JSON.stringify(notebook, null, 2);
-    var entries = [
-      { path: "notebooks/", content: "" },
-      { path: "notebooks/dataset.csv", content: datasetPack.csvText },
-      { path: "notebooks/run.ipynb", content: notebookText },
-    ].concat(modelGraphEntries);
+    var datasetEntries = [];
+    if (datasetPack.bundle && Array.isArray(datasetPack.bundle.files) && datasetPack.bundle.files.length) {
+      datasetEntries = datasetPack.bundle.files.map(function (f) {
+        return {
+          path: "notebooks/" + String(f.path || "").replace(/^\/+/, ""),
+          content: f.content,
+          contentType: f.contentType
+        };
+      });
+    } else if (datasetPack.csvText) {
+      datasetEntries = [{ path: "notebooks/dataset.csv", content: datasetPack.csvText }];
+    }
+    var entries = [{ path: "notebooks/", content: "" }]
+      .concat(datasetEntries)
+      .concat([{ path: "notebooks/run.ipynb", content: notebookText }])
+      .concat(modelGraphEntries);
     // include train_subprocess.py for standalone use
     if (genericRuntime.trainSubprocessSource) {
       entries.push({ path: "notebooks/train_subprocess.py", content: genericRuntime.trainSubprocessSource, contentType: "text/x-python" });
@@ -2269,8 +2344,10 @@
       notebook = buildGenericNotebook({
         sessions: sessions,
         schemaId: schemaId,
-        datasetCsvPath: "dataset.csv",
+        datasetCsvPath: datasetPack.datasetRef || "dataset.csv",
         datasetCsvText: datasetPack.csvText,
+        datasetSourceDescriptor: datasetPack.sourceDescriptor || null,
+        datasetSourceDescriptorPath: datasetPack.sourceDescriptorRef || "",
         embedDataset: true,
         embedGraph: true,
         graphPayload: sessions[0] && sessions[0].drawflowGraph ? sessions[0].drawflowGraph : null,
