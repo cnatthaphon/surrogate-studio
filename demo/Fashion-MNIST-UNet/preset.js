@@ -14,11 +14,22 @@
   "use strict";
 
   var _nid = 0;
+  // N: appends _layer suffix (standard nodes)
   function N(d, name, data, x, y) {
     _nid++;
     d[String(_nid)] = {
       id: _nid, name: name + "_layer", data: data || {}, class: name + "_layer",
       html: "<div><div>" + name + "_layer</div></div>", typenode: false,
+      inputs: {}, outputs: {}, pos_x: x, pos_y: y,
+    };
+    return String(_nid);
+  }
+  // NR: raw name, no suffix (for nodes like concat_block that have no _layer)
+  function NR(d, name, data, x, y) {
+    _nid++;
+    d[String(_nid)] = {
+      id: _nid, name: name, data: data || {}, class: name,
+      html: "<div><div>" + name + "</div></div>", typenode: false,
       inputs: {}, outputs: {}, pos_x: x, pos_y: y,
     };
     return String(_nid);
@@ -33,13 +44,13 @@
   function graph(d) { return { drawflow: { Home: { data: d } } }; }
 
   // ─── UNet Model ───
-  // Encoder: Conv(16) → Pool → Conv(32) → Pool
-  // Bottleneck: Conv(64)
-  // Decoder: UpSample → Concat(skip2) → Conv(32) → UpSample → Concat(skip1) → Conv(16) → Conv(1)
+  // ImageSource → Reshape → Conv(16) → Pool → Conv(32) → Pool → Conv(64) bottleneck
+  //   → UpSample → Concat(skip2) → Conv(32) → UpSample → Concat(skip1) → Conv(16) → Conv(1)
   function buildUNet() {
+    _nid = 0;
     var d = {};
-    // Input: 28x28x1 image via Reshape
-    var inp     = N(d, "input",          { featureSize: 784 },                   50,  300);
+    // Feature block + Reshape to 28x28x1
+    var imgSrc  = N(d, "image_source",   { sourceKey: "pixel_values", featureSize: 784, imageShape: [28,28,1] }, 50, 300);
     var reshape = N(d, "reshape",        { targetShape: "28,28,1" },            200,  300);
 
     // Encoder block 1
@@ -56,15 +67,15 @@
     var bottleA = N(d, "conv2d",         { filters: 64, kernelSize: 3, strides: 1, padding: "same", activation: "relu" }, 550, 600);
     var bottleB = N(d, "conv2d",         { filters: 64, kernelSize: 3, strides: 1, padding: "same", activation: "relu" }, 720, 600);
 
-    // Decoder block 2
+    // Decoder block 2: UpSample → Concat(skip from enc2b) → Conv
     var up2     = N(d, "upsample2d",     { size: 2 },                           900, 600);
-    var cat2    = N(d, "concat",         {},                                     900, 400);
+    var cat2    = NR(d, "concat_block",  {},                                     900, 400);
     var dec2a   = N(d, "conv2d",         { filters: 32, kernelSize: 3, strides: 1, padding: "same", activation: "relu" }, 1080, 400);
     var dec2b   = N(d, "conv2d",         { filters: 32, kernelSize: 3, strides: 1, padding: "same", activation: "relu" }, 1250, 400);
 
-    // Decoder block 1
+    // Decoder block 1: UpSample → Concat(skip from enc1b) → Conv
     var up1     = N(d, "upsample2d",     { size: 2 },                           1250, 200);
-    var cat1    = N(d, "concat",         {},                                     1250, 100);
+    var cat1    = NR(d, "concat_block",  {},                                     1250, 100);
     var dec1a   = N(d, "conv2d",         { filters: 16, kernelSize: 3, strides: 1, padding: "same", activation: "relu" }, 1420, 100);
     var dec1b   = N(d, "conv2d",         { filters: 1,  kernelSize: 1, strides: 1, padding: "same", activation: "sigmoid" }, 1590, 100);
 
@@ -73,7 +84,7 @@
     var out     = N(d, "output",         { targetType: "x", matchWeight: 1, headType: "reconstruction" }, 1760, 300);
 
     // Encoder path
-    C(d, inp, reshape);
+    C(d, imgSrc, reshape);
     C(d, reshape, enc1a);
     C(d, enc1a, enc1b);
     C(d, enc1b, pool1);
@@ -109,7 +120,7 @@
   function buildConvAE() {
     _nid = 100;
     var d = {};
-    var inp     = N(d, "input",      { featureSize: 784 },          50,  300);
+    var imgSrc  = N(d, "image_source", { sourceKey: "pixel_values", featureSize: 784, imageShape: [28,28,1] }, 50, 300);
     var reshape = N(d, "reshape",    { targetShape: "28,28,1" },   200,  300);
     var e1      = N(d, "conv2d",     { filters: 16, kernelSize: 3, strides: 1, padding: "same", activation: "relu" }, 380, 300);
     var pool1   = N(d, "maxpool2d",  { poolSize: 2, strides: 2 },  550, 300);
@@ -122,7 +133,7 @@
     var flat    = N(d, "flatten",    {},                           1740, 300);
     var out     = N(d, "output",     { targetType: "x", matchWeight: 1, headType: "reconstruction" }, 1910, 300);
 
-    C(d, inp, reshape); C(d, reshape, e1); C(d, e1, pool1); C(d, pool1, e2); C(d, e2, pool2);
+    C(d, imgSrc, reshape); C(d, reshape, e1); C(d, e1, pool1); C(d, pool1, e2); C(d, e2, pool2);
     C(d, pool2, up1); C(d, up1, d1); C(d, d1, up2); C(d, up2, d2); C(d, d2, flat); C(d, flat, out);
     return graph(d);
   }
@@ -143,8 +154,8 @@
   };
 
   var MODELS = [
-    { id: "unet_model", name: "UNet (skip connections)", schemaId: "fashion_mnist", drawflowGraph: buildUNet() },
-    { id: "conv_ae_model", name: "Conv AE (baseline)", schemaId: "fashion_mnist", drawflowGraph: buildConvAE() },
+    { id: "unet_model", name: "UNet (skip connections)", schemaId: "fashion_mnist", graph: buildUNet() },
+    { id: "conv_ae_model", name: "Conv AE (baseline)", schemaId: "fashion_mnist", graph: buildConvAE() },
   ];
 
   var TRAINERS = [
