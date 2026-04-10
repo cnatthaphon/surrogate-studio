@@ -21,16 +21,27 @@ Input(784) → Reshape(28,28,1)
   → UpSample → Concat(skip1) → Conv(16) → Conv(1,sigmoid)
   → Flatten → Output(x)
 ```
-~42K parameters. Skip connections preserve spatial detail from encoder.
+~116K parameters. Skip connections preserve spatial detail from encoder.
 
 ### 2. Conv Autoencoder (baseline)
 ```
 Input(784) → Reshape(28,28,1)
-  → Conv(16, stride=2) → Conv(32, stride=2)
-  → ConvTranspose(16, stride=2) → ConvTranspose(1, stride=2, sigmoid)
+  → Conv(16) → MaxPool → Conv(32) → MaxPool
+  → UpSample → Conv(16) → UpSample → Conv(1,sigmoid)
   → Flatten → Output(x)
 ```
-~5K parameters. No skip connections — bottleneck must encode everything.
+~9K parameters. No skip connections — bottleneck must encode everything.
+
+## Results
+
+Trained on Fashion-MNIST (PyTorch CUDA):
+
+| Model | Params | Test MAE | Test MSE |
+|-------|:------:|:--------:|:--------:|
+| **UNet (skip connections)** | 115,665 | **0.031** | **0.0017** |
+| Conv AE (baseline) | 9,441 | 0.069 | 0.0125 |
+
+Skip connections give 2x lower MAE and 7x lower MSE.
 
 ## How to Use
 
