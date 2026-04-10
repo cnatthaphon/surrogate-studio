@@ -67,6 +67,10 @@ const api = require("../src/workflow_api_core.js");
     run: false,
   });
   assert.ok(fs.existsSync(unpacked.runNotebook), "unpacked notebook run.ipynb must exist");
+  const notebookDir = path.dirname(unpacked.runNotebook);
+  assert.ok(fs.existsSync(path.join(notebookDir, "train_subprocess.py")), "generic notebook bundle must include train_subprocess.py");
+  assert.ok(fs.existsSync(path.join(notebookDir, "checkpoint_format.py")), "generic notebook bundle must include checkpoint_format.py");
+  assert.ok(fs.existsSync(path.join(notebookDir, "runtime_weight_loader.py")), "generic notebook bundle must include runtime_weight_loader.py");
 
   console.log("PASS test_contract_headless_api_flow");
 })().catch(function (err) {

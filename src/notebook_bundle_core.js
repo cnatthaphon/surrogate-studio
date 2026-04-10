@@ -1377,6 +1377,41 @@
     return keys.length ? files[keys[0]] : "";
   }
 
+  function loadGenericServerNotebookSources(rawCfg) {
+    var cfg = rawCfg || {};
+    var out = {
+      trainSubprocessSource: "",
+      helperSources: {}
+    };
+    var helperNames = ["checkpoint_format.py", "runtime_weight_loader.py"];
+    try {
+      var runtimeLoader = typeof cfg.runtimeLoader === "function" ? cfg.runtimeLoader : null;
+      if (runtimeLoader) {
+        out.trainSubprocessSource = runtimeLoader("train_subprocess.py") || "";
+        for (var i = 0; i < helperNames.length; i += 1) {
+          var helperName = helperNames[i];
+          out.helperSources[helperName] = runtimeLoader(helperName) || "";
+        }
+      }
+    } catch (e) { /* not available */ }
+    if (isNode && FS && PATH) {
+      if (!out.trainSubprocessSource) {
+        try {
+          out.trainSubprocessSource = FS.readFileSync(PATH.resolve(PATH.dirname(__filename || "."), "..", "server", "train_subprocess.py"), "utf8");
+        } catch (_e1) { /* */ }
+      }
+      for (var j = 0; j < helperNames.length; j += 1) {
+        var nm = helperNames[j];
+        if (!out.helperSources[nm]) {
+          try {
+            out.helperSources[nm] = FS.readFileSync(PATH.resolve(PATH.dirname(__filename || "."), "..", "server", nm), "utf8");
+          } catch (_e2) { /* */ }
+        }
+      }
+    }
+    return out;
+  }
+
   function buildGenericNotebook(opts) {
     CELL_SEQ = 0;
     var sessions = opts.sessions || [];
@@ -1464,8 +1499,25 @@
     if (hasSubprocess) {
       // embed the build_model_from_graph function from train_subprocess.py
       var b64src = toBase64Utf8(opts.trainSubprocessSource);
+      var helperSourceMap = opts.serverHelperSources || {};
+      var helperBootstrapLines = "";
+      var helperSummary = ["train_subprocess.py"];
+      var helperKeys = Object.keys(helperSourceMap);
+      for (var hk = 0; hk < helperKeys.length; hk += 1) {
+        var helperFile = String(helperKeys[hk] || "").trim();
+        var helperSource = String(helperSourceMap[helperFile] || "");
+        if (!helperFile || !helperSource) continue;
+        var moduleName = helperFile.replace(/\.py$/i, "");
+        helperSummary.push(helperFile);
+        helperBootstrapLines +=
+          "_helper_src_" + hk + " = base64.b64decode('" + toBase64Utf8(helperSource) + "').decode('utf-8')\n" +
+          "_helper_mod_" + hk + " = types.ModuleType('" + moduleName + "')\n" +
+          "sys.modules['" + moduleName + "'] = _helper_mod_" + hk + "\n" +
+          "exec(compile(_helper_src_" + hk + ", '" + helperFile + "', 'exec'), _helper_mod_" + hk + ".__dict__)\n\n";
+      }
       cells.push(makeCodeCell(
         "import base64, types, sys\n\n" +
+        helperBootstrapLines +
         "# Load model builder from train_subprocess.py (same code as server runtime)\n" +
         "_subprocess_src = base64.b64decode('" + b64src + "').decode('utf-8')\n" +
         "_mod = types.ModuleType('train_subprocess')\n" +
@@ -1484,7 +1536,7 @@
           role: "runtime-loader",
           collapsed: true,
           hideSource: true,
-          summary: "Embedded runtime loader from train_subprocess.py"
+          summary: "Embedded runtime loader: " + helperSummary.join(", ")
         }
       }));
     } else {
@@ -2042,14 +2094,7 @@
       return out;
     });
     // Load train_subprocess.py for model builder (shared between server + notebook)
-    var trainSubprocessSource = "";
-    try {
-      var runtimeLoader = typeof cfg.runtimeLoader === "function" ? cfg.runtimeLoader : null;
-      if (runtimeLoader) trainSubprocessSource = runtimeLoader("train_subprocess.py") || "";
-    } catch (e) { /* not available */ }
-    if (!trainSubprocessSource && isNode && FS) {
-      try { trainSubprocessSource = FS.readFileSync(PATH.resolve(PATH.dirname(__filename || "."), "..", "server", "train_subprocess.py"), "utf8"); } catch (e) { /* */ }
-    }
+    var genericRuntime = loadGenericServerNotebookSources(cfg);
 
     // Decide notebook type based on schema
     var schemaId = datasetPack.schemaId || "";
@@ -2070,7 +2115,8 @@
         sessions: sessionPayloads,
         schemaId: schemaId,
         datasetCsvPath: "dataset.csv",
-        trainSubprocessSource: trainSubprocessSource,
+        trainSubprocessSource: genericRuntime.trainSubprocessSource,
+        serverHelperSources: genericRuntime.helperSources,
       });
     }
 
@@ -2081,8 +2127,15 @@
       { path: "notebooks/run.ipynb", content: notebookText },
     ].concat(modelGraphEntries);
     // include train_subprocess.py for standalone use
-    if (trainSubprocessSource) {
-      entries.push({ path: "notebooks/train_subprocess.py", content: trainSubprocessSource, contentType: "text/x-python" });
+    if (genericRuntime.trainSubprocessSource) {
+      entries.push({ path: "notebooks/train_subprocess.py", content: genericRuntime.trainSubprocessSource, contentType: "text/x-python" });
+    }
+    var helperEntryNames = Object.keys(genericRuntime.helperSources || {});
+    for (var hei = 0; hei < helperEntryNames.length; hei += 1) {
+      var helperEntryName = helperEntryNames[hei];
+      var helperEntrySource = String((genericRuntime.helperSources || {})[helperEntryName] || "");
+      if (!helperEntryName || !helperEntrySource) continue;
+      entries.push({ path: "notebooks/" + helperEntryName, content: helperEntrySource, contentType: "text/x-python" });
     }
     var zipBytes = makeZipBytes(entries);
     var fileName = String(cfg.zipFileName || ("trainner_" + Date.now() + ".zip"));
@@ -2104,7 +2157,7 @@
       layout: String(cfg.layout || "per_session"),
       packageMode: String(cfg.packageMode || "zip_two_file_runtime"),
       sessionCount: sessions.length,
-      fileCount: 2 + modelGraphEntries.length,
+      fileCount: entries.length - 1,
       runtimeCount: runtime.loaded,
       runtimeTotal: runtime.total,
       datasetRows: datasetPack.rowCount,
@@ -2159,14 +2212,7 @@
         datasetCsvText: datasetPack.csvText,
       });
     } else {
-      var trainSubprocessSource = "";
-      try {
-        var runtimeLoader = typeof cfg.runtimeLoader === "function" ? cfg.runtimeLoader : null;
-        if (runtimeLoader) trainSubprocessSource = runtimeLoader("train_subprocess.py") || "";
-      } catch (e) { /* not available */ }
-      if (!trainSubprocessSource && isNode && FS) {
-        try { trainSubprocessSource = FS.readFileSync(PATH.resolve(PATH.dirname(__filename || "."), "..", "server", "train_subprocess.py"), "utf8"); } catch (e) { /* */ }
-      }
+      var genericRuntime = loadGenericServerNotebookSources(cfg);
       notebook = buildGenericNotebook({
         sessions: sessions,
         schemaId: schemaId,
@@ -2175,7 +2221,8 @@
         embedDataset: true,
         embedGraph: true,
         graphPayload: sessions[0] && sessions[0].drawflowGraph ? sessions[0].drawflowGraph : null,
-        trainSubprocessSource: trainSubprocessSource,
+        trainSubprocessSource: genericRuntime.trainSubprocessSource,
+        serverHelperSources: genericRuntime.helperSources,
       });
     }
     var notebookText = JSON.stringify(notebook, null, 2);
