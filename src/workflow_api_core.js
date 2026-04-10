@@ -21,6 +21,8 @@ function bootstrapRuntime() {
   const taskRecipeRegistry = require(path.join(PROJECT_ROOT, "src", "task_recipe_registry.js"));
   globalThis.OSCTaskRecipeRegistry = taskRecipeRegistry;
   require(path.join(PROJECT_ROOT, "src", "task_recipe_definitions_builtin.js"));
+  const taskRecipeRuntime = require(path.join(PROJECT_ROOT, "src", "task_recipe_runtime.js"));
+  globalThis.OSCTaskRecipeRuntime = taskRecipeRuntime;
   require(path.join(PROJECT_ROOT, "src", "schema_definitions_builtin.js"));
   const datasetSourceDescriptor = require(path.join(PROJECT_ROOT, "src", "dataset_source_descriptor.js"));
   globalThis.OSCDatasetSourceDescriptor = datasetSourceDescriptor;
@@ -43,6 +45,7 @@ function bootstrapRuntime() {
     core,
     schemaRegistry,
     taskRecipeRegistry,
+    taskRecipeRuntime,
     datasetModules,
     datasetRuntime,
     workspaceStore: workspaceStoreMod,

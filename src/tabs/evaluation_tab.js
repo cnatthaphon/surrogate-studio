@@ -49,6 +49,8 @@
     var getTf = function () { var W = typeof window !== "undefined" ? window : {}; return W.tf || null; };
     var getUiEngine = function () { var W = typeof window !== "undefined" ? window : {}; return W.OSCUiSharedEngine || null; };
     var getGenerationEngine = function () { var W = typeof window !== "undefined" ? window : {}; return W.OSCGenerationEngineCore || null; };
+    var getTaskRecipeRegistry = function () { var W = typeof window !== "undefined" ? window : {}; return W.OSCTaskRecipeRegistry || null; };
+    var getTaskRecipeRuntime = function () { var W = typeof window !== "undefined" ? window : {}; return W.OSCTaskRecipeRuntime || null; };
     var modal = deps.modal;
 
     var _activeEvalId = null;
@@ -65,7 +67,12 @@
       recon_mse: { dir: "lower", text: "Reconstruction mean squared error." },
       mae: { dir: "lower", text: "Mean absolute prediction error." },
       rmse: { dir: "lower", text: "Root mean squared prediction error." },
+      bbox_mae: { dir: "lower", text: "Mean absolute error over normalized bounding-box coordinates." },
+      bbox_rmse: { dir: "lower", text: "Root mean squared error over normalized bounding-box coordinates." },
+      bbox_bias: { dir: "lower", text: "Signed average bounding-box coordinate bias." },
       iou_mean: { dir: "higher", text: "Mean intersection-over-union for normalized predicted and reference boxes." },
+      class_accuracy: { dir: "higher", text: "Classification accuracy for the detection class head." },
+      class_macro_f1: { dir: "higher", text: "Macro F1 for the detection class head." },
       acc: { dir: "higher", text: "Classification accuracy." },
       f1: { dir: "higher", text: "F1 score." },
       auc_macro: { dir: "higher", text: "Macro-averaged AUC." }
@@ -91,16 +98,40 @@
     }
 
     // ─── Built-in evaluators ───
-    function _getBuiltinEvaluators(isClassification) {
+    function _resolveTaskRecipe(schemaId, datasetData) {
+      var runtime = getTaskRecipeRuntime();
+      var registry = getTaskRecipeRegistry();
+      if (!runtime || typeof runtime.resolveRecipe !== "function") return null;
+      return runtime.resolveRecipe(schemaRegistry, registry, schemaId, datasetData, datasetData && datasetData.taskRecipeId);
+    }
+
+    function _resolvePredictiveMode(schemaId, datasetData) {
+      var runtime = getTaskRecipeRuntime();
+      var recipe = _resolveTaskRecipe(schemaId, datasetData);
+      var outputKeys = schemaRegistry ? schemaRegistry.getOutputKeys(schemaId) : [];
+      if (!runtime || typeof runtime.getPredictiveMode !== "function") {
+        var defHt = outputKeys && outputKeys[0] ? (outputKeys[0].headType || "regression") : "regression";
+        return { recipe: recipe, mode: defHt === "classification" ? "classification" : "regression" };
+      }
+      return { recipe: recipe, mode: runtime.getPredictiveMode(recipe, outputKeys) };
+    }
+
+    function _getBuiltinEvaluators(predictiveMode) {
       var list = [];
-      if (!isClassification) {
+      if (predictiveMode === "classification") {
+        list.push({ id: "accuracy", name: "Accuracy", mode: "test" });
+        list.push({ id: "macro_f1", name: "Macro F1", mode: "test" });
+      } else if (predictiveMode === "detection") {
+        list.push({ id: "bbox_mae", name: "BBox MAE", mode: "test" });
+        list.push({ id: "bbox_rmse", name: "BBox RMSE", mode: "test" });
+        list.push({ id: "bbox_bias", name: "BBox Bias", mode: "test" });
+        list.push({ id: "class_accuracy", name: "Class Accuracy", mode: "test" });
+        list.push({ id: "class_macro_f1", name: "Class Macro F1", mode: "test" });
+      } else {
         list.push({ id: "mae", name: "MAE", mode: "test" });
         list.push({ id: "rmse", name: "RMSE", mode: "test" });
         list.push({ id: "r2", name: "R\u00B2", mode: "test" });
         list.push({ id: "bias", name: "Bias", mode: "test" });
-      } else {
-        list.push({ id: "accuracy", name: "Accuracy", mode: "test" });
-        list.push({ id: "macro_f1", name: "Macro F1", mode: "test" });
       }
       list.push({ id: "recon_mse", name: "Reconstruction MSE", mode: "generation" });
       list.push({ id: "mmd_rbf", name: "MMD (RBF)", mode: "generation" });
@@ -128,8 +159,8 @@
       return [];
     }
 
-    function _getAllEvaluators(schemaId, isClassification) {
-      return _getBuiltinEvaluators(isClassification).concat(_getModuleEvaluators(schemaId));
+    function _getAllEvaluators(schemaId, predictiveMode) {
+      return _getBuiltinEvaluators(predictiveMode).concat(_getModuleEvaluators(schemaId));
     }
 
     // ─── Get trained trainers for a schema ───
@@ -229,6 +260,16 @@
         }
       }
       return { name: "", x: [], y: [], length: 0 };
+    }
+
+    function _resolveSplitLabels(dsData, split) {
+      var splitName = String(split || "").trim().toLowerCase();
+      if (!splitName) return [];
+      var activeDs = _getActiveDatasetData(dsData) || {};
+      var rec = activeDs.records && activeDs.records[splitName];
+      if (rec && Array.isArray(rec.labels)) return rec.labels;
+      var key = "labels" + splitName.charAt(0).toUpperCase() + splitName.slice(1);
+      return Array.isArray(activeDs[key]) ? activeDs[key] : [];
     }
 
     function _resolveFeatureSize(dsData, fallbackRows) {
@@ -370,6 +411,15 @@
           var name = (_nameInput && _nameInput.value.trim()) || "";
           var sid = _schemaSelect ? _schemaSelect.value : "";
           if (!name) { onStatus("Enter a name"); return; }
+          var recipeInfo = _resolvePredictiveMode(sid, null);
+          var runtime = getTaskRecipeRuntime();
+          var suggestedMetricIds = runtime && typeof runtime.getSuggestedMetricIds === "function"
+            ? runtime.getSuggestedMetricIds(recipeInfo.recipe, recipeInfo.mode === "classification"
+              ? ["accuracy", "macro_f1"]
+              : (recipeInfo.mode === "detection" ? ["bbox_mae", "class_accuracy", "iou_mean"] : ["mae", "rmse", "r2"]))
+            : (recipeInfo.mode === "classification"
+              ? ["accuracy", "macro_f1"]
+              : (recipeInfo.mode === "detection" ? ["bbox_mae", "class_accuracy", "iou_mean"] : ["mae", "rmse", "r2"]));
           var id = "eval_" + Date.now() + "_" + Math.floor(Math.random() * 10000);
           var rec = {
             id: id,
@@ -377,7 +427,7 @@
             schemaId: sid,
             datasetId: "",
             trainerIds: [],
-            evaluatorIds: ["mae", "rmse", "r2"],
+            evaluatorIds: suggestedMetricIds,
             runMode: "auto",
             weightSelection: "last",
             generationConfig: {
@@ -485,6 +535,7 @@
         var best = {};
         metricKeys.forEach(function (k) {
           var isLower = k === "mae" || k === "rmse" || k === "bias" || k === "recon_mse" ||
+            k === "bbox_mae" || k === "bbox_rmse" || k === "bbox_bias" ||
             k === "mmd_rbf" || k === "mean_gap" || k === "std_gap" ||
             k === "nn_precision" || k === "nn_coverage" || k === "diversity_gap";
           var bestVal = isLower ? Infinity : -Infinity;
@@ -666,13 +717,8 @@
           "Selected dataset is not generated yet. Use the Dataset tab and click Generate Dataset before running evaluation."));
       }
 
-      var isClassification = false;
-      if (ev.schemaId && schemaRegistry) {
-        var outputKeys = schemaRegistry.getOutputKeys(ev.schemaId);
-        var defHt = outputKeys && outputKeys[0] ? (outputKeys[0].headType || "regression") : "regression";
-        isClassification = defHt === "classification";
-      }
-      var allEvaluators = _getAllEvaluators(ev.schemaId, isClassification);
+      var recipeInfo = _resolvePredictiveMode(ev.schemaId, selectedDataset && selectedDataset.data);
+      var allEvaluators = _getAllEvaluators(ev.schemaId, recipeInfo.mode);
       var selectedEvaluatorDefs = allEvaluators.filter(function (item) { return (ev.evaluatorIds || []).indexOf(item.id) >= 0; });
       var hasGenerationMetrics = selectedEvaluatorDefs.some(function (item) { return item.mode === "generation" || item.mode === "both"; });
       var showGenSettings = String(ev.runMode || "auto") !== "predict" || hasGenerationMetrics;
@@ -996,9 +1042,9 @@
 
     function _getServerAdapter() { var W = typeof window !== "undefined" ? window : {}; return W.OSCServerRuntimeAdapter || null; }
 
-    function _resolveSelectedEvaluators(ev, isClassification) {
+    function _resolveSelectedEvaluators(ev, predictiveMode) {
       var selectedIds = ev && ev.evaluatorIds ? ev.evaluatorIds : [];
-      return _getAllEvaluators(ev && ev.schemaId, isClassification).filter(function (item) {
+      return _getAllEvaluators(ev && ev.schemaId, predictiveMode).filter(function (item) {
         return selectedIds.indexOf(item.id) >= 0;
       });
     }
@@ -1043,27 +1089,61 @@
       return req || "last";
     }
 
-    function _applyPredictionMetrics(pc, r, selectedIds, allPreds, testY, testN, nCls, isClassification) {
-      if (!pc) return;
-      if (isClassification) {
-        var predLabels = allPreds.map(function (p) { return p.indexOf(Math.max.apply(null, p)); });
-        var trueLabels = testY.map(function (y) { return Array.isArray(y) ? y.indexOf(Math.max.apply(null, y)) : Number(y); });
-        var correct = 0;
-        for (var ci = 0; ci < testN; ci++) if (predLabels[ci] === trueLabels[ci]) correct++;
-        if (selectedIds.indexOf("accuracy") >= 0) r.metrics.accuracy = correct / testN;
-        if (selectedIds.indexOf("macro_f1") >= 0 && pc.confusionMatrix) {
-          var cm = pc.confusionMatrix(trueLabels, predLabels, nCls);
-          var prf = pc.precisionRecallF1(cm);
-          r.metrics.macro_f1 = prf.reduce(function (s, p) { return s + p.f1; }, 0) / Math.max(1, nCls);
-        }
-        return;
-      }
+    function _normalizePredictiveResult(headConfigs, predictions, headOutputs) {
+      var primary = Array.isArray(predictions) ? predictions : [];
+      var rawHeads = Array.isArray(headOutputs) && headOutputs.length ? headOutputs : (primary.length ? [primary] : []);
+      var cfgs = Array.isArray(headConfigs) ? headConfigs : [];
+      var heads = rawHeads.map(function (rows, idx) {
+        var cfg = cfgs[idx] || {};
+        return {
+          index: idx,
+          id: String(cfg.id || ("head_" + idx)),
+          target: String(cfg.target || cfg.targetType || ""),
+          headType: String(cfg.headType || "regression"),
+          predictions: Array.isArray(rows) ? rows : [],
+        };
+      });
+      return {
+        primary: primary,
+        heads: heads,
+        headConfigs: cfgs,
+      };
+    }
 
+    function _findPredictionHead(predictionResult, matcher) {
+      var heads = predictionResult && Array.isArray(predictionResult.heads) ? predictionResult.heads : [];
+      if (!heads.length) return null;
+      var wantTarget = matcher && matcher.target ? String(matcher.target).trim().toLowerCase() : "";
+      var wantHeadType = matcher && matcher.headType ? String(matcher.headType).trim().toLowerCase() : "";
+      for (var i = 0; i < heads.length; i++) {
+        var head = heads[i] || {};
+        var target = String(head.target || "").trim().toLowerCase();
+        var headType = String(head.headType || "").trim().toLowerCase();
+        if (wantTarget && target === wantTarget) return head;
+        if (wantHeadType && headType === wantHeadType) return head;
+      }
+      return null;
+    }
+
+    function _resolvePredictionRows(predictionResult, predictiveMode) {
+      if (!predictionResult) return [];
+      if (predictiveMode === "detection") {
+        var bboxHead = _findPredictionHead(predictionResult, { target: "bbox" }) ||
+          _findPredictionHead(predictionResult, { headType: "regression" });
+        if (bboxHead && Array.isArray(bboxHead.predictions)) return bboxHead.predictions;
+      }
+      if (Array.isArray(predictionResult.primary)) return predictionResult.primary;
+      if (Array.isArray(predictionResult)) return predictionResult;
+      return [];
+    }
+
+    function _applyRegressionMetrics(pc, r, metricPrefix, selectedIds, preds, truthRows, testN) {
+      if (!Array.isArray(preds) || !preds.length) return;
       var truthFlat = [];
       var predFlat = [];
       for (var mi = 0; mi < testN; mi++) {
-        var yt = testY[mi];
-        var pp = allPreds[mi];
+        var yt = truthRows[mi];
+        var pp = preds[mi];
         if (Array.isArray(yt) && yt.length > 1) {
           for (var d = 0; d < yt.length; d++) {
             truthFlat.push(Number(yt[d] || 0));
@@ -1075,10 +1155,43 @@
         }
       }
       var reg = pc.computeRegressionMetrics(truthFlat, predFlat);
-      if (selectedIds.indexOf("mae") >= 0) r.metrics.mae = reg.mae;
-      if (selectedIds.indexOf("rmse") >= 0) r.metrics.rmse = reg.rmse;
-      if (selectedIds.indexOf("bias") >= 0) r.metrics.bias = reg.bias;
-      if (selectedIds.indexOf("r2") >= 0) r.metrics.r2 = pc.r2Score(truthFlat, predFlat);
+      if (selectedIds.indexOf(metricPrefix + "mae") >= 0 || (!metricPrefix && selectedIds.indexOf("mae") >= 0)) r.metrics[metricPrefix + "mae"] = reg.mae;
+      if (selectedIds.indexOf(metricPrefix + "rmse") >= 0 || (!metricPrefix && selectedIds.indexOf("rmse") >= 0)) r.metrics[metricPrefix + "rmse"] = reg.rmse;
+      if (selectedIds.indexOf(metricPrefix + "bias") >= 0 || (!metricPrefix && selectedIds.indexOf("bias") >= 0)) r.metrics[metricPrefix + "bias"] = reg.bias;
+      if (!metricPrefix && selectedIds.indexOf("r2") >= 0) r.metrics.r2 = pc.r2Score(truthFlat, predFlat);
+    }
+
+    function _applyClassificationMetrics(pc, r, metricPrefix, selectedIds, preds, labelRows, nCls) {
+      if (!Array.isArray(preds) || !preds.length || !Array.isArray(labelRows) || !labelRows.length) return;
+      var predLabels = preds.map(function (p) { return Array.isArray(p) ? p.indexOf(Math.max.apply(null, p)) : Number(p || 0); });
+      var trueLabels = labelRows.map(function (y) { return Array.isArray(y) ? y.indexOf(Math.max.apply(null, y)) : Number(y); });
+      var correct = 0;
+      for (var ci = 0; ci < predLabels.length && ci < trueLabels.length; ci++) if (predLabels[ci] === trueLabels[ci]) correct++;
+      var accKey = metricPrefix ? (metricPrefix + "accuracy") : "accuracy";
+      var f1Key = metricPrefix ? (metricPrefix + "macro_f1") : "macro_f1";
+      if (selectedIds.indexOf(accKey) >= 0 || (!metricPrefix && selectedIds.indexOf("accuracy") >= 0)) r.metrics[accKey] = correct / Math.max(1, trueLabels.length);
+      if ((selectedIds.indexOf(f1Key) >= 0 || (!metricPrefix && selectedIds.indexOf("macro_f1") >= 0)) && pc.confusionMatrix) {
+        var cm = pc.confusionMatrix(trueLabels, predLabels, nCls);
+        var prf = pc.precisionRecallF1(cm);
+        r.metrics[f1Key] = prf.reduce(function (s, p) { return s + p.f1; }, 0) / Math.max(1, nCls);
+      }
+    }
+
+    function _applyPredictionMetrics(pc, r, selectedIds, predictionResult, testY, testLabels, testN, nCls, predictiveMode) {
+      if (!pc || !predictionResult) return;
+      if (predictiveMode === "classification") {
+        _applyClassificationMetrics(pc, r, "", selectedIds, _resolvePredictionRows(predictionResult, predictiveMode), testY, nCls);
+        return;
+      }
+      if (predictiveMode === "detection") {
+        var bboxHead = _findPredictionHead(predictionResult, { target: "bbox" }) ||
+          _findPredictionHead(predictionResult, { headType: "regression" });
+        var clsHead = _findPredictionHead(predictionResult, { headType: "classification" });
+        if (bboxHead && Array.isArray(bboxHead.predictions)) _applyRegressionMetrics(pc, r, "bbox_", selectedIds, bboxHead.predictions, testY, testN);
+        if (clsHead && Array.isArray(clsHead.predictions)) _applyClassificationMetrics(pc, r, "class_", selectedIds, clsHead.predictions, testLabels, nCls);
+        return;
+      }
+      _applyRegressionMetrics(pc, r, "", selectedIds, _resolvePredictionRows(predictionResult, predictiveMode), testY, testN);
     }
 
     function _applyGenerationMetrics(pc, r, selectedIds, comparison, generationResult) {
@@ -1106,6 +1219,9 @@
 
     function _runPredictiveEvaluation(tf, trainer, modelRec, artifacts, allowedOutputKeys, defaultTarget, nCls, featureSize, testX, useServer) {
       var serverAdapter = _getServerAdapter();
+      var inferredHeadConfigs = modelBuilder && typeof modelBuilder.inferOutputHeads === "function"
+        ? modelBuilder.inferOutputHeads(modelRec.graph, allowedOutputKeys, defaultTarget)
+        : [];
       if (useServer && serverAdapter) {
         var serverUrl = (trainer.config && trainer.config.serverUrl) || "";
         return serverAdapter.checkServer(serverUrl).then(function (ok) {
@@ -1119,8 +1235,13 @@
             targetSize: featureSize,
             numClasses: nCls,
             xInput: testX,
+            headConfigs: inferredHeadConfigs,
           }, serverUrl).then(function (result) {
-            return result && result.predictions ? result.predictions : [];
+            return _normalizePredictiveResult(
+              inferredHeadConfigs,
+              result && result.predictions ? result.predictions : [],
+              result && result.headOutputs ? result.headOutputs : null
+            );
           }).catch(function () {
             return null;
           });
@@ -1140,17 +1261,23 @@
         });
         _loadWeights(tf, built.model, artifacts);
         var allPreds = [];
+        var headOutputs = null;
         var batchSize = 256;
         for (var bi = 0; bi < testX.length; bi += batchSize) {
           var bEnd = Math.min(bi + batchSize, testX.length);
           var bt = tf.tensor2d(testX.slice(bi, bEnd));
           var br = built.model.predict(bt);
-          allPreds = allPreds.concat((Array.isArray(br) ? br[0] : br).arraySync());
+          var outputs = Array.isArray(br) ? br : [br];
+          if (!headOutputs) headOutputs = outputs.map(function () { return []; });
+          outputs.forEach(function (tensor, idx) {
+            headOutputs[idx] = headOutputs[idx].concat(tensor.arraySync());
+          });
+          allPreds = allPreds.concat(outputs[0].arraySync());
           bt.dispose();
-          if (Array.isArray(br)) br.forEach(function (t) { t.dispose(); }); else br.dispose();
+          outputs.forEach(function (t) { t.dispose(); });
         }
         built.model.dispose();
-        return allPreds;
+        return _normalizePredictiveResult(built.headConfigs || inferredHeadConfigs, allPreds, headOutputs);
       });
     }
 
@@ -1361,31 +1488,30 @@
         r.status = "error"; r.error = "Missing model or dataset"; return Promise.resolve();
       }
 
+      var dsData = dataset.data;
       var schemaId = ev.schemaId;
       var allowedOutputKeys = schemaRegistry ? schemaRegistry.getOutputKeys(schemaId) : [];
       var defaultTarget = (allowedOutputKeys[0] && (allowedOutputKeys[0].key || allowedOutputKeys[0])) || "";
-      // Determine actual head type from model graph (not just schema default)
-      var modelHeadType = "regression";
-      if (modelRec && modelRec.graph) {
-        var outputHeads = modelBuilder.inferOutputHeads ? modelBuilder.inferOutputHeads(modelRec.graph, allowedOutputKeys, defaultTarget) : [];
-        if (outputHeads.length && outputHeads[0].headType) modelHeadType = outputHeads[0].headType;
+      var recipeInfo = _resolvePredictiveMode(schemaId, dsData);
+      var predictiveMode = recipeInfo.mode;
+      if (predictiveMode !== "detection" && modelRec && modelRec.graph && modelBuilder && typeof modelBuilder.inferOutputHeads === "function") {
+        var outputHeads = modelBuilder.inferOutputHeads(modelRec.graph, allowedOutputKeys, defaultTarget);
+        var modelHeadType = outputHeads.length && outputHeads[0].headType ? String(outputHeads[0].headType).trim().toLowerCase() : "";
+        if (modelHeadType === "classification" || modelHeadType === "reconstruction") predictiveMode = modelHeadType;
       }
-      var defHeadType = modelHeadType || (allowedOutputKeys[0] && allowedOutputKeys[0].headType) || "regression";
-      var isClassification = defHeadType === "classification";
-      var isReconstruction = defHeadType === "reconstruction";
-      var selectedEvaluatorDefs = _resolveSelectedEvaluators(ev, isClassification);
+      var selectedEvaluatorDefs = _resolveSelectedEvaluators(ev, predictiveMode);
       var runNeeds = _resolveRunNeeds(ev, selectedEvaluatorDefs);
       var selectedIds = ev.evaluatorIds || [];
-      var dsData = dataset.data;
       var activeDs = _getActiveDatasetData(dsData);
       var nCls = activeDs.classCount || activeDs.numClasses || 10;
       var testSplit = _resolveReferenceSplit(dsData, ["test", "val", "train"]);
       var testX = testSplit.x || [];
-      var testY = isReconstruction ? testX : (testSplit.y || []);
+      var testY = predictiveMode === "reconstruction" ? testX : (testSplit.y || []);
+      var testLabels = _resolveSplitLabels(dsData, testSplit.name || "");
       var featureSize = _resolveFeatureSize(dsData, testX) || 1;
       var testN = testX.length;
 
-      if (isClassification && testY.length && typeof testY[0] === "number") {
+      if (predictiveMode === "classification" && testY.length && typeof testY[0] === "number") {
         testY = testY.map(function (l) { var a = new Array(nCls).fill(0); a[l] = 1; return a; });
       }
       if ((runNeeds.predictive || runNeeds.generative) && !testN) {
@@ -1421,8 +1547,8 @@
         })
         .then(function (allPreds) {
           predictiveResult = allPreds;
-          if (runNeeds.predictive && Array.isArray(allPreds)) {
-            _applyPredictionMetrics(pc, r, selectedIds, allPreds, testY, testN, nCls, isClassification);
+          if (runNeeds.predictive && allPreds) {
+            _applyPredictionMetrics(pc, r, selectedIds, allPreds, testY, testLabels, testN, nCls, predictiveMode);
           }
           if (!runNeeds.generative) return null;
           return _runGenerativeEvaluation(tf, trainer, modelRec, dataset, artifacts, ev, meta, featureSize, nCls);
@@ -1450,8 +1576,10 @@
             };
           }
           _applyModuleMetrics(schemaId, selectedIds, r, {
-            predictions: predictiveResult,
+            predictions: _resolvePredictionRows(predictiveResult, predictiveMode),
+            predictionHeads: predictiveResult && predictiveResult.heads ? predictiveResult.heads : [],
             truth: testY,
+            labels: testLabels,
             samples: generationResult && generationResult.samples ? generationResult.samples : null,
             originals: generationResult && generationResult.originals ? generationResult.originals : null,
             referenceSamples: testX,

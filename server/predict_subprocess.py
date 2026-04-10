@@ -48,14 +48,26 @@ def main():
     model.eval()
     batch_size = int(config.get("batchSize", 512))
     all_preds = []
+    head_outputs = None
     for i in range(0, len(x_input), batch_size):
         batch = torch.tensor(x_input[i:i + batch_size], dtype=torch.float32).to(device)
         with torch.no_grad():
-            pred = model(batch).cpu().numpy()
-        all_preds.append(pred)
+            pred = model(batch)
+        if isinstance(pred, (list, tuple)):
+            pred_items = [p.detach().cpu().numpy() for p in pred]
+            if head_outputs is None:
+                head_outputs = [[] for _ in range(len(pred_items))]
+            for idx, item in enumerate(pred_items):
+                head_outputs[idx].append(item)
+            all_preds.append(pred_items[0])
+        else:
+            all_preds.append(pred.detach().cpu().numpy())
 
     predictions = np.concatenate(all_preds, axis=0).tolist()
-    print(json.dumps({"kind": "result", "result": {"predictions": predictions, "N": len(predictions)}}))
+    result = {"predictions": predictions, "N": len(predictions)}
+    if head_outputs:
+        result["headOutputs"] = [np.concatenate(items, axis=0).tolist() for items in head_outputs]
+    print(json.dumps({"kind": "result", "result": result}))
 
 if __name__ == "__main__":
     try:

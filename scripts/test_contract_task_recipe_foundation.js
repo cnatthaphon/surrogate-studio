@@ -11,6 +11,7 @@ function assert(cond, msg) {
 
 globalThis.OSCSchemaRegistry = require(path.join(ROOT, "src", "schema_registry.js"));
 globalThis.OSCTaskRecipeRegistry = require(path.join(ROOT, "src", "task_recipe_registry.js"));
+globalThis.OSCTaskRecipeRuntime = require(path.join(ROOT, "src", "task_recipe_runtime.js"));
 require(path.join(ROOT, "src", "task_recipe_definitions_builtin.js"));
 require(path.join(ROOT, "src", "schema_definitions_builtin.js"));
 
@@ -20,12 +21,19 @@ const datasetModules = require(path.join(ROOT, "src", "dataset_modules.js"));
 async function main() {
   const schemaRegistry = globalThis.OSCSchemaRegistry;
   const taskRecipeRegistry = globalThis.OSCTaskRecipeRegistry;
+  const taskRecipeRuntime = globalThis.OSCTaskRecipeRuntime;
 
   assert(taskRecipeRegistry.getRecipe("supervised_standard"), "missing supervised_standard recipe");
   assert(taskRecipeRegistry.getRecipe("detection_single_box"), "missing detection_single_box recipe");
+  assert(taskRecipeRuntime && typeof taskRecipeRuntime.resolveRecipe === "function", "missing task recipe runtime");
 
   assert(schemaRegistry.getTaskRecipeId("oscillator") === "sequence_forecast", "oscillator taskRecipeId mismatch");
   assert(schemaRegistry.getTaskRecipeId("synthetic_detection") === "detection_single_box", "synthetic_detection taskRecipeId mismatch");
+  const detectionRecipe = taskRecipeRuntime.resolveRecipe(schemaRegistry, taskRecipeRegistry, "synthetic_detection", null, "");
+  assert(detectionRecipe && detectionRecipe.id === "detection_single_box", "synthetic_detection recipe resolve mismatch");
+  assert(taskRecipeRuntime.getPredictiveMode(detectionRecipe, schemaRegistry.getOutputKeys("synthetic_detection")) === "detection", "synthetic_detection predictive mode mismatch");
+  const suggested = taskRecipeRuntime.getSuggestedMetricIds(detectionRecipe, ["mae"]);
+  assert(Array.isArray(suggested) && suggested.indexOf("iou_mean") >= 0, "synthetic_detection suggested metrics mismatch");
 
   const normalized = datasetSourceDescriptor.normalize({
     kind: "local_csv_manifest",
