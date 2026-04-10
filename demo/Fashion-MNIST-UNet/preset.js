@@ -143,8 +143,8 @@
   };
 
   var MODELS = [
-    { id: "unet_model", name: "UNet (skip connections)", schemaId: "fashion_mnist", drawflowGraph: buildUNet() },
-    { id: "conv_ae_model", name: "Conv AE (baseline)", schemaId: "fashion_mnist", drawflowGraph: buildConvAE() },
+    { id: "unet_model", name: "UNet (skip connections)", schemaId: "fashion_mnist", graph: buildUNet() },
+    { id: "conv_ae_model", name: "Conv AE (baseline)", schemaId: "fashion_mnist", graph: buildConvAE() },
   ];
 
   var TRAINERS = [
