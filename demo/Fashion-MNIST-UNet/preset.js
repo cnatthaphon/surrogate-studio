@@ -38,8 +38,8 @@
   // Decoder: UpSample → Concat(skip2) → Conv(32) → UpSample → Concat(skip1) → Conv(16) → Conv(1)
   function buildUNet() {
     var d = {};
-    // Input: 28x28x1 image via Reshape
-    var inp     = N(d, "input",          { featureSize: 784 },                   50,  300);
+    // Feature block + Input + Reshape to 28x28x1
+    var imgSrc  = N(d, "image_source",   { sourceKey: "pixel_values", featureSize: 784, imageShape: [28,28,1] }, 50, 300);
     var reshape = N(d, "reshape",        { targetShape: "28,28,1" },            200,  300);
 
     // Encoder block 1
@@ -73,7 +73,7 @@
     var out     = N(d, "output",         { targetType: "x", matchWeight: 1, headType: "reconstruction" }, 1760, 300);
 
     // Encoder path
-    C(d, inp, reshape);
+    C(d, imgSrc, reshape);
     C(d, reshape, enc1a);
     C(d, enc1a, enc1b);
     C(d, enc1b, pool1);
@@ -109,7 +109,7 @@
   function buildConvAE() {
     _nid = 100;
     var d = {};
-    var inp     = N(d, "input",      { featureSize: 784 },          50,  300);
+    var imgSrc  = N(d, "image_source", { sourceKey: "pixel_values", featureSize: 784, imageShape: [28,28,1] }, 50, 300);
     var reshape = N(d, "reshape",    { targetShape: "28,28,1" },   200,  300);
     var e1      = N(d, "conv2d",     { filters: 16, kernelSize: 3, strides: 1, padding: "same", activation: "relu" }, 380, 300);
     var pool1   = N(d, "maxpool2d",  { poolSize: 2, strides: 2 },  550, 300);
@@ -122,7 +122,7 @@
     var flat    = N(d, "flatten",    {},                           1740, 300);
     var out     = N(d, "output",     { targetType: "x", matchWeight: 1, headType: "reconstruction" }, 1910, 300);
 
-    C(d, inp, reshape); C(d, reshape, e1); C(d, e1, pool1); C(d, pool1, e2); C(d, e2, pool2);
+    C(d, imgSrc, reshape); C(d, reshape, e1); C(d, e1, pool1); C(d, pool1, e2); C(d, e2, pool2);
     C(d, pool2, up1); C(d, up1, d1); C(d, d1, up2); C(d, up2, d2); C(d, d2, flat); C(d, flat, out);
     return graph(d);
   }
@@ -143,8 +143,8 @@
   };
 
   var MODELS = [
-    { id: "unet_model", name: "UNet (skip connections)", schemaId: "fashion_mnist", drawflowGraph: buildUNet() },
-    { id: "conv_ae_model", name: "Conv AE (baseline)", schemaId: "fashion_mnist", drawflowGraph: buildConvAE() },
+    { id: "unet_model", name: "UNet (skip connections)", schemaId: "fashion_mnist", graph: buildUNet() },
+    { id: "conv_ae_model", name: "Conv AE (baseline)", schemaId: "fashion_mnist", graph: buildConvAE() },
   ];
 
   var TRAINERS = [
