@@ -2868,6 +2868,7 @@
             batchSize: Number(config.batchSize || 32),
             learningRate: Number(config.learningRate || 0.001),
             datasetData: notebookDsData,
+            modelArtifacts: tCard.modelArtifacts || null,
           }],
         }).then(function (result) {
           if (!result) throw new Error("Notebook generation returned empty");
@@ -2890,7 +2891,23 @@
             onStatus("Failed to parse notebook");
             return;
           }
-          runner.open({ notebook: notebookObj, serverUrl: runnerServerUrl0 });
+          runner.open({ notebook: notebookObj, serverUrl: runnerServerUrl0, onArtifacts: function (artifacts) {
+            if (!artifacts || !artifacts.weightSpecs || !store) return;
+            var card = store.getTrainerCard(activeId);
+            if (!card) return;
+            var fmt = W.OSCCheckpointFormatCore || null;
+            var normalized = fmt && typeof fmt.normalizeArtifacts === "function"
+              ? fmt.normalizeArtifacts(artifacts, { producerRuntime: "notebook" })
+              : artifacts;
+            card.modelArtifacts = normalized;
+            card.modelArtifactsLast = normalized;
+            card.status = "done";
+            if (artifacts.metrics) card.metrics = artifacts.metrics;
+            store.upsertTrainerCard(card);
+            onStatus("Weights loaded from notebook into trainer '" + (card.name || activeId) + "'");
+            _renderLeftPanel();
+            _renderMainPanel();
+          }});
           onStatus(preview.truncated ? ("Notebook opened (preview dataset: " + preview.keptRows + " rows)") : "Notebook opened");
         }).catch(function (err) {
           _isNotebookPreparing = false;

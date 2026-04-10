@@ -19,7 +19,7 @@ import math
 import signal
 import traceback
 import numpy as np
-from checkpoint_format import normalize_artifacts
+from checkpoint_format import normalize_artifacts, extract_pytorch_state
 from runtime_weight_loader import load_weights_into_model
 
 _STOP_REQUESTED = False
@@ -682,70 +682,8 @@ def main():
         model.load_state_dict(best_state)
 
     status("Training complete. Extracting weights...")
-    # --- Extract weights in TF.js-compatible format ---
-    # PyTorch Dense: [out, in] → TF.js: [in, out] (transpose)
-    # PyTorch LSTM: weight_ih [4*hidden, input], weight_hh [4*hidden, hidden], bias_ih, bias_hh
-    # TF.js LSTM: kernel [input, 4*hidden], recurrent_kernel [hidden, 4*hidden], bias [4*hidden]
-    weight_specs = []
-    weight_arrays = []  # collect numpy arrays, concatenate at end (much faster than Python list)
-    offset = 0
-
-    state = model.state_dict()
-    # Separate: regular weights first, then BN running stats at end (matching TF.js order)
-    bn_running_keys = [k for k in state.keys() if "running_mean" in k or "running_var" in k]
-    regular_keys = [k for k in state.keys() if "num_batches_tracked" not in k and k not in bn_running_keys]
-    keys = regular_keys + bn_running_keys
-    i = 0
-    while i < len(keys):
-        name = keys[i]
-        param = state[name].detach().cpu().numpy()
-
-        # Check if this is an RNN weight_ih (followed by weight_hh, bias_ih, bias_hh)
-        if "weight_ih_l0" in name and i + 3 < len(keys) and "weight_hh_l0" in keys[i+1]:
-            w_ih = state[keys[i]].detach().cpu().numpy()
-            w_hh = state[keys[i+1]].detach().cpu().numpy()
-            b_ih = state[keys[i+2]].detach().cpu().numpy()
-            b_hh = state[keys[i+3]].detach().cpu().numpy()
-
-            H = w_ih.shape[0] // 4
-            def swap_gates(w):
-                chunks = [w[i*H:(i+1)*H] for i in range(4)]
-                return np.concatenate([chunks[0], chunks[2], chunks[1], chunks[3]], axis=0)
-
-            kernel = swap_gates(w_ih).T
-            recurrent = swap_gates(w_hh).T
-            bias = swap_gates(b_ih + b_hh)
-
-            for arr, suffix, shape in [
-                (kernel, "kernel", list(kernel.shape)),
-                (recurrent, "recurrent_kernel", list(recurrent.shape)),
-                (bias, "bias", list(bias.shape)),
-            ]:
-                flat = arr.astype(np.float32).flatten()
-                weight_specs.append({"name": f"tfjs_{suffix}", "shape": shape, "dtype": "float32", "offset": offset})
-                weight_arrays.append(flat)
-                offset += flat.size * 4
-            i += 4
-            continue
-
-        # Export in TF.js kernel layout based on tensor rank and layer type.
-        if param.ndim == 2:
-            param = param.T  # [out, in] → [in, out]
-        elif param.ndim == 4 and ".weight" in name and (name.startswith("conv2d_") or name.startswith("convt2d_") or name.startswith("pe_proj_")):
-            param = np.transpose(param, (2, 3, 1, 0))
-
-        flat = param.astype(np.float32).flatten()
-        shape = list(param.shape)
-        weight_specs.append({"name": f"tfjs_{name}", "shape": shape, "dtype": "float32", "offset": offset})
-        weight_arrays.append(flat)
-        offset += flat.size * 4
-        i += 1
-
-    # concatenate all weight arrays into one flat list (numpy concat is fast)
-    if weight_arrays:
-        weight_values = np.concatenate(weight_arrays).tolist()
-    else:
-        weight_values = []
+    # Use shared canonical checkpoint extraction (same path for server + notebook)
+    weight_specs, weight_values = extract_pytorch_state(model.state_dict())
 
     status("Computing test metrics...")
     # --- Compute final metrics (val + test) ---
