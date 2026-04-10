@@ -79,6 +79,14 @@
     };
   }
 
+  function _normalizeTaskRecipeId(def, dataset, metadata) {
+    var raw = (def && (def.taskRecipeId || def.taskRecipe || def.recipeId)) ||
+      (dataset && dataset.metadata && (dataset.metadata.taskRecipeId || dataset.metadata.taskRecipe)) ||
+      (metadata && (metadata.taskRecipeId || metadata.taskRecipe)) ||
+      "supervised_standard";
+    return _id(raw, "supervised_standard");
+  }
+
   function _normalizeDataset(dataset, fallbackId, fallbackLabel) {
     var d = dataset || {};
     var splitDefaults = (d.splitDefaults && typeof d.splitDefaults === "object") ? d.splitDefaults : {};
@@ -165,6 +173,7 @@
       description: String(def.description || ""),
       dataset: dataset,
       model: model,
+      taskRecipeId: _normalizeTaskRecipeId(def, dataset, def.metadata),
       preconfig: preconfig,
       metadata: (def.metadata && typeof def.metadata === "object") ? _clone(def.metadata) : {},
     };
@@ -220,6 +229,11 @@
     return s ? _clone(s.dataset) : null;
   }
 
+  function getTaskRecipeId(schemaId) {
+    var s = getSchema(schemaId);
+    return s ? String(s.taskRecipeId || "supervised_standard") : "supervised_standard";
+  }
+
   function listSchemas() {
     return Object.keys(_schemas)
       .sort()
@@ -229,6 +243,7 @@
           id: sid,
           label: String(s.label || sid),
           description: String(s.description || ""),
+          taskRecipeId: String(s.taskRecipeId || "supervised_standard"),
           model: {
             outputs: Array.isArray(s.model && s.model.outputs) ? s.model.outputs.length : 0,
             params: Array.isArray(s.model && s.model.params) ? s.model.params.length : 0,
@@ -297,6 +312,7 @@
     getSchema: getSchema,
     getModelSchema: getModelSchema,
     getDatasetSchema: getDatasetSchema,
+    getTaskRecipeId: getTaskRecipeId,
     listSchemas: listSchemas,
     getOutputKeys: getOutputKeys,
     getParamDefs: getParamDefs,

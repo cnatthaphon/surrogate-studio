@@ -13,9 +13,15 @@ The normal public workflow is still browser-first. The server exists to:
 Start the server with:
 
 ```bash
-cd server
 npm install
-node training_server.js
+npm run server:install:py
+npm run server:start
+```
+
+If you need a CUDA-specific PyTorch wheel, install that first and then re-run:
+
+```bash
+python3 -m pip install -r server/requirements.txt
 ```
 
 Default URL:
@@ -73,6 +79,22 @@ Server runtime is still ephemeral per run:
 - model/dataset/config are sent for that run
 - live PyTorch state is destroyed after completion or stop
 - the saved checkpoint is the durable source of truth
+
+## Large Local Datasets
+
+The server now supports dataset source descriptors for server-side loading.
+
+That means a dataset card can carry either:
+
+- embedded arrays for browser-first workflows
+- a `sourceDescriptor` pointing at a local CSV manifest or JSON dataset on disk
+
+Current supported descriptor kinds:
+
+- `local_csv_manifest`
+- `local_json_dataset`
+
+This is the foundation for larger local datasets that should stay on disk for the PyTorch server and notebook runtimes instead of being copied into the browser payload.
 
 ## Legacy Scripts
 

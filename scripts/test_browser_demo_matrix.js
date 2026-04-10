@@ -45,6 +45,15 @@ var DEMOS = [
     minEvaluations: 1,
   },
   {
+    name: "Synthetic Detection",
+    file: path.join(ROOT, "demo", "Synthetic-Detection", "index.html"),
+    presetKey: "SYNTHETIC_DETECTION_PRESET",
+    minModels: 1,
+    minTrainers: 1,
+    minGenerations: 0,
+    minEvaluations: 1,
+  },
+  {
     name: "Oscillator Surrogate",
     file: path.join(ROOT, "demo", "Oscillator-Surrogate", "index.html"),
     presetKey: "OSCILLATOR_DEMO_PRESET",

@@ -2055,7 +2055,28 @@
       // resolve data via source registry (zero-copy) or legacy records
       var W = typeof window !== "undefined" ? window : {};
       var srcReg = W.OSCDatasetSourceRegistry || null;
+      var sourceDescriptorHelper = W.OSCDatasetSourceDescriptor || null;
+      var normalizedSourceDescriptor = sourceDescriptorHelper && typeof sourceDescriptorHelper.normalize === "function"
+        ? sourceDescriptorHelper.normalize(activeDs && activeDs.sourceDescriptor)
+        : (activeDs && activeDs.sourceDescriptor ? activeDs.sourceDescriptor : null);
+      var useServerDatasetReference = !!(normalizedSourceDescriptor && sourceDescriptorHelper && typeof sourceDescriptorHelper.shouldUseServerReference === "function"
+        ? sourceDescriptorHelper.shouldUseServerReference(normalizedSourceDescriptor)
+        : normalizedSourceDescriptor);
       if (!activeDs.xTrain) {
+        if (useServerDatasetReference) {
+          activeDs = Object.assign({}, activeDs, {
+            xTrain: [], yTrain: [],
+            xVal: [], yVal: [],
+            xTest: [], yTest: [],
+            labelsTrain: activeDs.labelsTrain || [],
+            labelsVal: activeDs.labelsVal || [],
+            labelsTest: activeDs.labelsTest || [],
+            featureSize: Number(activeDs.featureSize || 0),
+            numClasses: Number(activeDs.numClasses || activeDs.classCount || 0),
+            targetMode: defaultTarget,
+            sourceDescriptor: normalizedSourceDescriptor,
+          });
+        } else {
         var nClasses = activeDs.classCount || activeDs.numClasses || 10;
         var isClassification2 = defaultHeadType2 === "classification";
         var isReconstruction2 = defaultHeadType2 === "reconstruction" || (!isClassification2 && defaultHeadType2 !== "classification");
@@ -2090,6 +2111,8 @@
           activeDs.labelsTrain = train.y.map(function (l) { return typeof l === "number" ? oneHot(l, nClasses) : l; });
           activeDs.labelsVal = val.y.map(function (l) { return typeof l === "number" ? oneHot(l, nClasses) : l; });
           activeDs.labelsTest = test.y.map(function (l) { return typeof l === "number" ? oneHot(l, nClasses) : l; });
+        }
+        activeDs.sourceDescriptor = normalizedSourceDescriptor;
         }
       }
 
@@ -2220,14 +2243,22 @@
           });
           onStatus("Server connected \u2014 training on PyTorch...");
           _activeModel = buildResult.model;
+          var taskRecipeId = (schemaRegistry && typeof schemaRegistry.getTaskRecipeId === "function")
+            ? String(schemaRegistry.getTaskRecipeId(schemaId) || "supervised_standard")
+            : "supervised_standard";
           // server OK — proceed with server training
           var serverRun = serverAdapter.runTrainingOnServer({
           runId: runtimeRunId,
           schemaId: schemaId,
+          taskRecipeId: taskRecipeId,
           graph: model.graph,
           modelArtifacts: resumeArtifacts,
           dataset: {
             mode: graphMode, featureSize: featureSize, targetMode: activeDs.targetMode || defaultTarget,
+            schemaId: schemaId,
+            datasetModuleId: activeDs.moduleId || activeDs.module || "",
+            taskRecipeId: taskRecipeId,
+            sourceDescriptor: activeDs.sourceDescriptor || null,
             xTrain: activeDs.xTrain, yTrain: activeDs.yTrain, xVal: activeDs.xVal, yVal: activeDs.yVal,
             xTest: activeDs.xTest, yTest: activeDs.yTest,
             pTrain: activeDs.pTrain, pVal: activeDs.pVal, pTest: activeDs.pTest,

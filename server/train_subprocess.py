@@ -21,6 +21,7 @@ import traceback
 import numpy as np
 from checkpoint_format import normalize_artifacts, extract_pytorch_state
 from runtime_weight_loader import load_weights_into_model
+from dataset_source_loader import resolve_dataset_payload
 
 _STOP_REQUESTED = False
 
@@ -142,7 +143,7 @@ def main():
 
     # --- Extract data ---
     status("Loading dataset into memory...")
-    ds = config.get("dataset", {})
+    ds = resolve_dataset_payload(config.get("dataset", {}) or {})
     x_train = np.array(ds.get("xTrain", []), dtype=np.float32)
     y_train = np.array(ds.get("yTrain", []), dtype=np.float32)
     x_val = np.array(ds.get("xVal", []), dtype=np.float32)

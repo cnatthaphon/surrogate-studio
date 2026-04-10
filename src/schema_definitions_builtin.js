@@ -125,6 +125,7 @@
     id: "oscillator",
     label: "oscillator",
     description: "ODE oscillator trajectories (spring / pendulum / bouncing)",
+    taskRecipeId: "sequence_forecast",
     dataset: {
       id: "oscillator",
       label: "Oscillator trajectories",
@@ -2776,6 +2777,7 @@
     id: "mnist",
     label: "mnist",
     description: "MNIST digit dataset schema for image-classification style experiments",
+    taskRecipeId: "supervised_standard",
     dataset: {
       id: "mnist",
       label: "MNIST images",
@@ -3091,6 +3093,7 @@
     id: "fashion_mnist",
     label: "fashion_mnist",
     description: "Fashion-MNIST image dataset schema for classification experiments",
+    taskRecipeId: "supervised_standard",
     dataset: {
       id: "fashion_mnist",
       label: "Fashion-MNIST images",
@@ -3462,6 +3465,7 @@
     id: "cifar10",
     label: "cifar10",
     description: "CIFAR-10 image dataset schema — 32x32 RGB, 10 classes",
+    taskRecipeId: "supervised_standard",
     dataset: {
       id: "cifar10",
       label: "CIFAR-10 images",
@@ -3530,11 +3534,58 @@
     }
   });
 
+  // ===== SYNTHETIC SINGLE-BOX DETECTION =====
+  registerSchema({
+    id: "synthetic_detection",
+    label: "synthetic_detection",
+    description: "Synthetic single-object detection with bbox regression and class label prediction",
+    taskRecipeId: "detection_single_box",
+    dataset: {
+      id: "synthetic_detection",
+      label: "Synthetic Detection Images",
+      sampleType: "image",
+      splitUnit: "sample",
+      splitDefaults: { mode: "random", train: 0.70, val: 0.15, test: 0.15 },
+      metadata: {
+        ui: { sidebarMode: "generic", viewer: "image" },
+        splitModes: [
+          { id: "random", label: "Random (global)", stratifyKey: "" }
+        ],
+        display: { chartType: "image_grid", tableColumns: ["split", "index", "label", "bbox", "pixel_values"] }
+      }
+    },
+    model: {
+      outputs: [
+        { key: "bbox", label: "Bounding box (x0,y0,x1,y1)", headType: "regression" },
+        { key: "label", label: "Object class", headType: "classification" }
+      ],
+      params: [],
+      presets: [],
+      metadata: {
+        featureNodes: {
+          imageSource: [
+            { key: "pixel_values", label: "pixel values (32x32)", featureSize: 1024, shape: [32, 32, 1] }
+          ],
+          oneHot: [
+            { key: "label", label: "label", values: ["square", "wide_box", "tall_box"] }
+          ],
+          policy: { allowHistory: false, allowWindowHistory: false, allowParams: false, allowOneHot: true, allowImageSource: true },
+          palette: { items: _imagePaletteItems() }
+        }
+      },
+    },
+    preconfig: {
+      dataset: { defaultModuleId: "synthetic_detection", splitDefaults: { mode: "random", train: 0.70, val: 0.15, test: 0.15 } },
+      model: { defaultPreset: "" },
+    }
+  });
+
   // ===== AIS TRAJECTORY =====
   registerSchema({
     id: "ais_trajectory",
     label: "ais_trajectory",
     description: "AIS vessel trajectory data — autoregressive position prediction",
+    taskRecipeId: "sequence_forecast",
     dataset: {
       id: "ais_trajectory",
       label: "AIS Maritime Trajectories",

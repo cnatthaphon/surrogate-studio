@@ -25,6 +25,7 @@ const baseSuite = [
   "test_contract_workspace_selection_ui_core.js",
   "test_contract_dataset_modules.js",
   "test_contract_dataset_runtime.js",
+  "test_contract_task_recipe_foundation.js",
   "test_contract_dataset_service_core.js",
   "test_contract_workspace_store.js",
   "test_contract_dataset_bundle_adapter.js",

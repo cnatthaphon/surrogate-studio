@@ -18,7 +18,12 @@ function bootstrapRuntime() {
   const core = require(path.join(PROJECT_ROOT, "src", "notebook_bundle_core.js"));
   const schemaRegistry = require(path.join(PROJECT_ROOT, "src", "schema_registry.js"));
   globalThis.OSCSchemaRegistry = schemaRegistry;
+  const taskRecipeRegistry = require(path.join(PROJECT_ROOT, "src", "task_recipe_registry.js"));
+  globalThis.OSCTaskRecipeRegistry = taskRecipeRegistry;
+  require(path.join(PROJECT_ROOT, "src", "task_recipe_definitions_builtin.js"));
   require(path.join(PROJECT_ROOT, "src", "schema_definitions_builtin.js"));
+  const datasetSourceDescriptor = require(path.join(PROJECT_ROOT, "src", "dataset_source_descriptor.js"));
+  globalThis.OSCDatasetSourceDescriptor = datasetSourceDescriptor;
   const datasetModules = require(path.join(PROJECT_ROOT, "src", "dataset_modules.js"));
   globalThis.OSCDatasetModules = datasetModules;
   const datasetRuntime = require(path.join(PROJECT_ROOT, "src", "dataset_runtime.js"));
@@ -37,10 +42,12 @@ function bootstrapRuntime() {
     projectRoot: PROJECT_ROOT,
     core,
     schemaRegistry,
+    taskRecipeRegistry,
     datasetModules,
     datasetRuntime,
     workspaceStore: workspaceStoreMod,
     datasetBundleAdapter,
+    datasetSourceDescriptor,
     modelGraphDrawflowAdapter,
     trainingSessionCore,
     tfjsHeadlessCore,

@@ -29,6 +29,10 @@
     var W = typeof window !== "undefined" ? window : {};
     return W.OSCCheckpointFormatCore || null;
   }
+  function getDatasetSourceDescriptorHelper() {
+    var W = typeof window !== "undefined" ? window : {};
+    return W.OSCDatasetSourceDescriptor || null;
+  }
 
   function _isLoopbackServer(url) {
     return /^http:\/\/(?:127\.0\.0\.1|localhost|0\.0\.0\.0|\[::1\])(?::\d+)?(?:\/|$)/i.test(String(url || ""));
@@ -174,9 +178,22 @@
     var serverUrl = String(deps.serverUrl || DEFAULT_SERVER).replace(/\/$/, "");
 
     var ds = spec.dataset || {};
+    var sourceHelper = getDatasetSourceDescriptorHelper();
+    var sourceDescriptor = ds.sourceDescriptor || null;
+    if (sourceHelper && typeof sourceHelper.normalize === "function") {
+      sourceDescriptor = sourceHelper.normalize(Object.assign({}, sourceDescriptor || {}, {
+        schemaId: String(ds.schemaId || spec.schemaId || ""),
+        datasetModuleId: String(ds.datasetModuleId || ds.moduleId || ds.module || ""),
+        taskRecipeId: String(ds.taskRecipeId || spec.taskRecipeId || ""),
+      }));
+    }
+    var useServerReference = !!(sourceDescriptor && sourceHelper && typeof sourceHelper.shouldUseServerReference === "function"
+      ? sourceHelper.shouldUseServerReference(sourceDescriptor)
+      : sourceDescriptor);
     var payload = {
       runId: String(spec.runId || ("srv-" + Date.now().toString(36) + "-" + Math.floor(Math.random() * 1e6).toString(36))),
       schemaId: String(spec.schemaId || ""),
+      taskRecipeId: String(spec.taskRecipeId || ds.taskRecipeId || ""),
       graph: spec.graph || {},
       runtimeConfig: spec.runtimeConfig || { runtimeId: "python_server", backend: "cuda" },
       modelArtifacts: spec.modelArtifacts || null,
@@ -185,9 +202,12 @@
         featureSize: Number(ds.featureSize || 1),
         targetSize: Number(ds.targetSize || (ds.yTrain && ds.yTrain[0] ? (Array.isArray(ds.yTrain[0]) ? ds.yTrain[0].length : 1) : 0)),
         targetMode: String(ds.targetMode || "xv"),
-        xTrain: ds.xTrain || [], yTrain: ds.yTrain || [],
-        xVal: ds.xVal || [], yVal: ds.yVal || [],
-        xTest: ds.xTest || [], yTest: ds.yTest || [],
+        schemaId: String(ds.schemaId || spec.schemaId || ""),
+        datasetModuleId: String(ds.datasetModuleId || ds.moduleId || ds.module || ""),
+        sourceDescriptor: sourceDescriptor,
+        xTrain: useServerReference ? [] : (ds.xTrain || []), yTrain: useServerReference ? [] : (ds.yTrain || []),
+        xVal: useServerReference ? [] : (ds.xVal || []), yVal: useServerReference ? [] : (ds.yVal || []),
+        xTest: useServerReference ? [] : (ds.xTest || []), yTest: useServerReference ? [] : (ds.yTest || []),
         pTrain: ds.pTrain || [], pVal: ds.pVal || [], pTest: ds.pTest || [],
         paramNames: ds.paramNames || [], paramSize: Number(ds.paramSize || 0),
         numClasses: Number(ds.numClasses || 0),

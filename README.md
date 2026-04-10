@@ -1,10 +1,10 @@
 # Surrogate Studio
 
-![Status](https://img.shields.io/badge/status-active%20development-brightgreen) ![Models](https://img.shields.io/badge/models-25-blue) ![Demos](https://img.shields.io/badge/demos-9-orange)
+![Status](https://img.shields.io/badge/status-active%20development-brightgreen) ![Models](https://img.shields.io/badge/models-26-blue) ![Demos](https://img.shields.io/badge/demos-10-orange)
 
 **A schema-driven, browser-first ML experimentation platform.**
 
-**[Live Demo](https://cnatthaphon.github.io/surrogate-studio/)** | [Benchmark](https://cnatthaphon.github.io/surrogate-studio/demo/Fashion-MNIST-Benchmark/) | [GAN](https://cnatthaphon.github.io/surrogate-studio/demo/Fashion-MNIST-GAN/) | [Diffusion](https://cnatthaphon.github.io/surrogate-studio/demo/Fashion-MNIST-Diffusion/) | [Conditional Diffusion](https://cnatthaphon.github.io/surrogate-studio/demo/Fashion-MNIST-Conditional-Diffusion/) | [UNet](https://cnatthaphon.github.io/surrogate-studio/demo/Fashion-MNIST-UNet/) | [Transformer](https://cnatthaphon.github.io/surrogate-studio/demo/Fashion-MNIST-Transformer/) | [TrAISformer](https://cnatthaphon.github.io/surrogate-studio/demo/TrAISformer/) | [LSTM-VAE](https://cnatthaphon.github.io/surrogate-studio/demo/LSTM-VAE-for-dominant-motion-extraction/) | [Oscillator](https://cnatthaphon.github.io/surrogate-studio/demo/Oscillator-Surrogate/)
+**[Live Demo](https://cnatthaphon.github.io/surrogate-studio/)** | [Benchmark](https://cnatthaphon.github.io/surrogate-studio/demo/Fashion-MNIST-Benchmark/) | [GAN](https://cnatthaphon.github.io/surrogate-studio/demo/Fashion-MNIST-GAN/) | [Diffusion](https://cnatthaphon.github.io/surrogate-studio/demo/Fashion-MNIST-Diffusion/) | [Conditional Diffusion](https://cnatthaphon.github.io/surrogate-studio/demo/Fashion-MNIST-Conditional-Diffusion/) | [UNet](https://cnatthaphon.github.io/surrogate-studio/demo/Fashion-MNIST-UNet/) | [Synthetic Detection](https://cnatthaphon.github.io/surrogate-studio/demo/Synthetic-Detection/) | [Transformer](https://cnatthaphon.github.io/surrogate-studio/demo/Fashion-MNIST-Transformer/) | [TrAISformer](https://cnatthaphon.github.io/surrogate-studio/demo/TrAISformer/) | [LSTM-VAE](https://cnatthaphon.github.io/surrogate-studio/demo/LSTM-VAE-for-dominant-motion-extraction/) | [Oscillator](https://cnatthaphon.github.io/surrogate-studio/demo/Oscillator-Surrogate/)
 
 **[Contributing](CONTRIBUTING.md)** | **[Developer Docs](docs/README.md)** | **[Server Notes](server/README.md)** | **[Schema Notes](schemas/README.md)**
 
@@ -106,6 +106,16 @@ Image reconstruction demo showing that UNet-style skip connections are just grap
 | 1 | UNet (skip connections) | Reconstruction with spatial skip paths | Ronneberger et al. 2015 |
 | 2 | Conv AE (baseline) | Reconstruction without skip paths | Baseline |
 
+### [Synthetic Detection](demo/Synthetic-Detection/) — Single-Object Detection Baseline
+
+Live: [GitHub Pages](https://cnatthaphon.github.io/surrogate-studio/demo/Synthetic-Detection/) | Guide: [README](demo/Synthetic-Detection/README.md)
+
+Small additive detection demo built on the shared graph/trainer contract. The dataset is synthetic 32x32 grayscale imagery with one object per image, one bounding-box regression head, and one class head.
+
+| # | Architecture | Purpose | Task Recipe |
+|---|---|---|---|
+| 1 | CNN single-box detector | Predict bbox + class from image | `detection_single_box` |
+
 ### [Fashion-MNIST Transformer](demo/Fashion-MNIST-Transformer/) — Vision Transformer Classification
 
 Live: [GitHub Pages](https://cnatthaphon.github.io/surrogate-studio/demo/Fashion-MNIST-Transformer/) | Guide: [README](demo/Fashion-MNIST-Transformer/README.md)
@@ -196,6 +206,7 @@ Live: [GitHub Pages](https://cnatthaphon.github.io/surrogate-studio/demo/Oscilla
 | `mnist` | Image | 28x28 grayscale, 10 classes | Lazy-fetch from CDN |
 | `fashion_mnist` | Image | 28x28 grayscale, 10 classes | Lazy-fetch from CDN |
 | `cifar10` | Image | 32x32 RGB, 10 classes | Lazy-fetch from CDN |
+| `synthetic_detection` | Image | 32x32 grayscale, bbox + class label | Built-in |
 | `ais_trajectory` | Trajectory | Window of (lat, lon, sog, cog), predict next position | Built-in |
 | `ant_trajectory` | Trajectory | 20 ants x (x,y), 40 features | Demo plugin |
 

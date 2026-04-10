@@ -17,6 +17,7 @@ Technical references:
 |----------|-------------|
 | [ARCHITECTURE_PLAN.md](ARCHITECTURE_PLAN.md) | Current architecture notes and engineering rules |
 | [DATASET_MODEL_TRAINER_CONTRACT.md](DATASET_MODEL_TRAINER_CONTRACT.md) | Dataset/model/trainer module contracts |
+| [TASK_RECIPE_CONTRACT.md](TASK_RECIPE_CONTRACT.md) | Task recipe ids, server-side dataset references, and extension direction |
 | [STORE_CONTRACT.md](STORE_CONTRACT.md) | Workspace store contract |
 | [TAB_RENDER_CONTRACT.md](TAB_RENDER_CONTRACT.md) | Shared 3-panel tab render contract |
 | [WORKER_RUNTIME_CONTRACT.md](WORKER_RUNTIME_CONTRACT.md) | Main thread / worker / server runtime contract |
