@@ -32,7 +32,13 @@ Current built-in recipe ids:
 - `diffusion_denoise`
 - `detection_single_box`
 
-Today these are mostly metadata and routing contracts. They are the foundation for stronger per-task train/test/eval hooks.
+Today these are additive runtime contracts. They currently drive:
+
+- predictive evaluation mode and default metrics
+- dataset preparation for Trainer-tab training
+- server-reference preservation for large local datasets
+
+They are the foundation for stronger per-task train/test/eval hooks.
 
 ## Current Contract Surface
 
@@ -44,11 +50,20 @@ Dataset payload:
 
 - standard embedded arrays for browser-first workflows
 - optional `sourceDescriptor` for server-side loading of large local datasets
+- normalized training dataset produced by `taskRecipeRuntime.prepareDatasetForTraining(...)`
+
+Runtime helper surface:
+
+- `resolveRecipe(...)`
+- `getPredictiveMode(...)`
+- `getSuggestedMetricIds(...)`
+- `prepareDatasetForTraining(...)`
 
 Server training payload:
 
 - `taskRecipeId`
 - `dataset.sourceDescriptor`
+- worker specs preserve `taskRecipeId`, so custom runners can dispatch through the same recipe contract
 
 Server dataset source descriptors currently support:
 

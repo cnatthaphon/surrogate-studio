@@ -55,10 +55,12 @@ const api = require("../src/workflow_api_core.js");
     compileModelArtifacts: async function (ctx) {
       assert.strictEqual(String(ctx.model.id), String(model.id), "compile hook model mismatch");
       assert.strictEqual(String(ctx.dataset.id), String(dataset.id), "compile hook dataset mismatch");
+      assert.strictEqual(String(ctx.taskRecipeId), "supervised_standard", "compile hook taskRecipeId mismatch");
       return { modelTopology: { class_name: "Sequential" }, weightSpecs: [], weightData: new ArrayBuffer(0) };
     },
     runTrainingInWorker: async function (spec) {
       assert.strictEqual(String(spec.runId), String(trainer.id), "runId should match trainer id");
+      assert.strictEqual(String(spec.taskRecipeId), "supervised_standard", "worker spec taskRecipeId mismatch");
       assert.ok(spec.dataset && (spec.dataset.splitIndices || (spec.dataset.records && spec.dataset.records.train)), "dataset payload should come from store");
       return {
         metrics: { mae: 0.1, testMae: 0.2, bestValLoss: 0.05, bestEpoch: 2, finalLr: 1e-4, stoppedEarly: false },

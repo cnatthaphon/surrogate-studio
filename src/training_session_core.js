@@ -45,6 +45,7 @@
       }, runtimeConfig),
       modelArtifacts: spec.modelArtifacts || null,
       dataset: spec.dataset || null,
+      taskRecipeId: toStr(spec.taskRecipeId, (spec.dataset && spec.dataset.taskRecipeId) || ""),
       isSequence: toBool(spec.isSequence, false),
       headConfigs: Array.isArray(spec.headConfigs) ? spec.headConfigs.slice() : [],
       outputLossConfig: spec.outputLossConfig || {},

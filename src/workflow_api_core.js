@@ -353,6 +353,9 @@ function create_trainner(rawCfg) {
   const schemaId = boot.datasetRuntime.resolveSchemaId(
     c.schemaId || (dataset && dataset.schemaId) || (model && model.schemaId) || "mnist"
   );
+  const taskRecipeId = (boot.schemaRegistry && typeof boot.schemaRegistry.getTaskRecipeId === "function")
+    ? boot.schemaRegistry.getTaskRecipeId(schemaId)
+    : "supervised_standard";
   if (!dataset) throw new Error("create_trainner requires dataset.");
   if (!model) throw new Error("create_trainner requires model.");
   if (boot.datasetRuntime.resolveSchemaId(dataset.schemaId || schemaId) !== schemaId) {
@@ -366,6 +369,7 @@ function create_trainner(rawCfg) {
     id: sanitizeName(c.id, `session_${Date.now()}_${Math.floor(Math.random() * 1e6)}`),
     name: sanitizeName(c.name, `session_${Date.now()}`),
     schemaId,
+    taskRecipeId,
     datasetSchemaId: schemaId,
     modelSchemaId: schemaId,
     datasetName: dataset.name || `${dataset.schemaId}_dataset`,
@@ -385,6 +389,7 @@ function create_trainner(rawCfg) {
       id: session.id,
       name: session.name,
       schemaId: session.schemaId,
+      taskRecipeId: session.taskRecipeId,
       datasetId: String(dataset.id || ""),
       modelId: String(model.id || ""),
       modelName: session.modelName,
@@ -420,6 +425,12 @@ async function run_trainner(rawCfg) {
   const trainCfg = Object.assign({}, trainer.trainCfg || {}, c.trainCfg || {});
   const runtime = String(c.runtime || trainer.runtime || "js_client");
   const runtimeFamily = String(c.runtimeFamily || trainer.runtimeFamily || runtimeFamilyFor(runtime)).trim().toLowerCase();
+  const schemaIdForRun = String(trainer.schemaId || model.schemaId || dataset.schemaId || "");
+  const taskRecipeId = String(trainer.taskRecipeId || dataset.taskRecipeId || (
+    boot.schemaRegistry && typeof boot.schemaRegistry.getTaskRecipeId === "function"
+      ? boot.schemaRegistry.getTaskRecipeId(schemaIdForRun)
+      : "supervised_standard"
+  ) || "supervised_standard");
 
   if (runtimeFamily === "tfjs" && typeof c.runTrainingInWorker !== "function" && !(c.deps && typeof c.deps.runTrainingInWorker === "function")) {
     const tfjsResult = await boot.tfjsHeadlessCore.runTrainer({
@@ -427,7 +438,8 @@ async function run_trainner(rawCfg) {
       model: model,
       dataset: dataset,
       trainCfg: trainCfg,
-      schemaId: String(trainer.schemaId || model.schemaId || dataset.schemaId || ""),
+      schemaId: schemaIdForRun,
+      taskRecipeId: taskRecipeId,
     });
     const epochRowsDirect = buildEpochRowsFromHistory(tfjsResult.history);
     if (store && typeof store.replaceTrainerEpochs === "function") {
@@ -438,6 +450,7 @@ async function run_trainner(rawCfg) {
         id: String(trainer.id || trainerId),
         name: String(trainer.name || trainerId || "trainer"),
         schemaId: String(trainer.schemaId || dataset.schemaId || model.schemaId || "oscillator"),
+        taskRecipeId: taskRecipeId,
         datasetId: String(dataset.id || trainer.datasetId || ""),
         modelId: String(model.id || trainer.modelId || ""),
         runtime: runtime,
@@ -487,13 +500,14 @@ async function run_trainner(rawCfg) {
 
   let modelArtifacts = c.modelArtifacts || trainer.modelArtifacts || model.modelArtifacts || null;
   if ((!modelArtifacts || !modelArtifacts.modelTopology) && typeof c.compileModelArtifacts === "function") {
-    modelArtifacts = await Promise.resolve(c.compileModelArtifacts({
-      trainer: trainer,
-      model: model,
-      dataset: dataset,
-      store: store,
-      schemaId: String(trainer.schemaId || model.schemaId || dataset.schemaId || ""),
-    }));
+      modelArtifacts = await Promise.resolve(c.compileModelArtifacts({
+        trainer: trainer,
+        model: model,
+        dataset: dataset,
+        store: store,
+        schemaId: schemaIdForRun,
+        taskRecipeId: taskRecipeId,
+      }));
   }
   if (!modelArtifacts || !modelArtifacts.modelTopology) {
     throw new Error("run_trainner requires modelArtifacts.modelTopology or compileModelArtifacts(ctx).");
@@ -509,6 +523,7 @@ async function run_trainner(rawCfg) {
       endpoint: String(c.endpoint || ""),
     },
     modelArtifacts: modelArtifacts,
+    taskRecipeId: taskRecipeId,
     dataset: dataset,
     epochs: trainCfg.epochs,
     batchSize: trainCfg.batchSize,
@@ -538,6 +553,7 @@ async function run_trainner(rawCfg) {
       id: String(trainer.id || trainerId),
       name: String(trainer.name || trainerId || "trainer"),
       schemaId: String(trainer.schemaId || dataset.schemaId || model.schemaId || "oscillator"),
+      taskRecipeId: taskRecipeId,
       datasetId: String(dataset.id || trainer.datasetId || ""),
       modelId: String(model.id || trainer.modelId || ""),
       runtime: runtime,

@@ -2091,6 +2091,23 @@
       var useServerDatasetReference = !!(normalizedSourceDescriptor && sourceDescriptorHelper && typeof sourceDescriptorHelper.shouldUseServerReference === "function"
         ? sourceDescriptorHelper.shouldUseServerReference(normalizedSourceDescriptor)
         : normalizedSourceDescriptor);
+      var taskRecipeRuntime = W.OSCTaskRecipeRuntime || null;
+      var taskRecipeRegistry = W.OSCTaskRecipeRegistry || null;
+      if (taskRecipeRuntime && typeof taskRecipeRuntime.prepareDatasetForTraining === "function") {
+        var preparedForTraining = taskRecipeRuntime.prepareDatasetForTraining(schemaRegistry, taskRecipeRegistry, schemaId, activeDs, {
+          allowedOutputKeys: allowedOutputKeys,
+          inferredHeads: _heads,
+          defaultTarget: defaultTarget,
+          defaultHeadType: defaultHeadType2,
+          sourceRegistry: srcReg,
+          sourceDescriptorHelper: sourceDescriptorHelper,
+        });
+        if (preparedForTraining && preparedForTraining.dataset) {
+          activeDs = preparedForTraining.dataset;
+          normalizedSourceDescriptor = preparedForTraining.sourceDescriptor || normalizedSourceDescriptor;
+          useServerDatasetReference = !!preparedForTraining.useSourceReference;
+        }
+      }
       if (!activeDs.xTrain) {
         if (useServerDatasetReference) {
           activeDs = Object.assign({}, activeDs, {

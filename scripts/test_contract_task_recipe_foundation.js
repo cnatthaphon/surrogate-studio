@@ -36,6 +36,7 @@ async function main() {
   assert(Array.isArray(suggested) && suggested.indexOf("iou_mean") >= 0, "synthetic_detection suggested metrics mismatch");
   assert(suggested.indexOf("bbox_mae") >= 0, "synthetic_detection bbox metric missing");
   assert(suggested.indexOf("class_accuracy") >= 0, "synthetic_detection class metric missing");
+  assert(typeof taskRecipeRuntime.prepareDatasetForTraining === "function", "missing recipe dataset preparation hook");
 
   const normalized = datasetSourceDescriptor.normalize({
     kind: "local_csv_manifest",
@@ -60,6 +61,27 @@ async function main() {
   assert(Array.isArray(ds.labelsTrain) && ds.labelsTrain.length === ds.xTrain.length, "synthetic_detection labelsTrain mismatch");
   assert(Array.isArray(ds.yTrain[0]) && ds.yTrain[0].length === 4, "synthetic_detection bbox target mismatch");
   assert(Array.isArray(ds.labelsTrain[0]) && ds.labelsTrain[0].length === 3, "synthetic_detection class target mismatch");
+  const preparedDetection = taskRecipeRuntime.prepareDatasetForTraining(schemaRegistry, taskRecipeRegistry, "synthetic_detection", {
+    schemaId: "synthetic_detection",
+    featureSize: 4,
+    classCount: 3,
+    records: {
+      train: { x: [[0, 1, 0, 1]], y: [[0.1, 0.2, 0.3, 0.4]], labels: [2] },
+      val: { x: [[1, 0, 1, 0]], y: [[0.2, 0.2, 0.5, 0.5]], labels: [1] },
+      test: { x: [[1, 1, 0, 0]], y: [[0.0, 0.0, 0.4, 0.4]], labels: [0] },
+    },
+  }, {
+    inferredHeads: [
+      { target: "bbox", headType: "regression" },
+      { target: "label", headType: "classification" },
+    ],
+    defaultTarget: "bbox",
+  });
+  assert(preparedDetection && preparedDetection.dataset, "prepareDatasetForTraining returned no dataset");
+  assert(preparedDetection.mode === "detection", "prepareDatasetForTraining detection mode mismatch");
+  assert(preparedDetection.dataset.targetMode === "bbox", "prepared detection targetMode mismatch");
+  assert(Array.isArray(preparedDetection.dataset.yTrain[0]) && preparedDetection.dataset.yTrain[0].length === 4, "prepared detection bbox mismatch");
+  assert(Array.isArray(preparedDetection.dataset.labelsTrain[0]) && preparedDetection.dataset.labelsTrain[0][2] === 1, "prepared detection label one-hot mismatch");
   const sourceBacked = await Promise.resolve(mod.build({
     sourceDescriptor: datasetSourceDescriptor.normalize({
       kind: "local_json_dataset",
@@ -74,6 +96,17 @@ async function main() {
   assert(Number(sourceBacked.featureSize) === 1024, "synthetic_detection source-backed featureSize mismatch");
   assert(Number(sourceBacked.numClasses) === 3, "synthetic_detection source-backed numClasses mismatch");
   assert(Array.isArray(sourceBacked.classNames) && sourceBacked.classNames.length === 3, "synthetic_detection source-backed classNames mismatch");
+  const preparedSourceBacked = taskRecipeRuntime.prepareDatasetForTraining(schemaRegistry, taskRecipeRegistry, "synthetic_detection", sourceBacked, {
+    sourceDescriptorHelper: datasetSourceDescriptor,
+    inferredHeads: [
+      { target: "bbox", headType: "regression" },
+      { target: "label", headType: "classification" },
+    ],
+    defaultTarget: "bbox",
+  });
+  assert(preparedSourceBacked.useSourceReference === true, "source-backed dataset should preserve server reference");
+  assert(preparedSourceBacked.dataset.sourceDescriptor, "prepared source-backed descriptor missing");
+  assert(Array.isArray(preparedSourceBacked.dataset.xTrain) && preparedSourceBacked.dataset.xTrain.length === 0, "prepared source-backed should not embed rows");
 
   global.window = global.window || {};
   delete global.window.SYNTHETIC_DETECTION_PRESET;
