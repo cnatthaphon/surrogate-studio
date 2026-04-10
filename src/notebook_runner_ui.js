@@ -26,6 +26,7 @@
   var _kernelId = null;
   var _serverUrl = "";
   var _busyStatusEl = null;
+  var _onArtifactsCallback = null;
 
   function _getCellUiMeta(cell) {
     var meta = (cell && cell.metadata && cell.metadata.surrogate) || {};
@@ -199,6 +200,7 @@
 
     var notebook = opts.notebook || { cells: [] };
     _serverUrl = _normalizeServerUrl(opts.serverUrl);
+    _onArtifactsCallback = opts.onArtifacts || null;
     var cells = notebook.cells || [];
 
     // Create fullscreen overlay
@@ -311,6 +313,7 @@
       function runNext() {
         if (ci >= codeCells.length) {
           statusEl.textContent = "All cells executed.";
+          _checkForArtifacts(statusEl);
           return;
         }
         var cell = codeCells[ci++];
@@ -362,6 +365,43 @@
       }
 
       if (callback) callback();
+    });
+  }
+
+  function _checkForArtifacts(statusEl) {
+    if (!_kernelId) return;
+    // Ask kernel if __surrogate_artifacts__ was set during training
+    var code = "import json; print(json.dumps(globals().get('__surrogate_artifacts__', None)))";
+    _executeCell(code, function (result) {
+      if (!result || result.error) return;
+      var raw = String(result.stdout || "").trim();
+      if (!raw || raw === "null" || raw === "None") return;
+      try {
+        var artifacts = JSON.parse(raw);
+        if (!artifacts || !artifacts.weightSpecs) return;
+        var count = artifacts.weightValues ? artifacts.weightValues.length : 0;
+        var specs = artifacts.weightSpecs ? artifacts.weightSpecs.length : 0;
+
+        statusEl.textContent = "All cells executed. Trained weights available (" + count + " values).";
+        statusEl.style.color = "#4ade80";
+
+        // Add "Load Weights to Trainer" button
+        var btn = _el("button", {
+          style: "margin-left:8px;padding:4px 12px;background:#22c55e;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:11px;font-weight:600;"
+        }, "Load Weights to Trainer");
+        statusEl.parentElement.appendChild(btn);
+
+        btn.addEventListener("click", function () {
+          btn.disabled = true;
+          btn.textContent = "Loaded!";
+          btn.style.background = "#475569";
+          if (_onArtifactsCallback) {
+            _onArtifactsCallback(artifacts);
+          }
+        });
+      } catch (e) {
+        // silently ignore parse errors
+      }
     });
   }
 

@@ -477,6 +477,7 @@
       trainCfg: normalizeTrainCfg(trainCfgRaw),
       drawflowGraph: jsonClone(graph),
       datasetData: s.datasetData || null,
+      modelArtifacts: s.modelArtifacts || null,
     };
   }
 
@@ -1422,10 +1423,19 @@
     var trainCfg = firstSession.trainCfg || {};
     var graphPath = firstSession.modelGraphPath || "model.graph.json";
     var graphPayload = opts.graphPayload || firstSession.drawflowGraph || firstSession.graph || null;
+    var initialArtifacts = firstSession.modelArtifacts || opts.modelArtifacts || null;
     var embedDataset = !!opts.embedDataset && !!datasetCsvText;
     var embedGraph = !!opts.embedGraph && !!graphPayload;
     var embeddedDatasetCsvB64 = embedDataset ? toBase64Utf8(datasetCsvText) : "";
     var embeddedGraphJsonB64 = embedGraph ? toBase64Utf8(JSON.stringify(graphPayload)) : "";
+    var embeddedArtifactsB64 = "";
+    if (initialArtifacts && initialArtifacts.weightSpecs && initialArtifacts.weightValues) {
+      embeddedArtifactsB64 = toBase64Utf8(JSON.stringify({
+        weightSpecs: initialArtifacts.weightSpecs,
+        weightValues: initialArtifacts.weightValues,
+        producerRuntime: initialArtifacts.producerRuntime || "",
+      }));
+    }
 
     var cells = [];
 
@@ -1446,6 +1456,7 @@
       "MODEL_GRAPH = '" + (embedGraph ? "(embedded)" : graphPath) + "'\n" +
       "EMBEDDED_DATASET_CSV_B64 = '" + embeddedDatasetCsvB64 + "'\n" +
       "EMBEDDED_GRAPH_JSON_B64 = '" + embeddedGraphJsonB64 + "'\n" +
+      "EMBEDDED_ARTIFACTS_B64 = '" + embeddedArtifactsB64 + "'\n" +
       "EPOCHS = " + (trainCfg.epochs || 20) + "\n" +
       "BATCH_SIZE = " + (trainCfg.batchSize || 32) + "\n" +
       "LR = " + (trainCfg.learningRate || 0.001) + "\n" +
@@ -1575,6 +1586,28 @@
           collapsed: true,
           hideSource: true,
           summary: "Fallback embedded graph/model loader"
+        }
+      }));
+    }
+
+    // Cell 4b: Load initial weights via canonical runtime_weight_loader (resume from trainer)
+    if (embeddedArtifactsB64) {
+      cells.push(makeCodeCell(
+        "# --- Load initial weights from trainer (resume / fine-tune) ---\n" +
+        "from runtime_weight_loader import load_weights_into_model\n\n" +
+        "if EMBEDDED_ARTIFACTS_B64:\n" +
+        "    _art = json.loads(base64.b64decode(EMBEDDED_ARTIFACTS_B64).decode('utf-8'))\n" +
+        "    _ok = load_weights_into_model(model, _art)\n" +
+        "    model = model.to(device)\n" +
+        "    print(f'Loaded weights from trainer: {\"success\" if _ok else \"failed\"} (resume)')\n" +
+        "else:\n" +
+        "    print('Training from scratch (no initial weights)')\n",
+      {
+        surrogate: {
+          role: "weight-loader",
+          collapsed: true,
+          hideSource: true,
+          summary: "Load initial weights from trainer card (resume / fine-tune)"
         }
       }));
     }
@@ -2045,6 +2078,26 @@
       "print(f'  Latent Optimization: ✓' if 'optimized' in dir() else '  Latent Optimization: skipped')\n" +
       "print(f'  Inverse: ✓' if 'inv_result' in dir() else '  Inverse: skipped')\n" +
       "print('\\nNotebook complete.')\n"
+    ));
+
+    // Cell 16: Save weights via canonical checkpoint path
+    cells.push(makeMarkdownCell("## 16) Save Weights\n\nSave trained weights using the same canonical checkpoint adapter used by the server runtime.\nThe JSON file can be loaded back into the trainer card via the UI."));
+    cells.push(makeCodeCell(
+      "# --- Save weights via canonical checkpoint_format ---\n" +
+      "from checkpoint_format import extract_pytorch_state, normalize_artifacts\n\n" +
+      "torch.save(model.state_dict(), 'model_weights.pth')\n" +
+      "print('Saved: model_weights.pth')\n\n" +
+      "weight_specs, weight_values = extract_pytorch_state(model.state_dict())\n" +
+      "artifacts = normalize_artifacts(weight_specs, weight_values, producer_runtime='notebook', include_weight_data=True)\n" +
+      "artifacts['metrics'] = {'mae': float(mae), 'r2': float(r2), 'bestValLoss': float(best_val)}\n" +
+      "if is_cls and 'accuracy' in dir():\n" +
+      "    artifacts['metrics']['accuracy'] = float(accuracy)\n\n" +
+      "import json\n" +
+      "with open('model_artifacts.json', 'w') as f:\n" +
+      "    json.dump(artifacts, f)\n" +
+      "print(f'Saved: model_artifacts.json ({len(weight_values)} values, {len(weight_specs)} tensors)')\n" +
+      "print('These weights can be loaded back into Surrogate Studio trainer card.')\n\n" +
+      "globals()['__surrogate_artifacts__'] = artifacts\n"
     ));
 
     return {
