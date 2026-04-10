@@ -34,6 +34,8 @@ async function main() {
   assert(taskRecipeRuntime.getPredictiveMode(detectionRecipe, schemaRegistry.getOutputKeys("synthetic_detection")) === "detection", "synthetic_detection predictive mode mismatch");
   const suggested = taskRecipeRuntime.getSuggestedMetricIds(detectionRecipe, ["mae"]);
   assert(Array.isArray(suggested) && suggested.indexOf("iou_mean") >= 0, "synthetic_detection suggested metrics mismatch");
+  assert(suggested.indexOf("bbox_mae") >= 0, "synthetic_detection bbox metric missing");
+  assert(suggested.indexOf("class_accuracy") >= 0, "synthetic_detection class metric missing");
 
   const normalized = datasetSourceDescriptor.normalize({
     kind: "local_csv_manifest",
@@ -47,6 +49,7 @@ async function main() {
 
   const mod = datasetModules.getModule("synthetic_detection");
   assert(mod && typeof mod.build === "function", "synthetic_detection module missing");
+  assert(mod.uiApi && typeof mod.uiApi.getSourceDescriptorSpec === "function", "synthetic_detection source descriptor spec missing");
   const ds = await Promise.resolve(mod.build({ seed: 7, totalCount: 120 }));
   assert(ds && ds.schemaId === "synthetic_detection", "synthetic_detection schemaId mismatch");
   assert(ds.featureSize === 1024, "synthetic_detection featureSize mismatch");
@@ -57,6 +60,31 @@ async function main() {
   assert(Array.isArray(ds.labelsTrain) && ds.labelsTrain.length === ds.xTrain.length, "synthetic_detection labelsTrain mismatch");
   assert(Array.isArray(ds.yTrain[0]) && ds.yTrain[0].length === 4, "synthetic_detection bbox target mismatch");
   assert(Array.isArray(ds.labelsTrain[0]) && ds.labelsTrain[0].length === 3, "synthetic_detection class target mismatch");
+  const sourceBacked = await Promise.resolve(mod.build({
+    sourceDescriptor: datasetSourceDescriptor.normalize({
+      kind: "local_json_dataset",
+      schemaId: "synthetic_detection",
+      datasetModuleId: "synthetic_detection",
+      datasetPath: "/tmp/synth_det.json",
+      metadata: { featureSize: 1024, numClasses: 3, classNames: ["square", "wide_box", "tall_box"] },
+    }),
+    trainFrac: 0.7, valFrac: 0.15, testFrac: 0.15,
+  }));
+  assert(sourceBacked && sourceBacked.sourceDescriptor, "synthetic_detection source-backed build missing sourceDescriptor");
+  assert(Number(sourceBacked.featureSize) === 1024, "synthetic_detection source-backed featureSize mismatch");
+  assert(Number(sourceBacked.numClasses) === 3, "synthetic_detection source-backed numClasses mismatch");
+  assert(Array.isArray(sourceBacked.classNames) && sourceBacked.classNames.length === 3, "synthetic_detection source-backed classNames mismatch");
+
+  global.window = global.window || {};
+  delete global.window.SYNTHETIC_DETECTION_PRESET;
+  require(path.join(ROOT, "demo", "Synthetic-Detection", "preset.js"));
+  const preset = global.window.SYNTHETIC_DETECTION_PRESET;
+  assert(preset && Array.isArray(preset.evaluations) && preset.evaluations.length, "synthetic_detection preset missing evaluation");
+  const evalCard = preset.evaluations[0];
+  assert(Array.isArray(evalCard.evaluatorIds), "synthetic_detection preset evaluatorIds missing");
+  assert(evalCard.evaluatorIds.indexOf("bbox_mae") >= 0, "synthetic_detection preset bbox_mae missing");
+  assert(evalCard.evaluatorIds.indexOf("class_accuracy") >= 0, "synthetic_detection preset class_accuracy missing");
+  assert(evalCard.evaluatorIds.indexOf("iou_mean") >= 0, "synthetic_detection preset iou_mean missing");
 
   console.log("PASS test_contract_task_recipe_foundation");
 }

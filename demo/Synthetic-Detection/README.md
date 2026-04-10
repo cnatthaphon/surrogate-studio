@@ -35,7 +35,7 @@ Targets:
 2. Inspect the sample previews with orange bounding boxes.
 3. Open the `Model` tab and inspect the dual-head detector graph.
 4. Train in the `Trainer` tab. PyTorch server is the recommended runtime.
-5. Run `BBox Quality` in `Evaluation` to measure bounding-box MAE and mean IoU.
+5. Run `BBox Quality` in `Evaluation` to measure bounding-box MAE, class accuracy, and mean IoU.
 
 ## Scope
 

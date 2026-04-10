@@ -168,11 +168,23 @@
     return sum / Math.max(1, n);
   }
 
+  function parseClassNames(raw) {
+    var items = String(raw || "").split(",").map(function (s) { return String(s || "").trim(); }).filter(Boolean);
+    return items.length ? items : CLASS_NAMES.slice();
+  }
+
   function renderGrid(mountEl, datasetData) {
     mountEl.innerHTML = "";
     var splitX = datasetData.xTrain || [];
     var splitB = datasetData.yTrain || [];
     var splitL = datasetData.labelsTrain || [];
+    if (!splitX.length && datasetData.sourceDescriptor) {
+      var info = document.createElement("div");
+      info.style.cssText = "padding:10px;border:1px dashed #334155;border-radius:8px;background:#0b1220;font-size:12px;color:#cbd5e1;";
+      info.textContent = "Local source descriptor configured. Preview is unavailable in the browser; use the PyTorch server or notebook runtime to load data from disk.";
+      mountEl.appendChild(info);
+      return;
+    }
     var title = document.createElement("div");
     title.style.cssText = "font-size:12px;color:#cbd5e1;margin-bottom:8px;";
     title.textContent = "Synthetic single-object detection samples";
@@ -219,6 +231,36 @@
 
   function buildDataset(cfg) {
     var c = cfg || {};
+    if (c.sourceDescriptor) {
+      var sourceMeta = c.sourceDescriptor.metadata || {};
+      var classNames = parseClassNames(sourceMeta.classNames && sourceMeta.classNames.join ? sourceMeta.classNames.join(",") : sourceMeta.classNames);
+      return {
+        schemaId: "synthetic_detection",
+        datasetModuleId: "synthetic_detection",
+        source: "synthetic_detection_source_descriptor",
+        mode: "regression",
+        taskRecipeId: "detection_single_box",
+        imageShape: [IMAGE_H, IMAGE_W, 1],
+        featureSize: Math.max(1, Number(sourceMeta.featureSize || FEATURE_SIZE)),
+        targetSize: 4,
+        targetMode: "bbox",
+        numClasses: Math.max(1, Number(sourceMeta.numClasses || classNames.length || CLASS_NAMES.length)),
+        classCount: Math.max(1, Number(sourceMeta.numClasses || classNames.length || CLASS_NAMES.length)),
+        classNames: classNames,
+        trainCount: 0,
+        valCount: 0,
+        testCount: 0,
+        splitCounts: { train: 0, val: 0, test: 0 },
+        splitConfig: {
+          mode: "random",
+          train: Number(c.trainFrac || 0.70),
+          val: Number(c.valFrac || 0.15),
+          test: Number(c.testFrac || 0.15),
+        },
+        seed: clampInt(c.seed || 42, 0, 2147483647),
+        sourceDescriptor: c.sourceDescriptor,
+      };
+    }
     var rng = createRng(c.seed);
     var plan = stratifiedSplit({
       totalCount: clampInt(c.totalCount || 900, 90, 12000),
@@ -318,6 +360,38 @@
               }
             }
           ]
+        };
+      },
+      getSourceDescriptorSpec: function () {
+        return {
+          title: "Local Source",
+          helpText: "Optional: point the detection dataset at a local JSON dataset or CSV manifest for PyTorch server/notebook runtimes.",
+          schema: [
+            { key: "useSourceDescriptor", label: "Use local source", type: "checkbox" },
+            {
+              key: "sourceKind", label: "Source type", type: "select",
+              options: [
+                { value: "local_json_dataset", label: "Local JSON dataset" },
+                { value: "local_csv_manifest", label: "Local CSV manifest" }
+              ]
+            },
+            { key: "sourceDatasetPath", label: "Dataset path", type: "text" },
+            { key: "sourceManifestPath", label: "Manifest path", type: "text" },
+            { key: "sourceRootDir", label: "Root dir", type: "text" },
+            { key: "sourceFeatureSize", label: "Feature size", type: "number", min: 1, step: 1 },
+            { key: "sourceNumClasses", label: "Classes", type: "number", min: 1, step: 1 },
+            { key: "sourceClassNames", label: "Class names CSV", type: "text" },
+          ],
+          value: {
+            useSourceDescriptor: false,
+            sourceKind: "local_json_dataset",
+            sourceDatasetPath: "",
+            sourceManifestPath: "",
+            sourceRootDir: "",
+            sourceFeatureSize: String(FEATURE_SIZE),
+            sourceNumClasses: String(CLASS_NAMES.length),
+            sourceClassNames: CLASS_NAMES.join(","),
+          }
         };
       }
     },

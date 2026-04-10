@@ -149,6 +149,42 @@
       return list.length && datasetModules.getModule ? datasetModules.getModule(list[0].id) : null;
     }
 
+    function _getSourceDescriptorSpec(mod, dsRecord) {
+      if (!mod || !mod.uiApi || typeof mod.uiApi.getSourceDescriptorSpec !== "function") return null;
+      try {
+        return mod.uiApi.getSourceDescriptorSpec({
+          schemaId: dsRecord && dsRecord.schemaId,
+          datasetRecord: dsRecord || null,
+        }) || null;
+      } catch (_) {
+        return null;
+      }
+    }
+
+    function _buildSourceDescriptorFromForm(schemaId, moduleId, formConfig) {
+      var W = typeof window !== "undefined" ? window : {};
+      var helper = W.OSCDatasetSourceDescriptor || null;
+      var cfg = formConfig && typeof formConfig === "object" ? formConfig : {};
+      if (!cfg.useSourceDescriptor) return null;
+      var raw = {
+        kind: cfg.sourceKind || "",
+        schemaId: schemaId || "",
+        datasetModuleId: moduleId || "",
+        datasetPath: cfg.sourceDatasetPath || "",
+        manifestPath: cfg.sourceManifestPath || "",
+        rootDir: cfg.sourceRootDir || "",
+        taskRecipeId: schemaRegistry && typeof schemaRegistry.getTaskRecipeId === "function" ? schemaRegistry.getTaskRecipeId(schemaId) : "",
+        deliveryMode: "server_reference",
+        metadata: {
+          featureSize: Number(cfg.sourceFeatureSize || 0),
+          numClasses: Number(cfg.sourceNumClasses || 0),
+          classNames: String(cfg.sourceClassNames || "").split(",").map(function (s) { return String(s || "").trim(); }).filter(Boolean),
+        },
+      };
+      if (helper && typeof helper.normalize === "function") return helper.normalize(raw);
+      return raw;
+    }
+
     // === MIDDLE: delegate to module or show info ===
     function _renderMainPanel() {
       var mainEl = layout.mainEl;
@@ -191,6 +227,12 @@
         if (d.classCount) parts.push("Classes: " + d.classCount);
       }
       if (parts.length) mainEl.appendChild(el("div", { style: "font-size:12px;color:#cbd5e1;padding:4px 8px;" }, parts.join(" | ")));
+
+      if (activeDs && activeDs.sourceDescriptor && (!activeDs.xTrain || !activeDs.xTrain.length)) {
+        mainEl.appendChild(el("div", {
+          style: "margin-top:8px;padding:8px;background:#111827;border:1px solid #334155;border-radius:6px;font-size:11px;color:#cbd5e1;"
+        }, "Source-backed dataset configured. Browser preview is limited; PyTorch server and notebook runtimes will load data directly from the local path."));
+      }
 
       // delegate dataset preview to module or core renderer
       var mod = _getModuleForSchema(ds.schemaId);
@@ -412,6 +454,42 @@
         });
       }
 
+      var sourceSpec = _getSourceDescriptorSpec(mod, ds);
+      if (sourceSpec && uiEngine && typeof uiEngine.renderConfigForm === "function") {
+        var sourceFields = Array.isArray(sourceSpec.schema) ? sourceSpec.schema : [];
+        var sourceDefaults = (sourceSpec.value && typeof sourceSpec.value === "object") ? sourceSpec.value : {};
+        if (sourceFields.length) {
+          rightEl.appendChild(el("div", { style: "font-size:11px;color:#67e8f9;margin-top:8px;margin-bottom:4px;font-weight:600;" }, sourceSpec.title || "Local Source"));
+          var sourceSchema = [];
+          var sourceValue = {};
+          sourceFields.forEach(function (f) {
+            var key = f.key || f.id;
+            if (!key) return;
+            sourceSchema.push({
+              key: key,
+              label: f.label || key,
+              type: f.type || "text",
+              options: f.options,
+              min: f.min,
+              max: f.max,
+              step: f.step,
+              disabled: f.disabled,
+              placeholder: f.placeholder
+            });
+            sourceValue[key] = savedCfg[key] !== undefined ? savedCfg[key] : (sourceDefaults[key] !== undefined ? sourceDefaults[key] : "");
+          });
+          var sourceMount = el("div", {});
+          uiEngine.renderConfigForm({
+            mountEl: sourceMount, schema: sourceSchema, value: sourceValue,
+            fieldNamePrefix: "dssrc", rowClassName: "osc-form-row",
+          });
+          rightEl.appendChild(sourceMount);
+          if (sourceSpec.helpText) {
+            rightEl.appendChild(el("div", { style: "font-size:10px;color:#64748b;margin-top:4px;" }, sourceSpec.helpText));
+          }
+        }
+      }
+
       // initial count update
       _updateAutoCountFields(rightEl);
 
@@ -442,6 +520,8 @@
       }
       if (!formConfig.totalCount && formConfig.mnistTotalCount) formConfig.totalCount = Number(formConfig.mnistTotalCount);
       var buildConfig = Object.assign({ schemaId: schemaId, moduleId: mod.id, variant: schemaId }, dsRecord.config || {}, formConfig);
+      var sourceDescriptor = _buildSourceDescriptorFromForm(schemaId, mod.id, formConfig);
+      if (sourceDescriptor) buildConfig.sourceDescriptor = sourceDescriptor;
 
       // show loading state
       onStatus("Generating " + (dsRecord.name || dsRecord.id) + "...");
@@ -470,6 +550,7 @@
         var handle = function (data) {
           if (currentMountId !== _mountId) return;
           if (!data) { onStatus("Empty result"); _renderMainPanel(); return; }
+          if (sourceDescriptor && !data.sourceDescriptor) data.sourceDescriptor = sourceDescriptor;
           var updated = Object.assign({}, dsRecord, { data: data, status: "ready", generatedAt: Date.now(), config: Object.assign({}, dsRecord.config || {}, formConfig) });
           if (store) store.upsertDataset(updated);
           onStatus("\u2713 Ready: " + (dsRecord.name || dsRecord.id));

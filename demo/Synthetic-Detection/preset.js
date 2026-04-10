@@ -128,7 +128,7 @@
         schemaId: sid,
         datasetId: DS_ID,
         trainerIds: ["synthetic_detection_trainer"],
-        evaluatorIds: ["mae", "iou_mean"],
+        evaluatorIds: ["bbox_mae", "class_accuracy", "iou_mean"],
         status: "draft",
         runs: [],
         createdAt: Date.now(),
