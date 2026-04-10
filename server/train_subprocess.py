@@ -1167,9 +1167,16 @@ def build_model_from_graph(graph, feature_size, target_size, num_classes=0):
                     # concat along batch axis: feature dim stays same
                     dim_map[nid] = in_dim
                 elif t == "concat":
-                    # concat along feature axis: sum of parent dims
-                    total_dim = sum(dim_map.get(p["from"], in_dim) for p in parents if p["from"] in dim_map)
-                    dim_map[nid] = total_dim if total_dim > 0 else in_dim
+                    # concat along feature/channel axis
+                    parent_dims = [dim_map.get(p["from"], in_dim) for p in parents if p["from"] in dim_map]
+                    if parent_dims and all(isinstance(d, list) and len(d) == 3 for d in parent_dims):
+                        # spatial: [H, W, C] — sum channels, keep H/W from first parent
+                        total_c = sum(d[2] for d in parent_dims)
+                        dim_map[nid] = [parent_dims[0][0], parent_dims[0][1], total_c]
+                    else:
+                        # flat: sum scalar dims
+                        total_dim = sum(d if isinstance(d, (int, float)) else (d[0] * d[1] * d[2] if isinstance(d, list) and len(d) == 3 else 0) for d in parent_dims)
+                        dim_map[nid] = total_dim if total_dim > 0 else in_dim
                 elif t == "phase_switch":
                     dim_map[nid] = in_dim
                 elif t == "constant":
@@ -1473,11 +1480,17 @@ def build_model_from_graph(graph, feature_size, target_size, num_classes=0):
                         tensors[nid] = inp
                     continue
                 elif t == "concat":
-                    # concat along feature axis (last dim) — used by diffusion (noisy_image + time_embed)
+                    # concat along feature/channel axis
                     parent_tensors = [tensors[p["from"]] for p in parents_sorted if p["from"] in tensors]
                     if len(parent_tensors) >= 2:
-                        parent_tensors = [_flatten_tf_layout(pt) if pt.dim() > 2 else pt for pt in parent_tensors]
-                        tensors[nid] = torch.cat(parent_tensors, dim=-1)
+                        all_4d = all(pt.dim() == 4 for pt in parent_tensors)
+                        if all_4d:
+                            # spatial concat: channel axis (dim=1 in NCHW) — UNet skip connections
+                            tensors[nid] = torch.cat(parent_tensors, dim=1)
+                        else:
+                            # flatten to 2D then concat on feature axis — diffusion (noisy_image + time_embed)
+                            parent_tensors = [_flatten_tf_layout(pt) if pt.dim() > 2 else pt for pt in parent_tensors]
+                            tensors[nid] = torch.cat(parent_tensors, dim=-1)
                     else:
                         tensors[nid] = inp
                     continue
