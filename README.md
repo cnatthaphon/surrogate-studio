@@ -1,10 +1,10 @@
 # Surrogate Studio
 
-![Status](https://img.shields.io/badge/status-active%20development-brightgreen) ![Models](https://img.shields.io/badge/models-25-blue) ![Demos](https://img.shields.io/badge/demos-8-orange)
+![Status](https://img.shields.io/badge/status-active%20development-brightgreen) ![Models](https://img.shields.io/badge/models-25-blue) ![Demos](https://img.shields.io/badge/demos-9-orange)
 
 **A schema-driven, browser-first ML experimentation platform.**
 
-**[Live Demo](https://cnatthaphon.github.io/surrogate-studio/)** | [Benchmark](https://cnatthaphon.github.io/surrogate-studio/demo/Fashion-MNIST-Benchmark/) | [GAN](https://cnatthaphon.github.io/surrogate-studio/demo/Fashion-MNIST-GAN/) | [Diffusion](https://cnatthaphon.github.io/surrogate-studio/demo/Fashion-MNIST-Diffusion/) | [Conditional Diffusion](https://cnatthaphon.github.io/surrogate-studio/demo/Fashion-MNIST-Conditional-Diffusion/) | [Transformer](https://cnatthaphon.github.io/surrogate-studio/demo/Fashion-MNIST-Transformer/) | [TrAISformer](https://cnatthaphon.github.io/surrogate-studio/demo/TrAISformer/) | [LSTM-VAE](https://cnatthaphon.github.io/surrogate-studio/demo/LSTM-VAE-for-dominant-motion-extraction/) | [Oscillator](https://cnatthaphon.github.io/surrogate-studio/demo/Oscillator-Surrogate/)
+**[Live Demo](https://cnatthaphon.github.io/surrogate-studio/)** | [Benchmark](https://cnatthaphon.github.io/surrogate-studio/demo/Fashion-MNIST-Benchmark/) | [GAN](https://cnatthaphon.github.io/surrogate-studio/demo/Fashion-MNIST-GAN/) | [Diffusion](https://cnatthaphon.github.io/surrogate-studio/demo/Fashion-MNIST-Diffusion/) | [Conditional Diffusion](https://cnatthaphon.github.io/surrogate-studio/demo/Fashion-MNIST-Conditional-Diffusion/) | [UNet](https://cnatthaphon.github.io/surrogate-studio/demo/Fashion-MNIST-UNet/) | [Transformer](https://cnatthaphon.github.io/surrogate-studio/demo/Fashion-MNIST-Transformer/) | [TrAISformer](https://cnatthaphon.github.io/surrogate-studio/demo/TrAISformer/) | [LSTM-VAE](https://cnatthaphon.github.io/surrogate-studio/demo/LSTM-VAE-for-dominant-motion-extraction/) | [Oscillator](https://cnatthaphon.github.io/surrogate-studio/demo/Oscillator-Surrogate/)
 
 **[Contributing](CONTRIBUTING.md)** | **[Developer Docs](docs/README.md)** | **[Server Notes](server/README.md)** | **[Schema Notes](schemas/README.md)**
 
@@ -94,6 +94,17 @@ Generate specific Fashion-MNIST classes by conditioning the denoiser on a one-ho
 | 2 | Conditional Denoiser | image + class | Baseline + class concat |
 
 3 classes (T-shirt/top, Trouser, Sneaker), pretrained on 18K real Fashion-MNIST images. Evaluations included: generation quality, reconstruction quality, per-class comparison.
+
+### [Fashion-MNIST UNet](demo/Fashion-MNIST-UNet/) — Reconstruction with Skip Connections
+
+Live: [GitHub Pages](https://cnatthaphon.github.io/surrogate-studio/demo/Fashion-MNIST-UNet/) | Guide: [README](demo/Fashion-MNIST-UNet/README.md)
+
+Image reconstruction demo showing that UNet-style skip connections are just graph wiring. The encoder and decoder are composed from existing Conv2D, MaxPool2D, UpSample2D, and Concat blocks, then compared against a plain convolutional autoencoder baseline.
+
+| # | Architecture | Purpose | Paper |
+|---|---|---|---|
+| 1 | UNet (skip connections) | Reconstruction with spatial skip paths | Ronneberger et al. 2015 |
+| 2 | Conv AE (baseline) | Reconstruction without skip paths | Baseline |
 
 ### [Fashion-MNIST Transformer](demo/Fashion-MNIST-Transformer/) — Vision Transformer Classification
 
@@ -224,6 +235,7 @@ https://cnatthaphon.github.io/surrogate-studio/demo/Fashion-MNIST-Benchmark/
 https://cnatthaphon.github.io/surrogate-studio/demo/Fashion-MNIST-GAN/
 https://cnatthaphon.github.io/surrogate-studio/demo/Fashion-MNIST-Diffusion/
 https://cnatthaphon.github.io/surrogate-studio/demo/Fashion-MNIST-Conditional-Diffusion/
+https://cnatthaphon.github.io/surrogate-studio/demo/Fashion-MNIST-UNet/
 https://cnatthaphon.github.io/surrogate-studio/demo/Fashion-MNIST-Transformer/
 https://cnatthaphon.github.io/surrogate-studio/demo/TrAISformer/
 https://cnatthaphon.github.io/surrogate-studio/demo/LSTM-VAE-for-dominant-motion-extraction/
