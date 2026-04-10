@@ -13,7 +13,7 @@ Encoder-decoder architecture with skip connections for image reconstruction on F
 
 ### 1. UNet (skip connections)
 ```
-Input(784) → Reshape(28,28,1)
+ImageSource → Reshape(28,28,1)
   → Conv(16) → Conv(16) → [skip1] → MaxPool
   → Conv(32) → Conv(32) → [skip2] → MaxPool
   → Conv(64) → Conv(64)                         ← bottleneck
@@ -25,7 +25,7 @@ Input(784) → Reshape(28,28,1)
 
 ### 2. Conv Autoencoder (baseline)
 ```
-Input(784) → Reshape(28,28,1)
+ImageSource → Reshape(28,28,1)
   → Conv(16) → MaxPool → Conv(32) → MaxPool
   → UpSample → Conv(16) → UpSample → Conv(1,sigmoid)
   → Flatten → Output(x)
@@ -36,23 +36,19 @@ Input(784) → Reshape(28,28,1)
 
 Trained on Fashion-MNIST (PyTorch CUDA):
 
-| Model | Params | Test MAE | Test MSE |
-|-------|:------:|:--------:|:--------:|
-| **UNet (skip connections)** | 115,665 | **0.031** | **0.0017** |
-| Conv AE (baseline) | 9,441 | 0.069 | 0.0125 |
-
-Skip connections give 2x lower MAE and 7x lower MSE.
+| Model | Params | Test MAE | Test MSE | Test R² |
+|-------|:------:|:--------:|:--------:|:-------:|
+| **UNet (skip connections)** | 115,665 | **0.015** | **0.0006** | **0.995** |
+| Conv AE (baseline) | 9,441 | 0.069 | 0.0125 | — |
 
 ## How to Use
 
 1. **Dataset** tab — click Generate Dataset to fetch Fashion-MNIST from CDN
 2. **Model** tab — inspect the UNet graph: notice how Concat nodes merge encoder features with decoder features
-3. **Trainer** tab — train both models (server recommended for Conv2D performance)
+3. **Trainer** tab — train both models (PyTorch server recommended for Conv2D performance)
 4. **Generation** tab — compare reconstructions: UNet should preserve more detail
-5. **Evaluation** tab — benchmark reconstruction MSE side by side
+5. **Evaluation** tab — benchmark reconstruction quality side by side
 
 ## Reference
 
 Ronneberger, O., Fischer, P., & Brox, T. **"U-Net: Convolutional Networks for Biomedical Image Segmentation."** *MICCAI 2015.* [arXiv:1505.04597](https://arxiv.org/abs/1505.04597)
-
-This demo uses the UNet architecture for image reconstruction (autoencoder) rather than segmentation, to demonstrate skip connections within the existing Fashion-MNIST pipeline.
