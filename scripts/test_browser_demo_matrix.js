@@ -54,6 +54,15 @@ var DEMOS = [
     minEvaluations: 1,
   },
   {
+    name: "Cell Nuclei Segmentation",
+    file: path.join(ROOT, "demo", "Cell-Nuclei-Segmentation", "index.html"),
+    presetKey: "CELL_NUCLEI_SEGMENTATION_PRESET",
+    minModels: 2,
+    minTrainers: 2,
+    minGenerations: 0,
+    minEvaluations: 1,
+  },
+  {
     name: "Synthetic Detection",
     file: path.join(ROOT, "demo", "Synthetic-Detection", "index.html"),
     presetKey: "SYNTHETIC_DETECTION_PRESET",
