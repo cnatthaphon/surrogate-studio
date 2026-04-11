@@ -1367,8 +1367,7 @@
       // Determine actual head type from model graph (not just schema default)
       var modelHeadType = "regression";
       if (modelRec && modelRec.graph) {
-        var graphData = modelBuilder.extractGraphData(modelRec.graph);
-        var outputHeads = modelBuilder.inferOutputHeads ? modelBuilder.inferOutputHeads(graphData) : [];
+        var outputHeads = modelBuilder.inferOutputHeads ? modelBuilder.inferOutputHeads(modelRec.graph, allowedOutputKeys, defaultTarget) : [];
         if (outputHeads.length && outputHeads[0].headType) modelHeadType = outputHeads[0].headType;
       }
       var defHeadType = modelHeadType || (allowedOutputKeys[0] && allowedOutputKeys[0].headType) || "regression";
