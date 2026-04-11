@@ -245,7 +245,8 @@ def main():
     # head_configs already extracted above from config
     is_classification = _is_all_cls
     # check if any head uses BCE (needs float labels, not int)
-    _any_bce = any(str(hc.get("loss", "")).lower() == "bce" for hc in head_configs) if head_configs else False
+    _bce_aliases = {"bce", "binarycrossentropy", "binary_crossentropy"}
+    _any_bce = any(str(hc.get("loss", "")).lower().replace("_", "").replace("-", "") in _bce_aliases or str(hc.get("loss", "")).lower() in _bce_aliases for hc in head_configs) if head_configs else False
     if is_classification and not _any_bce:
         loss_fn = nn.CrossEntropyLoss()
         # CrossEntropyLoss expects integer labels, not one-hot float
@@ -301,7 +302,7 @@ def main():
         # explicit loss field takes priority
         if hl == "none":
             head_losses.append({"fn": None, "weight": 0, "phase": hp, "cls": False, "skip": True})
-        elif hl == "bce":
+        elif hl in ("bce", "binarycrossentropy", "binary_crossentropy"):
             head_losses.append({"fn": nn.BCELoss(), "weight": hw, "phase": hp, "cls": False, "bce_binary": True})
         elif hl in ("wasserstein", "wgan"):
             # Wasserstein loss: -mean(truth * pred)
@@ -352,15 +353,21 @@ def main():
             head_pred = preds[i] if i < len(preds) else preds[0]
             # determine target for this head
             if hl.get("bce_binary"):
-                # Use labels from graph (PhaseSwitch + ConcatBatch constructs them)
-                custom_labels = getattr(model, '_custom_labels', {})
-                oid = model.output_ids[i] if i < len(model.output_ids) else None
-                if oid and oid in custom_labels:
-                    target = custom_labels[oid]
-                    if target.shape[0] != head_pred.shape[0]:
-                        target = target.expand_as(head_pred)
+                # Segmentation/mask heads: use real yb targets
+                head_htype = str(head_configs[i].get("headType", "")) if i < len(head_configs) else ""
+                head_target = str(head_configs[i].get("target", head_configs[i].get("targetType", ""))) if i < len(head_configs) else ""
+                if head_htype == "segmentation" or head_target in ("mask", "segmentation_mask"):
+                    target = yb
                 else:
-                    target = torch.ones_like(head_pred)
+                    # GAN: use labels from graph (PhaseSwitch + ConcatBatch constructs them)
+                    custom_labels = getattr(model, '_custom_labels', {})
+                    oid = model.output_ids[i] if i < len(model.output_ids) else None
+                    if oid and oid in custom_labels:
+                        target = custom_labels[oid]
+                        if target.shape[0] != head_pred.shape[0]:
+                            target = target.expand_as(head_pred)
+                    else:
+                        target = torch.ones_like(head_pred)
             elif hl["cls"]:
                 # Classification head: use label batch if available, else fall back to yb
                 cls_src = lb if lb is not None else yb
@@ -376,7 +383,7 @@ def main():
             # match target shape to prediction shape
             if target.shape != head_pred.shape:
                 if head_pred.shape[-1] == 1 and target.dim() > 1:
-                    target = torch.ones_like(head_pred)  # default: all 1s for BCE
+                    target = target[:, :1] if target.shape[-1] >= 1 else torch.ones_like(head_pred)
             total = total + hl["weight"] * hl["fn"](head_pred, target)
         return total
 
@@ -1241,8 +1248,9 @@ def build_model_from_graph(graph, feature_size, target_size, num_classes=0):
                     node_units = int(c.get("units", c.get("unitsHint", 0)) or 0)
                     if node_units > 0:
                         odim = node_units
-                    elif oloss == "bce":
-                        odim = 1
+                    elif oloss in ("bce", "binarycrossentropy", "binary_crossentropy"):
+                        # Segmentation masks: output full target_size, not 1
+                        odim = target_size if (htype == "segmentation" or target_key in ("mask", "segmentation_mask")) else 1
                     elif target_key in ("custom", "none", "") and out_in:
                         odim = out_in
                     elif htype == "classification" and num_classes > 0 and target_key in ("label", "logits"):

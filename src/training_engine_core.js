@@ -726,8 +726,9 @@
         yTrainArrays.push(tf.zeros([nSamples, headUnits]));
         return;
       }
-      // bce: dummy ones (shape must match output [N, units])
-      if (headLoss === "bce" && headUnits > 0) {
+      // bce: for GAN discriminator use dummy ones; for segmentation/mask use real targets
+      var headTarget = String(head.target || head.targetType || "").toLowerCase();
+      if (headLoss === "bce" && headUnits > 0 && ht !== "segmentation" && headTarget !== "mask" && headTarget !== "segmentation_mask") {
         yTrainArrays.push(tf.ones([nSamples, headUnits]));
         return;
       }

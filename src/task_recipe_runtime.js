@@ -35,6 +35,7 @@
   function getPredictiveMode(recipe, allowedOutputKeys) {
     var fam = String(recipe && recipe.family || "supervised").trim().toLowerCase();
     if (fam === "detection") return "detection";
+    if (fam === "segmentation") return "segmentation";
     var keys = _asArray(allowedOutputKeys);
     var hasClassification = keys.some(function (k) { return String(k && k.headType || "").trim().toLowerCase() === "classification"; });
     var hasNonClassification = keys.some(function (k) { return String(k && k.headType || "").trim().toLowerCase() !== "classification"; });
@@ -56,6 +57,10 @@
 
   function isDetectionRecipe(recipe) {
     return getFamily(recipe) === "detection";
+  }
+
+  function isSegmentationRecipe(recipe) {
+    return getFamily(recipe) === "segmentation";
   }
 
   function _cloneRows(rows) {
@@ -133,10 +138,11 @@
     return true;
   }
 
-  function _mapPrimaryTarget(splitData, mode, defaultTarget, defaultHeadType, isDetection, nClasses) {
+  function _mapPrimaryTarget(splitData, mode, defaultTarget, defaultHeadType, isDetection, isSegmentation, nClasses) {
     var target = String(defaultTarget || "").trim().toLowerCase();
     var headType = String(defaultHeadType || "").trim().toLowerCase();
     if (isDetection || target === "bbox") return _cloneRows(splitData.y);
+    if (isSegmentation || headType === "segmentation" || target === "mask" || target === "segmentation_mask") return _cloneRows(splitData.y);
     if (mode === "classification" || headType === "classification" || target === "label" || target === "logits") {
       return _cloneRows(splitData.y).map(function (label) {
         return typeof label === "number" ? _oneHot(label, nClasses) : (Array.isArray(label) ? label.slice() : label);
@@ -162,7 +168,8 @@
     var allowedOutputKeys = _asArray(options.allowedOutputKeys);
     var mode = getPredictiveMode(recipe, heads.length ? heads : allowedOutputKeys);
     var detection = isDetectionRecipe(recipe);
-    var defaultTarget = String(options.defaultTarget || ds.targetMode || (detection ? "bbox" : "x")).trim().toLowerCase();
+    var segmentation = isSegmentationRecipe(recipe);
+    var defaultTarget = String(options.defaultTarget || ds.targetMode || (detection ? "bbox" : (segmentation ? "mask" : "x"))).trim().toLowerCase();
     var defaultHeadType = String(options.defaultHeadType || (heads[0] && heads[0].headType) || "").trim().toLowerCase();
     var nClasses = Math.max(1, Number(ds.numClasses || ds.classCount || (ds.classNames && ds.classNames.length) || options.numClasses || 10));
     var sourceDescriptor = _normalizeSourceDescriptor(ds, options.sourceDescriptorHelper, schemaId, recipeId);
@@ -216,11 +223,11 @@
 
     var prepared = Object.assign({}, ds, {
       xTrain: train.x,
-      yTrain: _mapPrimaryTarget(train, mode, defaultTarget, defaultHeadType, detection, nClasses),
+      yTrain: _mapPrimaryTarget(train, mode, defaultTarget, defaultHeadType, detection, segmentation, nClasses),
       xVal: val.x,
-      yVal: _mapPrimaryTarget(val, mode, defaultTarget, defaultHeadType, detection, nClasses),
+      yVal: _mapPrimaryTarget(val, mode, defaultTarget, defaultHeadType, detection, segmentation, nClasses),
       xTest: test.x,
-      yTest: _mapPrimaryTarget(test, mode, defaultTarget, defaultHeadType, detection, nClasses),
+      yTest: _mapPrimaryTarget(test, mode, defaultTarget, defaultHeadType, detection, segmentation, nClasses),
       featureSize: resolvedFeatureSize || Number(ds.featureSize || 1),
       numClasses: nClasses,
       classCount: Math.max(1, Number(ds.classCount || nClasses)),
@@ -242,6 +249,7 @@
     getSuggestedMetricIds: getSuggestedMetricIds,
     getFamily: getFamily,
     isDetectionRecipe: isDetectionRecipe,
+    isSegmentationRecipe: isSegmentationRecipe,
     prepareDatasetForTraining: prepareDatasetForTraining,
   };
 });

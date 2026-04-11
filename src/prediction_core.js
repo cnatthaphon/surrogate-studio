@@ -433,6 +433,69 @@
     };
   }
 
+  // --- Segmentation mask metrics ---
+  function computeMaskIoU(predFlat, truthFlat, threshold) {
+    var th = Number(threshold) || 0.5;
+    if (predFlat.length !== truthFlat.length) return 0;
+    var intersection = 0, union = 0;
+    var n = predFlat.length;
+    for (var i = 0; i < n; i++) {
+      var p = Number(predFlat[i] || 0) >= th ? 1 : 0;
+      var t = Number(truthFlat[i] || 0) >= th ? 1 : 0;
+      if (p === 1 || t === 1) union++;
+      if (p === 1 && t === 1) intersection++;
+    }
+    return union > 0 ? intersection / union : 1.0;
+  }
+
+  function computeDiceScore(predFlat, truthFlat, threshold) {
+    var th = Number(threshold) || 0.5;
+    if (predFlat.length !== truthFlat.length) return 0;
+    var intersection = 0, predSum = 0, truthSum = 0;
+    var n = predFlat.length;
+    for (var i = 0; i < n; i++) {
+      var p = Number(predFlat[i] || 0) >= th ? 1 : 0;
+      var t = Number(truthFlat[i] || 0) >= th ? 1 : 0;
+      if (p === 1 && t === 1) intersection++;
+      predSum += p;
+      truthSum += t;
+    }
+    var denom = predSum + truthSum;
+    return denom > 0 ? (2 * intersection) / denom : 1.0;
+  }
+
+  function computePixelAccuracy(predFlat, truthFlat, threshold) {
+    var th = Number(threshold) || 0.5;
+    if (predFlat.length !== truthFlat.length) return 0;
+    var correct = 0;
+    var n = predFlat.length;
+    for (var i = 0; i < n; i++) {
+      var p = Number(predFlat[i] || 0) >= th ? 1 : 0;
+      var t = Number(truthFlat[i] || 0) >= th ? 1 : 0;
+      if (p === t) correct++;
+    }
+    return n > 0 ? correct / n : 1.0;
+  }
+
+  function computeSegmentationMetrics(allPreds, allTruth, threshold) {
+    var th = Number(threshold) || 0.5;
+    var n = Math.min(allPreds.length, allTruth.length);
+    if (n === 0) return { mask_iou: 0, dice: 0, pixel_accuracy: 0 };
+    var sumIou = 0, sumDice = 0, sumAcc = 0;
+    for (var i = 0; i < n; i++) {
+      var predRow = Array.isArray(allPreds[i]) ? allPreds[i] : [allPreds[i]];
+      var truthRow = Array.isArray(allTruth[i]) ? allTruth[i] : [allTruth[i]];
+      sumIou += computeMaskIoU(predRow, truthRow, th);
+      sumDice += computeDiceScore(predRow, truthRow, th);
+      sumAcc += computePixelAccuracy(predRow, truthRow, th);
+    }
+    return {
+      mask_iou: sumIou / n,
+      dice: sumDice / n,
+      pixel_accuracy: sumAcc / n,
+    };
+  }
+
   return {
     computeRegressionMetrics: computeRegressionMetrics,
     computeClassificationMetrics: computeClassificationMetrics,
@@ -447,6 +510,10 @@
     computeResiduals: computeResiduals,
     computeSetComparisonMetrics: computeSetComparisonMetrics,
     resolveInferenceMethod: resolveInferenceMethod,
+    computeMaskIoU: computeMaskIoU,
+    computeDiceScore: computeDiceScore,
+    computePixelAccuracy: computePixelAccuracy,
+    computeSegmentationMetrics: computeSegmentationMetrics,
     buildHistoryWindow: buildHistoryWindow,
   };
 });
