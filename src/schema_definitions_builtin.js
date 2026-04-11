@@ -3621,6 +3621,90 @@
     }
   });
 
+  // ===== DSB 2018 CELL NUCLEI SEGMENTATION =====
+  registerSchema({
+    id: "dsb2018_segmentation",
+    label: "dsb2018_segmentation",
+    description: "Cell nuclei segmentation from the 2018 Data Science Bowl",
+    taskRecipeId: "segmentation_mask",
+    dataset: {
+      id: "dsb2018_segmentation",
+      label: "DSB 2018 Cell Nuclei (32x32)",
+      sampleType: "image",
+      splitUnit: "sample",
+      splitDefaults: { mode: "random", train: 0.70, val: 0.15, test: 0.15 },
+    },
+    model: {
+      outputs: [{ key: "mask", label: "Nucleus mask (per-pixel)", headType: "segmentation" }],
+      params: [], presets: [],
+      metadata: { featureNodes: { imageSource: [{ key: "pixel_values", label: "pixel values (32x32)", featureSize: 1024, shape: [32, 32, 1] }], policy: { allowHistory: false, allowWindowHistory: false, allowParams: false, allowOneHot: false, allowImageSource: true }, palette: { items: _imagePaletteItems() } } },
+    },
+    preconfig: { dataset: { defaultModuleId: "dsb2018_segmentation", splitDefaults: { mode: "random", train: 0.70, val: 0.15, test: 0.15 } }, model: { defaultPreset: "" } }
+  });
+
+  // ===== TEXT CLASSIFICATION =====
+  registerSchema({
+    id: "text_classification",
+    label: "text_classification",
+    description: "Synthetic sentiment classification — token sequences labeled positive/negative",
+    taskRecipeId: "supervised_standard",
+    dataset: {
+      id: "text_classification",
+      label: "Synthetic Sentiment Text",
+      sampleType: "sequence",
+      splitUnit: "sample",
+      splitDefaults: { mode: "random", train: 0.70, val: 0.15, test: 0.15 },
+    },
+    model: {
+      outputs: [{ key: "label", label: "Sentiment (positive/negative)", headType: "classification" }],
+      params: [], presets: [],
+      metadata: { featureNodes: { embedding: [{ key: "token_ids", label: "token IDs", vocabSize: 120, seqLen: 12 }], policy: { allowHistory: false, allowWindowHistory: false, allowParams: false, allowOneHot: false, allowImageSource: false, allowEmbedding: true } } },
+    },
+    preconfig: { dataset: { defaultModuleId: "text_classification", splitDefaults: { mode: "random", train: 0.70, val: 0.15, test: 0.15 } }, model: { defaultPreset: "" } }
+  });
+
+  // ===== SIAMESE PAIRS =====
+  registerSchema({
+    id: "siamese_pairs",
+    label: "siamese_pairs",
+    description: "Siamese pair classification — learn to compare image similarity",
+    taskRecipeId: "supervised_standard",
+    dataset: {
+      id: "siamese_pairs",
+      label: "Siamese Shape Pairs (28x28)",
+      sampleType: "pair",
+      splitUnit: "sample",
+      splitDefaults: { mode: "random", train: 0.70, val: 0.15, test: 0.15 },
+    },
+    model: {
+      outputs: [{ key: "label", label: "Same/Different", headType: "classification" }],
+      params: [], presets: [],
+      metadata: { featureNodes: { policy: { allowHistory: false, allowWindowHistory: false, allowParams: false, allowOneHot: false, allowImageSource: false } } },
+    },
+    preconfig: { dataset: { defaultModuleId: "siamese_pairs", splitDefaults: { mode: "random", train: 0.70, val: 0.15, test: 0.15 } }, model: { defaultPreset: "" } }
+  });
+
+  // ===== SAR SHIP DETECTION =====
+  registerSchema({
+    id: "sar_ship_detection",
+    label: "sar_ship_detection",
+    description: "SAR satellite ship detection — bounding box regression on radar imagery",
+    taskRecipeId: "detection_single_box",
+    dataset: {
+      id: "sar_ship_detection",
+      label: "HRSID SAR Ship Patches (64x64)",
+      sampleType: "image",
+      splitUnit: "sample",
+      splitDefaults: { mode: "random", train: 0.70, val: 0.15, test: 0.15 },
+    },
+    model: {
+      outputs: [{ key: "bbox", label: "Ship bounding box (x,y,w,h)", headType: "regression" }],
+      params: [], presets: [],
+      metadata: { featureNodes: { imageSource: [{ key: "pixel_values", label: "SAR pixel values (64x64)", featureSize: 4096, shape: [64, 64, 1] }], policy: { allowHistory: false, allowWindowHistory: false, allowParams: false, allowOneHot: false, allowImageSource: true }, palette: { items: _imagePaletteItems() } } },
+    },
+    preconfig: { dataset: { defaultModuleId: "hrsid_ship", splitDefaults: { mode: "random", train: 0.70, val: 0.15, test: 0.15 } }, model: { defaultPreset: "" } }
+  });
+
   // ===== AIS TRAJECTORY =====
   registerSchema({
     id: "ais_trajectory",
