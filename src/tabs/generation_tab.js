@@ -766,6 +766,28 @@
       var trainerArtifacts = _getTrainerArtifacts(trainer, config.weightSelection);
       var generationRuntime = String(config.generationRuntime || "client").trim().toLowerCase();
 
+      // Early dataset check for methods that need real data
+      if (method === "reconstruct" || method === "inverse") {
+        var _chkDs = trainer.datasetId ? store.getDataset(trainer.datasetId) : null;
+        var _chkDsData = _chkDs && _chkDs.data ? _chkDs.data : {};
+        var _chkActive = _chkDsData.kind === "dataset_bundle" && _chkDsData.datasets ? _chkDsData.datasets[_chkDsData.activeVariantId || Object.keys(_chkDsData.datasets)[0]] : _chkDsData;
+        var _chkW = typeof window !== "undefined" ? window : {};
+        var _chkReg = _chkW.OSCDatasetSourceRegistry || null;
+        var _chkHasData = false;
+        if (_chkReg && typeof _chkReg.resolveDatasetSplit === "function") {
+          var _chkS = _chkReg.resolveDatasetSplit(_chkActive, "test");
+          if (_chkS && _chkS.x && _chkS.x.length) _chkHasData = true;
+        }
+        if (!_chkHasData && _chkActive.records) {
+          var _chkR = _chkActive.records.test || _chkActive.records.val || _chkActive.records.train;
+          if (_chkR && _chkR.x && _chkR.x.length) _chkHasData = true;
+        }
+        if (!_chkHasData) {
+          onStatus("Dataset not loaded yet. Go to Dataset tab → click Generate Dataset first, then come back.");
+          return;
+        }
+      }
+
       var useServerForGen = generationRuntime === "server";
       if (useServerForGen) {
         var serverAdapter = _getServerAdapter();
@@ -1030,8 +1052,8 @@
           if (!testX.length) {
             _isGenerating = false;
             g.status = "draft"; _saveGen(g);
-            onStatus("Reconstruct requires dataset — go to Dataset tab and click Generate first.");
-            _renderRightPanel();
+            onStatus("Dataset not loaded. Go to Dataset tab → click Generate Dataset first, then come back here.");
+            _renderLeftPanel(); _renderRightPanel();
             built.model.dispose();
             return;
           }

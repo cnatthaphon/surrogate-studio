@@ -1,58 +1,76 @@
-# Fashion-MNIST UNet — Image Reconstruction with Skip Connections
+# Fashion-MNIST UNet — Skip Connection Architecture
 
-Encoder-decoder architecture with skip connections for image reconstruction on Fashion-MNIST. Demonstrates that the visual graph editor supports **branching topologies** — the UNet's skip connections are standard Concat nodes wired across the encoder-decoder boundary.
+UNet-style encoder-decoder with skip connections for image reconstruction on Fashion-MNIST. Demonstrates that the visual graph editor supports **branching topologies** — skip connections are standard Concat nodes wired across the encoder-decoder boundary.
 
 ## What This Demo Shows
 
 - **Skip connections as graph wiring**: no special UNet node — just Conv2D, MaxPool2D, UpSample2D, and Concat composed in the graph editor
 - **Spatial concat**: Concat node preserves 4D tensor layout (channel-axis concatenation) instead of flattening
-- **Comparison**: UNet (with skip connections) vs plain Conv Autoencoder (without)
-- **Same training engine**: no UNet-specific training code — the graph defines everything
+- **Comparison**: encoder-decoder with skip connections vs without (plain Conv AE)
+- **Same training engine**: no architecture-specific training code — the graph defines everything
+
+## Architecture
+
+This is a **UNet-style** architecture — same structural pattern as the original (encoder + skip connections + decoder) — adapted for image reconstruction instead of segmentation.
+
+### Comparison with Original UNet
+
+| Aspect | Ronneberger et al. 2015 | This Demo |
+|--------|------------------------|-----------|
+| **Task** | Biomedical image segmentation | Image reconstruction (autoencoder) |
+| **Input** | 572x572 microscopy images | 28x28 Fashion-MNIST |
+| **Encoder depth** | 4 levels (64-128-256-512-1024) | 2 levels (16-32-64) |
+| **Skip connections** | Crop + concatenate | Concatenate (same padding) |
+| **Upsampling** | Learned 2x2 up-convolution | Nearest-neighbor UpSample2D |
+| **Output** | Per-pixel class probabilities (softmax) | Reconstructed image (sigmoid) |
+| **Parameters** | ~31M | ~116K |
+
+The core contribution of the UNet paper — **skip connections that pass spatial detail from encoder to decoder** — is what this demo implements and validates.
 
 ## Models
 
-### 1. UNet (skip connections)
+### 1. UNet-style (with skip connections)
 ```
-Input(784) → Reshape(28,28,1)
-  → Conv(16) → Conv(16) → [skip1] → MaxPool
-  → Conv(32) → Conv(32) → [skip2] → MaxPool
-  → Conv(64) → Conv(64)                         ← bottleneck
-  → UpSample → Concat(skip2) → Conv(32) → Conv(32)
-  → UpSample → Concat(skip1) → Conv(16) → Conv(1,sigmoid)
-  → Flatten → Output(x)
+ImageSource -> Reshape(28,28,1)
+  -> Conv(16)x2 -> [skip1] -> MaxPool
+  -> Conv(32)x2 -> [skip2] -> MaxPool
+  -> Conv(64)x2                           <- bottleneck
+  -> UpSample -> Concat(skip2) -> Conv(32)x2
+  -> UpSample -> Concat(skip1) -> Conv(16) -> Conv(1,sigmoid)
+  -> Flatten -> Output
 ```
-~116K parameters. Skip connections preserve spatial detail from encoder.
+115,665 parameters.
 
-### 2. Conv Autoencoder (baseline)
+### 2. Conv Autoencoder (baseline, no skip connections)
 ```
-Input(784) → Reshape(28,28,1)
-  → Conv(16) → MaxPool → Conv(32) → MaxPool
-  → UpSample → Conv(16) → UpSample → Conv(1,sigmoid)
-  → Flatten → Output(x)
+ImageSource -> Reshape(28,28,1)
+  -> Conv(16) -> MaxPool -> Conv(32) -> MaxPool
+  -> UpSample -> Conv(16) -> UpSample -> Conv(1,sigmoid)
+  -> Flatten -> Output
 ```
-~9K parameters. No skip connections — bottleneck must encode everything.
+9,441 parameters. Same encoder-decoder structure without skip connections.
 
 ## Results
 
-Trained on Fashion-MNIST (PyTorch CUDA):
+Trained on Fashion-MNIST, 200 epochs, PyTorch CUDA:
 
-| Model | Params | Test MAE | Test MSE |
-|-------|:------:|:--------:|:--------:|
-| **UNet (skip connections)** | 115,665 | **0.031** | **0.0017** |
-| Conv AE (baseline) | 9,441 | 0.069 | 0.0125 |
+| Model | Params | Test MAE | Best Epoch |
+|-------|:------:|:--------:|:----------:|
+| **UNet-style** | 115,665 | **0.0076** | 197 |
+| Conv AE (baseline) | 9,441 | 0.027 | 200 |
 
-Skip connections give 2x lower MAE and 7x lower MSE.
+Skip connections give 3.5x lower reconstruction error.
 
 ## How to Use
 
 1. **Dataset** tab — click Generate Dataset to fetch Fashion-MNIST from CDN
-2. **Model** tab — inspect the UNet graph: notice how Concat nodes merge encoder features with decoder features
-3. **Trainer** tab — train both models (server recommended for Conv2D performance)
-4. **Generation** tab — compare reconstructions: UNet should preserve more detail
-5. **Evaluation** tab — benchmark reconstruction MSE side by side
+2. **Model** tab — inspect the graph: Concat nodes merge encoder features with decoder features
+3. **Trainer** tab — pre-trained weights included, or train from scratch via PyTorch server
+4. **Generation** tab — compare reconstructions (requires dataset loaded first)
+5. **Evaluation** tab — benchmark reconstruction quality side by side
 
 ## Reference
 
 Ronneberger, O., Fischer, P., & Brox, T. **"U-Net: Convolutional Networks for Biomedical Image Segmentation."** *MICCAI 2015.* [arXiv:1505.04597](https://arxiv.org/abs/1505.04597)
 
-This demo uses the UNet architecture for image reconstruction (autoencoder) rather than segmentation, to demonstrate skip connections within the existing Fashion-MNIST pipeline.
+This demo adapts the UNet architecture (encoder + skip connections + decoder) for reconstruction rather than segmentation, to demonstrate skip connection support within the graph editor.

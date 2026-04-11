@@ -57,6 +57,8 @@
   <script src="../../src/tabs/evaluation_tab.js"></script>
   <script src="../../src/surrogate_studio.js"></script>
 
+  <script src="./unet_pretrained.js"></script>
+  <script src="./conv_ae_pretrained.js"></script>
   <script src="./preset.js"></script>
 </head>
 <body>
@@ -67,7 +69,7 @@
     if (preset) {
       if (preset.dataset) store.upsertDataset(preset.dataset);
       if (preset.models) preset.models.forEach(function (m) { store.upsertModel(m); });
-      if (preset.trainers) preset.trainers.forEach(function (t) { store.upsertTrainerCard(t); });
+      OSCPretrainedLoader.loadAll(store, preset.trainers);
       store.initTables({ tables: ["generationRuns", "evaluations"] });
       if (preset.generations) preset.generations.forEach(function (g) { store.save({ table: "generationRuns", values: [g] }); });
       if (preset.evaluations) preset.evaluations.forEach(function (e) { store.save({ table: "evaluations", values: [e] }); });

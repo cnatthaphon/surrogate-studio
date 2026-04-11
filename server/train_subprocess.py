@@ -79,7 +79,11 @@ def _cfg_bool(v, fallback=True):
     return bool(fallback)
 
 def _resolve_optimizer_config(config):
-    opt = config.get("optimizer", {}) or {}
+    opt = config.get("optimizer", {})
+    if isinstance(opt, str):
+        opt = {"name": opt}
+    elif not isinstance(opt, dict):
+        opt = {}
     betas = opt.get("betas", []) if isinstance(opt, dict) else []
     return {
         "type": str(config.get("optimizerType", opt.get("name", "adam"))).strip().lower() or "adam",
@@ -87,7 +91,6 @@ def _resolve_optimizer_config(config):
         "beta2": min(0.999999, max(0.0, _cfg_float(config.get("optimizerBeta2", betas[1] if len(betas) > 1 else 0.999), 0.999))),
         "momentum": max(0.0, _cfg_float(config.get("optimizerMomentum", opt.get("momentum", 0.0)), 0.0)),
         "rho": min(0.999999, max(0.0, _cfg_float(config.get("optimizerRho", opt.get("rho", 0.9)), 0.9))),
-        # Match the TF.js client default when config does not specify epsilon.
         "epsilon": max(1e-8, _cfg_float(config.get("optimizerEpsilon", opt.get("epsilon", 1e-7)), 1e-7)),
     }
 
@@ -171,6 +174,12 @@ def main():
         status("Resuming training from checkpoint weights...")
 
     # --- Training config ---
+    # Config can be at top level OR nested under "config" key.
+    # Merge nested config into top level so downstream reads work uniformly.
+    if isinstance(config.get("config"), dict):
+        nested = config["config"]
+        for k, v in nested.items():
+            config.setdefault(k, v)
     epochs = int(config.get("epochs", 20))
     batch_size = int(config.get("batchSize", 32))
     lr = float(config.get("learningRate", 1e-3))
