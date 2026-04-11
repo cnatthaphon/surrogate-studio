@@ -1505,7 +1505,7 @@
         { key: "gradClipNorm", label: "Grad clip norm (0=off)", type: "number", min: 0, step: 0.1, disabled: isStopping },
         { key: "gradClipValue", label: "Grad clip value (0=off)", type: "number", min: 0, step: 0.1, disabled: isStopping },
       ]);
-      var config = t.config || {};
+      var config = Object.assign({}, t.trainCfg || {}, t.config || {});
       var formValue = {
         datasetId: t.datasetId || "", modelId: t.modelId || "",
         runtimeBackend: config.runtimeBackend || "auto",
@@ -1551,6 +1551,7 @@
           onChange: function (cfg, ctx) {
             // save ONLY the changed field (not all defaults which would overwrite preset values)
             if (ctx && ctx.key && t) {
+              if (!t.config || typeof t.config !== "object") t.config = {};
               t.config[ctx.key] = ctx.value;
               if (store) store.upsertTrainerCard(t);
             }
