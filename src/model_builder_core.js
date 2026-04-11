@@ -568,7 +568,11 @@
     var inputMode = String((inputNode.data && inputNode.data.mode) || "auto");
     var isSequence = inputMode === "sequence" ? true : (inputMode === "flat" ? false : hasRecurrent);
     // Allow LSTM in direct mode by reshaping flat input to [batch, 1, features] (seq_len=1)
-    var needsReshapeForRecurrent = !isSequence && hasRecurrent && inputMode !== "sequence";
+    // Skip if Embedding is a direct child of the primary input — embedding creates the sequence dim
+    var inputDirectChildIsEmbedding = getOutgoing(inputId).some(function (e) {
+      return reachable[e.to] && moduleData[e.to] && moduleData[e.to].name === "embedding_layer";
+    });
+    var needsReshapeForRecurrent = !isSequence && hasRecurrent && inputMode !== "sequence" && !inputDirectChildIsEmbedding;
 
     // topological sort
     var indegree = {};
@@ -1038,7 +1042,9 @@
         var odata = node.data || {};
         var headMatchWeight = Math.max(0, Number(odata.matchWeight != null ? odata.matchWeight : 1));
         var targets = outputTargetsFromNodeData(odata, allowedOutputKeys, fallbackTarget);
-        var lossName = String((odata && odata.loss) || "mse");
+        var rawLossName = String((odata && odata.loss) || "mse").trim().toLowerCase();
+        // Normalize BCE aliases once
+        var lossName = (rawLossName === "binarycrossentropy" || rawLossName === "binary_crossentropy") ? "bce" : rawLossName;
         var paramsSelect = String((odata && odata.paramsSelect) || "");
         var inForHead = (inTensor.shape && inTensor.shape.length === 3)
           ? tf.layers.globalAveragePooling1d().apply(inTensor) : inTensor;
@@ -1056,8 +1062,9 @@
             outTensors.push(inForHead);
             generated.push(inForHead);
           } else if (lossName === "bce") {
-            // BCE: binary output (1 unit, sigmoid)
-            units = Number(odata.units || 1);
+            // BCE: sigmoid output. For segmentation/mask use target_size, else 1.
+            var isMaskHead = ht === "segmentation" || String(odata.target || odata.targetType || "").toLowerCase().indexOf("mask") >= 0;
+            units = Number(odata.units || (isMaskHead ? (datasetMeta && datasetMeta.targetSize ? datasetMeta.targetSize : upstreamUnits) : 1));
             act = "sigmoid";
             var upDim = upstreamUnits;
             if (upDim === units) {

@@ -55,6 +55,18 @@
         suggestedMetrics: ["bbox_mae", "class_accuracy", "iou_mean"],
       },
     },
+    {
+      id: "segmentation_mask",
+      label: "Semantic Segmentation",
+      description: "Pixel-wise binary or multi-class segmentation. Target is a flat mask with values 0-1 per pixel.",
+      family: "segmentation",
+      trainMode: "standard",
+      metadata: {
+        taskType: "semantic_segmentation",
+        targetLayout: "pixel_mask",
+        suggestedMetrics: ["mask_iou", "dice", "pixel_accuracy"],
+      },
+    },
   ], { makeDefault: true });
 
   return taskRecipeRegistry.listRecipes();

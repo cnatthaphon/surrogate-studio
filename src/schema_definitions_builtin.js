@@ -3580,6 +3580,47 @@
     }
   });
 
+  // ===== SYNTHETIC SEGMENTATION =====
+  registerSchema({
+    id: "synthetic_segmentation",
+    label: "synthetic_segmentation",
+    description: "Synthetic binary segmentation — predict pixel mask for random shapes",
+    taskRecipeId: "segmentation_mask",
+    dataset: {
+      id: "synthetic_segmentation",
+      label: "Synthetic Segmentation Images",
+      sampleType: "image",
+      splitUnit: "sample",
+      splitDefaults: { mode: "random", train: 0.70, val: 0.15, test: 0.15 },
+      metadata: {
+        ui: { sidebarMode: "generic", viewer: "image" },
+        splitModes: [
+          { id: "random", label: "Random (global)", stratifyKey: "" }
+        ],
+      }
+    },
+    model: {
+      outputs: [
+        { key: "mask", label: "Segmentation mask (per-pixel)", headType: "segmentation" }
+      ],
+      params: [],
+      presets: [],
+      metadata: {
+        featureNodes: {
+          imageSource: [
+            { key: "pixel_values", label: "pixel values (32x32)", featureSize: 1024, shape: [32, 32, 1] }
+          ],
+          policy: { allowHistory: false, allowWindowHistory: false, allowParams: false, allowOneHot: false, allowImageSource: true },
+          palette: { items: _imagePaletteItems() }
+        }
+      },
+    },
+    preconfig: {
+      dataset: { defaultModuleId: "synthetic_segmentation", splitDefaults: { mode: "random", train: 0.70, val: 0.15, test: 0.15 } },
+      model: { defaultPreset: "" },
+    }
+  });
+
   // ===== AIS TRAJECTORY =====
   registerSchema({
     id: "ais_trajectory",
