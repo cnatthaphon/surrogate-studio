@@ -245,7 +245,8 @@ def main():
     # head_configs already extracted above from config
     is_classification = _is_all_cls
     # check if any head uses BCE (needs float labels, not int)
-    _any_bce = any(str(hc.get("loss", "")).lower() == "bce" for hc in head_configs) if head_configs else False
+    _bce_aliases = {"bce", "binarycrossentropy", "binary_crossentropy"}
+    _any_bce = any(str(hc.get("loss", "")).lower().replace("_", "").replace("-", "") in _bce_aliases or str(hc.get("loss", "")).lower() in _bce_aliases for hc in head_configs) if head_configs else False
     if is_classification and not _any_bce:
         loss_fn = nn.CrossEntropyLoss()
         # CrossEntropyLoss expects integer labels, not one-hot float
@@ -301,7 +302,7 @@ def main():
         # explicit loss field takes priority
         if hl == "none":
             head_losses.append({"fn": None, "weight": 0, "phase": hp, "cls": False, "skip": True})
-        elif hl == "bce":
+        elif hl in ("bce", "binarycrossentropy", "binary_crossentropy"):
             head_losses.append({"fn": nn.BCELoss(), "weight": hw, "phase": hp, "cls": False, "bce_binary": True})
         elif hl in ("wasserstein", "wgan"):
             # Wasserstein loss: -mean(truth * pred)
@@ -1241,7 +1242,7 @@ def build_model_from_graph(graph, feature_size, target_size, num_classes=0):
                     node_units = int(c.get("units", c.get("unitsHint", 0)) or 0)
                     if node_units > 0:
                         odim = node_units
-                    elif oloss == "bce":
+                    elif oloss in ("bce", "binarycrossentropy", "binary_crossentropy"):
                         odim = 1
                     elif target_key in ("custom", "none", "") and out_in:
                         odim = out_in

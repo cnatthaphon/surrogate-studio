@@ -45,6 +45,15 @@ var DEMOS = [
     minEvaluations: 1,
   },
   {
+    name: "Synthetic Segmentation",
+    file: path.join(ROOT, "demo", "Synthetic-Segmentation", "index.html"),
+    presetKey: "SYNTHETIC_SEGMENTATION_PRESET",
+    minModels: 2,
+    minTrainers: 2,
+    minGenerations: 0,
+    minEvaluations: 1,
+  },
+  {
     name: "Synthetic Detection",
     file: path.join(ROOT, "demo", "Synthetic-Detection", "index.html"),
     presetKey: "SYNTHETIC_DETECTION_PRESET",

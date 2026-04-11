@@ -1055,7 +1055,7 @@
             units = upstreamUnits || 1;
             outTensors.push(inForHead);
             generated.push(inForHead);
-          } else if (lossName === "bce") {
+          } else if (lossName === "bce" || lossName === "binarycrossentropy" || lossName === "binary_crossentropy") {
             // BCE: binary output (1 unit, sigmoid)
             units = Number(odata.units || 1);
             act = "sigmoid";

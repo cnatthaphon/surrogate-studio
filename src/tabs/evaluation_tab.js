@@ -75,7 +75,10 @@
       class_macro_f1: { dir: "higher", text: "Macro F1 for the detection class head." },
       acc: { dir: "higher", text: "Classification accuracy." },
       f1: { dir: "higher", text: "F1 score." },
-      auc_macro: { dir: "higher", text: "Macro-averaged AUC." }
+      auc_macro: { dir: "higher", text: "Macro-averaged AUC." },
+      mask_iou: { dir: "higher", text: "Mean IoU between predicted and target binary masks." },
+      dice: { dir: "higher", text: "Dice score (F1 at pixel level) between predicted and target masks." },
+      pixel_accuracy: { dir: "higher", text: "Fraction of correctly classified pixels." }
     };
 
     // init custom table
@@ -127,6 +130,10 @@
         list.push({ id: "bbox_bias", name: "BBox Bias", mode: "test" });
         list.push({ id: "class_accuracy", name: "Class Accuracy", mode: "test" });
         list.push({ id: "class_macro_f1", name: "Class Macro F1", mode: "test" });
+      } else if (predictiveMode === "segmentation") {
+        list.push({ id: "mask_iou", name: "Mask IoU", mode: "test" });
+        list.push({ id: "dice", name: "Dice Score", mode: "test" });
+        list.push({ id: "pixel_accuracy", name: "Pixel Accuracy", mode: "test" });
       } else {
         list.push({ id: "mae", name: "MAE", mode: "test" });
         list.push({ id: "rmse", name: "RMSE", mode: "test" });
@@ -1191,6 +1198,16 @@
         if (clsHead && Array.isArray(clsHead.predictions)) _applyClassificationMetrics(pc, r, "class_", selectedIds, clsHead.predictions, testLabels, nCls);
         return;
       }
+      if (predictiveMode === "segmentation") {
+        var segPreds = _resolvePredictionRows(predictionResult, predictiveMode);
+        if (pc && typeof pc.computeSegmentationMetrics === "function" && segPreds.length) {
+          var segMetrics = pc.computeSegmentationMetrics(segPreds, testY, 0.5);
+          if (selectedIds.indexOf("mask_iou") >= 0) r.metrics.mask_iou = segMetrics.mask_iou;
+          if (selectedIds.indexOf("dice") >= 0) r.metrics.dice = segMetrics.dice;
+          if (selectedIds.indexOf("pixel_accuracy") >= 0) r.metrics.pixel_accuracy = segMetrics.pixel_accuracy;
+        }
+        return;
+      }
       _applyRegressionMetrics(pc, r, "", selectedIds, _resolvePredictionRows(predictionResult, predictiveMode), testY, testN);
     }
 
@@ -1497,7 +1514,7 @@
       if (predictiveMode !== "detection" && modelRec && modelRec.graph && modelBuilder && typeof modelBuilder.inferOutputHeads === "function") {
         var outputHeads = modelBuilder.inferOutputHeads(modelRec.graph, allowedOutputKeys, defaultTarget);
         var modelHeadType = outputHeads.length && outputHeads[0].headType ? String(outputHeads[0].headType).trim().toLowerCase() : "";
-        if (modelHeadType === "classification" || modelHeadType === "reconstruction") predictiveMode = modelHeadType;
+        if (modelHeadType === "classification" || modelHeadType === "reconstruction" || modelHeadType === "segmentation") predictiveMode = modelHeadType;
       }
       var selectedEvaluatorDefs = _resolveSelectedEvaluators(ev, predictiveMode);
       var runNeeds = _resolveRunNeeds(ev, selectedEvaluatorDefs);
