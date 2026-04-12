@@ -4,6 +4,8 @@
   "description": "A schema-driven ML experimentation platform.",
   "main": "src/workflow_api_core.js",
   "scripts": {
+    "start": "node server/training_server.js",
+    "build": "bash scripts/build_bundle.sh",
     "server:start": "node server/training_server.js",
     "server:install:py": "python3 -m pip install -r server/requirements.txt",
     "test": "node scripts/test_contract_all.js",

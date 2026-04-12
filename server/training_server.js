@@ -541,8 +541,29 @@ var server = http.createServer(function (req, res) {
     }
   }
 
-  res.writeHead(404);
-  res.end("Not found");
+  // --- Static file serving (fallback for non-API routes) ---
+  var PROJECT_ROOT = path.resolve(__dirname, "..");
+  var STATIC_MIME = {
+    ".html": "text/html", ".js": "application/javascript", ".css": "text/css",
+    ".json": "application/json", ".png": "image/png", ".jpg": "image/jpeg",
+    ".gif": "image/gif", ".svg": "image/svg+xml", ".ico": "image/x-icon",
+    ".woff": "font/woff", ".woff2": "font/woff2",
+  };
+  var safePath = path.normalize(decodeURIComponent(pathname)).replace(/\.\./g, "");
+  var filePath = path.join(PROJECT_ROOT, safePath);
+  if (filePath.endsWith(path.sep) || filePath.endsWith("/")) filePath += "index.html";
+
+  fs.stat(filePath, function (err, stat) {
+    if (err || !stat || !stat.isFile()) {
+      res.writeHead(404);
+      res.end("Not found");
+      return;
+    }
+    var ext = path.extname(filePath).toLowerCase();
+    var mime = STATIC_MIME[ext] || "application/octet-stream";
+    res.writeHead(200, { "Content-Type": mime, "Cache-Control": "no-cache" });
+    fs.createReadStream(filePath).pipe(res);
+  });
 });
 
 server.listen(PORT, function () {
