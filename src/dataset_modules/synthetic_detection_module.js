@@ -400,7 +400,12 @@
         renderGrid(mountEl, deps && deps.datasetData ? deps.datasetData : {});
       },
       renderPlayground: function (mountEl, deps) {
-        renderGrid(mountEl, deps && deps.datasetData ? deps.datasetData : {});
+        var dsData = deps && deps.datasetData ? deps.datasetData : {};
+        // If no data yet, generate a quick preview
+        if (!dsData.xTrain || !dsData.xTrain.length) {
+          dsData = buildDataset({ seed: 42, totalCount: 30, trainFrac: 1, valFrac: 0, testFrac: 0 });
+        }
+        renderGrid(mountEl, dsData);
       },
       getEvaluators: function () {
         return [{
