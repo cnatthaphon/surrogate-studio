@@ -67,6 +67,28 @@
     return { images: images, bboxes: bboxes, count: count, dim: dim };
   }
 
+  var DATA_SCRIPT_URL = "demo/SAR-Ship-Detection/hrsid_ships_64x64.js";
+
+  function _lazyLoadData() {
+    var W = typeof window !== "undefined" ? window : {};
+    if (W.HRSID_SHIPS_DATA_B64) return Promise.resolve();
+    return new Promise(function (resolve, reject) {
+      // Try to find the script relative to document or known paths
+      var basePaths = ["../../", "../../../", "./", "/"];
+      var doc = typeof document !== "undefined" ? document : null;
+      if (!doc) { reject(new Error("No document")); return; }
+      function tryNext(i) {
+        if (i >= basePaths.length) { reject(new Error("Could not load HRSID data")); return; }
+        var s = doc.createElement("script");
+        s.src = basePaths[i] + DATA_SCRIPT_URL;
+        s.onload = function () { if (W.HRSID_SHIPS_DATA_B64) resolve(); else tryNext(i + 1); };
+        s.onerror = function () { tryNext(i + 1); };
+        doc.head.appendChild(s);
+      }
+      tryNext(0);
+    });
+  }
+
   function buildDataset(cfg) {
     var c = cfg || {};
     var seed = clampInt(c.seed, 0, 2147483647) || 42;
@@ -74,14 +96,19 @@
 
     var data = decodeData();
     if (!data || !data.count) {
-      return {
-        schemaId: "sar_ship_detection", datasetModuleId: "hrsid_ship",
-        taskRecipeId: "detection_single_box", mode: "detection",
-        imageShape: [IMAGE_H, IMAGE_W, 1], featureSize: FEATURE_SIZE, targetSize: 4,
-        targetMode: "bbox", numClasses: 1, classCount: 1, classNames: ["ship"],
-        seed: seed, trainCount: 0, valCount: 0, testCount: 0,
-        xTrain: [], yTrain: [], xVal: [], yVal: [], xTest: [], yTest: [],
-      };
+      // Try lazy load, then rebuild
+      return _lazyLoadData().then(function () {
+        return buildDataset(cfg);
+      }).catch(function () {
+        return {
+          schemaId: "sar_ship_detection", datasetModuleId: "hrsid_ship",
+          taskRecipeId: "detection_single_box", mode: "detection",
+          imageShape: [IMAGE_H, IMAGE_W, 1], featureSize: FEATURE_SIZE, targetSize: 4,
+          targetMode: "bbox", numClasses: 1, classCount: 1, classNames: ["ship"],
+          seed: seed, trainCount: 0, valCount: 0, testCount: 0,
+          xTrain: [], yTrain: [], xVal: [], yVal: [], xTest: [], yTest: [],
+        };
+      });
     }
 
     // Shuffle
@@ -138,7 +165,11 @@
 
     var data = decodeData();
     if (!data) {
-      mountEl.appendChild(el("div", { style: "color:#fbbf24;font-size:12px;" }, "Dataset not loaded. Include hrsid_ships_64x64.js."));
+      mountEl.appendChild(el("div", { style: "color:#fbbf24;font-size:12px;" }, "Loading SAR data..."));
+      _lazyLoadData().then(function () { renderPlayground(mountEl, deps); }).catch(function () {
+        mountEl.innerHTML = "";
+        mountEl.appendChild(el("div", { style: "color:#f87171;font-size:12px;" }, "SAR data not available. Open the demo page directly: demo/SAR-Ship-Detection/"));
+      });
       return;
     }
 
