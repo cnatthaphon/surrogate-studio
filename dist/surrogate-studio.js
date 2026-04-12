@@ -1,5 +1,5 @@
 // Surrogate Studio — concatenated bundle
-// Generated: 2026-04-12T06:43:16Z
+// Generated: 2026-04-15T09:36:30Z
 // Source files: 57
 
 
@@ -8261,7 +8261,12 @@
         renderGrid(mountEl, deps && deps.datasetData ? deps.datasetData : {});
       },
       renderPlayground: function (mountEl, deps) {
-        renderGrid(mountEl, deps && deps.datasetData ? deps.datasetData : {});
+        var dsData = deps && deps.datasetData ? deps.datasetData : {};
+        // If no data yet and no source descriptor, generate a quick preview
+        if ((!dsData.xTrain || !dsData.xTrain.length) && !dsData.sourceDescriptor) {
+          dsData = buildDataset({ seed: 42, totalCount: 30, trainFrac: 1, valFrac: 0, testFrac: 0 });
+        }
+        renderGrid(mountEl, dsData);
       },
       getEvaluators: function () {
         return [{
@@ -8574,12 +8579,52 @@
     return { images: images, masks: masks, count: count, dim: dim };
   }
 
+  var DATA_SCRIPT_URL = "demo/Cell-Nuclei-Segmentation/dsb2018_32x32_data.js";
+
+  function _lazyLoadData() {
+    var W = typeof window !== "undefined" ? window : {};
+    if (W.DSB2018_DATA_B64) return Promise.resolve();
+    return new Promise(function (resolve, reject) {
+      var doc = typeof document !== "undefined" ? document : null;
+      if (!doc) { reject(new Error("No document")); return; }
+      var basePaths = ["../../", "../../../", "./", "/"];
+      function tryNext(i) {
+        if (i >= basePaths.length) { reject(new Error("Could not load DSB2018 data")); return; }
+        var s = doc.createElement("script");
+        s.src = basePaths[i] + DATA_SCRIPT_URL;
+        s.onload = function () { if (W.DSB2018_DATA_B64) resolve(); else tryNext(i + 1); };
+        s.onerror = function () { tryNext(i + 1); };
+        doc.head.appendChild(s);
+      }
+      tryNext(0);
+    });
+  }
+
   function buildDataset(cfg) {
     var c = cfg || {};
     var seed = clampInt(c.seed, 0, 2147483647) || 42;
     var rng = createRng(seed);
 
+    var W = typeof window !== "undefined" ? window : {};
     var data = decodeData();
+
+    // Missing script — try lazy load
+    if (!data && !W.DSB2018_DATA_B64) {
+      return _lazyLoadData().then(function () {
+        return buildDataset(cfg);
+      }).catch(function () {
+        return {
+          schemaId: "dsb2018_segmentation", datasetModuleId: "dsb2018_segmentation",
+          taskRecipeId: "segmentation_mask", mode: "segmentation",
+          imageShape: [IMAGE_H, IMAGE_W, 1], featureSize: FEATURE_SIZE, targetSize: FEATURE_SIZE,
+          targetMode: "mask", numClasses: 2, classCount: 2, classNames: ["background", "nucleus"],
+          seed: seed, trainCount: 0, valCount: 0, testCount: 0,
+          xTrain: [], yTrain: [], xVal: [], yVal: [], xTest: [], yTest: [],
+        };
+      });
+    }
+
+    // Present but empty/invalid payload — return empty dataset, don't retry
     if (!data || !data.count) {
       return {
         schemaId: "dsb2018_segmentation", datasetModuleId: "dsb2018_segmentation",
@@ -8645,7 +8690,11 @@
 
     var data = decodeData();
     if (!data) {
-      mountEl.appendChild(el("div", { style: "color:#fbbf24;font-size:12px;" }, "Dataset not loaded. Include dsb2018_32x32_data.js."));
+      mountEl.appendChild(el("div", { style: "color:#fbbf24;font-size:12px;" }, "Loading cell nuclei data..."));
+      _lazyLoadData().then(function () { renderPlayground(mountEl, deps); }).catch(function () {
+        mountEl.innerHTML = "";
+        mountEl.appendChild(el("div", { style: "color:#f87171;font-size:12px;" }, "Cell nuclei data not available. Open the demo page directly: demo/Cell-Nuclei-Segmentation/"));
+      });
       return;
     }
 
@@ -9181,12 +9230,53 @@
     return { images: images, bboxes: bboxes, count: count, dim: dim };
   }
 
+  var DATA_SCRIPT_URL = "demo/SAR-Ship-Detection/hrsid_ships_64x64.js";
+
+  function _lazyLoadData() {
+    var W = typeof window !== "undefined" ? window : {};
+    if (W.HRSID_SHIPS_DATA_B64) return Promise.resolve();
+    return new Promise(function (resolve, reject) {
+      // Try to find the script relative to document or known paths
+      var basePaths = ["../../", "../../../", "./", "/"];
+      var doc = typeof document !== "undefined" ? document : null;
+      if (!doc) { reject(new Error("No document")); return; }
+      function tryNext(i) {
+        if (i >= basePaths.length) { reject(new Error("Could not load HRSID data")); return; }
+        var s = doc.createElement("script");
+        s.src = basePaths[i] + DATA_SCRIPT_URL;
+        s.onload = function () { if (W.HRSID_SHIPS_DATA_B64) resolve(); else tryNext(i + 1); };
+        s.onerror = function () { tryNext(i + 1); };
+        doc.head.appendChild(s);
+      }
+      tryNext(0);
+    });
+  }
+
   function buildDataset(cfg) {
     var c = cfg || {};
     var seed = clampInt(c.seed, 0, 2147483647) || 42;
     var rng = createRng(seed);
 
+    var W = typeof window !== "undefined" ? window : {};
     var data = decodeData();
+
+    // Missing script — try lazy load
+    if (!data && !W.HRSID_SHIPS_DATA_B64) {
+      return _lazyLoadData().then(function () {
+        return buildDataset(cfg);
+      }).catch(function () {
+        return {
+          schemaId: "sar_ship_detection", datasetModuleId: "hrsid_ship",
+          taskRecipeId: "detection_single_box", mode: "detection",
+          imageShape: [IMAGE_H, IMAGE_W, 1], featureSize: FEATURE_SIZE, targetSize: 4,
+          targetMode: "bbox", numClasses: 1, classCount: 1, classNames: ["ship"],
+          seed: seed, trainCount: 0, valCount: 0, testCount: 0,
+          xTrain: [], yTrain: [], xVal: [], yVal: [], xTest: [], yTest: [],
+        };
+      });
+    }
+
+    // Present but empty/invalid payload
     if (!data || !data.count) {
       return {
         schemaId: "sar_ship_detection", datasetModuleId: "hrsid_ship",
@@ -9252,7 +9342,11 @@
 
     var data = decodeData();
     if (!data) {
-      mountEl.appendChild(el("div", { style: "color:#fbbf24;font-size:12px;" }, "Dataset not loaded. Include hrsid_ships_64x64.js."));
+      mountEl.appendChild(el("div", { style: "color:#fbbf24;font-size:12px;" }, "Loading SAR data..."));
+      _lazyLoadData().then(function () { renderPlayground(mountEl, deps); }).catch(function () {
+        mountEl.innerHTML = "";
+        mountEl.appendChild(el("div", { style: "color:#f87171;font-size:12px;" }, "SAR data not available. Open the demo page directly: demo/SAR-Ship-Detection/"));
+      });
       return;
     }
 
@@ -11031,6 +11125,10 @@
         if (src.indexOf("ais_module.js") >= 0) {
           return src.replace(/src\/dataset_modules\/ais_module\.js.*$/, "data/ais-dma/");
         }
+        // Bundle: dist/surrogate-studio.js → data/ais-dma/
+        if (src.indexOf("surrogate-studio.js") >= 0) {
+          return src.replace(/dist\/surrogate-studio\.js.*$/, "data/ais-dma/");
+        }
       }
     }
     return "../../data/ais-dma/";
@@ -11196,7 +11294,7 @@
         mapDiv.style.cssText = "width:100%;height:calc(100vh - 200px);min-height:450px;border-radius:8px;border:1px solid #334155;";
         mountEl.appendChild(mapDiv);
 
-        var map = L.map(mapDiv, { zoomControl: true, attributionControl: true, preferCanvas: true }).setView([56.75, 11.65], 7);
+        var map = L.map(mapDiv, { zoomControl: true, attributionControl: true, preferCanvas: true, zoomAnimation: true, zoomSnap: 1, wheelPxPerZoomLevel: 120 }).setView([56.75, 11.65], 7);
 
         // Tile layers — user selects from layer control
         var attr_osm = '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a>';
@@ -11268,71 +11366,223 @@
         var p50 = allSog[Math.floor(allSog.length * 0.5)] || 0;
         var p75 = allSog[Math.floor(allSog.length * 0.75)] || 0;
 
-        var allLats = [], allLons = [];
-        // Split layer groups for toggle
+        // Compute bounds without Math.min/max.apply (which crashes at >65K args)
+        var minLat = Infinity, maxLat = -Infinity, minLon = Infinity, maxLon = -Infinity;
+        allTrajs.forEach(function (traj) {
+          for (var i = 0; i < traj.length; i++) {
+            var lat = denormLat(Number(traj[i][0] || 0));
+            var lon = denormLon(Number(traj[i][1] || 0));
+            if (lat < minLat) minLat = lat;
+            if (lat > maxLat) maxLat = lat;
+            if (lon < minLon) minLon = lon;
+            if (lon > maxLon) maxLon = lon;
+          }
+        });
+
+        if (minLat < Infinity) {
+          map.fitBounds([[minLat, minLon], [maxLat, maxLon]], { padding: [20, 20] });
+        }
+
+        // Track split visibility for toggle
+        // Split visibility derived from map.hasLayer(splitLayerGroups[s])
+
+        // Parse turbo to raw RGB for canvas (avoid string parsing per segment)
+        function turboRgbRaw(t) {
+          t = Math.max(0, Math.min(1, t));
+          return [
+            Math.max(0, Math.min(255, Math.round(34.61 + t * (1172.33 + t * (-10793.56 + t * (33300.12 + t * (-38394.49 + t * 14825.05))))))),
+            Math.max(0, Math.min(255, Math.round(23.31 + t * (557.33 + t * (1225.33 + t * (-3574.96 + t * (1073.77 + t * 707.56))))))),
+            Math.max(0, Math.min(255, Math.round(27.2 + t * (3211.1 + t * (-15327.97 + t * (27814 + t * (-22569.18 + t * 6838.66)))))))
+          ];
+        }
+
+        // Sample trajectories for display (full data used for training)
+        var MAX_DISPLAY = 500;
+        var displayTrajs = allTrajs;
+        var totalTrajCount = allTrajs.length;
+        if (allTrajs.length > MAX_DISPLAY) {
+          // Evenly sample across all trajectories
+          var step = allTrajs.length / MAX_DISPLAY;
+          displayTrajs = [];
+          for (var di = 0; di < MAX_DISPLAY; di++) displayTrajs.push(allTrajs[Math.floor(di * step)]);
+        }
+
+        // Use Leaflet canvas renderer with sampled polylines
+        var canvasRenderer = L.canvas({ padding: 0.5 });
         var splitLayerGroups = {};
         if (showSplits) {
           ["train", "val", "test"].forEach(function (s) { splitLayerGroups[s] = L.layerGroup().addTo(map); });
         }
-        function getTargetLayer(trajIdx) {
-          if (!showSplits) return map;
-          for (var s in splitRanges) {
-            if (trajIdx >= splitRanges[s][0] && trajIdx < splitRanges[s][1]) return splitLayerGroups[s];
+
+        var _cogMarkers = [];
+        displayTrajs.forEach(function (traj, di) {
+          if (traj.length < 2) return;
+          var coords = [];
+          var avgSog = 0;
+          for (var i = 0; i < traj.length; i++) {
+            coords.push([denormLat(Number(traj[i][0] || 0)), denormLon(Number(traj[i][1] || 0))]);
+            avgSog += Number(traj[i][2] || 0);
           }
-          return map;
-        }
+          avgSog = traj.length ? avgSog / traj.length : 0;
 
-        // Draw trajectory segments + COG direction markers
-        allTrajs.forEach(function (traj, trajIdx) {
-          for (var i = 0; i < traj.length - 1; i++) {
-            var lat1 = denormLat(Number(traj[i][0] || 0));
-            var lon1 = denormLon(Number(traj[i][1] || 0));
-            var lat2 = denormLat(Number(traj[i + 1][0] || 0));
-            var lon2 = denormLon(Number(traj[i + 1][1] || 0));
-            var sog = Number(traj[i][2] || 0);
-            var cogNorm = Number(traj[i][3] || 0);
-            var cogDeg = cogNorm * 360;
-            var line = L.polyline([[lat1, lon1], [lat2, lon2]], { color: sogColor(sog), weight: 1.5, opacity: 0.7 });
-
-            // Popup: clean format
-            (function (pt, ti, si, lat, lon, spd, cog) {
-              line.bindPopup(function () {
-                return "<div style='font-size:12px;line-height:1.6;font-family:monospace;'>" +
-                  "<div style='font-weight:700;margin-bottom:4px;border-bottom:1px solid #ccc;padding-bottom:2px;'>Vessel #" + ti + " — Step " + si + "/" + traj.length + "</div>" +
-                  "<table style='border-collapse:collapse;'>" +
-                  "<tr><td style='padding:1px 8px 1px 0;color:#666;'>Position</td><td>" + lat.toFixed(4) + "°N, " + lon.toFixed(4) + "°E</td></tr>" +
-                  "<tr><td style='padding:1px 8px 1px 0;color:#666;'></td><td style='font-size:10px;color:#999;'>(norm: " + Number(pt[0]).toFixed(4) + ", " + Number(pt[1]).toFixed(4) + ")</td></tr>" +
-                  "<tr><td style='padding:1px 8px 1px 0;color:#666;'>Speed</td><td>" + spd.toFixed(4) + " <span style='font-size:10px;color:#999;'>(norm)</span></td></tr>" +
-                  "<tr><td style='padding:1px 8px 1px 0;color:#666;'>Course</td><td>" + cog.toFixed(1) + "° <span style='font-size:10px;color:#999;'>(norm: " + Number(pt[3]).toFixed(4) + ")</span></td></tr>" +
-                  "</table></div>";
-              });
-            })(traj[i], trajIdx, i, lat1, lon1, sog, cogDeg);
-            var targetLayer = getTargetLayer(trajIdx);
-            line.addTo(targetLayer);
-
-            // COG triangle marker every N steps
-            if (i % 4 === 0 && sog > 0.01) {
-              var triIcon = L.divIcon({
-                className: "",
-                html: "<div style='transform:rotate(" + (cogDeg - 90) + "deg);font-size:8px;color:" + sogColor(sog) + ";opacity:0.8;'>&#9654;</div>",
-                iconSize: [10, 10], iconAnchor: [5, 5],
-              });
-              L.marker([lat1, lon1], { icon: triIcon, interactive: false }).addTo(targetLayer);
+          // Find original index for split assignment
+          var origIdx = allTrajs.indexOf(traj);
+          var target = map;
+          if (showSplits) {
+            for (var s in splitRanges) {
+              if (origIdx >= splitRanges[s][0] && origIdx < splitRanges[s][1]) {
+                target = splitLayerGroups[s] || map;
+                break;
+              }
             }
-
-            allLats.push(lat1); allLons.push(lon1);
           }
-          if (traj.length) {
-            var last = traj[traj.length - 1];
-            allLats.push(denormLat(Number(last[0] || 0)));
-            allLons.push(denormLon(Number(last[1] || 0)));
+
+          L.polyline(coords, {
+            color: sogColor(avgSog), weight: 1.5, opacity: 0.7,
+            renderer: canvasRenderer, interactive: false
+          }).addTo(target);
+
+          // Collect COG markers with their target layer
+          for (var mi = 0; mi < traj.length; mi += 4) {
+            var msog = Number(traj[mi][2] || 0);
+            if (msog < 0.01) continue;
+            _cogMarkers.push({ lat: coords[mi][0], lon: coords[mi][1], cog: Number(traj[mi][3] || 0), sog: msog, color: sogColor(msog), target: target, trajIdx: di, step: mi, trajLen: traj.length });
           }
         });
 
-        if (allLats.length) {
-          map.fitBounds([[Math.min.apply(null, allLats), Math.min.apply(null, allLons)],
-                         [Math.max.apply(null, allLats), Math.max.apply(null, allLons)]], { padding: [20, 20] });
+        // COG direction triangles: Leaflet circleMarkers on canvas renderer
+        // with custom _updatePath to draw triangles instead of circles.
+        // All in the SAME canvas as polylines — no sync issues.
+        var TriangleMarker = L.CircleMarker.extend({
+          _updatePath: function () {
+            if (!this._renderer || !this._renderer._ctx) return;
+            var ctx = this._renderer._ctx;
+            var p = this._point;
+            if (!p) return;
+            // COG: 0 = north, 0.25 = east, 0.5 = south, 0.75 = west
+            // Canvas rotation: 0 = right. So COG 0 (north) = -π/2 rotation
+            var cogRad = (this.options.cog || 0) * 2 * Math.PI - Math.PI / 2;
+            ctx.fillStyle = this.options.fillColor || this.options.color || "#fff";
+            ctx.globalAlpha = this.options.fillOpacity || 0.85;
+            ctx.save();
+            ctx.translate(p.x, p.y);
+            ctx.rotate(cogRad);
+            // Wider triangle: base=10, length=8
+            ctx.beginPath();
+            ctx.moveTo(8, 0);
+            ctx.lineTo(-4, -5);
+            ctx.lineTo(-4, 5);
+            ctx.closePath();
+            ctx.fill();
+            ctx.restore();
+            ctx.globalAlpha = 1;
+          },
+          // Hit detection for hover/click
+          _containsPoint: function (p) {
+            return this._point && this._point.distanceTo(p) <= 10;
+          }
+        });
+
+        _cogMarkers.forEach(function (m) {
+          var tri = new TriangleMarker([m.lat, m.lon], {
+            radius: 0, cog: m.cog, color: m.color, fillColor: m.color,
+            fillOpacity: 0.85, weight: 0, renderer: canvasRenderer, interactive: true,
+            bubblingMouseEvents: false,
+          });
+          tri.bindPopup(
+            "<div style='font-size:12px;line-height:1.6;font-family:monospace;'>" +
+            "<div style='font-weight:700;margin-bottom:4px;border-bottom:1px solid #ccc;padding-bottom:2px;'>Vessel #" + m.trajIdx + " — Step " + m.step + "/" + m.trajLen + "</div>" +
+            "<table style='border-collapse:collapse;'>" +
+            "<tr><td style='padding:1px 8px 1px 0;color:#666;'>Position</td><td>" + m.lat.toFixed(4) + "°N, " + m.lon.toFixed(4) + "°E</td></tr>" +
+            "<tr><td style='padding:1px 8px 1px 0;color:#666;'>Speed</td><td>" + m.sog.toFixed(4) + " <span style='font-size:10px;color:#999;'>(norm)</span></td></tr>" +
+            "<tr><td style='padding:1px 8px 1px 0;color:#666;'>Course</td><td>" + (m.cog * 360).toFixed(1) + "°</td></tr>" +
+            "</table></div>"
+          );
+          tri.addTo(m.target);
+        });
+
+        // Info text
+        var infoText = totalTrajCount + " trajectories";
+        if (displayTrajs.length < totalTrajCount) infoText += " (showing " + displayTrajs.length + " sampled)";
+        infoText += " | Color: speed (blue=slow, red=fast) | Max SOG: " + maxSog.toFixed(2);
+        mountEl.appendChild(el("div", { style: "font-size:10px;color:#64748b;margin-top:4px;" }, infoText));
+
+        // Split toggle checkboxes
+        if (showSplits) {
+          var splitColors = { train: "#3b82f6", val: "#f59e0b", test: "#ef4444" };
+          var splitControl = L.control({ position: "topright" });
+          splitControl.onAdd = function () {
+            var div = L.DomUtil.create("div");
+            div.style.cssText = "background:rgba(0,0,0,0.7);padding:6px 10px;border-radius:4px;font-size:11px;color:#e2e8f0;";
+            L.DomEvent.disableClickPropagation(div);
+            L.DomEvent.disableScrollPropagation(div);
+            ["train", "val", "test"].forEach(function (s) {
+              var count = splitRanges[s][1] - splitRanges[s][0];
+              var label = L.DomUtil.create("label", "", div);
+              label.style.cssText = "display:flex;align-items:center;gap:4px;cursor:pointer;margin:2px 0;";
+              var cb = L.DomUtil.create("input", "", label);
+              cb.type = "checkbox";
+              cb.checked = true;
+              var samples = 0;
+              for (var ti = splitRanges[s][0]; ti < splitRanges[s][1]; ti++) samples += allTrajs[ti] ? allTrajs[ti].length : 0;
+              var span = L.DomUtil.create("span", "", label);
+              span.style.color = splitColors[s];
+              span.textContent = s + " (" + count + " traj, " + samples + " samples)";
+              cb.addEventListener("change", function () {
+                if (splitLayerGroups[s]) {
+                  if (cb.checked) splitLayerGroups[s].addTo(map);
+                  else map.removeLayer(splitLayerGroups[s]);
+                }
+              });
+            });
+            return div;
+          };
+          splitControl.addTo(map);
         }
+
+        // Click handler: find nearest trajectory
+        map.on("click", function (e) {
+          var clickPt = map.latLngToContainerPoint(e.latlng);
+          var bestDist = 20; // pixel threshold
+          var bestIdx = -1;
+          var bestStep = -1;
+          for (var ti = 0; ti < displayTrajs.length; ti++) {
+            // Check split visibility via actual map layer state
+            if (showSplits) {
+              var origIdx = allTrajs.indexOf(displayTrajs[ti]);
+              var layerVisible = true;
+              for (var s in splitRanges) {
+                if (origIdx >= splitRanges[s][0] && origIdx < splitRanges[s][1]) {
+                  layerVisible = !splitLayerGroups[s] || map.hasLayer(splitLayerGroups[s]);
+                  break;
+                }
+              }
+              if (!layerVisible) continue;
+            }
+            var traj = displayTrajs[ti];
+            for (var si = 0; si < traj.length; si++) {
+              var pt = map.latLngToContainerPoint([denormLat(Number(traj[si][0])), denormLon(Number(traj[si][1]))]);
+              var dx = pt.x - clickPt.x, dy = pt.y - clickPt.y;
+              var dist = Math.sqrt(dx * dx + dy * dy);
+              if (dist < bestDist) { bestDist = dist; bestIdx = ti; bestStep = si; }
+            }
+          }
+          if (bestIdx >= 0) {
+            var tr = displayTrajs[bestIdx];
+            var pt0 = tr[bestStep];
+            L.popup()
+              .setLatLng([denormLat(Number(pt0[0])), denormLon(Number(pt0[1]))])
+              .setContent(
+                "<div style='font-size:12px;font-family:monospace;'>" +
+                "<b>Vessel #" + bestIdx + "</b> — Step " + bestStep + "/" + tr.length +
+                "<br>Lat: " + denormLat(Number(pt0[0])).toFixed(4) + "°N" +
+                "<br>Lon: " + denormLon(Number(pt0[1])).toFixed(4) + "°E" +
+                "<br>Speed: " + Number(pt0[2]).toFixed(4) + " (norm)" +
+                "<br>Course: " + (Number(pt0[3]) * 360).toFixed(1) + "°</div>"
+              )
+              .openOn(map);
+          }
+        });
 
         // SOG color bar legend
         var legend = L.control({ position: "bottomright" });
@@ -11354,27 +11604,11 @@
         };
         legend.addTo(map);
 
-        // Split toggle control (only on dataset tab)
-        if (showSplits && Object.keys(splitLayerGroups).length) {
-          // Show sample counts from generated data if available
-          var dsData = (deps && deps.datasetData) || {};
-          var splitOverlays = {};
-          var genCounts = dsData.numTrajectories || {};
-          ["train", "val", "test"].forEach(function (s) {
-            var displayed = splitRanges[s] ? splitRanges[s][1] - splitRanges[s][0] : 0;
-            var actualTrajs = genCounts[s] || displayed;
-            var sampleKey = "x" + s.charAt(0).toUpperCase() + s.slice(1);
-            var sampleCount = dsData[sampleKey] ? dsData[sampleKey].length : 0;
-            var label = s + " (" + actualTrajs + " traj" + (sampleCount ? ", " + sampleCount + " samples" : "") + ")";
-            if (displayed > 0 || sampleCount > 0) splitOverlays[label] = splitLayerGroups[s];
-          });
-          L.control.layers(null, splitOverlays, { collapsed: false, position: "topright" }).addTo(map);
-        }
+        // Split toggle handled by custom checkboxes above (line ~430)
 
         // Store bounds for center button
-        var dataBounds = allLats.length ? L.latLngBounds(
-          [Math.min.apply(null, allLats), Math.min.apply(null, allLons)],
-          [Math.max.apply(null, allLats), Math.max.apply(null, allLons)]
+        var dataBounds = minLat < Infinity ? L.latLngBounds(
+          [minLat, minLon], [maxLat, maxLon]
         ) : null;
 
         // Center trajectories button
@@ -11449,10 +11683,10 @@
 
   var playgroundApi = {
     renderDataset: function (mountEl, deps) {
-      _renderTrajectoryMap(mountEl, deps, { title: "AIS Dataset", limit: 100, showSplits: true });
+      _renderTrajectoryMap(mountEl, deps, { title: "AIS Dataset", limit: 99999, showSplits: true });
     },
     renderPlayground: function (mountEl, deps) {
-      _renderTrajectoryMap(mountEl, deps, { title: "AIS Trajectory Explorer", limit: 120 });
+      _renderTrajectoryMap(mountEl, deps, { title: "AIS Trajectory Explorer", limit: 99999 });
     },
   };
 
