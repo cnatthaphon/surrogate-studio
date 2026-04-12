@@ -1,10 +1,10 @@
 # Surrogate Studio
 
-![Status](https://img.shields.io/badge/status-active%20development-brightgreen) ![Models](https://img.shields.io/badge/models-26-blue) ![Demos](https://img.shields.io/badge/demos-10-orange)
+![Status](https://img.shields.io/badge/status-active%20development-brightgreen) ![Models](https://img.shields.io/badge/models-26-blue) ![Demos](https://img.shields.io/badge/demos-15-orange)
 
 **A schema-driven, browser-first ML experimentation platform.**
 
-**[Live Demo](https://cnatthaphon.github.io/surrogate-studio/)** | [Benchmark](https://cnatthaphon.github.io/surrogate-studio/demo/Fashion-MNIST-Benchmark/) | [GAN](https://cnatthaphon.github.io/surrogate-studio/demo/Fashion-MNIST-GAN/) | [Diffusion](https://cnatthaphon.github.io/surrogate-studio/demo/Fashion-MNIST-Diffusion/) | [Conditional Diffusion](https://cnatthaphon.github.io/surrogate-studio/demo/Fashion-MNIST-Conditional-Diffusion/) | [UNet](https://cnatthaphon.github.io/surrogate-studio/demo/Fashion-MNIST-UNet/) | [Synthetic Detection](https://cnatthaphon.github.io/surrogate-studio/demo/Synthetic-Detection/) | [Transformer](https://cnatthaphon.github.io/surrogate-studio/demo/Fashion-MNIST-Transformer/) | [TrAISformer](https://cnatthaphon.github.io/surrogate-studio/demo/TrAISformer/) | [LSTM-VAE](https://cnatthaphon.github.io/surrogate-studio/demo/LSTM-VAE-for-dominant-motion-extraction/) | [Oscillator](https://cnatthaphon.github.io/surrogate-studio/demo/Oscillator-Surrogate/)
+**[Live Demo](https://cnatthaphon.github.io/surrogate-studio/)** | [Benchmark](https://cnatthaphon.github.io/surrogate-studio/demo/Fashion-MNIST-Benchmark/) | [GAN](https://cnatthaphon.github.io/surrogate-studio/demo/Fashion-MNIST-GAN/) | [Diffusion](https://cnatthaphon.github.io/surrogate-studio/demo/Fashion-MNIST-Diffusion/) | [Conditional Diffusion](https://cnatthaphon.github.io/surrogate-studio/demo/Fashion-MNIST-Conditional-Diffusion/) | [UNet](https://cnatthaphon.github.io/surrogate-studio/demo/Fashion-MNIST-UNet/) | [Synthetic Detection](https://cnatthaphon.github.io/surrogate-studio/demo/Synthetic-Detection/) | [Transformer](https://cnatthaphon.github.io/surrogate-studio/demo/Fashion-MNIST-Transformer/) | [TrAISformer](https://cnatthaphon.github.io/surrogate-studio/demo/TrAISformer/) | [LSTM-VAE](https://cnatthaphon.github.io/surrogate-studio/demo/LSTM-VAE-for-dominant-motion-extraction/) | [Oscillator](https://cnatthaphon.github.io/surrogate-studio/demo/Oscillator-Surrogate/) | [Segmentation](https://cnatthaphon.github.io/surrogate-studio/demo/Synthetic-Segmentation/) | [Cell Nuclei](https://cnatthaphon.github.io/surrogate-studio/demo/Cell-Nuclei-Segmentation/) | [Text NLP](https://cnatthaphon.github.io/surrogate-studio/demo/Text-Sentiment-Transformer/) | [Siamese](https://cnatthaphon.github.io/surrogate-studio/demo/Siamese-Shape-Verification/) | [SAR Ship](https://cnatthaphon.github.io/surrogate-studio/demo/SAR-Ship-Detection/)
 
 **[Contributing](CONTRIBUTING.md)** | **[Developer Docs](docs/README.md)** | **[Server Notes](server/README.md)** | **[Schema Notes](schemas/README.md)**
 
@@ -183,6 +183,38 @@ Live: [GitHub Pages](https://cnatthaphon.github.io/surrogate-studio/demo/Oscilla
 | **VAE+Classifier** | 8,605 | **0.0251** | **0.970** |
 | Denoising AE | 7,138 | 0.0420 | 0.944 |
 
+### [Synthetic Segmentation](demo/Synthetic-Segmentation/) — Binary Mask Prediction
+
+Live: [GitHub Pages](https://cnatthaphon.github.io/surrogate-studio/demo/Synthetic-Segmentation/) | Guide: [README](demo/Synthetic-Segmentation/README.md)
+
+Pixel-wise binary segmentation on synthetic shape images. Demonstrates the `segmentation_mask` task recipe with mask-specific evaluation metrics (IoU, Dice, pixel accuracy). UNet-style skip connections vs MLP baseline.
+
+### [Cell Nuclei Segmentation](demo/Cell-Nuclei-Segmentation/) — Real UNet on Biomedical Data
+
+Live: [GitHub Pages](https://cnatthaphon.github.io/surrogate-studio/demo/Cell-Nuclei-Segmentation/) | Guide: [README](demo/Cell-Nuclei-Segmentation/README.md)
+
+Binary segmentation of cell nuclei from real microscopy images (2018 Data Science Bowl). The same class of biomedical task the original UNet paper targets. 300 samples, 32×32 grayscale, evaluated with IoU/Dice.
+
+> Reference: Ronneberger et al., *"U-Net: Convolutional Networks for Biomedical Image Segmentation"*, MICCAI 2015.
+
+### [Text Sentiment Transformer](demo/Text-Sentiment-Transformer/) — NLP Classification
+
+Live: [GitHub Pages](https://cnatthaphon.github.io/surrogate-studio/demo/Text-Sentiment-Transformer/) | Guide: [README](demo/Text-Sentiment-Transformer/README.md)
+
+Transformer-based text classification on synthetic sentiment data. Standard NLP pipeline: tokenize → embed → self-attention → pool → classify. Compares Transformer vs LSTM vs MLP on the same text data.
+
+### [Siamese Shape Verification](demo/Siamese-Shape-Verification/) — Metric Learning
+
+Live: [GitHub Pages](https://cnatthaphon.github.io/surrogate-studio/demo/Siamese-Shape-Verification/) | Guide: [README](demo/Siamese-Shape-Verification/README.md)
+
+Pair-based similarity classification for verification tasks. Learns to compare image pairs as same or different. Demonstrates the contrastive/metric learning paradigm using standard classification.
+
+### [SAR Ship Detection](demo/SAR-Ship-Detection/) — Radar Satellite Object Detection
+
+Live: [GitHub Pages](https://cnatthaphon.github.io/surrogate-studio/demo/SAR-Ship-Detection/) | Guide: [README](demo/SAR-Ship-Detection/README.md)
+
+Ship detection on real SAR (Synthetic Aperture Radar) satellite images from the HRSID dataset. Bounding box regression on 64×64 radar patches. Part of the maritime AI portfolio alongside TrAISformer vessel trajectory prediction.
+
 ---
 
 ## Tabs
@@ -207,6 +239,11 @@ Live: [GitHub Pages](https://cnatthaphon.github.io/surrogate-studio/demo/Oscilla
 | `fashion_mnist` | Image | 28x28 grayscale, 10 classes | Lazy-fetch from CDN |
 | `cifar10` | Image | 32x32 RGB, 10 classes | Lazy-fetch from CDN |
 | `synthetic_detection` | Image | 32x32 grayscale, bbox + class label | Built-in |
+| `synthetic_segmentation` | Image | 32x32 grayscale, binary pixel mask | Built-in |
+| `dsb2018_segmentation` | Image | 32x32 microscopy, nucleus binary mask | Embedded (800KB) |
+| `text_classification` | Text | 12-token sentiment sequences, 120-word vocab | Built-in |
+| `siamese_pairs` | Pair | 28x28 shape pairs, same/different classification | Built-in |
+| `sar_ship_detection` | Image | 64x64 SAR radar, ship bounding box | Embedded (1.6MB) |
 | `ais_trajectory` | Trajectory | Window of (lat, lon, sog, cog), predict next position | Built-in |
 | `ant_trajectory` | Trajectory | 20 ants x (x,y), 40 features | Demo plugin |
 
@@ -251,6 +288,11 @@ https://cnatthaphon.github.io/surrogate-studio/demo/Fashion-MNIST-Transformer/
 https://cnatthaphon.github.io/surrogate-studio/demo/TrAISformer/
 https://cnatthaphon.github.io/surrogate-studio/demo/LSTM-VAE-for-dominant-motion-extraction/
 https://cnatthaphon.github.io/surrogate-studio/demo/Oscillator-Surrogate/
+https://cnatthaphon.github.io/surrogate-studio/demo/Synthetic-Segmentation/
+https://cnatthaphon.github.io/surrogate-studio/demo/Cell-Nuclei-Segmentation/
+https://cnatthaphon.github.io/surrogate-studio/demo/Text-Sentiment-Transformer/
+https://cnatthaphon.github.io/surrogate-studio/demo/Siamese-Shape-Verification/
+https://cnatthaphon.github.io/surrogate-studio/demo/SAR-Ship-Detection/
 ```
 
 Each demo README linked above explains how to use that demo inside the app.
@@ -265,28 +307,25 @@ Notebook execution is different from the pure browser demos:
 Open `index.html` in Chrome/Edge (works on `file://`)
 ```
 
-Or serve locally:
+### Local Server (recommended)
 
 ```bash
-npx serve .
-# -> http://localhost:3000
+npm install
+npm start
+# → http://localhost:3777
 ```
+
+Opens the full platform: browser training (TF.js), PyTorch server training, notebook execution, and all demos — from a single URL. CUDA is used automatically if available.
 
 ### Demo
 
+Open any demo directly:
+
 ```
-Open demo/Fashion-MNIST-Benchmark/index.html
+http://localhost:3777/demo/Fashion-MNIST-Benchmark/
 ```
 
-Dataset loads from CDN. Select a trainer, click **Start Training**, watch the loss curve.
-
-### PyTorch Server (optional, faster)
-
-```bash
-cd server
-npm install
-node training_server.js
-```
+Dataset loads from CDN (or embedded data). Select a trainer, click **Start Training**, watch the loss curve.
 
 Check `Use PyTorch Server` in the Trainer config before training. CUDA will be used if available.
 
@@ -383,14 +422,21 @@ node scripts/test_cross_runtime_weights.js
 | Dosovitskiy et al. — "An Image is Worth 16x16 Words" | 2021 | Transformer |
 | Nguyen et al. — "TrAISformer — A generative transformer for AIS trajectory prediction" | 2021 | TrAISformer |
 | Song et al. — "Score-Based Generative Modeling through Stochastic Differential Equations" | 2021 | Diffusion |
+| Ronneberger, Fischer, Brox — "U-Net: Convolutional Networks for Biomedical Image Segmentation" | 2015 | UNet, Cell Nuclei |
+| Wei et al. — "HRSID: A High-Resolution SAR Images Dataset for Ship Detection" | 2020 | SAR Ship |
 | Jadhav & Barati Farimani — "LSTM-VAE for dominant motion extraction" | 2022 | LSTM-VAE |
 
 ## Adding a New Demo
 
-1. Create `demo/<paper-name>/`
+1. Create `demo/<name>/`
 2. Write `preset.js` with pre-configured store entries (dataset, models, trainers, generations, evaluations)
-3. Create `index.html` that loads core from `../../src/` + your preset
+3. Create `index.html` — only needs the bundle + your preset:
+   ```html
+   <script src="../../dist/surrogate-studio.js"></script>
+   <script src="./preset.js"></script>
+   ```
 4. Write `README.md` with paper citation, architecture, benchmark results
+5. Run `npm run build` to regenerate the bundle if you added new core files
 5. Capture screenshots: `node scripts/capture_demo_assets.js demo/<paper-name> 5`
 
 No core files need to change. All demos are plugins.

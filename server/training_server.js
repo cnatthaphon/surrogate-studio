@@ -529,20 +529,52 @@ var server = http.createServer(function (req, res) {
     return;
   }
 
-  // Static file serving for development (optional)
-  if (req.method === "GET" && (pathname === "/" || pathname.indexOf("..") < 0)) {
-    var filePath = path.join(__dirname, "..", pathname === "/" ? "index.html" : pathname);
-    if (fs.existsSync(filePath) && fs.statSync(filePath).isFile()) {
-      var ext = path.extname(filePath);
-      var mimes = { ".html": "text/html", ".js": "application/javascript", ".css": "text/css", ".json": "application/json", ".png": "image/png" };
-      res.writeHead(200, { "Content-Type": mimes[ext] || "application/octet-stream" });
-      fs.createReadStream(filePath).pipe(res);
-      return;
-    }
+  // --- Static file serving (single handler for all non-API GET requests) ---
+  var PROJECT_ROOT = path.resolve(__dirname, "..");
+  var STATIC_MIME = {
+    ".html": "text/html", ".js": "application/javascript", ".css": "text/css",
+    ".json": "application/json", ".png": "image/png", ".jpg": "image/jpeg",
+    ".gif": "image/gif", ".svg": "image/svg+xml", ".ico": "image/x-icon",
+    ".woff": "font/woff", ".woff2": "font/woff2",
+  };
+
+  // Safe URL decoding — return 400 on malformed
+  var decodedPath;
+  try {
+    decodedPath = decodeURIComponent(pathname);
+  } catch (e) {
+    res.writeHead(400);
+    res.end("Bad request");
+    return;
   }
 
-  res.writeHead(404);
-  res.end("Not found");
+  // Resolve and validate path stays inside PROJECT_ROOT
+  var resolved = path.resolve(PROJECT_ROOT, "." + path.normalize("/" + decodedPath));
+  if (resolved.indexOf(PROJECT_ROOT) !== 0) {
+    res.writeHead(403);
+    res.end("Forbidden");
+    return;
+  }
+  if (resolved === PROJECT_ROOT || resolved.endsWith(path.sep)) {
+    resolved = path.join(resolved, "index.html");
+  }
+
+  fs.stat(resolved, function (err, stat) {
+    if (!err && stat && stat.isDirectory()) {
+      resolved = path.join(resolved, "index.html");
+      stat = null; // re-stat below
+      try { stat = fs.statSync(resolved); } catch (_) {}
+    }
+    if (!stat || !stat.isFile()) {
+      res.writeHead(404);
+      res.end("Not found");
+      return;
+    }
+    var ext = path.extname(resolved).toLowerCase();
+    var mime = STATIC_MIME[ext] || "application/octet-stream";
+    res.writeHead(200, { "Content-Type": mime, "Cache-Control": "no-cache" });
+    fs.createReadStream(resolved).pipe(res);
+  });
 });
 
 server.listen(PORT, function () {

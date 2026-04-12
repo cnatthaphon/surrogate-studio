@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Synthetic Segmentation — Surrogate Studio Demo</title>
+  <title>Cell Nuclei Segmentation — Surrogate Studio Demo</title>
 
   <!-- CDN libs -->
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/jerosoler/Drawflow/dist/drawflow.min.css">
@@ -13,22 +13,22 @@
 
   <!-- Surrogate Studio bundle -->
   <script src="../../dist/surrogate-studio.js"></script>
+  <script src="./dsb2018_32x32_data.js"></script>
   <script src="./preset.js"></script>
 </head>
 <body>
   <div id="app"></div>
   <script>
     var store = OSCWorkspaceStore.createMemoryStore();
-    var preset = window.SYNTHETIC_SEGMENTATION_PRESET;
+    var preset = window.CELL_NUCLEI_SEGMENTATION_PRESET;
     if (preset) {
       if (preset.dataset) store.upsertDataset(preset.dataset);
       if (preset.models) preset.models.forEach(function (m) { store.upsertModel(m); });
       if (preset.trainers) preset.trainers.forEach(function (t) { store.upsertTrainerCard(t); });
       store.initTables({ tables: ["generationRuns", "evaluations"] });
-      if (preset.generations) preset.generations.forEach(function (g) { store.save({ table: "generationRuns", values: [g] }); });
       if (preset.evaluations) preset.evaluations.forEach(function (e) { store.save({ table: "evaluations", values: [e] }); });
     }
-    SurrogateStudio.init({ mountEl: document.getElementById("app"), defaultSchemaId: "synthetic_segmentation", defaultTab: "dataset", store: store });
+    SurrogateStudio.init({ mountEl: document.getElementById("app"), defaultSchemaId: "dsb2018_segmentation", defaultTab: "dataset", store: store });
   </script>
 </body>
 </html>

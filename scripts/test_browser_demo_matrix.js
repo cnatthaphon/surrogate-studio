@@ -54,6 +54,30 @@ var DEMOS = [
     minEvaluations: 1,
   },
   {
+    name: "Cell Nuclei Segmentation",
+    file: path.join(ROOT, "demo", "Cell-Nuclei-Segmentation", "index.html"),
+    presetKey: "CELL_NUCLEI_SEGMENTATION_PRESET",
+    minModels: 2, minTrainers: 2, minGenerations: 0, minEvaluations: 1,
+  },
+  {
+    name: "Text Sentiment Transformer",
+    file: path.join(ROOT, "demo", "Text-Sentiment-Transformer", "index.html"),
+    presetKey: "TEXT_SENTIMENT_TRANSFORMER_PRESET",
+    minModels: 3, minTrainers: 3, minGenerations: 0, minEvaluations: 1,
+  },
+  {
+    name: "Siamese Shape Verification",
+    file: path.join(ROOT, "demo", "Siamese-Shape-Verification", "index.html"),
+    presetKey: "SIAMESE_SHAPE_VERIFICATION_PRESET",
+    minModels: 2, minTrainers: 2, minGenerations: 0, minEvaluations: 1,
+  },
+  {
+    name: "SAR Ship Detection",
+    file: path.join(ROOT, "demo", "SAR-Ship-Detection", "index.html"),
+    presetKey: "SAR_SHIP_DETECTION_PRESET",
+    minModels: 2, minTrainers: 2, minGenerations: 0, minEvaluations: 1,
+  },
+  {
     name: "Synthetic Detection",
     file: path.join(ROOT, "demo", "Synthetic-Detection", "index.html"),
     presetKey: "SYNTHETIC_DETECTION_PRESET",
