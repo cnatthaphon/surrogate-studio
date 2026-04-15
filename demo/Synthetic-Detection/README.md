@@ -1,50 +1,33 @@
-# Synthetic Detection
+# Synthetic Detection — Single-Object Detection Baseline
 
-This demo is the first additive object-detection recipe on top of the shared Surrogate Studio contracts.
+![Dataset](images/01_dataset.png)
 
-It is intentionally small:
+Single-object detection on synthetic grayscale images. Demonstrates the `detection_single_box` task recipe with bounding box regression and optional classification heads.
 
-- one object per image
-- one bounding box head
-- one class head
-- no hardcoded detection runtime outside the existing multi-head graph/trainer flow
+## What This Demo Shows
 
-## What It Shows
+- **Detection task recipe**: bounding box prediction driven by the `detection_single_box` recipe — no detection-specific logic in core tabs
+- **Multi-head output**: bbox regression + class label from the same model
+- **Anchor-free detection**: direct regression to [x, y, w, h] coordinates
 
-- `taskRecipeId = detection_single_box` attached through schema metadata
-- image dataset module owns data generation and preview rendering
-- model graph stays generic: `ImageSource -> Conv -> Pool -> Conv -> Pool -> Dense -> {bbox,label}`
-- PyTorch server can train the same graph using the shared checkpoint/runtime path
+| Dataset | Model Graph | Trainer |
+|:---:|:---:|:---:|
+| ![Dataset](images/01_dataset.png) | ![Model](images/02_model.png) | ![Trainer](images/03_trainer.png) |
 
 ## Dataset
 
-The dataset is synthetic 32x32 grayscale imagery with one object per sample:
+Synthetically generated 32×32 grayscale images with one shape (square, wide box, or tall box) per image. Target: normalized bounding box [x, y, w, h] + class label.
 
-- `square`
-- `wide_box`
-- `tall_box`
+| Class | Shape |
+|-------|-------|
+| 0 | Square |
+| 1 | Wide Box |
+| 2 | Tall Box |
 
-Targets:
+## How to Use
 
-- `bbox`: normalized `[x0, y0, x1, y1]`
-- `label`: one-hot class label
-
-## How To Use
-
-1. Open the `Dataset` tab and click `Generate Dataset`.
-2. Inspect the sample previews with orange bounding boxes.
-3. Open the `Model` tab and inspect the dual-head detector graph.
-4. Train in the `Trainer` tab. PyTorch server is the recommended runtime.
-5. Run `BBox Quality` in `Evaluation` to measure bounding-box MAE, class accuracy, and mean IoU.
-
-## Scope
-
-This is not a full COCO-style detector yet.
-
-It is the smallest honest step toward:
-
-- detection task recipes
-- local/server dataset references
-- structured detection losses and evaluation
-
-The next step after this baseline is variable-length annotations plus recipe-level collate/postprocess support.
+1. **Dataset** tab — click Generate Dataset (instant, synthetic)
+2. **Playground** tab — browse images with orange bounding boxes
+3. **Model** tab — inspect detection network
+4. **Trainer** tab — train on client (TF.js) or server (PyTorch)
+5. **Evaluation** tab — bbox MAE, class accuracy
