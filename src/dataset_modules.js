@@ -14,6 +14,7 @@
         safeRequire("./dataset_modules/mnist_module.js"),
         safeRequire("./dataset_modules/fashion_mnist_module.js"),
         safeRequire("./dataset_modules/cifar10_module.js"),
+        safeRequire("./dataset_modules/ais_module.js"),
         safeRequire("./dataset_modules/synthetic_detection_module.js"),
         safeRequire("./dataset_modules/synthetic_segmentation_module.js"),
         safeRequire("./dataset_modules/dsb2018_segmentation_module.js"),
