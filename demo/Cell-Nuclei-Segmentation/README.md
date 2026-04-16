@@ -8,6 +8,10 @@ Binary segmentation of cell nuclei from microscopy images. This is the same clas
 |:---:|:---:|:---:|
 | ![Dataset](images/01_dataset.png) | ![Model](images/02_model.png) | ![Trainer](images/03_trainer.png) |
 
+| Evaluation | Generation |
+|:---:|:---:|
+| ![Evaluation](images/04_test.png) | ![Generation](images/05_generation.png) |
+
 ## Dataset
 
 300 images from the 2018 Data Science Bowl `stage1_train`, downsampled to 32x32 grayscale. Individual per-nucleus masks merged into single binary masks.
