@@ -1,6 +1,12 @@
 # Fashion-MNIST UNet — Skip Connection Architecture
 
+![Dataset](images/01_dataset.png)
+
 UNet-style encoder-decoder with skip connections for image reconstruction on Fashion-MNIST. Demonstrates that the visual graph editor supports **branching topologies** — skip connections are standard Concat nodes wired across the encoder-decoder boundary.
+
+| Dataset | Model Graph | Trainer |
+|:---:|:---:|:---:|
+| ![Dataset](images/01_dataset.png) | ![Model](images/02_model.png) | ![Trainer](images/03_trainer.png) |
 
 ## What This Demo Shows
 

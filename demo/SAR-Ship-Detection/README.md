@@ -1,23 +1,29 @@
 # SAR Ship Detection — Bounding Box Regression on Radar Satellite Imagery
 
-Ship detection on real Synthetic Aperture Radar (SAR) satellite images from the HRSID dataset. Demonstrates object detection (bounding box regression) on remote sensing data.
+![Dataset](images/01_dataset.png)
+
+Ship detection on real Synthetic Aperture Radar (SAR) satellite images from the HRSID dataset. Predicts ship bounding boxes [x, y, width, height] from 64×64 SAR patches.
 
 ## What This Demo Shows
 
-- **Real SAR data**: not RGB aerial photos — actual radar backscatter imagery from Gaofen-3 and Sentinel-1 satellites
-- **Object detection**: predict ship bounding box [x, y, width, height] from image patch
-- **CNN vs MLP**: convolutional features vs flat features for spatial detection
-- **Maritime domain**: complements the AIS trajectory (TrAISformer) and oscillator demos
+- **Real SAR data**: radar backscatter imagery from Gaofen-3 and Sentinel-1 satellites
+- **Object detection**: bounding box regression on remote sensing data
+- **CNN vs MLP**: convolutional spatial features vs flat features for detection
+- **Maritime domain**: complements AIS trajectory prediction (TrAISformer) and oscillator physics demos
+
+| Dataset | Model Graph | Trainer |
+|:---:|:---:|:---:|
+| ![Dataset](images/01_dataset.png) | ![Model](images/02_model.png) | ![Trainer](images/03_trainer.png) |
 
 ## Dataset
 
-300 patches extracted from HRSID (High Resolution SAR Images Dataset). Each 64×64 grayscale SAR patch contains one ship with a normalized bounding box.
+300 patches extracted from HRSID (High Resolution SAR Images Dataset), downsampled to 64×64 grayscale. Each patch contains one ship with a normalized bounding box.
 
 | Property | Value |
 |----------|-------|
-| Images | 300 patches |
+| Samples | 300 patches (210 train / 45 val / 45 test) |
 | Resolution | 64×64 grayscale |
-| Source | HRSID (Gaofen-3, Sentinel-1) |
+| Source | HRSID — Gaofen-3, Sentinel-1 SAR |
 | Target | Bounding box [x, y, w, h] normalized 0-1 |
 
 ## Models
@@ -44,5 +50,5 @@ ImageSource → Dense(256) → Dense(64) → Output(bbox)
 
 ## References
 
-- HRSID: Wei, S., et al. "HRSID: A High-Resolution SAR Images Dataset for Ship Detection and Instance Segmentation." *IEEE Access*, 2020.
-- SAR Ship Detection Survey: Kang, M., et al. "A Survey on Deep Learning Based Ship Detection from Satellite Images." *Remote Sensing*, 2021.
+- Wei, S., et al. **"HRSID: A High-Resolution SAR Images Dataset for Ship Detection and Instance Segmentation."** *IEEE Access*, 2020.
+- Kang, M., et al. **"A Survey on Deep Learning Based Ship Detection from Satellite Images."** *Remote Sensing*, 2021.
