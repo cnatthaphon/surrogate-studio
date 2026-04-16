@@ -1,6 +1,12 @@
 # Cell Nuclei Segmentation — 2018 Data Science Bowl
 
+![Dataset](images/01_dataset.png)
+
 Binary segmentation of cell nuclei from microscopy images. This is the same class of biomedical image segmentation task that the original UNet paper (Ronneberger et al., MICCAI 2015) was designed for.
+
+| Dataset | Model Graph | Trainer |
+|:---:|:---:|:---:|
+| ![Dataset](images/01_dataset.png) | ![Model](images/02_model.png) | ![Trainer](images/03_trainer.png) |
 
 ## Dataset
 

@@ -30,4 +30,4 @@ Synthetically generated 32×32 grayscale images with one shape (square, wide box
 2. **Playground** tab — browse images with orange bounding boxes
 3. **Model** tab — inspect detection network
 4. **Trainer** tab — train on client (TF.js) or server (PyTorch)
-5. **Evaluation** tab — bbox MAE, class accuracy
+5. **Evaluation** tab — bbox MAE, mean IoU, class accuracy
