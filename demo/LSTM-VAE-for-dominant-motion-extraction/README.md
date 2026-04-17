@@ -215,9 +215,9 @@ To reproduce additional results from the paper:
 
 ---
 
-## Citation
+## References
 
-If you use this demo or Surrogate Studio in your work, please cite the original paper:
+Original paper:
 
 ```bibtex
 @article{jadhav2022dominant,

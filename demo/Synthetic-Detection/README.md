@@ -24,6 +24,19 @@ Synthetically generated 32×32 grayscale images with one shape (square, wide box
 | 1 | Wide Box |
 | 2 | Tall Box |
 
+## Models
+
+### 1. CNN Detector
+```
+ImageSource → Reshape(32,32,1) → Conv(16) → Conv(32)
+  → Flatten → Dense(64,relu) → Output(bbox, MSE)
+```
+
+### 2. MLP Baseline
+```
+ImageSource → Dense(128,relu) → Dense(64,relu) → Output(bbox, MSE)
+```
+
 ## How to Use
 
 1. **Dataset** tab — click Generate Dataset (instant, synthetic)
@@ -31,3 +44,9 @@ Synthetically generated 32×32 grayscale images with one shape (square, wide box
 3. **Model** tab — inspect detection network
 4. **Trainer** tab — train on client (TF.js) or server (PyTorch)
 5. **Evaluation** tab — bbox MAE, mean IoU, class accuracy
+
+## References
+
+This demo uses synthetic data with no external dataset. The detection approach follows the standard single-shot regression paradigm:
+
+- Redmon, J., et al. **"You Only Look Once: Unified, Real-Time Object Detection."** *CVPR 2016.* [arXiv:1506.02640](https://arxiv.org/abs/1506.02640) — Inspired the direct bbox regression approach.

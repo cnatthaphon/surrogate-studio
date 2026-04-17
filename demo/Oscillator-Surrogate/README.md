@@ -97,3 +97,9 @@ RK4-simulated oscillator trajectories (generated at runtime):
 This demo showcases the full Surrogate Studio pipeline applied to computational physics. Surrogate modeling replaces expensive simulations with learned approximations — a technique widely used in engineering design optimization, uncertainty quantification, and real-time control.
 
 The oscillator system is a canonical test case: simple enough to generate exact reference data, complex enough (3 scenarios, parameter variation, nonlinear dynamics) to challenge different model architectures.
+
+## References
+
+- Kingma, D.P. & Welling, M. **"Auto-Encoding Variational Bayes."** *ICLR 2014.* [arXiv:1312.6114](https://arxiv.org/abs/1312.6114) — VAE architecture used in models 3 and 4.
+- Cho, K., et al. **"Learning Phrase Representations using RNN Encoder-Decoder."** *EMNLP 2014.* [arXiv:1406.1078](https://arxiv.org/abs/1406.1078) — GRU architecture used in the AR-GRU model.
+- Raissi, M., Perdikaris, P., & Karniadakis, G.E. **"Physics-Informed Neural Networks."** *Journal of Computational Physics, 2019.* [arXiv:1711.10561](https://arxiv.org/abs/1711.10561) — Context for neural network surrogate modeling of physical systems.
