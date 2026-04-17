@@ -1,5 +1,5 @@
 // Surrogate Studio — concatenated bundle
-// Generated: 2026-04-15T09:36:30Z
+// Generated: 2026-04-16T17:49:23Z
 // Source files: 57
 
 
@@ -11738,6 +11738,7 @@
         safeRequire("./dataset_modules/mnist_module.js"),
         safeRequire("./dataset_modules/fashion_mnist_module.js"),
         safeRequire("./dataset_modules/cifar10_module.js"),
+        safeRequire("./dataset_modules/ais_module.js"),
         safeRequire("./dataset_modules/synthetic_detection_module.js"),
         safeRequire("./dataset_modules/synthetic_segmentation_module.js"),
         safeRequire("./dataset_modules/dsb2018_segmentation_module.js"),
