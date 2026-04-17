@@ -24,18 +24,18 @@ Synthetically generated 32×32 grayscale images with one shape (square, wide box
 | 1 | Wide Box |
 | 2 | Tall Box |
 
-## Models
+## Model
 
-### 1. CNN Detector
+### Single-Box CNN Detector (multi-head)
 ```
-ImageSource → Reshape(32,32,1) → Conv(16) → Conv(32)
-  → Flatten → Dense(64,relu) → Output(bbox, MSE)
+ImageSource → Reshape(32,32,1)
+  → Conv(16,3x3,relu) → MaxPool(2) → Conv(32,3x3,relu) → MaxPool(2)
+  → Flatten → Dense(96,relu)
+    ├→ Dense(32,relu) → Output(bbox, MSE)         [regression head]
+    └→ Dense(32,relu) → Output(label, CrossEntropy) [classification head]
 ```
 
-### 2. MLP Baseline
-```
-ImageSource → Dense(128,relu) → Dense(64,relu) → Output(bbox, MSE)
-```
+Two output heads from the same backbone: bbox regression predicts [x, y, w, h] coordinates, classification predicts shape class (square / wide box / tall box).
 
 ## How to Use
 
