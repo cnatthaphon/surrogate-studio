@@ -45,6 +45,12 @@ ImageSource → Dense(256,relu) → Dense(1024,sigmoid) → Output(mask, BCE)
 ## How to Use
 
 1. **Dataset** tab — click Generate Dataset (instant, synthetic)
-2. **Model** tab — inspect UNet graph with skip connections
-3. **Trainer** tab — train on client (TF.js) or server (PyTorch)
-4. **Evaluation** tab — compare IoU/Dice between UNet and MLP
+2. **Playground** tab — browse images alongside their ground truth masks
+3. **Model** tab — inspect UNet graph with skip connections
+4. **Trainer** tab — train on client (TF.js) or server (PyTorch)
+5. **Evaluation** tab — compare IoU/Dice between UNet and MLP
+
+## References
+
+- Ronneberger, O., Fischer, P., & Brox, T. **"U-Net: Convolutional Networks for Biomedical Image Segmentation."** *MICCAI 2015.* [arXiv:1505.04597](https://arxiv.org/abs/1505.04597) — The UNet architecture used in the skip-connection model.
+- Long, J., Shelhamer, E., & Darrell, T. **"Fully Convolutional Networks for Semantic Segmentation."** *CVPR 2015.* [arXiv:1411.4038](https://arxiv.org/abs/1411.4038) — Foundational work on pixel-wise prediction.

@@ -3,7 +3,7 @@
 /**
  * End-to-end smoke test against the live GitHub Pages deployment.
  *
- * Tests all 8 demos + main app:
+ * Tests all 15 demos + main app:
  *  - Page loads without fatal JS errors
  *  - Preset data hydrated (models, trainers, generations, evaluations)
  *  - All tabs render with content
@@ -116,6 +116,34 @@ var DEMOS = [
     presetKey: "OSCILLATOR_DEMO_PRESET",
     minModels: 5, minTrainers: 5, minGenerations: 3, minEvaluations: 1,
     tabs: ["dataset", "model", "trainer", "generation", "evaluation"], expectPretrained: true },
+  { name: "Cell Nuclei Segmentation", path: "/demo/Cell-Nuclei-Segmentation/",
+    presetKey: "CELL_NUCLEI_SEGMENTATION_PRESET",
+    minModels: 2, minTrainers: 2, minGenerations: 0, minEvaluations: 1,
+    tabs: ["dataset", "model", "trainer", "evaluation"] },
+  { name: "Fashion-MNIST UNet", path: "/demo/Fashion-MNIST-UNet/",
+    presetKey: "FASHION_MNIST_UNET_PRESET",
+    minModels: 2, minTrainers: 4, minGenerations: 2, minEvaluations: 1,
+    tabs: ["dataset", "model", "trainer", "generation", "evaluation"], expectPretrained: true },
+  { name: "SAR Ship Detection", path: "/demo/SAR-Ship-Detection/",
+    presetKey: "SAR_SHIP_DETECTION_PRESET",
+    minModels: 2, minTrainers: 2, minGenerations: 0, minEvaluations: 1,
+    tabs: ["dataset", "model", "trainer", "evaluation"] },
+  { name: "Siamese Shape Verification", path: "/demo/Siamese-Shape-Verification/",
+    presetKey: "SIAMESE_SHAPE_VERIFICATION_PRESET",
+    minModels: 2, minTrainers: 2, minGenerations: 0, minEvaluations: 1,
+    tabs: ["dataset", "model", "trainer", "evaluation"] },
+  { name: "Synthetic Detection", path: "/demo/Synthetic-Detection/",
+    presetKey: "SYNTHETIC_DETECTION_PRESET",
+    minModels: 1, minTrainers: 1, minGenerations: 0, minEvaluations: 1,
+    tabs: ["dataset", "model", "trainer", "evaluation"] },
+  { name: "Synthetic Segmentation", path: "/demo/Synthetic-Segmentation/",
+    presetKey: "SYNTHETIC_SEGMENTATION_PRESET",
+    minModels: 2, minTrainers: 2, minGenerations: 0, minEvaluations: 1,
+    tabs: ["dataset", "model", "trainer", "evaluation"] },
+  { name: "Text Sentiment Transformer", path: "/demo/Text-Sentiment-Transformer/",
+    presetKey: "TEXT_SENTIMENT_TRANSFORMER_PRESET",
+    minModels: 3, minTrainers: 3, minGenerations: 0, minEvaluations: 1,
+    tabs: ["dataset", "model", "trainer", "evaluation"] },
 ];
 
 async function testDemo(browser, demo) {
