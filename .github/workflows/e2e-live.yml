@@ -1,0 +1,22 @@
+name: E2E Live Site
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 6 * * *'  # daily at 06:00 UTC
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: E2E test against GitHub Pages (297 checks)
+        run: node scripts/test_github_pages_e2e.js
