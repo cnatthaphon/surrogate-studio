@@ -25,6 +25,18 @@ One person built a drag-and-drop neural network editor covering GAN, Diffusion, 
 
 ---
 
+## Why This Is Different
+
+Most ML demos are notebooks that run a training loop and show a plot. This is a **platform**:
+
+- **No-code workflow** — build a model by dragging nodes, not writing `nn.Linear(64, 32)`. The visual graph IS the model specification. Change the architecture, click train, see results.
+- **Same graph, two runtimes** — the exact same Drawflow graph trains in TF.js (browser, zero install) or PyTorch (server, CUDA). The training engine reads from the graph, not from hardcoded model code.
+- **Cross-runtime weight transfer** — weights trained in PyTorch load into TF.js and vice versa. Per-layer-type conversion handles Dense transpose, LSTM gate reorder, Conv NCHW/NHWC shuffle, BatchNorm running stats.
+- **Instant results** — most demos include pretrained weights. Open the page, see trained loss curves and evaluation metrics immediately. Then retrain or modify the graph if you want.
+- **Plugin architecture** — adding a new paper reproduction requires zero core code changes. Write a preset + dataset module, drop it in `demo/`, done.
+
+---
+
 ## 15 Demos
 
 Every demo runs on [GitHub Pages](https://cnatthaphon.github.io/surrogate-studio/) — click any link to try it.

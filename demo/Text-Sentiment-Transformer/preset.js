@@ -103,6 +103,24 @@
     ],
     trainers: [
       {
+        id: "text_tf_pre", name: "Transformer (pre-trained)", schemaId: sid,
+        datasetId: DS_ID, modelId: "text_transformer", status: "done",
+        _pretrainedVar: "TRANSFORMER_CLASSIFIER_PRE_TRAINED_PRETRAINED_BIN_B64",
+        config: { epochs: 30, batchSize: 32, learningRate: 0.001, optimizerType: "adam" },
+      },
+      {
+        id: "text_lstm_pre", name: "LSTM (pre-trained)", schemaId: sid,
+        datasetId: DS_ID, modelId: "text_lstm", status: "done",
+        _pretrainedVar: "LSTM_CLASSIFIER_PRE_TRAINED_PRETRAINED_BIN_B64",
+        config: { epochs: 30, batchSize: 32, learningRate: 0.001, optimizerType: "adam" },
+      },
+      {
+        id: "text_mlp_pre", name: "MLP (pre-trained)", schemaId: sid,
+        datasetId: DS_ID, modelId: "text_mlp", status: "done",
+        _pretrainedVar: "MLP_BASELINE_PRE_TRAINED_PRETRAINED_BIN_B64",
+        config: { epochs: 30, batchSize: 32, learningRate: 0.001, optimizerType: "adam" },
+      },
+      {
         id: "text_tf_trainer", name: "Transformer Trainer", schemaId: sid,
         datasetId: DS_ID, modelId: "text_transformer",
         runtime: "js_client", runtimeBackend: "auto", status: "draft",
@@ -125,7 +143,7 @@
     evaluations: [
       {
         id: "text_eval", name: "Sentiment: Transformer vs LSTM vs MLP", schemaId: sid, datasetId: DS_ID,
-        trainerIds: ["text_tf_trainer", "text_lstm_trainer", "text_mlp_trainer"],
+        trainerIds: ["text_tf_pre", "text_lstm_pre", "text_mlp_pre"],
         evaluatorIds: ["accuracy", "macro_f1"],
         status: "draft", runs: [], createdAt: Date.now(),
       },
