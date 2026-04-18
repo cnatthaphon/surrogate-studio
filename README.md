@@ -1,445 +1,111 @@
 # Surrogate Studio
 
-![Status](https://img.shields.io/badge/status-active%20development-brightgreen) ![Models](https://img.shields.io/badge/models-26-blue) ![Demos](https://img.shields.io/badge/demos-15-orange)
+![Demos](https://img.shields.io/badge/demos-15-orange) ![Models](https://img.shields.io/badge/models-43-blue) ![Tests](https://img.shields.io/badge/E2E%20checks-297%20pass-brightgreen) ![Papers](https://img.shields.io/badge/papers%20cited-18-blueviolet)
 
-**A schema-driven, browser-first ML experimentation platform.**
+**A visual ML platform that reproduces 15 published papers — trainable in the browser with no install.**
 
-**[Live Demo](https://cnatthaphon.github.io/surrogate-studio/)** | [Benchmark](https://cnatthaphon.github.io/surrogate-studio/demo/Fashion-MNIST-Benchmark/) | [GAN](https://cnatthaphon.github.io/surrogate-studio/demo/Fashion-MNIST-GAN/) | [Diffusion](https://cnatthaphon.github.io/surrogate-studio/demo/Fashion-MNIST-Diffusion/) | [Conditional Diffusion](https://cnatthaphon.github.io/surrogate-studio/demo/Fashion-MNIST-Conditional-Diffusion/) | [UNet](https://cnatthaphon.github.io/surrogate-studio/demo/Fashion-MNIST-UNet/) | [Synthetic Detection](https://cnatthaphon.github.io/surrogate-studio/demo/Synthetic-Detection/) | [Transformer](https://cnatthaphon.github.io/surrogate-studio/demo/Fashion-MNIST-Transformer/) | [TrAISformer](https://cnatthaphon.github.io/surrogate-studio/demo/TrAISformer/) | [LSTM-VAE](https://cnatthaphon.github.io/surrogate-studio/demo/LSTM-VAE-for-dominant-motion-extraction/) | [Oscillator](https://cnatthaphon.github.io/surrogate-studio/demo/Oscillator-Surrogate/) | [Segmentation](https://cnatthaphon.github.io/surrogate-studio/demo/Synthetic-Segmentation/) | [Cell Nuclei](https://cnatthaphon.github.io/surrogate-studio/demo/Cell-Nuclei-Segmentation/) | [Text NLP](https://cnatthaphon.github.io/surrogate-studio/demo/Text-Sentiment-Transformer/) | [Siamese](https://cnatthaphon.github.io/surrogate-studio/demo/Siamese-Shape-Verification/) | [SAR Ship](https://cnatthaphon.github.io/surrogate-studio/demo/SAR-Ship-Detection/)
+One person built a drag-and-drop neural network editor covering GAN, Diffusion, Transformer, UNet, detection, segmentation, NLP, and metric learning. Models train in TF.js (browser) or PyTorch (server) from the same visual graph. Cross-runtime weight conversion included.
 
-**[Contributing](CONTRIBUTING.md)** | **[Developer Docs](docs/README.md)** | **[Server Notes](server/README.md)** | **[Schema Notes](schemas/README.md)**
-
-Build datasets, design neural network architectures visually, train models, generate samples, and benchmark results from a single page. It works fully in the browser, with an optional PyTorch server for faster training and cross-runtime checks.
-
-Each demo folder also includes its own README with a `How to Use` section, so the root README can stay high-level while the demo README explains the exact trainer/generation/evaluation flow.
+### [Try it now](https://cnatthaphon.github.io/surrogate-studio/demo/Fashion-MNIST-Benchmark/) — no install, runs entirely in your browser.
 
 ![Demo Workflow](demo/Fashion-MNIST-Benchmark/images/demo_workflow.gif)
 
 ---
 
-## Key Features
+## What It Does
 
-- **Visual Model Builder** — drag-and-drop neural network design with [Drawflow](https://github.com/jerosoler/Drawflow). 35+ node types across MLP, CNN, RNN, VAE, GAN, and Diffusion architectures.
-- **Schema-Driven** — everything reads from schema and config. Zero hardcoded target names in core paths. New dataset types are plugins, not code changes. Each output node carries explicit `headType` (classification/regression/reconstruction) from schema metadata.
-- **Dual Runtime** — train with TF.js in the browser or with PyTorch via the optional Node.js server. Same graph contract, same trainer UI, same artifact flow.
-- **Cross-Runtime Weights** — per-node-type weight mapping between TF.js and PyTorch (Dense transpose, LSTM gate swap, GRU gate reorder, Conv dimension shuffle, BatchNorm running stats).
-- **Notebook Export** — export either a single `.ipynb` file or a ZIP bundle with `dataset.csv`, `model.graph.json`, and `run.ipynb` for reproducible PyTorch training outside the browser.
-- **Paper Reproductions** — self-contained demo folders that reproduce published research, with benchmarks and screenshots. No core modifications needed.
+| Feature | Detail |
+|---------|--------|
+| **Visual Graph Editor** | Drag-and-drop model design with 35+ node types (MLP, CNN, RNN, VAE, GAN, Diffusion, Transformer) |
+| **Dual Runtime** | Train with TF.js in browser or PyTorch via Node.js server — same graph, same UI |
+| **Cross-Runtime Weights** | Automatic weight conversion: Dense transpose, LSTM gate swap, Conv dim shuffle, BatchNorm stats |
+| **15 Paper Reproductions** | Self-contained demos with pretrained weights, benchmarks, and citations |
+| **Notebook Export** | Export `.ipynb` + `dataset.csv` + `model.graph.json` for reproducible PyTorch training |
+| **Plugin Architecture** | Each demo is a plugin — zero core code changes needed to add a new paper reproduction |
 
 ---
 
-## Demos
-
-### [Fashion-MNIST Benchmark](demo/Fashion-MNIST-Benchmark/) — 7 Architectures Compared
-
-Live: [GitHub Pages](https://cnatthaphon.github.io/surrogate-studio/demo/Fashion-MNIST-Benchmark/) | Guide: [README](demo/Fashion-MNIST-Benchmark/README.md)
-
-A visual survey of 35 years of neural network research, trained and evaluated on the same dataset.
-
-| Model | Training | Test | Generation |
-|:---:|:---:|:---:|:---:|
-| ![Model](demo/Fashion-MNIST-Benchmark/images/12_model_0.png) | ![Train](demo/Fashion-MNIST-Benchmark/images/02_trainer.png) | ![Test](demo/Fashion-MNIST-Benchmark/images/04_test_mlp_classification.png) | ![Gen](demo/Fashion-MNIST-Benchmark/images/06_gen_ae_reconstruct.png) |
-
-| # | Architecture | Params | Paper |
-|---|---|---|---|
-| 1 | MLP Baseline | ~235K | Rumelhart et al. 1986 |
-| 2 | CNN (LeNet-5) | ~860K | LeCun et al. 1998 |
-| 3 | Dense Autoencoder | ~450K | Hinton & Salakhutdinov 2006 |
-| 4 | Conv Autoencoder | ~85K | Masci et al. 2011 |
-| 5 | VAE | ~414K | Kingma & Welling 2014 |
-| 6 | VAE+Classifier | ~414K | Multi-task learning |
-| 7 | Denoising AE | ~734K | Ho et al. 2020 |
-
-### [Fashion-MNIST GAN](demo/Fashion-MNIST-GAN/) — 3 Adversarial Architectures
-
-Live: [GitHub Pages](https://cnatthaphon.github.io/surrogate-studio/demo/Fashion-MNIST-GAN/) | Guide: [README](demo/Fashion-MNIST-GAN/README.md)
-
-Real adversarial training with no hardcoded GAN logic — everything from Drawflow graph blocks (ConcatBatch, PhaseSwitch, Constant, weight tags).
-
-| MLP-GAN (Client) | DCGAN (Client) | WGAN (Client) |
-|:---:|:---:|:---:|
-| ![MLP](demo/Fashion-MNIST-GAN/images/mlp_gan_client.png) | ![DCGAN](demo/Fashion-MNIST-GAN/images/dcgan_client.png) | ![WGAN](demo/Fashion-MNIST-GAN/images/wgan_client.png) |
-
-| # | Architecture | Loss | Paper |
-|---|---|---|---|
-| 1 | MLP-GAN (LayerNorm + Dropout) | BCE + label smoothing | Goodfellow 2014 |
-| 2 | DCGAN (BatchNorm + LeakyReLU) | BCE (0/1 targets) | Radford 2016 |
-| 3 | MLP-WGAN (linear critic, weight clipping) | Wasserstein | Arjovsky 2017 |
-
-Pre-trained weights included for all 3 models — generate T-shirt images immediately without training. The screenshots above are client-generated examples; you can train on client (TF.js WebGL) or server (PyTorch CUDA).
-
-The GAN demo also includes blank trainer cards alongside the pre-trained ones. Use the cards with `(pre-trained)` for immediate generation, and use the plain `... Trainer` cards when you want to train from scratch.
-
-### [Fashion-MNIST Diffusion](demo/Fashion-MNIST-Diffusion/) — 4 Denoising Models
-
-Live: [GitHub Pages](https://cnatthaphon.github.io/surrogate-studio/demo/Fashion-MNIST-Diffusion/) | Guide: [README](demo/Fashion-MNIST-Diffusion/README.md)
-
-Iterative denoising from noise to images. Standard supervised MSE training — no adversarial dynamics.
-
-| # | Architecture | Method | Paper |
-|---|---|---|---|
-| 1 | MLP Denoiser (baseline) | Single-step denoise | — |
-| 2 | MLP DDPM (timestep-conditioned) | Iterative DDPM | Ho 2020 |
-| 3 | NCSN (deep score network) | Langevin dynamics | Song & Ermon 2019 |
-| 4 | Score SDE (skip connections, cosine schedule) | SDE sampling | Song et al. 2021 |
-
-### [Fashion-MNIST Conditional Diffusion](demo/Fashion-MNIST-Conditional-Diffusion/) — Class-Conditioned Generation
-
-Live: [GitHub Pages](https://cnatthaphon.github.io/surrogate-studio/demo/Fashion-MNIST-Conditional-Diffusion/) | Guide: [README](demo/Fashion-MNIST-Conditional-Diffusion/README.md)
-
-Generate specific Fashion-MNIST classes by conditioning the denoiser on a one-hot class label. Uses the new **ClassEmbed** graph node — select T-shirt, Trouser, or Sneaker from a dropdown.
-
-| # | Architecture | Conditioning | Paper |
-|---|---|---|---|
-| 1 | Conditional DDPM | image + time + class | Ho 2020 + class concat |
-| 2 | Conditional Denoiser | image + class | Baseline + class concat |
-
-3 classes (T-shirt/top, Trouser, Sneaker), pretrained on 18K real Fashion-MNIST images. Evaluations included: generation quality, reconstruction quality, per-class comparison.
-
-### [Fashion-MNIST UNet](demo/Fashion-MNIST-UNet/) — Reconstruction with Skip Connections
-
-Live: [GitHub Pages](https://cnatthaphon.github.io/surrogate-studio/demo/Fashion-MNIST-UNet/) | Guide: [README](demo/Fashion-MNIST-UNet/README.md)
-
-Image reconstruction demo showing that UNet-style skip connections are just graph wiring. The encoder and decoder are composed from existing Conv2D, MaxPool2D, UpSample2D, and Concat blocks, then compared against a plain convolutional autoencoder baseline.
-
-| # | Architecture | Purpose | Paper |
-|---|---|---|---|
-| 1 | UNet (skip connections) | Reconstruction with spatial skip paths | Ronneberger et al. 2015 |
-| 2 | Conv AE (baseline) | Reconstruction without skip paths | Baseline |
-
-### [Synthetic Detection](demo/Synthetic-Detection/) — Single-Object Detection Baseline
-
-Live: [GitHub Pages](https://cnatthaphon.github.io/surrogate-studio/demo/Synthetic-Detection/) | Guide: [README](demo/Synthetic-Detection/README.md)
-
-Small additive detection demo built on the shared graph/trainer contract. The dataset is synthetic 32x32 grayscale imagery with one object per image, one bounding-box regression head, and one class head.
-
-| # | Architecture | Purpose | Task Recipe |
-|---|---|---|---|
-| 1 | CNN single-box detector | Predict bbox + class from image | `detection_single_box` |
-
-### [Fashion-MNIST Transformer](demo/Fashion-MNIST-Transformer/) — Vision Transformer Classification
-
-Live: [GitHub Pages](https://cnatthaphon.github.io/surrogate-studio/demo/Fashion-MNIST-Transformer/) | Guide: [README](demo/Fashion-MNIST-Transformer/README.md)
-
-Attention-based image classification without convolutions using the graph editor's `PatchEmbed`, `TransformerBlock`, and `GlobalAvgPool1D` nodes. Pretrained on PyTorch CUDA, evaluated in TF.js browser.
-
-| Dataset | Model | Test | Evaluation |
-|:---:|:---:|:---:|:---:|
-| ![Dataset](demo/Fashion-MNIST-Transformer/images/01_dataset.png) | ![Model](demo/Fashion-MNIST-Transformer/images/02_model.png) | ![Test](demo/Fashion-MNIST-Transformer/images/04_test.png) | ![Eval](demo/Fashion-MNIST-Transformer/images/05_generation.png) |
-
-| Model | Params | Test Accuracy | Macro F1 |
-|-------|:------:|:-------------:|:--------:|
-| Tiny ViT (1 block) | 45,624 | 80.70% | 0.8058 |
-| **Small ViT (2 blocks)** | 87,288 | **82.50%** | **0.8260** |
-| ViT + MLP Head (2 blocks) | 96,248 | 81.30% | 0.8141 |
-
-> Paper: *"An Image is Worth 16x16 Words: Transformers for Image Recognition at Scale"* — Dosovitskiy et al., ICLR 2021. [arXiv:2010.11929](https://arxiv.org/abs/2010.11929)
-
-### [TrAISformer](demo/TrAISformer/) — Transformer-based AIS Trajectory Prediction
-
-Live: [GitHub Pages](https://cnatthaphon.github.io/surrogate-studio/demo/TrAISformer/) | Guide: [README](demo/TrAISformer/README.md)
-
-Predict vessel positions in the Baltic Sea from AIS (Automatic Identification System) data using transformer-based sequence models. Interactive Leaflet map with satellite tiles, speed-colored trajectories, and course-heading markers.
-
-| Dataset (Leaflet Map) | Model Graph | Evaluation |
-|:---:|:---:|:---:|
-| ![Dataset](demo/TrAISformer/images/01_dataset.png) | ![Model](demo/TrAISformer/images/02_model.png) | ![Eval](demo/TrAISformer/images/05_generation.png) |
-
-| Model | Params | Test MAE | Test RMSE | Test R² |
-|-------|:------:|:--------:|:---------:|:-------:|
-| **MLP Baseline** | 16,836 | **0.0225** | **0.0741** | **0.924** |
-| Tiny TrAISformer (1 block) | 10,884 | 0.0382 | 0.0884 | 0.891 |
-| Small TrAISformer (2 blocks) | 21,476 | 0.0400 | 0.0893 | 0.889 |
-
-> Paper: *"TrAISformer — A generative transformer for AIS trajectory prediction"* — Nguyen et al., 2021. [arXiv:2109.03958](https://arxiv.org/abs/2109.03958)
-
-### [LSTM-VAE for Dominant Motion Extraction](demo/LSTM-VAE-for-dominant-motion-extraction/)
-
-Live: [GitHub Pages](https://cnatthaphon.github.io/surrogate-studio/demo/LSTM-VAE-for-dominant-motion-extraction/) | Guide: [README](demo/LSTM-VAE-for-dominant-motion-extraction/README.md)
-
-Reproduces the LSTM-VAE from Jadhav & Barati Farimani (2022) for ant trajectory reconstruction.
-
-| Training | Generation |
-|:---:|:---:|
-| ![Training](demo/LSTM-VAE-for-dominant-motion-extraction/images/training.gif) | ![Generation](demo/LSTM-VAE-for-dominant-motion-extraction/images/generation.gif) |
-
-| Model | Params | Test R² | Test RMSE |
-|-------|:------:|:-------:|:---------:|
-| LSTM-VAE | 77,100 | **0.9970** | 0.0164 |
-| MLP-AE (baseline) | 19,312 | 0.9882 | 0.0325 |
-
-> Paper: *"Dominant motion identification of multi-particle system using deep learning from video"* — Jadhav & Barati Farimani, 2022. [arXiv:2104.12722](https://arxiv.org/abs/2104.12722)
-
-### [Oscillator Surrogate](demo/Oscillator-Surrogate/)
-
-Live: [GitHub Pages](https://cnatthaphon.github.io/surrogate-studio/demo/Oscillator-Surrogate/) | Guide: [README](demo/Oscillator-Surrogate/README.md)
-
-5 model architectures on RK4-simulated physics trajectories (spring, pendulum, bouncing ball). Full platform showcase: training, generation (reconstruct, random, classifier-guided, Langevin), and evaluation.
-
-| Model | Params | Test MAE | Test R² |
-|-------|:------:|:--------:|:-------:|
-| Direct-MLP | 4,962 | 0.0282 | 0.963 |
-| AR-GRU | 22,882 | 0.0277 | 0.966 |
-| VAE (8-dim latent) | 2,362 | 0.0278 | 0.949 |
-| **VAE+Classifier** | 8,605 | **0.0251** | **0.970** |
-| Denoising AE | 7,138 | 0.0420 | 0.944 |
-
-### [Synthetic Segmentation](demo/Synthetic-Segmentation/) — Binary Mask Prediction
-
-Live: [GitHub Pages](https://cnatthaphon.github.io/surrogate-studio/demo/Synthetic-Segmentation/) | Guide: [README](demo/Synthetic-Segmentation/README.md)
-
-Pixel-wise binary segmentation on synthetic shape images. Demonstrates the `segmentation_mask` task recipe with mask-specific evaluation metrics (IoU, Dice, pixel accuracy). UNet-style skip connections vs MLP baseline.
-
-### [Cell Nuclei Segmentation](demo/Cell-Nuclei-Segmentation/) — Real UNet on Biomedical Data
-
-Live: [GitHub Pages](https://cnatthaphon.github.io/surrogate-studio/demo/Cell-Nuclei-Segmentation/) | Guide: [README](demo/Cell-Nuclei-Segmentation/README.md)
-
-Binary segmentation of cell nuclei from real microscopy images (2018 Data Science Bowl). The same class of biomedical task the original UNet paper targets. 300 samples, 32×32 grayscale, evaluated with IoU/Dice.
-
-> Reference: Ronneberger et al., *"U-Net: Convolutional Networks for Biomedical Image Segmentation"*, MICCAI 2015.
-
-### [Text Sentiment Transformer](demo/Text-Sentiment-Transformer/) — NLP Classification
-
-Live: [GitHub Pages](https://cnatthaphon.github.io/surrogate-studio/demo/Text-Sentiment-Transformer/) | Guide: [README](demo/Text-Sentiment-Transformer/README.md)
-
-Transformer-based text classification on synthetic sentiment data. Standard NLP pipeline: tokenize → embed → self-attention → pool → classify. Compares Transformer vs LSTM vs MLP on the same text data.
-
-### [Siamese Shape Verification](demo/Siamese-Shape-Verification/) — Metric Learning
-
-Live: [GitHub Pages](https://cnatthaphon.github.io/surrogate-studio/demo/Siamese-Shape-Verification/) | Guide: [README](demo/Siamese-Shape-Verification/README.md)
-
-Pair-based similarity classification for verification tasks. Learns to compare image pairs as same or different. Demonstrates the contrastive/metric learning paradigm using standard classification.
-
-### [SAR Ship Detection](demo/SAR-Ship-Detection/) — Radar Satellite Object Detection
-
-Live: [GitHub Pages](https://cnatthaphon.github.io/surrogate-studio/demo/SAR-Ship-Detection/) | Guide: [README](demo/SAR-Ship-Detection/README.md)
-
-Ship detection on real SAR (Synthetic Aperture Radar) satellite images from the HRSID dataset. Bounding box regression on 64×64 radar patches. Part of the maritime AI portfolio alongside TrAISformer vessel trajectory prediction.
-
----
-
-## Tabs
-
-| Tab | Purpose |
-|-----|---------|
-| **Playground** | Browse schemas, preview dataset modules (trajectory plots, image grids) |
-| **Dataset** | Generate and manage datasets from registered modules |
-| **Model** | Visual graph editor with schema-driven palette and presets |
-| **Trainer** | Train models, monitor loss curves, view test metrics (accuracy, R², confusion matrix, scatter plots) |
-| **Generation** | Reconstruct, random sample, classifier-guided, Langevin dynamics, DDPM |
-| **Evaluation** | Compare multiple trained models on the same test data (benchmark) |
-
----
-
-## Supported Schemas
-
-| Schema | Type | Features | Dataset Module |
-|--------|------|----------|---------------|
-| `oscillator` | Trajectory | RK4 physics (spring, pendulum, bouncing ball) | Built-in |
-| `mnist` | Image | 28x28 grayscale, 10 classes | Lazy-fetch from CDN |
-| `fashion_mnist` | Image | 28x28 grayscale, 10 classes | Lazy-fetch from CDN |
-| `cifar10` | Image | 32x32 RGB, 10 classes | Lazy-fetch from CDN |
-| `synthetic_detection` | Image | 32x32 grayscale, bbox + class label | Built-in |
-| `synthetic_segmentation` | Image | 32x32 grayscale, binary pixel mask | Built-in |
-| `dsb2018_segmentation` | Image | 32x32 microscopy, nucleus binary mask | Embedded (800KB) |
-| `text_classification` | Text | 12-token sentiment sequences, 120-word vocab | Built-in |
-| `siamese_pairs` | Pair | 28x28 shape pairs, same/different classification | Built-in |
-| `sar_ship_detection` | Image | 64x64 SAR radar, ship bounding box | Embedded (1.6MB) |
-| `ais_trajectory` | Trajectory | Window of (lat, lon, sog, cog), predict next position | Built-in |
-| `ant_trajectory` | Trajectory | 20 ants x (x,y), 40 features | Demo plugin |
-
----
-
-## Node Types (35+)
-
-| Category | Nodes |
-|----------|-------|
-| **MLP** | Input, Dense, Dropout, BatchNorm, LayerNorm, Output |
-| **CNN** | Conv2D, Conv2DTranspose, MaxPool2D, UpSample2D, Flatten, Reshape, GlobalAvgPool2D |
-| **Transformer** | PatchEmbed, TransformerBlock, GlobalAvgPool1D |
-| **RNN** | SimpleRNN, GRU, LSTM, Conv1D, Concat |
-| **VAE** | Latent mu, Latent logvar, Reparameterize |
-| **GAN** | SampleZ, Detach |
-| **Diffusion** | AddNoise (GaussianNoise), NoiseSchedule, TimeEmbed, ClassEmbed |
-| **NLP** | Embedding |
-| **Feature** | ImageSource, History, WindowHistory, Params, OneHot |
-| **Utility** | SinNorm, CosNorm, TimeNorm, TimeSec |
+## 15 Demos
+
+Every demo runs on [GitHub Pages](https://cnatthaphon.github.io/surrogate-studio/) — click any link to try it.
+
+| Demo | Domain | Architecture | Paper |
+|------|--------|-------------|-------|
+| [Fashion-MNIST Benchmark](https://cnatthaphon.github.io/surrogate-studio/demo/Fashion-MNIST-Benchmark/) | Classification | MLP, CNN, AE, VAE, Denoising AE (7 models) | Rumelhart '86 through Ho '20 |
+| [Fashion-MNIST GAN](https://cnatthaphon.github.io/surrogate-studio/demo/Fashion-MNIST-GAN/) | Generation | MLP-GAN, DCGAN, WGAN | Goodfellow '14, Radford '16, Arjovsky '17 |
+| [Fashion-MNIST Diffusion](https://cnatthaphon.github.io/surrogate-studio/demo/Fashion-MNIST-Diffusion/) | Generation | DDPM, NCSN, Score SDE | Ho '20, Song '19, Song '21 |
+| [Conditional Diffusion](https://cnatthaphon.github.io/surrogate-studio/demo/Fashion-MNIST-Conditional-Diffusion/) | Generation | Class-conditioned DDPM | Ho '20 + Dhariwal '21 |
+| [Fashion-MNIST UNet](https://cnatthaphon.github.io/surrogate-studio/demo/Fashion-MNIST-UNet/) | Reconstruction | Encoder-decoder + skip connections | Ronneberger '15 |
+| [Vision Transformer](https://cnatthaphon.github.io/surrogate-studio/demo/Fashion-MNIST-Transformer/) | Classification | PatchEmbed + self-attention (ViT) | Dosovitskiy '21 |
+| [TrAISformer](https://cnatthaphon.github.io/surrogate-studio/demo/TrAISformer/) | Trajectory | Transformer on AIS vessel data + Leaflet map | Nguyen '21 |
+| [LSTM-VAE](https://cnatthaphon.github.io/surrogate-studio/demo/LSTM-VAE-for-dominant-motion-extraction/) | Reconstruction | LSTM encoder-decoder with VAE latent | Jadhav '22 |
+| [Oscillator Surrogate](https://cnatthaphon.github.io/surrogate-studio/demo/Oscillator-Surrogate/) | Regression | MLP, GRU, VAE, guided generation, Langevin | Physics surrogates |
+| [Cell Nuclei Segmentation](https://cnatthaphon.github.io/surrogate-studio/demo/Cell-Nuclei-Segmentation/) | Segmentation | UNet on real microscopy (DSB 2018) | Ronneberger '15 |
+| [Synthetic Segmentation](https://cnatthaphon.github.io/surrogate-studio/demo/Synthetic-Segmentation/) | Segmentation | UNet vs MLP on binary masks | Ronneberger '15 |
+| [Synthetic Detection](https://cnatthaphon.github.io/surrogate-studio/demo/Synthetic-Detection/) | Detection | CNN with bbox + class heads | Redmon '16 |
+| [SAR Ship Detection](https://cnatthaphon.github.io/surrogate-studio/demo/SAR-Ship-Detection/) | Detection | CNN on real HRSID radar imagery | Wei '20 |
+| [Text Sentiment](https://cnatthaphon.github.io/surrogate-studio/demo/Text-Sentiment-Transformer/) | NLP | Embedding + Transformer + classify | Vaswani '17 |
+| [Siamese Verification](https://cnatthaphon.github.io/surrogate-studio/demo/Siamese-Shape-Verification/) | Metric Learning | Pair-based similarity classification | Bromley '93 |
+
+Each demo has its own README with architecture details, benchmark results, and how-to-use guide. See [DEMOS.md](DEMOS.md) for the full breakdown.
 
 ---
 
 ## Quick Start
 
-### Browser / GitHub Pages
+### Browser (no install)
 
-Open the full app on GitHub Pages:
-
-```text
-https://cnatthaphon.github.io/surrogate-studio/
+Open any demo directly on GitHub Pages:
 ```
-
-Direct demo entrypoints:
-
-```text
 https://cnatthaphon.github.io/surrogate-studio/demo/Fashion-MNIST-Benchmark/
-https://cnatthaphon.github.io/surrogate-studio/demo/Fashion-MNIST-GAN/
-https://cnatthaphon.github.io/surrogate-studio/demo/Fashion-MNIST-Diffusion/
-https://cnatthaphon.github.io/surrogate-studio/demo/Fashion-MNIST-Conditional-Diffusion/
-https://cnatthaphon.github.io/surrogate-studio/demo/Fashion-MNIST-UNet/
-https://cnatthaphon.github.io/surrogate-studio/demo/Fashion-MNIST-Transformer/
-https://cnatthaphon.github.io/surrogate-studio/demo/TrAISformer/
-https://cnatthaphon.github.io/surrogate-studio/demo/LSTM-VAE-for-dominant-motion-extraction/
-https://cnatthaphon.github.io/surrogate-studio/demo/Oscillator-Surrogate/
-https://cnatthaphon.github.io/surrogate-studio/demo/Synthetic-Segmentation/
-https://cnatthaphon.github.io/surrogate-studio/demo/Cell-Nuclei-Segmentation/
-https://cnatthaphon.github.io/surrogate-studio/demo/Text-Sentiment-Transformer/
-https://cnatthaphon.github.io/surrogate-studio/demo/Siamese-Shape-Verification/
-https://cnatthaphon.github.io/surrogate-studio/demo/SAR-Ship-Detection/
 ```
 
-Each demo README linked above explains how to use that demo inside the app.
-
-Notebook execution is different from the pure browser demos:
-- the `Run Notebook` UI is available from GitHub Pages
-- actual execution still targets a local training server, usually `http://localhost:3777`
-- some browsers block public HTTPS pages from reaching loopback addresses like `127.0.0.1`
-- if you want notebook cells to run reliably, start the local backend first with `node server/training_server.js` and open Surrogate Studio from that local server
-
-```
-Open `index.html` in Chrome/Edge (works on `file://`)
-```
-
-### Local Server (recommended)
+### Local Server
 
 ```bash
 npm install
-npm start
-# → http://localhost:3777
+npm start        # http://localhost:3777
 ```
 
-Opens the full platform: browser training (TF.js), PyTorch server training, notebook execution, and all demos — from a single URL. CUDA is used automatically if available.
-
-### Demo
-
-Open any demo directly:
-
-```
-http://localhost:3777/demo/Fashion-MNIST-Benchmark/
-```
-
-Dataset loads from CDN (or embedded data). Select a trainer, click **Start Training**, watch the loss curve.
-
-Check `Use PyTorch Server` in the Trainer config before training. CUDA will be used if available.
+Serves all demos + PyTorch training API. CUDA is used automatically if available.
 
 ---
 
 ## Architecture
 
 ```
-index.html
-  |-- src/schema_registry.js          -- schema definitions + palette + headType
-  |-- src/dataset_modules.js          -- module registry + build contract
-  |-- src/model_builder_core.js       -- graph -> TF.js model (MLP, CNN, VAE, GAN, etc.)
-  |-- src/model_graph_core.js         -- Drawflow node factories + preset renderer
-  |-- src/training_engine_core.js     -- train loop (multi-head, phased, headType-driven)
-  |-- src/generation_engine_core.js   -- reconstruct, random, classifier-guided, Langevin, DDPM
-  |-- src/weight_converter.js         -- per-node-type PyTorch <-> TF.js weight mapping
-  |-- src/notebook_bundle_core.js     -- ZIP export (dataset + graph + notebook)
-  |-- src/workspace_store.js          -- in-memory store (datasets, models, trainers)
-  |-- src/dataset_source_registry.js  -- zero-copy source management (60K images, no duplication)
-  |-- src/server_runtime_adapter.js   -- gzip streaming to PyTorch server
-  |-- src/surrogate_studio.js         -- orchestrator: init -> layout -> tabs -> wiring
-  +-- src/tabs/*.js                   -- tab controllers (dataset, model, trainer, generation, evaluation)
-
-server/
-  |-- training_server.js              -- Node.js HTTP server, SSE epoch streaming
-  |-- train_subprocess.py             -- PyTorch training (graph -> model, phased, headType)
-  |-- generate_subprocess.py          -- PyTorch generation (reconstruct, random, Langevin, DDPM)
-  +-- predict_subprocess.py           -- PyTorch batch prediction
-
-demo/<paper>/
-  |-- preset.js                       -- pre-configured store (dataset + models + trainers + generations + evaluations)
-  |-- index.html                      -- loads core from ../../src/ + preset
-  |-- README.md                       -- paper citation, architecture, benchmark results
-  +-- images/                         -- screenshots + GIF (captured via Puppeteer)
+Browser (TF.js)                    Server (PyTorch)
+┌──────────────────────┐          ┌─────────────────────┐
+│  Visual Graph Editor │          │  training_server.js  │
+│  (Drawflow, 35+ nodes)│  ──────>│  train_subprocess.py │
+│  Training Engine     │  SSE     │  generate_subprocess │
+│  Generation Engine   │  <────── │  predict_subprocess  │
+│  Evaluation / Export │          │  CUDA auto-detected  │
+└──────────────────────┘          └─────────────────────┘
+         │                                  │
+         └──── weight_converter.js ────────┘
+              (cross-runtime mapping)
 ```
 
-### Core Principles
+**Core principles**: zero hardcode (everything from schema/config), plugin demos (no core changes per paper), same contract across TF.js/PyTorch/notebook.
 
-1. **Zero hardcode** — everything from schema/config. Classification detected via `headType`, not target name strings.
-2. **Module reuse** — compose existing modules, don't rewrite
-3. **Plugin demos** — paper reproductions need zero core changes
-4. **No build step** — UMD/IIFE modules, script load order = dependencies
-5. **Same contract everywhere** — TF.js browser, PyTorch server, and exported notebook all return identical result format
+See [Architecture Details](DEMOS.md#architecture) for the full file map.
 
 ---
 
-## Validation
+## Testing
 
-The public branch is still active development, so these are the most useful checks before pushing:
+| Suite | Coverage |
+|-------|----------|
+| Contract tests | 31 scripts |
+| Multi-schema pipeline | 11 schemas (5 full train+eval, 6 module-verified) |
+| GitHub Pages E2E | 297 checks across all 15 demos |
 
 ```bash
-# Contract suite
-npm test
-
-# Browser UI checks
-npm run test:browser
-node scripts/test_browser_demo_matrix.js
-
-# Headless multi-schema pipeline
-npm run test:pipeline
-
-# Benchmark / full flow with server running
-node scripts/test_benchmark_full.js
-
-# Notebook export verification
-node scripts/test_headless_notebook_export.js
-node scripts/test_headless_export_verify.js
-node scripts/test_notebook_kernel_api.js
-node scripts/test_browser_notebook_runner.js
-
-# Capture demo screenshots + GIF
-node scripts/capture_demo_assets.js demo/Fashion-MNIST-Benchmark 5
-
-# Cross-runtime weight verification
-node scripts/test_cross_runtime_weights.js
+npm test                                    # contract suite
+npm run test:pipeline                       # headless multi-schema
+node scripts/test_github_pages_e2e.js       # E2E on live site
 ```
-
----
-
-## Papers Cited
-
-| Paper | Year | Demo |
-|-------|------|------|
-| Rumelhart, Hinton, Williams — "Learning representations by back-propagating errors" | 1986 | Benchmark |
-| LeCun, Bottou, Bengio, Haffner — "Gradient-Based Learning Applied to Document Recognition" | 1998 | Benchmark |
-| Hinton & Salakhutdinov — "Reducing the Dimensionality of Data with Neural Networks" | 2006 | Benchmark |
-| Masci et al. — "Stacked Convolutional Auto-Encoders" | 2011 | Benchmark |
-| Kingma & Welling — "Auto-Encoding Variational Bayes" | 2013 | Benchmark |
-| Goodfellow et al. — "Generative Adversarial Nets" | 2014 | GAN |
-| Radford, Metz, Chintala — "Unsupervised Representation Learning with DCGANs" | 2015 | GAN |
-| Arjovsky, Chintala, Bottou — "Wasserstein GAN" | 2017 | GAN |
-| Song & Ermon — "Generative Modeling by Estimating Gradients of the Data Distribution" | 2019 | Diffusion |
-| Ho, Jain, Abbeel — "Denoising Diffusion Probabilistic Models" | 2020 | Benchmark, Diffusion |
-| Dosovitskiy et al. — "An Image is Worth 16x16 Words" | 2021 | Transformer |
-| Nguyen et al. — "TrAISformer — A generative transformer for AIS trajectory prediction" | 2021 | TrAISformer |
-| Song et al. — "Score-Based Generative Modeling through Stochastic Differential Equations" | 2021 | Diffusion |
-| Ronneberger, Fischer, Brox — "U-Net: Convolutional Networks for Biomedical Image Segmentation" | 2015 | UNet, Cell Nuclei |
-| Wei et al. — "HRSID: A High-Resolution SAR Images Dataset for Ship Detection" | 2020 | SAR Ship |
-| Jadhav & Barati Farimani — "LSTM-VAE for dominant motion extraction" | 2022 | LSTM-VAE |
-
-## Adding a New Demo
-
-1. Create `demo/<name>/`
-2. Write `preset.js` with pre-configured store entries (dataset, models, trainers, generations, evaluations)
-3. Create `index.html` — only needs the bundle + your preset:
-   ```html
-   <script src="../../dist/surrogate-studio.js"></script>
-   <script src="./preset.js"></script>
-   ```
-4. Write `README.md` with paper citation, architecture, benchmark results
-5. Run `npm run build` to regenerate the bundle if you added new core files
-5. Capture screenshots: `node scripts/capture_demo_assets.js demo/<paper-name> 5`
-
-No core files need to change. All demos are plugins.
 
 ---
 
