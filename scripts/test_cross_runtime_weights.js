@@ -11,7 +11,7 @@ var MBC = require("../src/model_builder_core.js");
 var fs = require("fs");
 var { execSync } = require("child_process");
 
-var PYTHON = "/home/cue/venv/main/bin/python3";
+var PYTHON = process.env.PYTHON || process.env.SURROGATE_STUDIO_PYTHON || "python3";
 var F = 20; // feature size for test graphs
 
 // --- Helper: build Drawflow graph from simple spec ---

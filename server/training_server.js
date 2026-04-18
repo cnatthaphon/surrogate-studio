@@ -19,14 +19,17 @@
 var http = require("http");
 var fs = require("fs");
 var path = require("path");
-var { spawn } = require("child_process");
+var { spawn, spawnSync } = require("child_process");
 var url = require("url");
 
 // --- config ---
 var PORT = 3777;
 var PYTHON = null; // auto-detect
-var VENV_PATH = "/home/cue/venv/main/bin/python3"; // default venv
 var SUBPROCESS_SCRIPT = path.join(__dirname, "train_subprocess.py");
+
+function _pythonWorks(cmd) {
+  try { return spawnSync(cmd, ["--version"], { stdio: "pipe" }).status === 0; } catch (e) { return false; }
+}
 
 // parse CLI args
 process.argv.slice(2).forEach(function (arg, i, arr) {
@@ -35,9 +38,11 @@ process.argv.slice(2).forEach(function (arg, i, arr) {
 });
 
 if (!PYTHON) {
-  // auto-detect python
-  if (fs.existsSync(VENV_PATH)) PYTHON = VENV_PATH;
-  else PYTHON = "python3";
+  var candidates = [process.env.PYTHON, process.env.SURROGATE_STUDIO_PYTHON, "python3", "python"].filter(Boolean);
+  for (var ci = 0; ci < candidates.length; ci++) {
+    if (_pythonWorks(candidates[ci])) { PYTHON = candidates[ci]; break; }
+  }
+  if (!PYTHON) PYTHON = "python3"; // fallback even if not found
 }
 
 // --- job storage ---

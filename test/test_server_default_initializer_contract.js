@@ -9,12 +9,13 @@ var fs = require("fs");
 var path = require("path");
 var child = require("child_process");
 
-var PYTHON = process.env.SURROGATE_STUDIO_PYTHON || "/home/cue/venv/main/bin/python3";
+var PYTHON = process.env.PYTHON || process.env.SURROGATE_STUDIO_PYTHON || "python3";
 var REPO_ROOT = path.resolve(__dirname, "..");
 var SERVER_DIR = path.join(REPO_ROOT, "server");
 
-if (!fs.existsSync(PYTHON)) {
-  console.log("SKIP test_server_default_initializer_contract (python env missing: " + PYTHON + ")");
+var _pyCheck = (function () { try { return child.spawnSync(PYTHON, ["--version"], { stdio: "pipe" }).status === 0; } catch (e) { return false; } })();
+if (!_pyCheck) {
+  console.log("SKIP test_server_default_initializer_contract (python not available: " + PYTHON + ")");
   process.exit(0);
 }
 

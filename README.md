@@ -1,6 +1,6 @@
 # Surrogate Studio
 
-![Demos](https://img.shields.io/badge/demos-15-orange) ![Models](https://img.shields.io/badge/models-43-blue) ![Tests](https://img.shields.io/badge/E2E%20checks-297%20pass-brightgreen) ![Papers](https://img.shields.io/badge/papers%20cited-18-blueviolet)
+[![CI](https://github.com/cnatthaphon/surrogate-studio/actions/workflows/ci.yml/badge.svg)](https://github.com/cnatthaphon/surrogate-studio/actions/workflows/ci.yml) ![Demos](https://img.shields.io/badge/demos-15-orange) ![Models](https://img.shields.io/badge/models-43-blue) ![Tests](https://img.shields.io/badge/E2E%20checks-297%20pass-brightgreen) ![Papers](https://img.shields.io/badge/papers%20cited-18-blueviolet) [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
 **A visual ML platform that reproduces 15 published papers — trainable in the browser with no install.**
 
@@ -111,4 +111,4 @@ node scripts/test_github_pages_e2e.js       # E2E on live site
 
 ## License
 
-See repository for license details.
+[MIT](LICENSE)

@@ -1,0 +1,32 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Contract tests (31 scripts)
+        run: npm test
+
+      - name: Multi-schema pipeline (11 schemas)
+        run: node scripts/test_headless_multi_schema_pipeline.js
+
+      - name: Syntax check E2E script
+        run: node --check scripts/test_github_pages_e2e.js
+
+      - name: Validate README badges and markdown links
+        run: node scripts/validate_docs.js
