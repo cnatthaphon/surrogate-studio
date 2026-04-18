@@ -21,8 +21,9 @@ var PYTHON = process.env.PYTHON || process.env.SURROGATE_STUDIO_PYTHON || "pytho
 var REPO_ROOT = path.resolve(__dirname, "..");
 var PREDICT = path.join(REPO_ROOT, "server", "predict_subprocess.py");
 
-if (!fs.existsSync(PYTHON)) {
-  console.log("SKIP test_server_conv_runtime_parity (python env missing: " + PYTHON + ")");
+var _pyCheck = (function () { try { return child.spawnSync(PYTHON, ["--version"], { stdio: "pipe" }).status === 0; } catch (e) { return false; } })();
+if (!_pyCheck) {
+  console.log("SKIP test_server_conv_runtime_parity (python not available: " + PYTHON + ")");
   process.exit(0);
 }
 

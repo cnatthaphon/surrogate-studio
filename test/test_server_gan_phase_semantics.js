@@ -21,8 +21,9 @@ eval(fs.readFileSync("./demo/Fashion-MNIST-GAN/preset.js", "utf8"));
 var PYTHON = process.env.PYTHON || process.env.SURROGATE_STUDIO_PYTHON || "python3";
 var TRAIN_SCRIPT = path.resolve(__dirname, "../server/train_subprocess.py");
 
-if (!fs.existsSync(PYTHON)) {
-  console.log("SKIP test_server_gan_phase_semantics (python env missing: " + PYTHON + ")");
+var _pyCheck = (function () { try { return child.spawnSync(PYTHON, ["--version"], { stdio: "pipe" }).status === 0; } catch (e) { return false; } })();
+if (!_pyCheck) {
+  console.log("SKIP test_server_gan_phase_semantics (python not available: " + PYTHON + ")");
   process.exit(0);
 }
 
