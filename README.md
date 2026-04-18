@@ -1,6 +1,6 @@
 # Surrogate Studio
 
-![Demos](https://img.shields.io/badge/demos-15-orange) ![Models](https://img.shields.io/badge/models-26-blue) ![Tests](https://img.shields.io/badge/E2E%20checks-297%20pass-brightgreen) ![Papers](https://img.shields.io/badge/papers%20cited-16-blueviolet)
+![Demos](https://img.shields.io/badge/demos-15-orange) ![Models](https://img.shields.io/badge/models-43-blue) ![Tests](https://img.shields.io/badge/E2E%20checks-297%20pass-brightgreen) ![Papers](https://img.shields.io/badge/papers%20cited-18-blueviolet)
 
 **A visual ML platform that reproduces 15 published papers — trainable in the browser with no install.**
 
