@@ -84,35 +84,32 @@ checkBadge("Demos", /demos-(\d+)/, demos.length);
 checkBadge("Models", /models-(\d+)/, totalModels);
 checkBadge("Papers", /papers%20cited-(\d+)/, paperCount);
 
-// --- 5. Check markdown image links in README ---
-console.log("\n=== README image links ===");
-var imgLinks = readme.match(/!\[.*?\]\((.*?)\)/g) || [];
-imgLinks.forEach(function (link) {
-  var src = link.match(/\]\((.*?)\)/)[1];
-  if (src.startsWith("http")) { ok("External: " + src.substring(0, 60)); return; }
-  var fullPath = path.join(__dirname, "..", src);
-  if (fs.existsSync(fullPath)) {
-    ok(src);
-  } else {
-    fail("Missing image: " + src);
-  }
-});
+// --- 5. Check all markdown links (images + standard) in a file ---
+function checkMarkdownLinks(fileName, content, baseDir) {
+  console.log("\n=== " + fileName + " markdown links ===");
+  // Match both ![alt](src) and [text](src) but not badge URLs or anchors
+  var allLinks = content.match(/!?\[.*?\]\((.*?)\)/g) || [];
+  var localChecked = 0;
+  allLinks.forEach(function (link) {
+    var src = link.match(/\]\((.*?)\)/)[1];
+    // skip external URLs and pure anchors
+    if (src.startsWith("http") || src.startsWith("#")) return;
+    // strip anchor from file#section links
+    var filePart = src.split("#")[0];
+    if (!filePart) return; // pure anchor like #section
+    var fullPath = path.join(baseDir, filePart);
+    if (fs.existsSync(fullPath)) {
+      localChecked++;
+    } else {
+      fail(fileName + ": broken link → " + src);
+    }
+  });
+  ok(localChecked + " local links valid");
+}
 
-// --- 6. Check markdown image links in DEMOS.md ---
-console.log("\n=== DEMOS.md image links ===");
-var demoImgLinks = demosmd.match(/!\[.*?\]\((.*?)\)/g) || [];
-var checkedImages = 0;
-demoImgLinks.forEach(function (link) {
-  var src = link.match(/\]\((.*?)\)/)[1];
-  if (src.startsWith("http")) return;
-  var fullPath = path.join(__dirname, "..", src);
-  if (fs.existsSync(fullPath)) {
-    checkedImages++;
-  } else {
-    fail("Missing image in DEMOS.md: " + src);
-  }
-});
-ok(checkedImages + " local image links valid");
+var rootDir = path.join(__dirname, "..");
+checkMarkdownLinks("README.md", readme, rootDir);
+checkMarkdownLinks("DEMOS.md", demosmd, rootDir);
 
 // --- 7. Check each demo has README with key sections ---
 console.log("\n=== Demo README sections ===");

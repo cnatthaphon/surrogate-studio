@@ -17,7 +17,7 @@ var loader = require("../src/tfjs_node_loader.js");
 var tf = loader.loadTfjs();
 var MBC = require("../src/model_builder_core.js");
 
-var PYTHON = process.env.SURROGATE_STUDIO_PYTHON || "/home/cue/venv/main/bin/python3";
+var PYTHON = process.env.PYTHON || process.env.SURROGATE_STUDIO_PYTHON || "python3";
 var REPO_ROOT = path.resolve(__dirname, "..");
 var PREDICT = path.join(REPO_ROOT, "server", "predict_subprocess.py");
 

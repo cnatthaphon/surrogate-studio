@@ -9,7 +9,7 @@ var fs = require("fs");
 var path = require("path");
 var child = require("child_process");
 
-var PYTHON = process.env.SURROGATE_STUDIO_PYTHON || "/home/cue/venv/main/bin/python3";
+var PYTHON = process.env.PYTHON || process.env.SURROGATE_STUDIO_PYTHON || "python3";
 var REPO_ROOT = path.resolve(__dirname, "..");
 var SERVER_DIR = path.join(REPO_ROOT, "server");
 

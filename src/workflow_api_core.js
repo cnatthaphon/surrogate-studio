@@ -8,7 +8,7 @@ const cp = require("child_process");
 const PROJECT_ROOT = path.resolve(__dirname, "..");
 const NOTEBOOK_DIR = path.join(PROJECT_ROOT, "notebooks");
 const MODELS_DIR = path.join(PROJECT_ROOT, "models");
-const PYTHON_EXE = "/home/cue/venv/main/bin/python3";
+const PYTHON_EXE = process.env.PYTHON || process.env.SURROGATE_STUDIO_PYTHON || "python3";
 
 let bootstrapState = null;
 

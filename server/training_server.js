@@ -25,7 +25,7 @@ var url = require("url");
 // --- config ---
 var PORT = 3777;
 var PYTHON = null; // auto-detect
-var VENV_PATH = "/home/cue/venv/main/bin/python3"; // default venv
+var VENV_PATH = process.env.PYTHON || process.env.SURROGATE_STUDIO_PYTHON || "python3";
 var SUBPROCESS_SCRIPT = path.join(__dirname, "train_subprocess.py");
 
 // parse CLI args

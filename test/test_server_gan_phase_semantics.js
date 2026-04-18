@@ -18,7 +18,7 @@ var MBC = require("../src/model_builder_core.js");
 
 eval(fs.readFileSync("./demo/Fashion-MNIST-GAN/preset.js", "utf8"));
 
-var PYTHON = process.env.SURROGATE_STUDIO_PYTHON || "/home/cue/venv/main/bin/python3";
+var PYTHON = process.env.PYTHON || process.env.SURROGATE_STUDIO_PYTHON || "python3";
 var TRAIN_SCRIPT = path.resolve(__dirname, "../server/train_subprocess.py");
 
 if (!fs.existsSync(PYTHON)) {

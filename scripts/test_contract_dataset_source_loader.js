@@ -8,7 +8,19 @@ const path = require("path");
 const cp = require("child_process");
 
 const ROOT = path.resolve(__dirname, "..");
-const PY = process.env.PYTHON || "/home/cue/venv/main/bin/python3";
+const PY = process.env.PYTHON || process.env.SURROGATE_STUDIO_PYTHON || "python3";
+
+// Skip if python or required modules unavailable
+try {
+  var check = cp.spawnSync(PY, ["-c", "import pandas; import numpy"], { encoding: "utf8", timeout: 10000 });
+  if (check.status !== 0) {
+    console.log("SKIP test_contract_dataset_source_loader (python deps unavailable)");
+    process.exit(0);
+  }
+} catch (e) {
+  console.log("SKIP test_contract_dataset_source_loader (python not found)");
+  process.exit(0);
+}
 
 function runLoader(desc) {
   const code = [
