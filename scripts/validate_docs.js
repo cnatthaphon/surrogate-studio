@@ -87,11 +87,25 @@ checkBadge("Papers", /papers%20cited-(\d+)/, paperCount);
 // --- 5. Check all markdown links (images + standard) in a file ---
 function checkMarkdownLinks(fileName, content, baseDir) {
   console.log("\n=== " + fileName + " markdown links ===");
-  // Match both ![alt](src) and [text](src) but not badge URLs or anchors
-  var allLinks = content.match(/!?\[.*?\]\((.*?)\)/g) || [];
+  // Collect all link targets: ![alt](src), [text](src), and nested [![...](img)](outer)
+  var targets = [];
+  // Standard and image links
+  var simple = content.match(/!?\[[^\]]*\]\([^)]+\)/g) || [];
+  simple.forEach(function (link) {
+    var m = link.match(/\]\(([^)]+)\)/);
+    if (m) targets.push(m[1]);
+  });
+  // Nested badge links: [![...](img-url)](outer-target)
+  var nested = content.match(/\[!\[[^\]]*\]\([^)]+\)\]\([^)]+\)/g) || [];
+  nested.forEach(function (link) {
+    var outer = link.match(/\)\]\(([^)]+)\)$/);
+    if (outer) targets.push(outer[1]);
+  });
+  // Deduplicate
+  var seen = {};
+  targets = targets.filter(function (t) { if (seen[t]) return false; seen[t] = true; return true; });
   var localChecked = 0;
-  allLinks.forEach(function (link) {
-    var src = link.match(/\]\((.*?)\)/)[1];
+  targets.forEach(function (src) {
     // skip external URLs and pure anchors
     if (src.startsWith("http") || src.startsWith("#")) return;
     // strip anchor from file#section links

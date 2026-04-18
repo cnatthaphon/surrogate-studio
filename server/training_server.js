@@ -19,7 +19,7 @@
 var http = require("http");
 var fs = require("fs");
 var path = require("path");
-var { spawn } = require("child_process");
+var { spawn, spawnSync } = require("child_process");
 var url = require("url");
 
 // --- config ---
@@ -28,7 +28,7 @@ var PYTHON = null; // auto-detect
 var SUBPROCESS_SCRIPT = path.join(__dirname, "train_subprocess.py");
 
 function _pythonWorks(cmd) {
-  try { return spawn(cmd, ["--version"], { stdio: "pipe" }).status === 0; } catch (e) { return false; }
+  try { return spawnSync(cmd, ["--version"], { stdio: "pipe" }).status === 0; } catch (e) { return false; }
 }
 
 // parse CLI args
