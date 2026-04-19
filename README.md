@@ -103,6 +103,11 @@ Browser (TF.js)                    Server (PyTorch)
 
 See [Architecture Details](DEMOS.md#architecture) for the full file map.
 
+**Docker** — everything in one container (Node.js + PyTorch):
+```bash
+docker build -t surrogate-studio . && docker run -p 3777:3777 surrogate-studio
+```
+
 ---
 
 ## Testing
