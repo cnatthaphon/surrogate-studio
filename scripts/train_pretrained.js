@@ -150,7 +150,7 @@ async function trainModel(modelDef, dataset, trainerDef) {
   if (!buildResult.model) { console.log("  SKIP (model build failed)"); return null; }
   console.log("  Model:", buildResult.model.countParams(), "params");
 
-  var tc = trainerDef.config || {};
+  var tc = trainerDef.trainCfg || trainerDef.config || {};
   var epochs = [];
   var trainResult = await TEC.trainModel(tf, {
     model: buildResult.model,
@@ -166,7 +166,7 @@ async function trainModel(modelDef, dataset, trainerDef) {
     epochs: tc.epochs || 30,
     batchSize: tc.batchSize || 32,
     learningRate: tc.learningRate || 0.001,
-    optimizerType: tc.optimizerType || "adam",
+    optimizerType: tc.optimizerType || tc.optimizer || "adam",
     lrSchedulerType: tc.lrSchedulerType || "none",
     earlyStoppingPatience: tc.earlyStoppingPatience || 10,
     restoreBestWeights: tc.restoreBestWeights !== false,
@@ -223,7 +223,14 @@ async function main() {
     if (result.trainResult.accuracy !== undefined) metrics.testAccuracy = result.trainResult.accuracy;
     if (result.trainResult.mae !== undefined) metrics.testMAE = result.trainResult.mae;
 
-    var varName = exportPretrained(trainerName, trainer.config || {}, metrics, result.epochs, result.model, outPath);
+    var rc = trainer.trainCfg || trainer.config || {};
+    var resolvedConfig = {
+      epochs: rc.epochs || 30,
+      batchSize: rc.batchSize || 32,
+      learningRate: rc.learningRate || 0.001,
+      optimizerType: rc.optimizerType || rc.optimizer || "adam",
+    };
+    var varName = exportPretrained(trainerName, resolvedConfig, metrics, result.epochs, result.model, outPath);
 
     console.log("  Variable:", varName);
     console.log("  Use in preset: { ..., _pretrainedVar: '" + varName + "', status: 'done' }");
