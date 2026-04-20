@@ -239,7 +239,9 @@ async function main() {
       bestValLoss: result.trainResult.bestValLoss,
     };
     if (result.trainResult.accuracy !== undefined) metrics.testAccuracy = result.trainResult.accuracy;
-    if (result.trainResult.mae !== undefined) metrics.testMAE = result.trainResult.mae;
+    if (result.trainResult.mae !== undefined) metrics.mae = result.trainResult.mae;
+    if (result.trainResult.testMae !== undefined) metrics.testMae = result.trainResult.testMae;
+    if (result.trainResult.testAccuracy !== undefined) metrics.testAccuracy = result.trainResult.testAccuracy;
 
     var rc = trainer.trainCfg || trainer.config || {};
     var resolvedConfig = {
