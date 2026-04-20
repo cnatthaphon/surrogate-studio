@@ -65,7 +65,25 @@ var mod = dm.getModule(modList[0].id);
 function oneHot(label, n) { var arr = new Array(n).fill(0); arr[label] = 1; return arr; }
 
 async function buildDataset() {
-  var cfg = { seed: 42, totalCount: 300, variant: schemaId, sourceMode: "synthetic" };
+  // Derive build config from preset.dataset — let module use its own defaults
+  var pds = preset.dataset || preset.datasets && preset.datasets[0] || {};
+  var cfg = {
+    seed: pds.seed || 42,
+    schemaId: schemaId,
+    moduleId: pds.datasetModuleId || mod.id,
+    sourceMode: "synthetic",
+  };
+  // Pass totalCount only if preset specifies it; otherwise let module default
+  if (pds.totalCount || pds.sourceTotalExamples) {
+    cfg.totalCount = pds.totalCount || pds.sourceTotalExamples;
+  }
+  // Pass split config if preset has it
+  if (pds.splitConfig) {
+    cfg.trainFrac = pds.splitConfig.train;
+    cfg.valFrac = pds.splitConfig.val;
+    cfg.testFrac = pds.splitConfig.test;
+  }
+  console.log("Build config:", JSON.stringify(cfg));
   var result = await mod.build(cfg);
   if (!result) throw new Error("build returned null");
 
