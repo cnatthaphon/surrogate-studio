@@ -130,6 +130,18 @@
     ],
     trainers: [
       {
+        id: "seg_unet_pre", name: "Seg-UNet (pre-trained)", schemaId: sid,
+        datasetId: DS_ID, modelId: "seg_unet", status: "done",
+        _pretrainedVar: "SEG_UNET_SKIP_CONNECTIONS_PRE_TRAINED_PRETRAINED_BIN_B64",
+        config: { epochs: 30, batchSize: 32, learningRate: 0.001, optimizerType: "adam" },
+      },
+      {
+        id: "seg_mlp_pre", name: "MLP Baseline (pre-trained)", schemaId: sid,
+        datasetId: DS_ID, modelId: "seg_mlp", status: "done",
+        _pretrainedVar: "MLP_BASELINE_PRE_TRAINED_PRETRAINED_BIN_B64",
+        config: { epochs: 30, batchSize: 32, learningRate: 0.001, optimizerType: "adam" },
+      },
+      {
         id: "seg_unet_trainer", name: "Seg-UNet Trainer", schemaId: sid,
         datasetId: DS_ID, modelId: "seg_unet",
         runtime: "js_client", runtimeBackend: "auto", status: "draft",
@@ -146,7 +158,7 @@
     evaluations: [
       {
         id: "seg_eval", name: "Segmentation: UNet vs MLP", schemaId: sid, datasetId: DS_ID,
-        trainerIds: ["seg_unet_trainer", "seg_mlp_trainer"],
+        trainerIds: ["seg_unet_pre", "seg_mlp_pre"],
         evaluatorIds: ["mask_iou", "dice", "pixel_accuracy"],
         status: "draft", runs: [], createdAt: Date.now(),
       },

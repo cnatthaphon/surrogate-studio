@@ -83,6 +83,18 @@
     ],
     trainers: [
       {
+        id: "deep_siamese_pre", name: "Deep Siamese (pre-trained)", schemaId: sid,
+        datasetId: DS_ID, modelId: "deep_siamese", status: "done",
+        _pretrainedVar: "DEEP_SIAMESE_MLP_PRE_TRAINED_PRETRAINED_BIN_B64",
+        config: { epochs: 30, batchSize: 32, learningRate: 0.001, optimizerType: "adam" },
+      },
+      {
+        id: "shallow_mlp_pre", name: "Shallow MLP (pre-trained)", schemaId: sid,
+        datasetId: DS_ID, modelId: "shallow_mlp", status: "done",
+        _pretrainedVar: "SHALLOW_MLP_BASELINE_PRE_TRAINED_PRETRAINED_BIN_B64",
+        config: { epochs: 30, batchSize: 32, learningRate: 0.001, optimizerType: "adam" },
+      },
+      {
         id: "deep_siamese_trainer", name: "Deep Siamese Trainer", schemaId: sid,
         datasetId: DS_ID, modelId: "deep_siamese",
         runtime: "js_client", runtimeBackend: "auto", status: "draft",
@@ -99,7 +111,7 @@
     evaluations: [
       {
         id: "siamese_eval", name: "Verification: Deep vs Shallow", schemaId: sid, datasetId: DS_ID,
-        trainerIds: ["deep_siamese_trainer", "shallow_mlp_trainer"],
+        trainerIds: ["deep_siamese_pre", "shallow_mlp_pre"],
         evaluatorIds: ["accuracy", "macro_f1"],
         status: "draft", runs: [], createdAt: Date.now(),
       },
