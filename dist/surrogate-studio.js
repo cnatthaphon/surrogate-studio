@@ -1,5 +1,5 @@
 // Surrogate Studio — concatenated bundle
-// Generated: 2026-04-21T11:33:28Z
+// Generated: 2026-04-21T16:13:28Z
 // Source files: 58
 
 
@@ -11835,8 +11835,9 @@
     var lines = text.trim().split(/\r?\n/);
     if (lines.length < 2) return null;
     var header = lines[0].split(",").map(function (h) { return h.trim(); });
-    var featureCols = header.filter(function (h) { return /^f\d+$/i.test(h); }).sort();
-    var targetCols = header.filter(function (h) { return /^t\d+$/i.test(h); }).sort();
+    function numSort(a, b) { return parseInt(a.slice(1), 10) - parseInt(b.slice(1), 10); }
+    var featureCols = header.filter(function (h) { return /^f\d+$/i.test(h); }).sort(numSort);
+    var targetCols = header.filter(function (h) { return /^t\d+$/i.test(h); }).sort(numSort);
     var splitIdx = header.indexOf("split");
 
     var x = { train: [], val: [], test: [] };
@@ -11874,6 +11875,23 @@
     var c = config || {};
     var seed = c.seed || 42;
     var csvText = c.csvText || null;
+    var sourceDescriptor = c.sourceDescriptor || null;
+
+    // If sourceDescriptor provided, pass it through for server-side loading
+    if (sourceDescriptor && !csvText) {
+      return {
+        schemaId: SCHEMA_ID,
+        datasetModuleId: MODULE_ID,
+        sourceDescriptor: sourceDescriptor,
+        mode: sourceDescriptor.mode || "classification",
+        featureSize: sourceDescriptor.featureSize || 0,
+        targetSize: sourceDescriptor.targetSize || 0,
+        targetMode: sourceDescriptor.targetMode || "target",
+        numClasses: sourceDescriptor.classCount || 0,
+        classCount: sourceDescriptor.classCount || 0,
+        seed: seed,
+      };
+    }
 
     var parsed;
     if (csvText) {
