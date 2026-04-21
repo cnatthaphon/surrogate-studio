@@ -4,7 +4,7 @@
 
 **A visual ML platform that reproduces 15 published papers — trainable in the browser with no install.**
 
-### [Try it now on GitHub Pages](https://cnatthaphon.github.io/surrogate-studio/demo/Fashion-MNIST-Benchmark/)
+### [Try it now on GitHub Pages](https://cnatthaphon.github.io/surrogate-studio/demo/Fashion-MNIST-GAN/) — pretrained models, instant results
 
 ![Demo Workflow](demo/Fashion-MNIST-Benchmark/images/demo_workflow.gif)
 
