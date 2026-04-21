@@ -65,7 +65,7 @@ async function main() {
   try {
     var page = await browser.newPage();
     page.on("pageerror", function (err) { consoleErrors.push(String(err)); });
-    page.on("requestfailed", function (req) {
+    page.on("request", function (req) {
       if (req.url().includes("localhost:3777")) serverPings.push(req.url());
     });
 
@@ -197,10 +197,10 @@ async function main() {
       if (dragResult.nodeAdded) {
         ok("Drag-and-drop added node: " + dragResult.itemText + " (" + dragResult.nodesBefore + " -> " + dragResult.nodesAfter + ")");
       } else {
-        ok("Drag-and-drop fired but node not added (" + dragResult.nodesBefore + " nodes, item: " + dragResult.itemText + ") — Drawflow may need mouse events");
+        console.log("  \x1b[33m⚠\x1b[0m Drag-and-drop fired but node not added (Drawflow requires real mouse events) — not counted as pass/fail");
       }
     } else {
-      ok("Drag-and-drop skipped: " + dragResult.reason);
+      console.log("  \x1b[33m⚠\x1b[0m Drag-and-drop not attempted: " + dragResult.reason + " — not counted as pass/fail");
     }
 
     // --- 5. Trainer tab — check pretrained OR train ---
@@ -290,7 +290,7 @@ async function main() {
     var ganPings = [];
     var ganErrors = [];
     var ganPage = await browser.newPage();
-    ganPage.on("requestfailed", function (req) {
+    ganPage.on("request", function (req) {
       if (req.url().includes("localhost:3777")) ganPings.push(req.url());
     });
     ganPage.on("pageerror", function (err) { ganErrors.push(String(err)); });
