@@ -61,9 +61,13 @@ async function main() {
   });
 
   var consoleErrors = [];
+  var serverPings = []; // track unwanted localhost:3777 requests
   try {
     var page = await browser.newPage();
     page.on("pageerror", function (err) { consoleErrors.push(String(err)); });
+    page.on("requestfailed", function (req) {
+      if (req.url().includes("localhost:3777")) serverPings.push(req.url());
+    });
 
     // --- 1. Load Synthetic Segmentation (instant data, has pretrained) ---
     console.log("[1] Load demo");
@@ -277,9 +281,13 @@ async function main() {
     if (finalState.hasEpoch) ok("Epoch data visible");
     if (finalState.hasMetrics) ok("Training metrics visible");
 
-    // --- 7. No fatal JS errors ---
+    // --- 7. No unwanted server pings ---
+    if (serverPings.length === 0) ok("No unwanted localhost:3777 requests");
+    else fail(serverPings.length + " unwanted server pings: " + serverPings[0]);
+
+    // --- 8. No fatal JS errors ---
     var fatal = consoleErrors.filter(function (e) {
-      return e.indexOf("favicon") < 0 && e.indexOf("net::ERR") < 0 && e.indexOf("404") < 0 && e.indexOf("localhost:3777") < 0;
+      return e.indexOf("favicon") < 0 && e.indexOf("net::ERR") < 0 && e.indexOf("404") < 0;
     });
     if (fatal.length === 0) ok("No fatal JS errors");
     else fail(fatal.length + " JS errors: " + fatal[0].substring(0, 80));

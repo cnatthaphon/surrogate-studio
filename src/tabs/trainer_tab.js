@@ -2975,8 +2975,13 @@
     function mount() {
       _mountId++; _subTab = "train";
       _renderLeftPanel(); _renderMainPanel(); _renderRightPanel();
-      // always recheck server on mount (heartbeat)
-      _checkServerConnection("", function () { _renderRightPanel(); });
+      // only check server if the active trainer has useServer enabled
+      var _mountAid = stateApi ? stateApi.getActiveTrainer() : "";
+      var _mountT = _mountAid && store ? store.getTrainerCard(_mountAid) : null;
+      var _mountCfg = _mountT ? Object.assign({}, _mountT.trainCfg || {}, _mountT.config || {}) : {};
+      if (_mountCfg.useServer) {
+        _checkServerConnection("", function () { _renderRightPanel(); });
+      }
     }
     function unmount() { _mountId++; if (_configFormApi && typeof _configFormApi.destroy === "function") _configFormApi.destroy(); _configFormApi = null; _lossChartDiv = null; _epochTableBody = null; layout.leftEl.innerHTML = ""; layout.mainEl.innerHTML = ""; layout.rightEl.innerHTML = ""; }
     function refresh() { mount(); }
