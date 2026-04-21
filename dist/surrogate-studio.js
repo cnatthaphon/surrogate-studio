@@ -1,5 +1,5 @@
 // Surrogate Studio — concatenated bundle
-// Generated: 2026-04-21T16:13:28Z
+// Generated: 2026-04-21T16:25:01Z
 // Source files: 58
 
 
@@ -11879,16 +11879,18 @@
 
     // If sourceDescriptor provided, pass it through for server-side loading
     if (sourceDescriptor && !csvText) {
+      var meta = sourceDescriptor.metadata || sourceDescriptor || {};
       return {
         schemaId: SCHEMA_ID,
         datasetModuleId: MODULE_ID,
         sourceDescriptor: sourceDescriptor,
-        mode: sourceDescriptor.mode || "classification",
-        featureSize: sourceDescriptor.featureSize || 0,
-        targetSize: sourceDescriptor.targetSize || 0,
-        targetMode: sourceDescriptor.targetMode || "target",
-        numClasses: sourceDescriptor.classCount || 0,
-        classCount: sourceDescriptor.classCount || 0,
+        mode: meta.mode || sourceDescriptor.mode || "classification",
+        featureSize: Number(meta.featureSize || sourceDescriptor.featureSize) || 0,
+        targetSize: Number(meta.targetSize || sourceDescriptor.targetSize) || 0,
+        targetMode: meta.targetMode || sourceDescriptor.targetMode || "target",
+        numClasses: Number(meta.numClasses || meta.classCount || sourceDescriptor.classCount) || 0,
+        classCount: Number(meta.classCount || meta.numClasses || sourceDescriptor.classCount) || 0,
+        classNames: meta.classNames || sourceDescriptor.classNames || [],
         seed: seed,
       };
     }
@@ -12039,6 +12041,40 @@
         c.csvText = window._customCsvText;
       }
       return build(c);
+    },
+    uiApi: {
+      getSourceDescriptorSpec: function () {
+        return {
+          title: "Local Source (Server Training)",
+          helpText: "Point to a local CSV + manifest JSON for PyTorch server or notebook training.",
+          schema: [
+            { key: "useSourceDescriptor", label: "Use local source", type: "checkbox" },
+            {
+              key: "sourceKind", label: "Source type", type: "select",
+              options: [
+                { value: "local_csv_manifest", label: "Local CSV + manifest" },
+                { value: "local_json_dataset", label: "Local JSON dataset" },
+              ],
+            },
+            { key: "sourceDatasetPath", label: "Dataset path", type: "text", placeholder: "/path/to/data.csv" },
+            { key: "sourceManifestPath", label: "Manifest path", type: "text", placeholder: "/path/to/manifest.json" },
+            { key: "sourceRootDir", label: "Root dir (optional)", type: "text" },
+            { key: "sourceFeatureSize", label: "Feature columns", type: "number", min: 1, step: 1 },
+            { key: "sourceTargetSize", label: "Target columns", type: "number", min: 1, step: 1 },
+            { key: "sourceNumClasses", label: "Classes (0 for regression)", type: "number", min: 0, step: 1 },
+          ],
+          value: {
+            useSourceDescriptor: false,
+            sourceKind: "local_csv_manifest",
+            sourceDatasetPath: "",
+            sourceManifestPath: "",
+            sourceRootDir: "",
+            sourceFeatureSize: "4",
+            sourceTargetSize: "1",
+            sourceNumClasses: "3",
+          },
+        };
+      },
     },
     playgroundApi: {
       renderPlayground: renderPlayground,

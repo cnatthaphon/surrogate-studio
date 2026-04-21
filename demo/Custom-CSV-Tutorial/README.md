@@ -69,7 +69,28 @@ Input(4) → Dense(16,relu) → Output(label)
 ```bash
 npm start   # start the server at localhost:3777
 ```
-Configure a `sourceDescriptor` in the dataset with `kind: "local_csv_manifest"` and a path to your CSV + manifest JSON. The server reads the file directly — no upload needed.
+In the **Dataset** tab, expand "Local Source (Server Training)" and fill in:
+
+| Field | Description |
+|-------|-------------|
+| **Use local source** | Check to enable |
+| **Source type** | `Local CSV + manifest` or `Local JSON dataset` |
+| **Dataset path** | Absolute path to your CSV, e.g. `/data/iris.csv` |
+| **Manifest path** | Path to a JSON manifest with `schemaId`, `mode`, `classCount` |
+| **Feature columns** | Number of `f*` columns in the CSV |
+| **Target columns** | Number of `t*` columns |
+| **Classes** | Number of classes (0 for regression) |
+
+Example manifest (`manifest.json`):
+```json
+{
+  "schemaId": "custom_csv",
+  "mode": "classification",
+  "classCount": 3
+}
+```
+
+The server reads the files directly via `dataset_source_loader.py` — no upload needed.
 
 ## Defining Your Own Schema
 
