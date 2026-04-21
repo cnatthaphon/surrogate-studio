@@ -1537,7 +1537,7 @@
       var formValue = {
         datasetId: t.datasetId || "", modelId: t.modelId || "",
         runtimeBackend: config.runtimeBackend || "auto",
-        useServer: config.useServer != null ? config.useServer : true,
+        useServer: config.useServer != null ? config.useServer : false,
         serverUrl: config.serverUrl || defaultServerUrl,
         epochs: config.epochs || 20, batchSize: config.batchSize || 32, learningRate: config.learningRate || 0.001,
         optimizerType: config.optimizerType || "adam", lrSchedulerType: config.lrSchedulerType || "plateau",
@@ -2975,8 +2975,8 @@
     function mount() {
       _mountId++; _subTab = "train";
       _renderLeftPanel(); _renderMainPanel(); _renderRightPanel();
-      // always recheck server on mount (heartbeat)
-      _checkServerConnection("", function () { _renderRightPanel(); });
+      // server check removed from mount — only triggered when user
+      // toggles "Use PyTorch Server" checkbox or clicks Start Training
     }
     function unmount() { _mountId++; if (_configFormApi && typeof _configFormApi.destroy === "function") _configFormApi.destroy(); _configFormApi = null; _lossChartDiv = null; _epochTableBody = null; layout.leftEl.innerHTML = ""; layout.mainEl.innerHTML = ""; layout.rightEl.innerHTML = ""; }
     function refresh() { mount(); }

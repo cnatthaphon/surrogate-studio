@@ -30,7 +30,7 @@
       if (preset.generations) preset.generations.forEach(function (g) { store.save({ table: "generationRuns", values: [g] }); });
       if (preset.evaluations) preset.evaluations.forEach(function (e) { store.save({ table: "evaluations", values: [e] }); });
     }
-    SurrogateStudio.init({ mountEl: document.getElementById("app"), defaultSchemaId: "synthetic_segmentation", defaultTab: "dataset", store: store });
+    SurrogateStudio.init({ mountEl: document.getElementById("app"), defaultSchemaId: "synthetic_segmentation", defaultTab: "trainer", store: store });
   </script>
 </body>
 </html>
