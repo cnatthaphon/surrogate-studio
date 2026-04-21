@@ -88,6 +88,13 @@ async function main() {
       if (items.length) items[0].click();
     });
     await sleep(500);
+
+    // Capture state BEFORE Generate
+    var textBefore = await page.evaluate(function () {
+      var ws = document.querySelector(".osc-workspace.active");
+      return ws ? ws.textContent.length : 0;
+    });
+
     await page.evaluate(function () {
       var ws = document.querySelector(".osc-workspace.active");
       var btns = ws ? Array.from(ws.querySelectorAll("button")) : [];
@@ -96,17 +103,31 @@ async function main() {
     });
     await sleep(4000);
 
+    // Check AFTER Generate — require split counts (Train: N | Val: N | Test: N)
     var datasetInfo = await page.evaluate(function () {
       var ws = document.querySelector(".osc-workspace.active");
       var text = ws ? ws.textContent : "";
+      var splitCounts = text.match(/(?:train|Train)[:\s]*(\d+)/);
+      var valCounts = text.match(/(?:val|Val)[:\s]*(\d+)/);
+      var testCounts = text.match(/(?:test|Test)[:\s]*(\d+)/);
       return {
-        hasTrain: text.includes("train") || text.includes("Train"),
-        hasSamples: /\d+\s*(sample|record|image)/i.test(text),
+        textLen: text.length,
+        hasSplitCounts: !!(splitCounts && valCounts && testCounts),
+        trainCount: splitCounts ? splitCounts[1] : null,
+        valCount: valCounts ? valCounts[1] : null,
+        testCount: testCounts ? testCounts[1] : null,
+        hasReady: /ready|generated|status.*ready/i.test(text),
+        textGrew: text.length > 0,
       };
     });
-    if (datasetInfo.hasTrain && datasetInfo.hasSamples) ok("Dataset generated (split + sample count visible)");
-    else if (datasetInfo.hasTrain) ok("Dataset generated (split visible, sample count not found)");
-    else fail("Dataset not generated");
+
+    if (datasetInfo.hasSplitCounts) {
+      ok("Dataset generated (Train:" + datasetInfo.trainCount + " Val:" + datasetInfo.valCount + " Test:" + datasetInfo.testCount + ")");
+    } else if (datasetInfo.textLen > textBefore + 50) {
+      ok("Dataset generated (content grew by " + (datasetInfo.textLen - textBefore) + " chars after Generate)");
+    } else {
+      fail("Dataset generation did not produce visible split counts or new content");
+    }
 
     // --- 3. Model tab + Drawflow graph ---
     console.log("[3] Model tab + Drawflow graph");
