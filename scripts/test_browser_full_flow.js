@@ -281,15 +281,34 @@ async function main() {
     if (finalState.hasEpoch) ok("Epoch data visible");
     if (finalState.hasMetrics) ok("Training metrics visible");
 
-    // --- 7. No unwanted server pings ---
-    if (serverPings.length === 0) ok("No unwanted localhost:3777 requests");
-    else fail(serverPings.length + " unwanted server pings: " + serverPings[0]);
+    // --- 7. No unwanted server pings (Segmentation) ---
+    if (serverPings.length === 0) ok("No unwanted localhost:3777 requests (Segmentation)");
+    else fail(serverPings.length + " unwanted server pings (Segmentation): " + serverPings[0]);
 
-    // --- 8. No fatal JS errors ---
+    // --- 8. GAN demo — the README flagship, has server-trained presets ---
+    console.log("[8] GAN demo (README flagship)");
+    var ganPings = [];
+    var ganErrors = [];
+    var ganPage = await browser.newPage();
+    ganPage.on("requestfailed", function (req) {
+      if (req.url().includes("localhost:3777")) ganPings.push(req.url());
+    });
+    ganPage.on("pageerror", function (err) { ganErrors.push(String(err)); });
+    await ganPage.goto("http://localhost:" + PORT + "/demo/Fashion-MNIST-GAN/index.html", { waitUntil: "networkidle0", timeout: 60000 });
+    await sleep(3000);
+    var ganLoaded = await ganPage.evaluate(function () { return !!document.querySelector(".osc-workspace"); });
+    if (ganLoaded) ok("GAN demo loaded"); else fail("GAN demo failed to load");
+    if (ganPings.length === 0) ok("No unwanted localhost:3777 requests (GAN)");
+    else fail(ganPings.length + " unwanted server pings (GAN): " + ganPings[0]);
+    var ganFatal = ganErrors.filter(function (e) { return e.indexOf("favicon") < 0 && e.indexOf("net::ERR") < 0 && e.indexOf("404") < 0; });
+    if (ganFatal.length === 0) ok("No fatal JS errors (GAN)"); else fail(ganFatal.length + " JS errors (GAN)");
+    await ganPage.close();
+
+    // --- 9. No fatal JS errors (Segmentation) ---
     var fatal = consoleErrors.filter(function (e) {
       return e.indexOf("favicon") < 0 && e.indexOf("net::ERR") < 0 && e.indexOf("404") < 0;
     });
-    if (fatal.length === 0) ok("No fatal JS errors");
+    if (fatal.length === 0) ok("No fatal JS errors (Segmentation)");
     else fail(fatal.length + " JS errors: " + fatal[0].substring(0, 80));
 
   } finally {
