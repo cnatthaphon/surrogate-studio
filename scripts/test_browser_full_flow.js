@@ -183,60 +183,60 @@ async function main() {
       fail("No Drawflow editor found");
     }
 
-    // --- 4. Try drag-and-drop ---
-    console.log("[4] Drag-and-drop test");
-    var dragResult = await page.evaluate(function () {
-      var ws = document.querySelector(".osc-workspace.active");
-      // Palette items may be buttons or draggable divs
-      var paletteItems = ws ? ws.querySelectorAll("[draggable='true'], .osc-palette-item, .palette-node-btn") : [];
-      if (!paletteItems.length) {
-        // Also check for button-based palette (model_tab renders buttons)
-        var left = ws ? ws.querySelector(".osc-panel-left") : null;
-        if (left) paletteItems = left.querySelectorAll("button[data-node], button.palette-btn");
-      }
+    // --- 4. Palette node insertion test ---
+    console.log("[4] Palette node insertion");
+    // Ensure we're on the Model tab with the graph visible
+    await clickTab(page, "Model");
+    await sleep(500);
+    var dragResult = await page.evaluate(async function () {
       var canvas = document.querySelector(".drawflow");
-      if (!paletteItems.length || !canvas) return { attempted: false, reason: "no palette (" + paletteItems.length + ") or no canvas", hasCanvas: !!canvas };
+      if (!canvas) return { attempted: false, reason: "no Drawflow canvas" };
+      // Palette buttons are plain <button> elements rendered by model_tab.js
+      // above the Drawflow editor. They use click → createNodeByType.
+      var ws = document.querySelector(".osc-workspace.active");
+      var mainPanel = ws ? ws.querySelector(".osc-panel-main") : null;
+      var allBtns = mainPanel ? Array.from(mainPanel.querySelectorAll("button")) : [];
+      // Filter: palette buttons are small (node type names like "Dense", "Conv2D"),
+      // positioned before the Drawflow editor, and not action buttons
+      var actionLabels = ["save", "clear", "export", "start", "continue", "generate", "new", "delete", "rename"];
+      var canvasTop = canvas.getBoundingClientRect().top;
+      var paletteBtns = allBtns.filter(function (b) {
+        var txt = b.textContent.trim().toLowerCase();
+        var rect = b.getBoundingClientRect();
+        return txt.length > 0 && txt.length < 20 &&
+          !actionLabels.some(function (a) { return txt.includes(a); }) &&
+          rect.top < canvasTop && rect.width < 120;
+      });
+      if (!paletteBtns.length) return { attempted: false, reason: "no palette buttons above canvas (" + allBtns.length + " buttons in panel)", hasCanvas: true };
 
-      var item = paletteItems[0];
-      var itemRect = item.getBoundingClientRect();
-      var canvasRect = canvas.getBoundingClientRect();
-
-      // Count nodes before
+      var item = paletteBtns[0];
       var nodesBefore = canvas.querySelectorAll(".drawflow-node").length;
 
-      // Simulate drag
-      var dt = new DataTransfer();
-      dt.setData("text/plain", item.getAttribute("data-node") || item.textContent.trim());
-      item.dispatchEvent(new DragEvent("dragstart", { bubbles: true, dataTransfer: dt, clientX: itemRect.x + 10, clientY: itemRect.y + 10 }));
-      canvas.dispatchEvent(new DragEvent("dragover", { bubbles: true, dataTransfer: dt, clientX: canvasRect.x + 400, clientY: canvasRect.y + 200 }));
-      canvas.dispatchEvent(new DragEvent("drop", { bubbles: true, dataTransfer: dt, clientX: canvasRect.x + 400, clientY: canvasRect.y + 200 }));
-      item.dispatchEvent(new DragEvent("dragend", { bubbles: true, dataTransfer: dt }));
+      // Palette buttons use click (not drag) to add nodes via createNodeByType
+      item.click();
+
+      // Brief delay for Drawflow to render the new node
+      await new Promise(function (r) { setTimeout(r, 500); });
 
       var nodesAfter = canvas.querySelectorAll(".drawflow-node").length;
       return {
         attempted: true,
         itemText: item.textContent.trim().substring(0, 30),
+        paletteCount: paletteBtns.length,
         nodesBefore: nodesBefore,
         nodesAfter: nodesAfter,
         nodeAdded: nodesAfter > nodesBefore,
       };
     });
 
-    // Drag-and-drop: Drawflow requires real mouse events (mousedown/mousemove/mouseup),
-    // not DragEvent. DragEvent simulation does not add nodes. We test this honestly:
-    // - If palette is visible and drag adds a node: pass
-    // - If palette is visible but drag fails: fail (would mean Drawflow API changed)
-    // - If preset already loaded graph (no palette): skip — graph verified via DOM nodes above
     if (dragResult.attempted) {
       if (dragResult.nodeAdded) {
-        ok("Drag-and-drop added node: " + dragResult.itemText + " (" + dragResult.nodesBefore + " -> " + dragResult.nodesAfter + ")");
+        ok("Palette click added node: '" + dragResult.itemText + "' (" + dragResult.nodesBefore + " -> " + dragResult.nodesAfter + " nodes, " + dragResult.paletteCount + " palette buttons)");
       } else {
-        fail("Drag-and-drop fired but node not added (" + dragResult.nodesBefore + " nodes, item: " + dragResult.itemText + "). Drawflow may require mouse events instead of DragEvent.");
+        fail("Palette click did not add node: '" + dragResult.itemText + "' (" + dragResult.nodesBefore + " nodes, " + dragResult.paletteCount + " palette buttons)");
       }
     } else {
-      // No palette = preset already loaded the graph, which is the normal demo path.
-      // Graph integrity verified by DOM node count check above.
-      ok("Graph loaded via preset (no empty palette to drag from)");
+      ok("Palette not visible (" + (dragResult.reason || "unknown") + ") — graph verified via DOM nodes above");
     }
 
     // --- 5. Trainer tab — check pretrained OR train ---
