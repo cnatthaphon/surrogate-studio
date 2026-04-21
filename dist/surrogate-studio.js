@@ -1,5 +1,5 @@
 // Surrogate Studio — concatenated bundle
-// Generated: 2026-04-18T17:59:47Z
+// Generated: 2026-04-21T08:19:54Z
 // Source files: 57
 
 
@@ -27900,7 +27900,7 @@
       var formValue = {
         datasetId: t.datasetId || "", modelId: t.modelId || "",
         runtimeBackend: config.runtimeBackend || "auto",
-        useServer: config.useServer != null ? config.useServer : true,
+        useServer: config.useServer != null ? config.useServer : false,
         serverUrl: config.serverUrl || defaultServerUrl,
         epochs: config.epochs || 20, batchSize: config.batchSize || 32, learningRate: config.learningRate || 0.001,
         optimizerType: config.optimizerType || "adam", lrSchedulerType: config.lrSchedulerType || "plateau",
