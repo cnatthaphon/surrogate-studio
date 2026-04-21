@@ -1,6 +1,6 @@
 // Surrogate Studio — concatenated bundle
-// Generated: 2026-04-21T09:58:17Z
-// Source files: 57
+// Generated: 2026-04-21T11:33:28Z
+// Source files: 58
 
 
 // ──── src/schema_registry.js ────
@@ -4513,6 +4513,49 @@
     preconfig: {
       dataset: { defaultModuleId: "ais_dma" },
     },
+  });
+
+  // ===== CUSTOM CSV =====
+  function _tabularPaletteItems() {
+    return [
+      _paletteItem("addInputBtn", "input", "Input", "NN", { mode: "flat" }),
+      _paletteItem("addDenseBtn", "dense", "Dense", "NN", { units: 32, activation: "relu" }),
+      _paletteItem("addDropoutBtn", "dropout", "Dropout", "NN", { rate: 0.2 }),
+      _paletteItem("addBatchNormBtn", "batchnorm", "BatchNorm", "NN", {}),
+      _paletteItem("addLayerNormBtn", "layernorm", "LayerNorm", "NN", {}),
+      _paletteItem("addLatentMuBtn", "latent_mu", "Latent \u03bc", "VAE", { units: 8, group: "z_shared" }),
+      _paletteItem("addLatentLogVarBtn", "latent_logvar", "Latent log\u03c3\u00b2", "VAE", { units: 8, group: "z_shared" }),
+      _paletteItem("addReparamBtn", "reparam", "Reparam z", "VAE", { group: "z_shared", beta: 1e-3 }),
+      _paletteItem("addConcatBtn", "concat", "Concat", "Utils", { numInputs: 2 }),
+      _paletteItem("addOutputBtn", "output", "Output", "Output", { target: "target", targetType: "target", loss: "mse" }),
+    ];
+  }
+  registerSchema({
+    id: "custom_csv",
+    label: "custom_csv",
+    description: "Bring your own tabular CSV — define features and targets, build any MLP/AE/VAE",
+    taskRecipeId: "supervised_standard",
+    dataset: {
+      id: "custom_csv",
+      label: "Custom CSV Dataset",
+      sampleType: "tabular",
+      splitUnit: "sample",
+      splitDefaults: { mode: "random", train: 0.70, val: 0.15, test: 0.15 },
+    },
+    model: {
+      outputs: [
+        { key: "target", label: "Target (regression)", headType: "regression" },
+        { key: "label", label: "Label (classification)", headType: "classification" },
+      ],
+      params: [], presets: [],
+      metadata: {
+        featureNodes: {
+          policy: { allowHistory: false, allowWindowHistory: false, allowParams: false, allowOneHot: false, allowImageSource: false },
+          palette: { items: _tabularPaletteItems() },
+        },
+      },
+    },
+    preconfig: { dataset: { defaultModuleId: "custom_csv", splitDefaults: { mode: "random", train: 0.70, val: 0.15, test: 0.15 } }, model: { defaultPreset: "" } }
   });
 
   var exports = {
@@ -11721,6 +11764,271 @@
 });
 
 
+// ──── src/dataset_modules/custom_csv_module.js ────
+/**
+ * Custom CSV Dataset Module
+ *
+ * Reads tabular CSV with columns: split, f0, f1, ..., t0, t1, ...
+ * - f* columns = features
+ * - t* columns = targets
+ * - split column = train/val/test
+ *
+ * Supports:
+ * - Built-in sample data (Iris-like) for instant demo
+ * - Browser file upload via FileReader
+ * - Server local path via sourceDescriptor
+ *
+ * Task type auto-detected: if targets are integers 0..N → classification, else regression
+ */
+(function (root, factory) {
+  var descriptor = factory(root);
+  if (typeof module === "object" && module.exports) {
+    module.exports = descriptor;
+    return;
+  }
+  if (root.OSCDatasetModules && typeof root.OSCDatasetModules.registerModule === "function") {
+    root.OSCDatasetModules.registerModule(descriptor);
+  }
+  root.OSCDatasetModuleCustomCsv = descriptor;
+})(typeof globalThis !== "undefined" ? globalThis : this, function (root) {
+  "use strict";
+
+  var MODULE_ID = "custom_csv";
+  var SCHEMA_ID = "custom_csv";
+
+  // --- Built-in sample: Iris-like dataset (4 features, 3 classes, 150 samples) ---
+  function generateSampleData(seed) {
+    var rng = (function (s) {
+      return function () { s = (s * 16807 + 0) % 2147483647; return (s - 1) / 2147483646; };
+    })(seed || 42);
+
+    var classes = [
+      { mean: [5.0, 3.4, 1.5, 0.2], std: [0.35, 0.38, 0.17, 0.11] },
+      { mean: [5.9, 2.8, 4.3, 1.3], std: [0.52, 0.31, 0.47, 0.20] },
+      { mean: [6.6, 3.0, 5.6, 2.0], std: [0.64, 0.32, 0.55, 0.27] },
+    ];
+    var rows = [];
+    var splits = [];
+    for (var ci = 0; ci < classes.length; ci++) {
+      for (var i = 0; i < 50; i++) {
+        var features = [];
+        for (var fi = 0; fi < 4; fi++) {
+          var u1 = rng(), u2 = rng();
+          var z = Math.sqrt(-2 * Math.log(u1 + 1e-10)) * Math.cos(2 * Math.PI * u2);
+          features.push(+(classes[ci].mean[fi] + z * classes[ci].std[fi]).toFixed(4));
+        }
+        var idx = rows.length;
+        var split = idx < 105 ? "train" : (idx < 128 ? "val" : "test");
+        rows.push({ features: features, label: ci, split: split });
+        splits.push(split);
+      }
+    }
+    // Shuffle deterministically
+    for (var si = rows.length - 1; si > 0; si--) {
+      var j = Math.floor(rng() * (si + 1));
+      var tmp = rows[si]; rows[si] = rows[j]; rows[j] = tmp;
+    }
+    return rows;
+  }
+
+  function parseCSV(text) {
+    var lines = text.trim().split(/\r?\n/);
+    if (lines.length < 2) return null;
+    var header = lines[0].split(",").map(function (h) { return h.trim(); });
+    var featureCols = header.filter(function (h) { return /^f\d+$/i.test(h); }).sort();
+    var targetCols = header.filter(function (h) { return /^t\d+$/i.test(h); }).sort();
+    var splitIdx = header.indexOf("split");
+
+    var x = { train: [], val: [], test: [] };
+    var y = { train: [], val: [], test: [] };
+
+    for (var i = 1; i < lines.length; i++) {
+      var parts = lines[i].split(",");
+      if (parts.length < header.length) continue;
+      var row = {};
+      header.forEach(function (h, idx) { row[h] = parts[idx].trim(); });
+      var split = splitIdx >= 0 ? (row.split || "train").toLowerCase() : "train";
+      if (!x[split]) split = "train";
+      var fvals = featureCols.map(function (c) { return parseFloat(row[c]) || 0; });
+      var tvals = targetCols.map(function (c) { return parseFloat(row[c]) || 0; });
+      x[split].push(fvals);
+      y[split].push(tvals);
+    }
+
+    return { x: x, y: y, featureSize: featureCols.length, targetSize: targetCols.length, featureCols: featureCols, targetCols: targetCols };
+  }
+
+  function detectTaskType(y) {
+    // If all target values are small non-negative integers → classification
+    var flat = [].concat(y.train, y.val, y.test);
+    if (!flat.length) return "regression";
+    var allInt = flat.every(function (row) {
+      return row.length === 1 && row[0] >= 0 && row[0] === Math.floor(row[0]) && row[0] < 100;
+    });
+    return allInt ? "classification" : "regression";
+  }
+
+  function oneHot(label, n) { var arr = new Array(n).fill(0); arr[Math.min(label, n - 1)] = 1; return arr; }
+
+  function build(config) {
+    var c = config || {};
+    var seed = c.seed || 42;
+    var csvText = c.csvText || null;
+
+    var parsed;
+    if (csvText) {
+      parsed = parseCSV(csvText);
+      if (!parsed) return null;
+    } else {
+      // Use built-in sample data
+      var rows = generateSampleData(seed);
+      var x = { train: [], val: [], test: [] };
+      var y = { train: [], val: [], test: [] };
+      rows.forEach(function (r) {
+        x[r.split].push(r.features);
+        y[r.split].push([r.label]);
+      });
+      parsed = { x: x, y: y, featureSize: 4, targetSize: 1, featureCols: ["f0", "f1", "f2", "f3"], targetCols: ["t0"] };
+    }
+
+    var taskType = detectTaskType(parsed.y);
+    var classCount = 0;
+    if (taskType === "classification") {
+      var allLabels = [].concat(parsed.y.train, parsed.y.val, parsed.y.test).map(function (r) { return r[0]; });
+      classCount = Math.max.apply(null, allLabels) + 1;
+    }
+
+    var result = {
+      schemaId: SCHEMA_ID,
+      datasetModuleId: MODULE_ID,
+      mode: taskType,
+      featureSize: parsed.featureSize,
+      targetSize: taskType === "classification" ? classCount : parsed.targetSize,
+      targetMode: taskType === "classification" ? "label" : "target",
+      numClasses: classCount || 0,
+      classCount: classCount || 0,
+      classNames: classCount > 0 ? Array.from({ length: classCount }, function (_, i) { return "class_" + i; }) : [],
+      featureColumns: parsed.featureCols,
+      targetColumns: parsed.targetCols,
+      seed: seed,
+      splitConfig: { mode: "from_csv", train: 0.7, val: 0.15, test: 0.15 },
+      trainCount: parsed.x.train.length,
+      valCount: parsed.x.val.length,
+      testCount: parsed.x.test.length,
+      xTrain: parsed.x.train,
+      yTrain: taskType === "classification"
+        ? parsed.y.train.map(function (r) { return oneHot(r[0], classCount); })
+        : parsed.y.train,
+      xVal: parsed.x.val,
+      yVal: taskType === "classification"
+        ? parsed.y.val.map(function (r) { return oneHot(r[0], classCount); })
+        : parsed.y.val,
+      xTest: parsed.x.test,
+      yTest: taskType === "classification"
+        ? parsed.y.test.map(function (r) { return oneHot(r[0], classCount); })
+        : parsed.y.test,
+    };
+
+    return result;
+  }
+
+  // --- Playground renderer ---
+  function renderPlayground(mountEl, deps) {
+    var el = deps.el || function (tag, attrs, children) {
+      var e = document.createElement(tag);
+      if (attrs) Object.keys(attrs).forEach(function (k) {
+        if (k === "className") e.className = attrs[k];
+        else if (k === "textContent") e.textContent = attrs[k];
+        else e.setAttribute(k, attrs[k]);
+      });
+      if (children) (Array.isArray(children) ? children : [children]).forEach(function (c) {
+        if (typeof c === "string") e.appendChild(document.createTextNode(c));
+        else if (c) e.appendChild(c);
+      });
+      return e;
+    };
+
+    mountEl.innerHTML = "";
+    var wrap = el("div", { style: "padding:16px;color:#e2e8f0;font-size:13px;" });
+
+    wrap.appendChild(el("h3", { style: "margin:0 0 12px 0;color:#67e8f9;" }, "Custom CSV Dataset"));
+    wrap.appendChild(el("p", {}, "Upload your own tabular CSV or use the built-in Iris sample dataset."));
+
+    // CSV format info
+    var formatInfo = el("div", { style: "background:#1e293b;padding:12px;border-radius:8px;margin:12px 0;font-family:monospace;font-size:11px;white-space:pre;" });
+    formatInfo.textContent = "CSV Format:\n  split,f0,f1,f2,f3,t0\n  train,5.1,3.5,1.4,0.2,0\n  train,4.9,3.0,1.4,0.2,0\n  val,7.0,3.2,4.7,1.4,1\n  test,6.3,3.3,6.0,2.5,2\n\n  f* = features, t* = targets, split = train/val/test";
+    wrap.appendChild(formatInfo);
+
+    // File upload
+    var uploadRow = el("div", { style: "margin:12px 0;display:flex;gap:8px;align-items:center;" });
+    var fileInput = el("input", { type: "file", accept: ".csv", style: "font-size:12px;" });
+    var statusSpan = el("span", { style: "font-size:11px;color:#94a3b8;" }, "No file selected — using Iris sample");
+    uploadRow.appendChild(fileInput);
+    uploadRow.appendChild(statusSpan);
+    wrap.appendChild(uploadRow);
+
+    // Store CSV text for build
+    fileInput.addEventListener("change", function () {
+      var file = fileInput.files && fileInput.files[0];
+      if (!file) return;
+      var reader = new FileReader();
+      reader.onload = function (e) {
+        var text = e.target.result;
+        if (typeof window !== "undefined") window._customCsvText = text;
+        var parsed = parseCSV(text);
+        if (parsed) {
+          statusSpan.style.color = "#4ade80";
+          statusSpan.textContent = "Loaded: " + parsed.featureSize + " features, " + parsed.targetSize + " targets";
+        } else {
+          statusSpan.style.color = "#f43f5e";
+          statusSpan.textContent = "Parse error — check CSV format";
+        }
+      };
+      reader.readAsText(file);
+    });
+
+    // Sample data preview
+    var sampleRows = generateSampleData(42).slice(0, 8);
+    var previewTable = el("table", { style: "margin-top:12px;border-collapse:collapse;font-size:11px;width:100%;" });
+    var thead = el("tr", {});
+    ["split", "f0 (sepal L)", "f1 (sepal W)", "f2 (petal L)", "f3 (petal W)", "t0 (class)"].forEach(function (h) {
+      thead.appendChild(el("th", { style: "padding:4px 8px;border-bottom:1px solid #334155;text-align:left;color:#67e8f9;" }, h));
+    });
+    previewTable.appendChild(thead);
+    sampleRows.forEach(function (r) {
+      var tr = el("tr", {});
+      [r.split].concat(r.features).concat([r.label]).forEach(function (v) {
+        tr.appendChild(el("td", { style: "padding:3px 8px;border-bottom:1px solid #1e293b;" }, String(v)));
+      });
+      previewTable.appendChild(tr);
+    });
+    wrap.appendChild(el("div", { style: "margin-top:8px;color:#94a3b8;font-size:11px;" }, "Sample data (Iris-like, 150 samples, 3 classes):"));
+    wrap.appendChild(previewTable);
+
+    mountEl.appendChild(wrap);
+  }
+
+  return {
+    id: MODULE_ID,
+    schemaId: SCHEMA_ID,
+    label: "Custom CSV",
+    description: "Upload tabular CSV with f*/t* columns or use built-in Iris sample",
+    kind: "panel_builder",
+    build: function (config) {
+      var c = config || {};
+      // Check for uploaded CSV in browser
+      if (typeof window !== "undefined" && window._customCsvText) {
+        c.csvText = window._customCsvText;
+      }
+      return build(c);
+    },
+    playgroundApi: {
+      renderPlayground: renderPlayground,
+    },
+  };
+});
+
+
 // ──── src/dataset_modules.js ────
 (function (root, factory) {
   if (typeof module === "object" && module.exports) {
@@ -11745,6 +12053,7 @@
         safeRequire("./dataset_modules/text_classification_module.js"),
         safeRequire("./dataset_modules/siamese_pairs_module.js"),
         safeRequire("./dataset_modules/hrsid_ship_module.js"),
+        safeRequire("./dataset_modules/custom_csv_module.js"),
       ]
     );
     return;

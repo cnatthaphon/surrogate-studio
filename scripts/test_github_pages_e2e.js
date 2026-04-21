@@ -144,6 +144,10 @@ var DEMOS = [
     presetKey: "TEXT_SENTIMENT_TRANSFORMER_PRESET",
     minModels: 3, minTrainers: 6, minGenerations: 0, minEvaluations: 1,
     tabs: ["dataset", "model", "trainer", "evaluation"], expectPretrained: true },
+  { name: "Custom CSV Tutorial", path: "/demo/Custom-CSV-Tutorial/",
+    presetKey: "CUSTOM_CSV_TUTORIAL_PRESET",
+    minModels: 2, minTrainers: 2, minGenerations: 0, minEvaluations: 1,
+    tabs: ["dataset", "model", "trainer", "evaluation"] },
 ];
 
 async function testDemo(browser, demo) {

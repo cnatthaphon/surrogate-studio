@@ -1,8 +1,8 @@
 # Surrogate Studio
 
-[![CI](https://github.com/cnatthaphon/surrogate-studio/actions/workflows/ci.yml/badge.svg)](https://github.com/cnatthaphon/surrogate-studio/actions/workflows/ci.yml) ![Demos](https://img.shields.io/badge/demos-15-orange) ![Models](https://img.shields.io/badge/models-43-blue) ![Tests](https://img.shields.io/badge/E2E%20checks-297%20pass-brightgreen) ![Papers](https://img.shields.io/badge/papers%20cited-18-blueviolet) [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+[![CI](https://github.com/cnatthaphon/surrogate-studio/actions/workflows/ci.yml/badge.svg)](https://github.com/cnatthaphon/surrogate-studio/actions/workflows/ci.yml) ![Demos](https://img.shields.io/badge/demos-16-orange) ![Models](https://img.shields.io/badge/models-45-blue) ![Tests](https://img.shields.io/badge/E2E%20checks-297%20pass-brightgreen) ![Papers](https://img.shields.io/badge/papers%20cited-18-blueviolet) [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
-**A visual ML platform that reproduces 15 published papers — trainable in the browser with no install.**
+**A visual ML platform with 16 demos across published papers and custom data — trainable in the browser with no install.**
 
 ### [Try it now on GitHub Pages](https://cnatthaphon.github.io/surrogate-studio/demo/Fashion-MNIST-GAN/) — pretrained models, instant results
 
@@ -56,7 +56,7 @@ Not just toy datasets — real SAR radar imagery, real microscopy cells, real ve
 
 ---
 
-## 15 Demos
+## 16 Demos
 
 Every demo runs live on [GitHub Pages](https://cnatthaphon.github.io/surrogate-studio/) — click to try.
 
@@ -77,6 +77,7 @@ Every demo runs live on [GitHub Pages](https://cnatthaphon.github.io/surrogate-s
 | **SAR Ship Detection** | Detection | Wei '20 (HRSID radar) | [Open](https://cnatthaphon.github.io/surrogate-studio/demo/SAR-Ship-Detection/) |
 | **Text Sentiment** | NLP | Vaswani '17 (Transformer) | [Open](https://cnatthaphon.github.io/surrogate-studio/demo/Text-Sentiment-Transformer/) |
 | **Siamese Verification** | Metric Learning | Bromley '93 | [Open](https://cnatthaphon.github.io/surrogate-studio/demo/Siamese-Shape-Verification/) |
+| **Custom CSV Tutorial** | Tabular | Bring your own data (Iris sample) | [Open](https://cnatthaphon.github.io/surrogate-studio/demo/Custom-CSV-Tutorial/) |
 
 Each demo has its own README with architecture diagrams, benchmark results, and step-by-step usage guide.
 
