@@ -1,5 +1,5 @@
 // Surrogate Studio — concatenated bundle
-// Generated: 2026-04-21T16:25:01Z
+// Generated: 2026-04-21T17:14:09Z
 // Source files: 58
 
 
@@ -11860,11 +11860,12 @@
   }
 
   function detectTaskType(y) {
-    // If all target values are small non-negative integers → classification
+    // Single target column with non-negative integers → classification
+    // Multiple target columns or any float → regression
     var flat = [].concat(y.train, y.val, y.test);
     if (!flat.length) return "regression";
     var allInt = flat.every(function (row) {
-      return row.length === 1 && row[0] >= 0 && row[0] === Math.floor(row[0]) && row[0] < 100;
+      return row.length === 1 && row[0] >= 0 && row[0] === Math.floor(row[0]);
     });
     return allInt ? "classification" : "regression";
   }
@@ -12036,8 +12037,8 @@
     kind: "panel_builder",
     build: function (config) {
       var c = config || {};
-      // Check for uploaded CSV in browser
-      if (typeof window !== "undefined" && window._customCsvText) {
+      // Only use browser-uploaded CSV if no sourceDescriptor is configured
+      if (!c.sourceDescriptor && !c.csvText && typeof window !== "undefined" && window._customCsvText) {
         c.csvText = window._customCsvText;
       }
       return build(c);
@@ -25631,6 +25632,7 @@
         deliveryMode: "server_reference",
         metadata: {
           featureSize: Number(cfg.sourceFeatureSize || 0),
+          targetSize: Number(cfg.sourceTargetSize || 0),
           numClasses: Number(cfg.sourceNumClasses || 0),
           classNames: String(cfg.sourceClassNames || "").split(",").map(function (s) { return String(s || "").trim(); }).filter(Boolean),
         },
