@@ -187,9 +187,15 @@ async function main() {
     console.log("[4] Drag-and-drop test");
     var dragResult = await page.evaluate(function () {
       var ws = document.querySelector(".osc-workspace.active");
-      var paletteItems = ws ? ws.querySelectorAll("[draggable='true']") : [];
+      // Palette items may be buttons or draggable divs
+      var paletteItems = ws ? ws.querySelectorAll("[draggable='true'], .osc-palette-item, .palette-node-btn") : [];
+      if (!paletteItems.length) {
+        // Also check for button-based palette (model_tab renders buttons)
+        var left = ws ? ws.querySelector(".osc-panel-left") : null;
+        if (left) paletteItems = left.querySelectorAll("button[data-node], button.palette-btn");
+      }
       var canvas = document.querySelector(".drawflow");
-      if (!paletteItems.length || !canvas) return { attempted: false, reason: "no palette (" + paletteItems.length + ") or no canvas" };
+      if (!paletteItems.length || !canvas) return { attempted: false, reason: "no palette (" + paletteItems.length + ") or no canvas", hasCanvas: !!canvas };
 
       var item = paletteItems[0];
       var itemRect = item.getBoundingClientRect();
@@ -303,23 +309,38 @@ async function main() {
       fail("No trainer found (no epoch data, no Start Training button)");
     }
 
-    // --- 6. Verify results ---
+    // --- 6. Verify results (require real numeric data, not just labels) ---
     console.log("[6] Verify results");
     var finalState = await page.evaluate(function () {
-      var ws = document.querySelector(".osc-workspace.active");
-      var text = ws ? ws.textContent : "";
+      // Search entire document, not just active workspace (trainer panel may use different container)
+      var body = document.body.textContent || "";
+      // Check for actual numeric loss values (e.g. "0.3241" or "3.21e-1")
+      var numericLoss = /\d+\.\d{2,}/i.test(body);
+      // Check for epoch data: table cells or spans containing epoch numbers + loss values
+      var cells = document.querySelectorAll("td, .epoch-cell, .loss-value");
+      var numericCells = Array.from(cells).filter(function (c) { return /^\s*\d+\.?\d*e?-?\d*\s*$/.test(c.textContent.trim()); });
+      // Also check for the epoch table header + rows pattern
+      var epochTableRows = document.querySelectorAll("tr");
+      var dataRows = Array.from(epochTableRows).filter(function (r) {
+        return /^\s*\d+\s/.test(r.textContent.trim()) && /\d+\.\d/.test(r.textContent);
+      });
+      // Metric values: look for bestEpoch, MAE, etc with numeric values
+      var hasMetricValues = /(?:bestEpoch|MAE|accuracy|val_loss|testMae|bestValLoss)\s*[:=]?\s*\d/i.test(body) ||
+        /\d+\.\d+.*(?:loss|mae|accuracy)/i.test(body);
       return {
-        hasLoss: text.includes("loss") || text.includes("Loss"),
-        hasEpoch: /epoch/i.test(text),
-        hasMetrics: text.includes("MAE") || text.includes("accuracy") || text.includes("val_loss") || text.includes("bestEpoch"),
+        numericLoss: numericLoss,
+        numericCells: numericCells.length,
+        epochDataRows: dataRows.length,
+        hasMetricValues: hasMetricValues,
       };
     });
-    if (finalState.hasLoss) ok("Loss data visible");
-    else fail("No loss data visible in trainer");
-    if (finalState.hasEpoch) ok("Epoch data visible");
-    else fail("No epoch data visible in trainer");
-    if (finalState.hasMetrics) ok("Training metrics visible");
-    else fail("No training metrics visible in trainer");
+    if (finalState.numericLoss) ok("Numeric loss values visible");
+    else fail("No numeric loss values in trainer");
+    if (finalState.epochDataRows > 0) ok("Epoch data rows: " + finalState.epochDataRows + " table rows with numeric data");
+    else if (finalState.numericCells > 0) ok("Epoch numeric cells: " + finalState.numericCells + " cells with values");
+    else fail("No epoch data rows or numeric cells in trainer");
+    if (finalState.hasMetricValues) ok("Training metric values visible");
+    else fail("No training metric values in trainer");
 
     // --- 7. No unwanted server pings (Segmentation) ---
     if (serverPings.length === 0) ok("No unwanted localhost:3777 requests (Segmentation)");
