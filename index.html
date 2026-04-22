@@ -78,8 +78,17 @@
   <script src="./src/surrogate_studio.js?v=1774434752"></script>
 </head>
 <body>
+  <div id="osc-start-banner" style="background:linear-gradient(135deg,#0f172a,#1e293b);border-bottom:1px solid #334155;padding:12px 20px;display:flex;align-items:center;justify-content:space-between;font-family:system-ui,sans-serif;">
+    <span style="color:#e2e8f0;font-size:13px;">New here? Start with a working demo that has pretrained models and instant results.</span>
+    <a href="./demo/Fashion-MNIST-GAN/" style="background:#0ea5e9;color:#fff;padding:6px 16px;border-radius:6px;text-decoration:none;font-size:13px;font-weight:600;white-space:nowrap;">Open Fashion-MNIST GAN Demo &rarr;</a>
+  </div>
   <div id="app"></div>
   <script>
+    // Allow dismissing the start banner
+    var _banner = document.getElementById('osc-start-banner');
+    if (_banner) _banner.addEventListener('click', function (e) {
+      if (e.target.tagName !== 'A') _banner.style.display = 'none';
+    });
     SurrogateStudio.init({
       mountEl: document.getElementById('app'),
       defaultSchemaId: 'oscillator'
