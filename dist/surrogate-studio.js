@@ -1,5 +1,5 @@
 // Surrogate Studio — concatenated bundle
-// Generated: 2026-04-21T17:14:09Z
+// Generated: 2026-04-22T04:40:54Z
 // Source files: 58
 
 
@@ -11856,6 +11856,8 @@
       y[split].push(tvals);
     }
 
+    if (!featureCols.length) return null; // no f* columns — likely a format error
+    if (!targetCols.length) return null; // no t* columns — likely a format error
     return { x: x, y: y, featureSize: featureCols.length, targetSize: targetCols.length, featureCols: featureCols, targetCols: targetCols };
   }
 
@@ -11885,7 +11887,7 @@
         schemaId: SCHEMA_ID,
         datasetModuleId: MODULE_ID,
         sourceDescriptor: sourceDescriptor,
-        mode: meta.mode || sourceDescriptor.mode || "classification",
+        mode: meta.mode || sourceDescriptor.mode || (Number(meta.numClasses || meta.classCount || sourceDescriptor.classCount) > 0 ? "classification" : "regression"),
         featureSize: Number(meta.featureSize || sourceDescriptor.featureSize) || 0,
         targetSize: Number(meta.targetSize || sourceDescriptor.targetSize) || 0,
         targetMode: meta.targetMode || sourceDescriptor.targetMode || "target",
