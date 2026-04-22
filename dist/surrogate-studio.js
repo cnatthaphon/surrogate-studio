@@ -1,5 +1,5 @@
 // Surrogate Studio — concatenated bundle
-// Generated: 2026-04-22T09:01:22Z
+// Generated: 2026-04-22T09:35:08Z
 // Source files: 58
 
 
@@ -10875,7 +10875,7 @@
           Object.keys(sc.inputs).forEach(function (k) { p[k] = Number(sc.inputs[k].value); });
           var g = Number((globalInputs.g || {}).value) || 9.81;
           var dt = Number((globalInputs.dt || {}).value) || 0.02;
-          var dur = Number((globalInputs.durationSec || {}).value) || 8;
+          var dur = Math.max(0.1, Number((globalInputs.durationSec || {}).value) || 8);
           var steps = Math.max(10, Math.floor(dur / dt));
           var sim = OSC_CORE.simulateOscillator({
             scenario: scenarioId, m: p.m || 1, c: p.c || 0, k: p.k || 4, g: g,
@@ -10908,7 +10908,7 @@
           Object.keys(sc.inputs).forEach(function (k) { p[k] = Number(sc.inputs[k].value); });
           var g = Number((globalInputs.g || {}).value) || 9.81;
           var dt = Number((globalInputs.dt || {}).value) || 0.02;
-          var dur = Number((globalInputs.durationSec || {}).value) || 8;
+          var dur = Math.max(0.1, Number((globalInputs.durationSec || {}).value) || 8);
           var steps = Math.max(10, Math.floor(dur / dt));
           var showX = sc.showX ? sc.showX.checked : true;
           var showV = sc.showV ? sc.showV.checked : true;
