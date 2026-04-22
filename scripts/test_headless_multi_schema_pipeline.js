@@ -23,6 +23,7 @@ require("../src/dataset_modules/synthetic_segmentation_module.js");
 require("../src/dataset_modules/text_classification_module.js");
 require("../src/dataset_modules/siamese_pairs_module.js");
 require("../src/dataset_modules/hrsid_ship_module.js");
+require("../src/dataset_modules/custom_csv_module.js");
 var WS = require("../src/workspace_store.js");
 var MBC = require("../src/model_builder_core.js");
 var TEC = require("../src/training_engine_core.js");

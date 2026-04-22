@@ -3753,6 +3753,49 @@
     },
   });
 
+  // ===== CUSTOM CSV =====
+  function _tabularPaletteItems() {
+    return [
+      _paletteItem("addInputBtn", "input", "Input", "NN", { mode: "flat" }),
+      _paletteItem("addDenseBtn", "dense", "Dense", "NN", { units: 32, activation: "relu" }),
+      _paletteItem("addDropoutBtn", "dropout", "Dropout", "NN", { rate: 0.2 }),
+      _paletteItem("addBatchNormBtn", "batchnorm", "BatchNorm", "NN", {}),
+      _paletteItem("addLayerNormBtn", "layernorm", "LayerNorm", "NN", {}),
+      _paletteItem("addLatentMuBtn", "latent_mu", "Latent \u03bc", "VAE", { units: 8, group: "z_shared" }),
+      _paletteItem("addLatentLogVarBtn", "latent_logvar", "Latent log\u03c3\u00b2", "VAE", { units: 8, group: "z_shared" }),
+      _paletteItem("addReparamBtn", "reparam", "Reparam z", "VAE", { group: "z_shared", beta: 1e-3 }),
+      _paletteItem("addConcatBtn", "concat", "Concat", "Utils", { numInputs: 2 }),
+      _paletteItem("addOutputBtn", "output", "Output", "Output", { target: "target", targetType: "target", loss: "mse" }),
+    ];
+  }
+  registerSchema({
+    id: "custom_csv",
+    label: "custom_csv",
+    description: "Bring your own tabular CSV — define features and targets, build any MLP/AE/VAE",
+    taskRecipeId: "supervised_standard",
+    dataset: {
+      id: "custom_csv",
+      label: "Custom CSV Dataset",
+      sampleType: "tabular",
+      splitUnit: "sample",
+      splitDefaults: { mode: "random", train: 0.70, val: 0.15, test: 0.15 },
+    },
+    model: {
+      outputs: [
+        { key: "target", label: "Target (regression)", headType: "regression" },
+        { key: "label", label: "Label (classification)", headType: "classification" },
+      ],
+      params: [], presets: [],
+      metadata: {
+        featureNodes: {
+          policy: { allowHistory: false, allowWindowHistory: false, allowParams: false, allowOneHot: false, allowImageSource: false },
+          palette: { items: _tabularPaletteItems() },
+        },
+      },
+    },
+    preconfig: { dataset: { defaultModuleId: "custom_csv", splitDefaults: { mode: "random", train: 0.70, val: 0.15, test: 0.15 } }, model: { defaultPreset: "" } }
+  });
+
   var exports = {
     registeredSchemaIds: schemaRegistry.listSchemas().map(function (x) { return String(x.id || ""); }),
     trajectoryPaletteItems: _trajectoryPaletteItems,

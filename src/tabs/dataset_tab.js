@@ -177,6 +177,7 @@
         deliveryMode: "server_reference",
         metadata: {
           featureSize: Number(cfg.sourceFeatureSize || 0),
+          targetSize: Number(cfg.sourceTargetSize || 0),
           numClasses: Number(cfg.sourceNumClasses || 0),
           classNames: String(cfg.sourceClassNames || "").split(",").map(function (s) { return String(s || "").trim(); }).filter(Boolean),
         },

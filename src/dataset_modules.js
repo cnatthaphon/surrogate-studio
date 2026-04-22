@@ -21,6 +21,7 @@
         safeRequire("./dataset_modules/text_classification_module.js"),
         safeRequire("./dataset_modules/siamese_pairs_module.js"),
         safeRequire("./dataset_modules/hrsid_ship_module.js"),
+        safeRequire("./dataset_modules/custom_csv_module.js"),
       ]
     );
     return;
