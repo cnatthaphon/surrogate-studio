@@ -446,13 +446,15 @@
     }, mode);
     const targetMode = String(normalizedCfg.targetMode || "x");
     const featSizes = inferFeatureSizes(normalizedCfg.windowSize, featureCfg, featureSpec);
-    const included = (normalizedCfg.includedScenarios && normalizedCfg.includedScenarios.length)
-      ? normalizedCfg.includedScenarios.slice()
-      : [normalizedCfg.scenarioType];
+    const rawScenarios = (normalizedCfg.includedScenarios && normalizedCfg.includedScenarios.length)
+      ? normalizedCfg.includedScenarios : [];
+    const included = rawScenarios.filter(function (s) { return PRESET_LIMITS[s]; });
+    if (!included.length) included.push(normalizedCfg.scenarioType && PRESET_LIMITS[normalizedCfg.scenarioType] ? normalizedCfg.scenarioType : "spring");
     const arFeatureCfg = ensureFeatureConfig(Object.assign({}, featureCfg, { useScenario: Boolean(featureSpec.useScenario) }));
     const sampleParams = function () {
       const s = included[Math.floor(rng() * included.length)];
-      const lim = PRESET_LIMITS[s][String(normalizedCfg.paramPreset || "safe")] || PRESET_LIMITS[s].safe;
+      const presetLimits = PRESET_LIMITS[s] || PRESET_LIMITS.spring;
+      const lim = presetLimits[String(normalizedCfg.paramPreset || "safe")] || presetLimits.safe;
       const scenarioCfg = normalizedCfg.scenarioRanges && normalizedCfg.scenarioRanges[s] ? normalizedCfg.scenarioRanges[s] : null;
       const mRange = scenarioCfg && scenarioCfg.mRange ? scenarioCfg.mRange : (s === normalizedCfg.scenarioType ? normalizedCfg.mRange : lim.m);
       const cRange = scenarioCfg && scenarioCfg.cRange ? scenarioCfg.cRange : (s === normalizedCfg.scenarioType ? normalizedCfg.cRange : lim.c);

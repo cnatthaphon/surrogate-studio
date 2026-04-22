@@ -433,10 +433,16 @@
     var targetMode = String(normalizedCfg.targetMode || "x");
     var targetSize = targetMode === "xv" ? 2 : 1;
     var featSizes = inferFeatureSizes(normalizedCfg.windowSize, featureCfg, featureSpec);
-    var included = (normalizedCfg.includedScenarios && normalizedCfg.includedScenarios.length)
-      ? normalizedCfg.includedScenarios.filter(function (s) { return PRESET_LIMITS[s]; })
-      : [];
-    if (!included.length) included = [normalizedCfg.scenarioType && PRESET_LIMITS[normalizedCfg.scenarioType] ? normalizedCfg.scenarioType : "spring"];
+    var rawScenarios = normalizedCfg.includedScenarios && normalizedCfg.includedScenarios.length
+      ? normalizedCfg.includedScenarios : [];
+    var included = rawScenarios.filter(function (s) { return PRESET_LIMITS[s]; });
+    var rejected = rawScenarios.filter(function (s) { return !PRESET_LIMITS[s]; });
+    if (rejected.length) console.warn("[dataset] Unknown scenarios filtered out:", rejected.join(", "), "— valid:", Object.keys(PRESET_LIMITS).join(", "));
+    if (!included.length) {
+      var fallback = normalizedCfg.scenarioType && PRESET_LIMITS[normalizedCfg.scenarioType] ? normalizedCfg.scenarioType : "spring";
+      if (rawScenarios.length) console.warn("[dataset] No valid scenarios remaining, falling back to:", fallback);
+      included = [fallback];
+    }
     var arFeatureCfg = ensureFeatureConfig(Object.assign({}, featureCfg, { useScenario: Boolean(featureSpec.useScenario) }));
     var sampleParams = function () {
       var s = included[Math.floor(rng() * included.length)];
