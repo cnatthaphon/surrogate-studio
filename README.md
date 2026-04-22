@@ -15,12 +15,12 @@
 | | Feature | What it means |
 |---|---------|--------------|
 | **1** | **Visual graph editor** | Design neural networks by dragging nodes — no model code needed. 35+ node types: MLP, CNN, RNN, VAE, GAN, Diffusion, Transformer, NLP. |
-| **2** | **Browser-first training** | Train models in TF.js directly in the browser. Zero install, zero server, zero GPU required. |
-| **3** | **Dual runtime** | Same visual graph trains in TF.js (browser) or PyTorch (server with CUDA). One graph, two backends. |
-| **4** | **Cross-runtime weight transfer** | Weights trained in PyTorch load into TF.js and vice versa. Handles Dense transpose, LSTM gate reorder, Conv NCHW/NHWC shuffle, BatchNorm stats — per layer type. |
+| **2** | **3 runtimes, 1 graph** | Same visual graph runs in TF.js (browser), PyTorch (server with CUDA), or Jupyter notebook. Train anywhere, compare everywhere. |
+| **3** | **Cross-runtime weight transfer** | Weights trained in PyTorch load into TF.js and vice versa. Handles Dense transpose, LSTM gate reorder, Conv NCHW/NHWC shuffle, BatchNorm stats — per layer type. |
+| **4** | **Jupyter notebook export** | Export `.ipynb` + `dataset.csv` + `model.graph.json` as a reproducible PyTorch training bundle. Run in JupyterLab, Colab, or any PyTorch environment — weights transfer back to the browser. |
 | **5** | **Pretrained instant results** | Most demos ship with trained weights. Open the page, see loss curves and metrics immediately. Retrain or modify if you want. |
 | **6** | **Plugin architecture** | Each demo is self-contained. Adding a new paper reproduction = zero core code changes. |
-| **7** | **Notebook export** | Export dataset + model graph + training notebook as `.ipynb` for reproducible PyTorch runs. |
+| **7** | **Custom data support** | Bring your own CSV — the platform auto-detects features, targets, and task type. Or define a full custom schema for any domain. |
 
 ---
 
