@@ -564,7 +564,7 @@
     );
     var p = getPreviewParamsForScenario(ctx, scenario);
     var dt = Math.max(1e-6, Number(uiState.previewDt) || 0.02);
-    var durationSec = Math.max(dt, Number(uiState.previewDurationSec) || 1);
+    var durationSec = Math.max(dt, 0.1, Number(uiState.previewDurationSec) || 1);
     var steps = typeof (ctx && ctx.getStepsFromDuration) === "function"
       ? ctx.getStepsFromDuration(durationSec, dt)
       : Math.max(2, Math.round(durationSec / dt) + 1);
@@ -993,7 +993,7 @@
       ? PRESET_LIMITS[primaryScenario][preset]
       : PRESET_LIMITS.spring.safe;
     var dt = Math.max(1e-6, Number(uiState.dt) || 0.02);
-    var durationSec = Math.max(dt, Number(uiState.durationSec) || 16.0);
+    var durationSec = Math.max(dt, 0.5, Number(uiState.durationSec) || 16.0);
     var steps = ctx && typeof ctx.getStepsFromDuration === "function"
       ? ctx.getStepsFromDuration(durationSec, dt)
       : Math.max(2, Math.round(durationSec / dt) + 1);

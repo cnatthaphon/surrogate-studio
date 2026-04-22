@@ -1,5 +1,5 @@
 // Surrogate Studio — concatenated bundle
-// Generated: 2026-04-22T04:40:54Z
+// Generated: 2026-04-22T09:01:22Z
 // Source files: 58
 
 
@@ -5053,13 +5053,21 @@
     var targetMode = String(normalizedCfg.targetMode || "x");
     var targetSize = targetMode === "xv" ? 2 : 1;
     var featSizes = inferFeatureSizes(normalizedCfg.windowSize, featureCfg, featureSpec);
-    var included = (normalizedCfg.includedScenarios && normalizedCfg.includedScenarios.length)
-      ? normalizedCfg.includedScenarios.slice()
-      : [normalizedCfg.scenarioType];
+    var rawScenarios = normalizedCfg.includedScenarios && normalizedCfg.includedScenarios.length
+      ? normalizedCfg.includedScenarios : [];
+    var included = rawScenarios.filter(function (s) { return PRESET_LIMITS[s]; });
+    var rejected = rawScenarios.filter(function (s) { return !PRESET_LIMITS[s]; });
+    if (rejected.length) console.warn("[dataset] Unknown scenarios filtered out:", rejected.join(", "), "— valid:", Object.keys(PRESET_LIMITS).join(", "));
+    if (!included.length) {
+      var fallback = normalizedCfg.scenarioType && PRESET_LIMITS[normalizedCfg.scenarioType] ? normalizedCfg.scenarioType : "spring";
+      if (rawScenarios.length) console.warn("[dataset] No valid scenarios remaining, falling back to:", fallback);
+      included = [fallback];
+    }
     var arFeatureCfg = ensureFeatureConfig(Object.assign({}, featureCfg, { useScenario: Boolean(featureSpec.useScenario) }));
     var sampleParams = function () {
       var s = included[Math.floor(rng() * included.length)];
-      var lim = PRESET_LIMITS[s][String(normalizedCfg.paramPreset || "safe")] || PRESET_LIMITS[s].safe;
+      var presetLimits = PRESET_LIMITS[s] || PRESET_LIMITS.spring;
+      var lim = presetLimits[String(normalizedCfg.paramPreset || "safe")] || presetLimits.safe;
       var scenarioCfg = normalizedCfg.scenarioRanges && normalizedCfg.scenarioRanges[s] ? normalizedCfg.scenarioRanges[s] : null;
       var mRange = scenarioCfg && scenarioCfg.mRange ? scenarioCfg.mRange : (s === normalizedCfg.scenarioType ? normalizedCfg.mRange : lim.m);
       var cRange = scenarioCfg && scenarioCfg.cRange ? scenarioCfg.cRange : (s === normalizedCfg.scenarioType ? normalizedCfg.cRange : lim.c);
@@ -10000,7 +10008,7 @@
     );
     var p = getPreviewParamsForScenario(ctx, scenario);
     var dt = Math.max(1e-6, Number(uiState.previewDt) || 0.02);
-    var durationSec = Math.max(dt, Number(uiState.previewDurationSec) || 1);
+    var durationSec = Math.max(dt, 0.1, Number(uiState.previewDurationSec) || 1);
     var steps = typeof (ctx && ctx.getStepsFromDuration) === "function"
       ? ctx.getStepsFromDuration(durationSec, dt)
       : Math.max(2, Math.round(durationSec / dt) + 1);
@@ -10429,7 +10437,7 @@
       ? PRESET_LIMITS[primaryScenario][preset]
       : PRESET_LIMITS.spring.safe;
     var dt = Math.max(1e-6, Number(uiState.dt) || 0.02);
-    var durationSec = Math.max(dt, Number(uiState.durationSec) || 16.0);
+    var durationSec = Math.max(dt, 0.5, Number(uiState.durationSec) || 16.0);
     var steps = ctx && typeof ctx.getStepsFromDuration === "function"
       ? ctx.getStepsFromDuration(durationSec, dt)
       : Math.max(2, Math.round(durationSec / dt) + 1);

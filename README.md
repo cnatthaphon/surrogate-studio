@@ -4,9 +4,17 @@
 
 **A visual ML platform with 16 demos across published papers and custom data — trainable in the browser with no install.**
 
-### [Try it now on GitHub Pages](https://cnatthaphon.github.io/surrogate-studio/demo/Fashion-MNIST-GAN/) — pretrained models, instant results
+### [Start here: Fashion-MNIST GAN demo](https://cnatthaphon.github.io/surrogate-studio/demo/Fashion-MNIST-GAN/) — pretrained models, instant results
 
 ![Demo Workflow](demo/Fashion-MNIST-Benchmark/images/demo_workflow.gif)
+
+---
+
+## Why This Exists
+
+Reproducing ML papers means rebuilding the same pipeline over and over: load data, define a model, train, evaluate, compare. Each paper uses different frameworks, different conventions, different evaluation code. Surrogate Studio replaces that cycle with a single visual platform where the graph IS the model — build it once, train it in the browser or on a PyTorch server, compare results side by side.
+
+The goal is not to advance state-of-the-art on any benchmark. It is to show that 16 different architectures — from MLPs to GANs to Diffusion to Transformers — can run through the same schema-driven pipeline, with the same training engine, the same evaluation, and the same weight format. Like Papers With Code, but the code actually runs live in your browser.
 
 ---
 
