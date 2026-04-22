@@ -1,5 +1,5 @@
 // Surrogate Studio — concatenated bundle
-// Generated: 2026-04-22T09:35:08Z
+// Generated: 2026-04-22T10:31:10Z
 // Source files: 58
 
 
@@ -10874,9 +10874,10 @@
           var p = {};
           Object.keys(sc.inputs).forEach(function (k) { p[k] = Number(sc.inputs[k].value); });
           var g = Number((globalInputs.g || {}).value) || 9.81;
-          var dt = Number((globalInputs.dt || {}).value) || 0.02;
-          var dur = Math.max(0.1, Number((globalInputs.durationSec || {}).value) || 8);
-          var steps = Math.max(10, Math.floor(dur / dt));
+          var dt = Math.max(1e-6, Number((globalInputs.dt || {}).value) || 0.02);
+          var dur = Math.max(dt, 0.1, Number((globalInputs.durationSec || {}).value) || 8);
+          if (globalInputs.durationSec && Number(globalInputs.durationSec.value) !== dur) globalInputs.durationSec.value = dur;
+          var steps = Math.max(2, Math.round(dur / dt));
           var sim = OSC_CORE.simulateOscillator({
             scenario: scenarioId, m: p.m || 1, c: p.c || 0, k: p.k || 4, g: g,
             x0: p.x0 || 0, v0: p.v0 || 0, restitution: p.e || 0.8,
@@ -10907,9 +10908,10 @@
           var p = {};
           Object.keys(sc.inputs).forEach(function (k) { p[k] = Number(sc.inputs[k].value); });
           var g = Number((globalInputs.g || {}).value) || 9.81;
-          var dt = Number((globalInputs.dt || {}).value) || 0.02;
-          var dur = Math.max(0.1, Number((globalInputs.durationSec || {}).value) || 8);
-          var steps = Math.max(10, Math.floor(dur / dt));
+          var dt = Math.max(1e-6, Number((globalInputs.dt || {}).value) || 0.02);
+          var dur = Math.max(dt, 0.1, Number((globalInputs.durationSec || {}).value) || 8);
+          if (globalInputs.durationSec && Number(globalInputs.durationSec.value) !== dur) globalInputs.durationSec.value = dur;
+          var steps = Math.max(2, Math.round(dur / dt));
           var showX = sc.showX ? sc.showX.checked : true;
           var showV = sc.showV ? sc.showV.checked : true;
           var traces = [];
@@ -11098,6 +11100,14 @@
     },
     build: function (cfg) {
       var raw = cfg && typeof cfg === "object" ? cfg : {};
+      // Convert UI checkbox keys (cardDsSpring etc.) to includedScenarios array
+      if (!raw.includedScenarios) {
+        var scenarios = [];
+        if (raw.cardDsSpring !== false) scenarios.push("spring");
+        if (raw.cardDsPendulum !== false) scenarios.push("pendulum");
+        if (raw.cardDsBouncing !== false) scenarios.push("bouncing");
+        if (scenarios.length) raw.includedScenarios = scenarios;
+      }
       if (raw && raw.variants && typeof raw.variants === "object") {
         return OSC_CORE.buildDatasetBundle(raw);
       }
@@ -28275,7 +28285,7 @@
       var formValue = {
         datasetId: t.datasetId || "", modelId: t.modelId || "",
         runtimeBackend: config.runtimeBackend || "auto",
-        useServer: config.useServer != null ? config.useServer : false,
+        useServer: (typeof location !== "undefined" && location.hostname && location.hostname.endsWith("github.io")) ? false : (config.useServer != null ? config.useServer : false),
         serverUrl: config.serverUrl || defaultServerUrl,
         epochs: config.epochs || 20, batchSize: config.batchSize || 32, learningRate: config.learningRate || 0.001,
         optimizerType: config.optimizerType || "adam", lrSchedulerType: config.lrSchedulerType || "plateau",
