@@ -111,7 +111,7 @@ Browser (TF.js)                    Server (PyTorch)
 
 **Zero hardcode**: everything from schema/config. **Plugin demos**: no core changes per paper. **Same contract**: TF.js, PyTorch, and exported notebook all produce identical results.
 
-Full architecture details, file map, supported schemas (12), and node types (35+) in [DEMOS.md](DEMOS.md#architecture).
+Full architecture details, file map, supported schemas (13), and node types (35+) in [DEMOS.md](DEMOS.md#architecture).
 
 ---
 

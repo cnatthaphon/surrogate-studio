@@ -92,6 +92,10 @@ Example manifest (`manifest.json`):
 
 The server reads the files directly via `dataset_source_loader.py` — no upload needed.
 
+Sample files included in this demo folder for testing:
+- [`sample_iris.csv`](sample_iris.csv) — 42 samples, 4 features, 3 classes
+- [`sample_manifest.json`](sample_manifest.json) — manifest with schemaId, classCount, classNames
+
 ## Defining Your Own Schema
 
 To add a fully custom schema (not just a CSV), create a schema definition with:

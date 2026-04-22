@@ -236,6 +236,23 @@ Pair-based similarity classification. Learns to compare image pairs as same or d
 
 ---
 
+## Custom CSV Tutorial — Bring Your Own Data
+
+[Live Demo](https://cnatthaphon.github.io/surrogate-studio/demo/Custom-CSV-Tutorial/) | [README](demo/Custom-CSV-Tutorial/README.md)
+
+Tutorial showing how to use Surrogate Studio with your own tabular data. Ships with a built-in Iris-like sample (150 samples, 4 features, 3 classes). Upload your own CSV or configure a server local path.
+
+Demonstrates:
+- CSV format: `split, f0, f1, ..., t0, t1, ...`
+- Auto-detection of classification vs regression from target values
+- Browser file upload via FileReader
+- Server local path via `sourceDescriptor`
+- How to define custom schemas for any domain
+
+> Fisher, R.A. *"The Use of Multiple Measurements in Taxonomic Problems."* Annals of Eugenics, 1936. — Iris dataset used as built-in sample.
+
+---
+
 ## Architecture
 
 ```
@@ -283,6 +300,7 @@ demo/<paper>/
 | `sar_ship_detection` | Image | 64x64 SAR radar, ship bounding box | Embedded (1.6MB) |
 | `ais_trajectory` | Trajectory | (lat, lon, sog, cog) vessel windows | Built-in |
 | `ant_trajectory` | Trajectory | 20 ants x (x,y), 40 features | Demo plugin |
+| `custom_csv` | Tabular | User CSV with f*/t* columns, auto-detect task | Built-in + file upload |
 
 ## Node Types (35+)
 

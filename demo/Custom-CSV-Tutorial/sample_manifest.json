@@ -1,0 +1,7 @@
+{
+  "schemaId": "custom_csv",
+  "mode": "classification",
+  "classCount": 3,
+  "classNames": ["setosa", "versicolor", "virginica"],
+  "datasetFile": "sample_iris.csv"
+}
