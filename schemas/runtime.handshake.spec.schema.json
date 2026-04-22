@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cnatthaphon.github.io/comphys/oscillator-surrogate/schemas/runtime.handshake.spec.schema.json",
+  "title": "Oscillator Runtime Handshake Event Spec v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["irVersion", "kind", "ts", "runtimeId", "runtime", "status"],
+  "properties": {
+    "irVersion": { "type": "string", "const": "1.0" },
+    "kind": { "type": "string", "enum": ["handshake_ok", "handshake_failed"] },
+    "ts": { "type": "number" },
+    "sessionId": { "type": "string" },
+    "runtimeId": {
+      "type": "string",
+      "enum": [
+        "js_client",
+        "server_tfjs",
+        "server_pytorch_gpu",
+        "server_pytorch_cpu",
+        "python_server",
+        "node_server",
+        "notebook_local"
+      ]
+    },
+    "runtime": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["host", "engine", "backend", "transport"],
+      "properties": {
+        "host": { "type": "string", "enum": ["browser", "server", "node", "unknown"] },
+        "engine": { "type": "string", "enum": ["tfjs", "pytorch", "django_worker", "unknown"] },
+        "backend": { "type": "string", "minLength": 1 },
+        "transport": { "type": "string", "enum": ["inproc", "ws", "http_poll", "http", "unknown"] }
+      }
+    },
+    "status": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["state", "message"],
+      "properties": {
+        "state": { "type": "string", "enum": ["ready", "error"] },
+        "message": { "type": "string" }
+      }
+    },
+    "reason": { "type": "string" },
+    "handshake": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "ok": { "type": "boolean" },
+        "backendAvailability": {
+          "type": "object",
+          "additionalProperties": { "type": "boolean" }
+        }
+      }
+    }
+  }
+}

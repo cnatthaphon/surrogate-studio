@@ -1,0 +1,85 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cnatthaphon.github.io/comphys/oscillator-surrogate/schemas/training.session.spec.schema.json",
+  "title": "Oscillator Training Session Spec v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["irVersion", "sessionId", "runtime", "datasetRef", "trainSpecRef", "evalSpecRef"],
+  "properties": {
+    "irVersion": { "type": "string", "const": "1.0" },
+    "sessionId": { "type": "string", "minLength": 1 },
+    "runtime": {
+      "type": "string",
+      "enum": [
+        "js_client",
+        "server_tfjs",
+        "server_pytorch_gpu",
+        "server_pytorch_cpu",
+        "python_server",
+        "node_server",
+        "notebook_local"
+      ]
+    },
+    "runtimeConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["irVersion", "runtimeId", "host", "engine", "backend", "transport"],
+      "properties": {
+        "irVersion": { "type": "string", "const": "1.0" },
+        "runtimeId": {
+          "type": "string",
+          "enum": [
+            "js_client",
+            "server_tfjs",
+            "server_pytorch_gpu",
+            "server_pytorch_cpu",
+            "python_server",
+            "node_server",
+            "notebook_local"
+          ]
+        },
+        "host": { "type": "string", "enum": ["browser", "server", "node", "unknown"] },
+        "engine": { "type": "string", "enum": ["tfjs", "pytorch", "django_worker", "unknown"] },
+        "backend": { "type": "string", "minLength": 1 },
+        "transport": { "type": "string", "enum": ["inproc", "ws", "http_poll", "http", "unknown"] }
+      }
+    },
+    "datasetRef": { "type": "string", "minLength": 1 },
+    "graphRefs": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "minItems": 1,
+      "uniqueItems": true
+    },
+    "graphRef": {
+      "oneOf": [
+        { "type": "string", "minLength": 1 },
+        {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "minItems": 1,
+          "uniqueItems": true
+        }
+      ]
+    },
+    "trainSpecRef": { "type": "string", "minLength": 1 },
+    "evalSpecRef": { "type": "string", "minLength": 1 },
+    "queue": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "priority": { "type": "integer", "minimum": 0 },
+        "allowParallel": { "type": "boolean" },
+        "retryMax": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "metadata": {
+      "type": "object",
+      "additionalProperties": true
+    }
+  },
+  "anyOf": [
+    { "required": ["graphRefs"] },
+    { "required": ["graphRef"] }
+  ]
+}

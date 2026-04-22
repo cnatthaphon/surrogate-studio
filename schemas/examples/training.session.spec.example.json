@@ -1,0 +1,28 @@
+{
+  "irVersion": "1.0",
+  "sessionId": "ae_run_001",
+  "runtime": "server_pytorch_gpu",
+  "runtimeConfig": {
+    "irVersion": "1.0",
+    "runtimeId": "server_pytorch_gpu",
+    "host": "server",
+    "engine": "pytorch",
+    "backend": "torch-cuda",
+    "transport": "ws"
+  },
+  "datasetRef": "dataset/oscillator_dataset_autoregressive_seed42.csv",
+  "graphRefs": [
+    "models/exp_ae_traj_lstm_zmatch.model.json",
+    "models/exp_ae_traj_cnn_zmatch.model.json"
+  ],
+  "trainSpecRef": "specs/train.spec.json",
+  "evalSpecRef": "specs/eval.spec.json",
+  "queue": {
+    "priority": 5,
+    "allowParallel": false,
+    "retryMax": 1
+  },
+  "metadata": {
+    "notes": "No-server primary session example"
+  }
+}

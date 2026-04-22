@@ -1,0 +1,26 @@
+{
+  "irVersion": "1.0",
+  "kind": "handshake_ok",
+  "ts": 1773000000000,
+  "sessionId": "sess_001",
+  "runtimeId": "js_client",
+  "runtime": {
+    "host": "browser",
+    "engine": "tfjs",
+    "backend": "webgl",
+    "transport": "inproc"
+  },
+  "status": {
+    "state": "ready",
+    "message": "Runtime handshake ready."
+  },
+  "handshake": {
+    "ok": true,
+    "backendAvailability": {
+      "cpu": true,
+      "webgl": true,
+      "wasm": false,
+      "webgpu": false
+    }
+  }
+}

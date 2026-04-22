@@ -1,0 +1,120 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cnatthaphon.github.io/comphys/oscillator-surrogate/schemas/train.spec.schema.json",
+  "title": "Oscillator Train Spec v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["irVersion", "runName", "optimizer", "training", "checkpointing"],
+  "properties": {
+    "irVersion": { "type": "string", "const": "1.0" },
+    "runName": { "type": "string", "minLength": 1 },
+    "seed": { "type": "integer" },
+    "runtime": {
+      "type": "string",
+      "enum": [
+        "js_client",
+        "server_tfjs",
+        "server_pytorch_gpu",
+        "server_pytorch_cpu",
+        "python_server",
+        "node_server",
+        "notebook_local"
+      ]
+    },
+    "runtimeConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["irVersion", "runtimeId", "host", "engine", "backend", "transport"],
+      "properties": {
+        "irVersion": { "type": "string", "const": "1.0" },
+        "runtimeId": {
+          "type": "string",
+          "enum": [
+            "js_client",
+            "server_tfjs",
+            "server_pytorch_gpu",
+            "server_pytorch_cpu",
+            "python_server",
+            "node_server",
+            "notebook_local"
+          ]
+        },
+        "host": { "type": "string", "enum": ["browser", "server", "node", "unknown"] },
+        "engine": { "type": "string", "enum": ["tfjs", "pytorch", "django_worker", "unknown"] },
+        "backend": { "type": "string", "minLength": 1 },
+        "transport": { "type": "string", "enum": ["inproc", "ws", "http_poll", "http", "unknown"] }
+      }
+    },
+    "device": { "type": "string", "enum": ["auto", "cpu", "cuda", "webgl", "wasm", "webgpu"] },
+    "optimizer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "lr"],
+      "properties": {
+        "name": { "type": "string", "enum": ["adam", "adamw", "sgd", "rmsprop"] },
+        "lr": { "type": "number", "exclusiveMinimum": 0 },
+        "weightDecay": { "type": "number", "minimum": 0 },
+        "betas": {
+          "type": "array",
+          "items": { "type": "number" },
+          "minItems": 2,
+          "maxItems": 2
+        }
+      }
+    },
+    "scheduler": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string", "enum": ["none", "reduce_on_plateau", "cosine", "step"] },
+        "factor": { "type": "number", "exclusiveMinimum": 0, "maximum": 1 },
+        "patience": { "type": "integer", "minimum": 1 },
+        "stepSize": { "type": "integer", "minimum": 1 },
+        "minLr": { "type": "number", "minimum": 0 }
+      }
+    },
+    "training": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["epochs", "batchSize"],
+      "properties": {
+        "epochs": { "type": "integer", "minimum": 1 },
+        "batchSize": { "type": "integer", "minimum": 1 },
+        "shuffle": { "type": "boolean" },
+        "gradientClipNorm": { "type": "number", "exclusiveMinimum": 0 },
+        "mixedPrecision": { "type": "boolean" }
+      }
+    },
+    "earlyStopping": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "monitor": { "type": "string", "enum": ["val_loss", "val_mae", "val_rmse"] },
+        "patience": { "type": "integer", "minimum": 1 },
+        "minDelta": { "type": "number", "minimum": 0 }
+      }
+    },
+    "checkpointing": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enabled", "saveBest", "saveLast"],
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "saveBest": { "type": "boolean" },
+        "saveLast": { "type": "boolean" },
+        "dir": { "type": "string" },
+        "specHash": { "type": "string" }
+      }
+    },
+    "metrics": {
+      "type": "array",
+      "items": { "type": "string", "enum": ["mae", "rmse", "bias", "mse"] },
+      "uniqueItems": true
+    },
+    "metadata": {
+      "type": "object",
+      "additionalProperties": true
+    }
+  }
+}

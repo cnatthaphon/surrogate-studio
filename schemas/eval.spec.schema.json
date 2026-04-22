@@ -1,0 +1,68 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cnatthaphon.github.io/comphys/oscillator-surrogate/schemas/eval.spec.schema.json",
+  "title": "Oscillator Eval Spec v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["irVersion", "mode", "rollout", "metrics", "report"],
+  "properties": {
+    "irVersion": { "type": "string", "const": "1.0" },
+    "mode": { "type": "string", "enum": ["direct", "autoregressive", "trajectory_ae", "diffusion"] },
+    "subset": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "split": { "type": "string", "enum": ["train", "val", "test"] },
+        "scenarios": {
+          "type": "array",
+          "items": { "type": "string", "enum": ["spring", "pendulum", "bouncing"] },
+          "uniqueItems": true
+        },
+        "maxTrajectories": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "rollout": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["initMode"],
+      "properties": {
+        "initMode": { "type": "string", "enum": ["rk4_warmup", "zero_pad", "edge_pad", "direct_bootstrap", "none"] },
+        "windowSize": { "type": "integer", "minimum": 1 },
+        "horizon": { "type": "integer", "minimum": 1 },
+        "teacherForcing": { "type": "boolean" }
+      }
+    },
+    "generation": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "samples": { "type": "integer", "minimum": 1 },
+        "bestOfK": { "type": "integer", "minimum": 1 },
+        "guidanceScale": { "type": "number", "minimum": 0 },
+        "diffusionSteps": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "metrics": {
+      "type": "array",
+      "items": { "type": "string", "enum": ["mae", "rmse", "bias", "mse", "wasserstein", "diversity_gap"] },
+      "minItems": 1,
+      "uniqueItems": true
+    },
+    "report": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["saveCsv", "saveJson"],
+      "properties": {
+        "saveCsv": { "type": "boolean" },
+        "saveJson": { "type": "boolean" },
+        "includeWorstCases": { "type": "boolean" },
+        "includeScenarioBreakdown": { "type": "boolean" }
+      }
+    },
+    "metadata": {
+      "type": "object",
+      "additionalProperties": true
+    }
+  }
+}

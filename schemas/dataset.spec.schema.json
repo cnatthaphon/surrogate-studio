@@ -1,0 +1,166 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cnatthaphon.github.io/comphys/oscillator-surrogate/schemas/dataset.spec.schema.json",
+  "title": "Oscillator Dataset Spec v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "irVersion",
+    "name",
+    "seed",
+    "dt",
+    "durationSec",
+    "trajectories",
+    "scenarios",
+    "scenarioConfig",
+    "split",
+    "normalization"
+  ],
+  "properties": {
+    "irVersion": {
+      "type": "string",
+      "const": "1.0"
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1
+    },
+    "seed": {
+      "type": "integer"
+    },
+    "dt": {
+      "type": "number",
+      "exclusiveMinimum": 0
+    },
+    "durationSec": {
+      "type": "number",
+      "exclusiveMinimum": 0
+    },
+    "trajectories": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "scenarios": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": ["spring", "pendulum", "bouncing"]
+      },
+      "minItems": 1,
+      "uniqueItems": true
+    },
+    "scenarioConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["spring", "pendulum", "bouncing"],
+      "properties": {
+        "spring": { "$ref": "#/$defs/springConfig" },
+        "pendulum": { "$ref": "#/$defs/pendulumConfig" },
+        "bouncing": { "$ref": "#/$defs/bouncingConfig" }
+      }
+    },
+    "split": {
+      "$ref": "#/$defs/splitConfig"
+    },
+    "normalization": {
+      "$ref": "#/$defs/normalizationConfig"
+    },
+    "features": {
+      "$ref": "#/$defs/featureConfig"
+    },
+    "metadata": {
+      "type": "object",
+      "additionalProperties": true
+    }
+  },
+  "$defs": {
+    "range2": {
+      "type": "array",
+      "items": { "type": "number" },
+      "minItems": 2,
+      "maxItems": 2
+    },
+    "splitConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode", "train", "val", "test"],
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": ["stratified_scenario", "random", "sequential"]
+        },
+        "train": { "type": "number", "minimum": 0, "maximum": 1 },
+        "val": { "type": "number", "minimum": 0, "maximum": 1 },
+        "test": { "type": "number", "minimum": 0, "maximum": 1 }
+      }
+    },
+    "normalizationConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["inputs", "targets", "params"],
+      "properties": {
+        "inputs": {
+          "type": "string",
+          "enum": ["none", "zscore", "minmax"]
+        },
+        "targets": {
+          "type": "string",
+          "enum": ["none", "zscore", "minmax"]
+        },
+        "params": {
+          "type": "string",
+          "enum": ["none", "zscore", "minmax"]
+        }
+      }
+    },
+    "featureConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "includeScenarioOneHot": { "type": "boolean" },
+        "includeTimeSec": { "type": "boolean" },
+        "includeTimeNorm": { "type": "boolean" },
+        "includeSinNorm": { "type": "boolean" },
+        "includeCosNorm": { "type": "boolean" },
+        "includeRatios": { "type": "boolean" }
+      }
+    },
+    "springConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "mRange": { "$ref": "#/$defs/range2" },
+        "cRange": { "$ref": "#/$defs/range2" },
+        "kRange": { "$ref": "#/$defs/range2" },
+        "x0Range": { "$ref": "#/$defs/range2" },
+        "v0Range": { "$ref": "#/$defs/range2" }
+      }
+    },
+    "pendulumConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "mRange": { "$ref": "#/$defs/range2" },
+        "cRange": { "$ref": "#/$defs/range2" },
+        "lRange": { "$ref": "#/$defs/range2" },
+        "x0Range": { "$ref": "#/$defs/range2" },
+        "v0Range": { "$ref": "#/$defs/range2" }
+      }
+    },
+    "bouncingConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "mRange": { "$ref": "#/$defs/range2" },
+        "cRange": { "$ref": "#/$defs/range2" },
+        "eRange": { "$ref": "#/$defs/range2" },
+        "x0Range": { "$ref": "#/$defs/range2" },
+        "v0Range": { "$ref": "#/$defs/range2" },
+        "g": { "type": "number" },
+        "groundModel": { "type": "string", "enum": ["rigid", "compliant"] },
+        "groundK": { "type": "number", "minimum": 0 },
+        "groundC": { "type": "number", "minimum": 0 }
+      }
+    }
+  }
+}

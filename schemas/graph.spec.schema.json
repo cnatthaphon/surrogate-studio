@@ -1,0 +1,209 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cnatthaphon.github.io/comphys/oscillator-surrogate/schemas/graph.spec.schema.json",
+  "title": "Oscillator Graph Spec v1 (Drawflow Contract)",
+  "description": "Canonical graph contract used by web editor, model JSON files, notebook export, and Python pipeline.",
+  "oneOf": [
+    { "$ref": "#/$defs/drawflowGraph" },
+    { "$ref": "#/$defs/modelPack" },
+    { "$ref": "#/$defs/modelEnvelope" }
+  ],
+  "$defs": {
+    "modelPack": {
+      "type": "object",
+      "required": ["graph"],
+      "additionalProperties": true,
+      "properties": {
+        "app": { "type": "string" },
+        "build": { "type": "string" },
+        "kind": { "type": "string" },
+        "name": { "type": "string", "minLength": 1 },
+        "schemaId": { "type": "string" },
+        "exportedAt": { "type": "string" },
+        "graph": { "$ref": "#/$defs/drawflowGraph" },
+        "metadata": { "type": "object", "additionalProperties": true }
+      }
+    },
+    "modelEnvelope": {
+      "type": "object",
+      "required": ["model"],
+      "additionalProperties": true,
+      "properties": {
+        "model": {
+          "type": "object",
+          "required": ["graph"],
+          "additionalProperties": true,
+          "properties": {
+            "name": { "type": "string" },
+            "schemaId": { "type": "string" },
+            "graph": { "$ref": "#/$defs/drawflowGraph" }
+          }
+        }
+      }
+    },
+    "drawflowGraph": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["drawflow"],
+      "properties": {
+        "irVersion": { "type": "string", "const": "1.0" },
+        "drawflow": {
+          "oneOf": [
+            { "$ref": "#/$defs/drawflowModules" },
+            {
+              "type": "object",
+              "required": ["drawflow"],
+              "additionalProperties": true,
+              "properties": {
+                "drawflow": { "$ref": "#/$defs/drawflowModules" }
+              }
+            }
+          ]
+        }
+      }
+    },
+    "drawflowModules": {
+      "type": "object",
+      "required": ["Home"],
+      "additionalProperties": true,
+      "properties": {
+        "Home": {
+          "type": "object",
+          "required": ["data"],
+          "additionalProperties": true,
+          "properties": {
+            "data": { "$ref": "#/$defs/nodeMap" }
+          }
+        }
+      }
+    },
+    "nodeMap": {
+      "type": "object",
+      "minProperties": 1,
+      "patternProperties": {
+        ".+": { "$ref": "#/$defs/node" }
+      },
+      "additionalProperties": false
+    },
+    "node": {
+      "type": "object",
+      "required": ["id", "name", "data", "inputs", "outputs"],
+      "additionalProperties": true,
+      "properties": {
+        "id": {
+          "oneOf": [
+            { "type": "integer" },
+            { "type": "string", "minLength": 1 }
+          ]
+        },
+        "name": {
+          "type": "string",
+          "enum": [
+            "input_layer",
+            "params_block",
+            "scenario_block",
+            "time_sec_block",
+            "time_norm_block",
+            "sin_norm_block",
+            "cos_norm_block",
+            "window_hist_x_block",
+            "window_hist_v_block",
+            "hist_x_block",
+            "hist_v_block",
+            "concat_block",
+            "dense_layer",
+            "dropout_layer",
+            "batch_norm_layer",
+            "layer_norm_layer",
+            "group_norm_layer",
+            "rnn_layer",
+            "gru_layer",
+            "lstm_layer",
+            "conv1d_layer",
+            "seq_pool_layer",
+            "repeat_layer",
+            "resample_layer",
+            "temporal_dense_layer",
+            "upsample_linear_layer",
+            "downsample_linear_layer",
+            "latent_layer",
+            "latent_mu_layer",
+            "latent_logvar_layer",
+            "reparam_layer",
+            "noise_schedule_block",
+            "output_layer"
+          ]
+        },
+        "data": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "class": { "type": "string" },
+        "html": { "type": "string" },
+        "typenode": { "type": "boolean" },
+        "pos_x": { "type": "number" },
+        "pos_y": { "type": "number" },
+        "inputs": { "$ref": "#/$defs/inputPortMap" },
+        "outputs": { "$ref": "#/$defs/outputPortMap" }
+      }
+    },
+    "inputPortMap": {
+      "type": "object",
+      "additionalProperties": { "$ref": "#/$defs/inputPort" }
+    },
+    "outputPortMap": {
+      "type": "object",
+      "additionalProperties": { "$ref": "#/$defs/outputPort" }
+    },
+    "inputPort": {
+      "type": "object",
+      "required": ["connections"],
+      "additionalProperties": true,
+      "properties": {
+        "connections": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/inputConnection" }
+        }
+      }
+    },
+    "outputPort": {
+      "type": "object",
+      "required": ["connections"],
+      "additionalProperties": true,
+      "properties": {
+        "connections": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/outputConnection" }
+        }
+      }
+    },
+    "inputConnection": {
+      "type": "object",
+      "required": ["node", "output"],
+      "additionalProperties": true,
+      "properties": {
+        "node": {
+          "oneOf": [
+            { "type": "integer" },
+            { "type": "string", "minLength": 1 }
+          ]
+        },
+        "output": { "type": "string", "minLength": 1 }
+      }
+    },
+    "outputConnection": {
+      "type": "object",
+      "required": ["node", "input"],
+      "additionalProperties": true,
+      "properties": {
+        "node": {
+          "oneOf": [
+            { "type": "integer" },
+            { "type": "string", "minLength": 1 }
+          ]
+        },
+        "input": { "type": "string", "minLength": 1 }
+      }
+    }
+  }
+}

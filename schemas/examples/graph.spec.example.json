@@ -1,0 +1,84 @@
+{
+  "irVersion": "1.0",
+  "drawflow": {
+    "Home": {
+      "data": {
+        "1": {
+          "id": 1,
+          "name": "input_layer",
+          "data": {
+            "mode": "flat",
+            "role": "trajectory"
+          },
+          "class": "input_layer",
+          "html": "<div><div>input_layer</div></div>",
+          "typenode": false,
+          "inputs": {},
+          "outputs": {
+            "output_1": {
+              "connections": [
+                { "node": "2", "input": "input_1" }
+              ]
+            }
+          },
+          "pos_x": 120,
+          "pos_y": 120
+        },
+        "2": {
+          "id": 2,
+          "name": "dense_layer",
+          "data": {
+            "units": 64,
+            "activation": "relu"
+          },
+          "class": "dense_layer",
+          "html": "<div><div>dense_layer</div></div>",
+          "typenode": false,
+          "inputs": {
+            "input_1": {
+              "connections": [
+                { "node": "1", "output": "output_1" }
+              ]
+            }
+          },
+          "outputs": {
+            "output_1": {
+              "connections": [
+                { "node": "3", "input": "input_1" }
+              ]
+            }
+          },
+          "pos_x": 300,
+          "pos_y": 120
+        },
+        "3": {
+          "id": 3,
+          "name": "output_layer",
+          "data": {
+            "target": "x",
+            "targetType": "x",
+            "loss": "mse",
+            "matchWeight": 1.0
+          },
+          "class": "output_layer",
+          "html": "<div><div>output_layer</div></div>",
+          "typenode": false,
+          "inputs": {
+            "input_1": {
+              "connections": [
+                { "node": "2", "output": "output_1" }
+              ]
+            }
+          },
+          "outputs": {},
+          "pos_x": 500,
+          "pos_y": 120
+        }
+      }
+    }
+  },
+  "metadata": {
+    "preset": "direct_mlp_strong",
+    "exportedFrom": "drawflow"
+  }
+}
