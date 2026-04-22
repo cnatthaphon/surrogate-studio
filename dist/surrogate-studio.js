@@ -1,5 +1,5 @@
 // Surrogate Studio — concatenated bundle
-// Generated: 2026-04-22T10:31:10Z
+// Generated: 2026-04-22T11:25:26Z
 // Source files: 58
 
 
@@ -10874,7 +10874,8 @@
           var p = {};
           Object.keys(sc.inputs).forEach(function (k) { p[k] = Number(sc.inputs[k].value); });
           var g = Number((globalInputs.g || {}).value) || 9.81;
-          var dt = Math.max(1e-6, Number((globalInputs.dt || {}).value) || 0.02);
+          var dt = Math.max(0.001, Number((globalInputs.dt || {}).value) || 0.02);
+          if (globalInputs.dt && Number(globalInputs.dt.value) !== dt) globalInputs.dt.value = dt;
           var dur = Math.max(dt, 0.1, Number((globalInputs.durationSec || {}).value) || 8);
           if (globalInputs.durationSec && Number(globalInputs.durationSec.value) !== dur) globalInputs.durationSec.value = dur;
           var steps = Math.max(2, Math.round(dur / dt));
@@ -10908,7 +10909,8 @@
           var p = {};
           Object.keys(sc.inputs).forEach(function (k) { p[k] = Number(sc.inputs[k].value); });
           var g = Number((globalInputs.g || {}).value) || 9.81;
-          var dt = Math.max(1e-6, Number((globalInputs.dt || {}).value) || 0.02);
+          var dt = Math.max(0.001, Number((globalInputs.dt || {}).value) || 0.02);
+          if (globalInputs.dt && Number(globalInputs.dt.value) !== dt) globalInputs.dt.value = dt;
           var dur = Math.max(dt, 0.1, Number((globalInputs.durationSec || {}).value) || 8);
           if (globalInputs.durationSec && Number(globalInputs.durationSec.value) !== dur) globalInputs.durationSec.value = dur;
           var steps = Math.max(2, Math.round(dur / dt));
@@ -11100,12 +11102,13 @@
     },
     build: function (cfg) {
       var raw = cfg && typeof cfg === "object" ? cfg : {};
-      // Convert UI checkbox keys (cardDsSpring etc.) to includedScenarios array
-      if (!raw.includedScenarios) {
+      // Convert UI checkbox keys to includedScenarios — only when UI keys are present
+      if (!raw.includedScenarios &&
+          (raw.cardDsSpring != null || raw.cardDsPendulum != null || raw.cardDsBouncing != null)) {
         var scenarios = [];
-        if (raw.cardDsSpring !== false) scenarios.push("spring");
-        if (raw.cardDsPendulum !== false) scenarios.push("pendulum");
-        if (raw.cardDsBouncing !== false) scenarios.push("bouncing");
+        if (raw.cardDsSpring) scenarios.push("spring");
+        if (raw.cardDsPendulum) scenarios.push("pendulum");
+        if (raw.cardDsBouncing) scenarios.push("bouncing");
         if (scenarios.length) raw.includedScenarios = scenarios;
       }
       if (raw && raw.variants && typeof raw.variants === "object") {
