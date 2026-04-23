@@ -420,7 +420,8 @@
   }
 
   function generateDataset(cfg) {
-    const normalizedCfg = cfg && typeof cfg === "object" ? cfg : {};
+    // Shallow-copy so we never mutate the caller's object
+    const normalizedCfg = Object.assign({}, cfg && typeof cfg === "object" ? cfg : {});
     // Ensure critical defaults for fields that may not come from UI forms
     if (!Number.isFinite(Number(normalizedCfg.windowSize)) || Number(normalizedCfg.windowSize) < 2) {
       normalizedCfg.windowSize = 20;
@@ -439,12 +440,14 @@
     if (!Number.isFinite(Number(normalizedCfg.steps))) {
       normalizedCfg.steps = Math.max(2, Math.round(normalizedCfg.durationSec / normalizedCfg.dt) + 1);
     }
-    // Bridge trainFrac/valFrac → splitConfig when splitConfig is absent
-    if (!normalizedCfg.splitConfig && (normalizedCfg.trainFrac != null || normalizedCfg.valFrac != null)) {
-      const _tr = Number.isFinite(Number(normalizedCfg.trainFrac)) ? Number(normalizedCfg.trainFrac) : 0.70;
-      const _va = Number.isFinite(Number(normalizedCfg.valFrac)) ? Number(normalizedCfg.valFrac) : 0.15;
+    // Always build splitConfig from current fracs (never reuse a stale cached one)
+    const _tr0 = Number(normalizedCfg.trainFrac);
+    const _va0 = Number(normalizedCfg.valFrac);
+    if (Number.isFinite(_tr0) || Number.isFinite(_va0)) {
+      const _tr = Number.isFinite(_tr0) ? _tr0 : 0.70;
+      const _va = Number.isFinite(_va0) ? _va0 : 0.15;
       normalizedCfg.splitConfig = {
-        mode: String(normalizedCfg.splitMode || "stratified_scenario"),
+        mode: String(normalizedCfg.splitMode || (normalizedCfg.splitConfig && normalizedCfg.splitConfig.mode) || "stratified_scenario"),
         train: _tr,
         val: _va,
         test: Math.max(0.01, 1 - _tr - _va),
