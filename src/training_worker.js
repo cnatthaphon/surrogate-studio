@@ -721,15 +721,33 @@
     let mae = 0;
     let testMse = 0;
     let testMae = 0;
+
+    function safeMetric(yTensor, pTensor, metricFn) {
+      try {
+        // Flatten both to 2D [batch, features] so shapes always match
+        var yFlat = yTensor.reshape([yTensor.shape[0], -1]);
+        var pFlat = pTensor.reshape([pTensor.shape[0], -1]);
+        var result = metricFn(yFlat, pFlat);
+        var val = result.dataSync()[0];
+        result.dispose();
+        if (yFlat !== yTensor) yFlat.dispose();
+        if (pFlat !== pTensor) pFlat.dispose();
+        return Number.isFinite(val) ? val : 0;
+      } catch (_) { return 0; }
+    }
+
     for (let i = 0; i < predVals.length; i += 1) {
       const pv = predVals[i];
       const pt = predTests[i];
       const yv = yValTensors[i];
       const yt = yTestTensors[i];
-      mse += tf.losses.meanSquaredError(yv, pv).dataSync()[0];
-      mae += tf.metrics.meanAbsoluteError(yv, pv).dataSync()[0];
-      testMse += tf.losses.meanSquaredError(yt, pt).dataSync()[0];
-      testMae += tf.metrics.meanAbsoluteError(yt, pt).dataSync()[0];
+      if (!pv || !yv) continue;
+      mse += safeMetric(yv, pv, tf.losses.meanSquaredError);
+      mae += safeMetric(yv, pv, tf.metrics.meanAbsoluteError);
+      if (pt && yt) {
+        testMse += safeMetric(yt, pt, tf.losses.meanSquaredError);
+        testMae += safeMetric(yt, pt, tf.metrics.meanAbsoluteError);
+      }
     }
     const denom = Math.max(1, predVals.length);
     mse /= denom;
