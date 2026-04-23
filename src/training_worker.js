@@ -710,6 +710,18 @@
     testMse /= denom;
     testMae /= denom;
 
+    // Save model artifacts BEFORE disposing anything — model.save calls
+    // .data() on weight tensors, which fails if they've been disposed.
+    const artifactHistory = Object.assign({}, history);
+    var trainedArtifacts = null;
+    try {
+      trainedArtifacts = await model.save(tf.io.withSaveHandler(async function (artifacts) {
+        return artifacts;
+      }));
+    } catch (saveErr) {
+      self.postMessage({ kind: "log", message: "Warning: could not serialize model weights: " + String(saveErr.message || saveErr) });
+    }
+
     disposeTensorArray(yTrainTensors);
     disposeTensorArray(yValTensors);
     disposeTensorArray(yTestTensors);
@@ -722,11 +734,6 @@
     disposeTensor(xVal);
     disposeTensor(xTest);
     disposeTensorArray(bestWeights);
-
-    const artifactHistory = Object.assign({}, history);
-    const trainedArtifacts = await model.save(tf.io.withSaveHandler(async function (artifacts) {
-      return artifacts;
-    }));
     model.dispose();
     return {
       metrics: {
