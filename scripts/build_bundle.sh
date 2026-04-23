@@ -13,7 +13,7 @@ mkdir -p "$OUT_DIR"
 
 SCRIPTS=$(grep 'src="./src/' "$ROOT/index.html" | sed 's/.*src="\.\///' | sed 's/?.*//' | sed 's/".*//')
 
-echo "// Surrogate Studio — concatenated bundle" > "$OUT_FILE"
+echo "// Surrogate Studio - concatenated bundle" > "$OUT_FILE"
 echo "// Generated: $(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$OUT_FILE"
 echo "// Source files: $(echo "$SCRIPTS" | wc -l)" >> "$OUT_FILE"
 echo "" >> "$OUT_FILE"
@@ -26,7 +26,7 @@ for SCRIPT in $SCRIPTS; do
     continue
   fi
   echo "" >> "$OUT_FILE"
-  echo "// ──── $SCRIPT ────" >> "$OUT_FILE"
+  echo "// ---- $SCRIPT ----" >> "$OUT_FILE"
   cat "$FILE" >> "$OUT_FILE"
   echo "" >> "$OUT_FILE"
   COUNT=$((COUNT + 1))
