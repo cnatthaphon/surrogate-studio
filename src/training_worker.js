@@ -148,8 +148,8 @@
     return tf.mean(tf.square(tf.sub(pred, truth)));
   }
 
-  function makeHeadLoss(head, targetMode, resolvedLossType) {
-    const target = String((head && head.target) || "x");
+  function makeHeadLoss(head, resolvedLossType) {
+    const target = String((head && head.target) || "");
     const type = mapLossAlias(head && head.loss, resolvedLossType);
     const wx = Math.max(0, Number((head && head.wx) || 1));
     const wv = Math.max(0, Number((head && head.wv) || 1));
@@ -178,41 +178,14 @@
     };
   }
 
-  function normalizeOutputTargetsList(raw, fallbackTargets, schemaId, allowed) {
-    let list = [];
-    if (Array.isArray(raw)) {
-      list = raw.map(function (x) { return String(x || "").trim().toLowerCase(); });
-    } else if (typeof raw === "string") {
-      list = raw.split(",").map(function (x) { return String(x || "").trim().toLowerCase(); });
-    } else if (raw != null) {
-      list = [String(raw || "").trim().toLowerCase()];
-    }
-    const allow = Array.isArray(allowed) && allowed.length ? allowed : ["x", "v", "xv", "traj", "params", "latent_diff", "latent_kl"];
-    list = list.filter(function (x) { return x && allow.indexOf(x) >= 0; });
-    if (!list.length) {
-      const fb = Array.isArray(fallbackTargets) ? fallbackTargets : ["x"];
-      list = fb.map(function (x) { return String(x || "").trim().toLowerCase(); })
-        .filter(function (x) { return x && allow.indexOf(x) >= 0; });
-    }
-    void schemaId;
-    if (!list.length) list = allow.indexOf("x") >= 0 ? ["x"] : allow.slice(0, 1);
-    const uniq = [];
-    list.forEach(function (x) {
-      if (uniq.indexOf(x) < 0) uniq.push(x);
-    });
-    if (uniq.indexOf("xv") >= 0) return uniq.filter(function (x) { return x !== "x" && x !== "v"; });
-    return uniq;
-  }
 
-  function extractHeadRows(rowsMain, rowsParams, targetMode, head) {
-    const headTarget = String((head && head.targetType) || (head && head.target) || "x");
+  function extractHeadRows(rowsMain, rowsParams, head) {
+    const headTarget = String((head && head.targetType) || (head && head.target) || "");
+    // Params head: select specific parameter columns from params data
     if (headTarget === "params") {
-      if (Math.max(0, Number(head && head.paramSize || 0)) < 1 && (!Array.isArray(rowsParams) || !rowsParams.length)) {
-        throw new Error("Params output head requires at least one enabled Params feature in dataset/schema.");
-      }
-      if (!Array.isArray(rowsParams) || !rowsParams.length) throw new Error("Params target requested but parameter targets are missing.");
+      if (!Array.isArray(rowsParams) || !rowsParams.length) throw new Error("Params target requested but parameter data is missing.");
       const rawSelect = String((head && head.paramsSelect) || "");
-      const picks = rawSelect.split(",").map(function (s) { return String(s || "").trim(); }).filter(function (s) { return !!s; });
+      const picks = rawSelect.split(",").map(function (s) { return String(s || "").trim(); }).filter(Boolean);
       const names = Array.isArray(head && head.paramNames) ? (head.paramNames || []) : [];
       if (picks.length && names.length) {
         const idx = picks.map(function (k) { return names.indexOf(k); }).filter(function (i) { return i >= 0; });
@@ -225,6 +198,7 @@
       }
       return rowsParams;
     }
+    // Latent heads: generate zero targets (loss is computed from predictions only)
     if (headTarget === "latent_diff") {
       const n = Array.isArray(rowsMain) ? rowsMain.length : 0;
       const units = Math.max(1, Number(head.units || 1));
@@ -239,26 +213,7 @@
       for (let i = 0; i < n; i += 1) zeros[i] = new Array(units).fill(0);
       return zeros;
     }
-    if (headTarget === "xv") {
-      if (String(targetMode) !== "xv") throw new Error("x+v head requires dataset target mode xv.");
-      return rowsMain;
-    }
-    if (headTarget === "traj") {
-      if (String(targetMode) === "v") throw new Error("traj head requested but dataset currently has v-only labels.");
-      return rowsMain.map(function (r) { return [Number(r[0] || 0)]; });
-    }
-    if (headTarget === "x") {
-      if (String(targetMode) === "v") throw new Error("x head requested but dataset currently has v-only labels.");
-      return rowsMain.map(function (r) { return [Number(r[0] || 0)]; });
-    }
-    if (headTarget === "v") {
-      if (String(targetMode) === "x") throw new Error("v head requested but dataset currently has x-only labels.");
-      if (String(targetMode) === "v") return rowsMain.map(function (r) { return [Number(r[0] || 0)]; });
-      return rowsMain.map(function (r) { return [Number(r[1] || 0)]; });
-    }
-    // Pass-through for non-oscillator head types: classification (label/logits),
-    // segmentation (mask), detection (bbox), reconstruction, custom, none.
-    // The dataset module already provides y data in the correct format.
+    // Generic pass-through: dataset module already provides y data in the correct format.
     return rowsMain.map(function (r) { return Array.isArray(r) ? r : [Number(r || 0)]; });
   }
 
@@ -435,10 +390,10 @@
       ? payloadHeadConfigs
       : [{
         id: "single",
-        target: String((ds && ds.targetMode) || "x"),
+        target: "default",
+        headType: "regression",
         loss: String((outputLossConfig && outputLossConfig.loss) || "mse"),
-        wx: 1,
-        wv: 1,
+        matchWeight: 1,
       }];
 
     const mode = String(ds.mode || "autoregressive");
@@ -502,7 +457,7 @@
     const xValInputs = buildInputSet(xVal, ds.xVal.length);
     const xTestInputs = buildInputSet(xTest, ds.xTest.length);
 
-    const targetMode = String(ds.targetMode || "x");
+    // targetMode removed — dataset modules produce y data in the correct shape
     const yTrainTensors = [];
     const yValTensors = [];
     const yTestTensors = [];
@@ -533,9 +488,9 @@
         headYVal = ds.labelsVal || headYVal;
         headYTest = ds.labelsTest || headYTest;
       }
-      var rowsTrain = extractHeadRows(headYTrain, ds.pTrain, targetMode, Object.assign({}, head, { paramSize: paramSize, paramNames: dsParamNames }));
-      var rowsVal = extractHeadRows(headYVal, ds.pVal, targetMode, Object.assign({}, head, { paramSize: paramSize, paramNames: dsParamNames }));
-      var rowsTest = extractHeadRows(headYTest, ds.pTest, targetMode, Object.assign({}, head, { paramSize: paramSize, paramNames: dsParamNames }));
+      var rowsTrain = extractHeadRows(headYTrain, ds.pTrain, Object.assign({}, head, { paramSize: paramSize, paramNames: dsParamNames }));
+      var rowsVal = extractHeadRows(headYVal, ds.pVal, Object.assign({}, head, { paramSize: paramSize, paramNames: dsParamNames }));
+      var rowsTest = extractHeadRows(headYTest, ds.pTest, Object.assign({}, head, { paramSize: paramSize, paramNames: dsParamNames }));
       var inferredCols = rowsTrain[0] ? (Array.isArray(rowsTrain[0]) ? rowsTrain[0].length : 1) : 1;
       var cols;
       if (ht === "classification") {
@@ -558,7 +513,7 @@
       yTrainTensors.push(rowsToTensor(rowsTrain, cols));
       yValTensors.push(rowsToTensor(rowsVal, cols));
       yTestTensors.push(rowsToTensor(rowsTest, cols));
-      losses.push(makeHeadLoss(head, targetMode, resolvedLossType));
+      losses.push(makeHeadLoss(head, resolvedLossType));
       metrics.push("mae");
     });
 
