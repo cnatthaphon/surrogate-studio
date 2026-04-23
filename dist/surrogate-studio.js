@@ -1,5 +1,5 @@
 // Surrogate Studio - concatenated bundle
-// Generated: 2026-04-23T10:19:44Z
+// Generated: 2026-04-23T10:32:32Z
 // Source files: 58
 
 
@@ -6205,7 +6205,6 @@
     var defaultTotalCount = Number(cfg.defaultTotalCount || 1400);
     var hasOriginalSplit = cfg.hasOriginalSplit !== false;
     var maxSamples = Number(cfg.maxSamples || 60000); // source max (MNIST=65000, CIFAR-10=10000)
-    var rngSeedOffset = Number(cfg.rngSeedOffset || 0);
     var defaultDatasetConfig = {
       seed: 42,
       splitMode: defaultSplitMode,
@@ -6296,7 +6295,7 @@
           if (!byClass[lbl]) byClass[lbl] = [];
           byClass[lbl].push(i);
         }
-        var rng = createRng(Number(source.loadedAt || 42) + Number(uiState.sampleNonce || 0) + rngSeedOffset);
+        var rng = createRng(Number(source.loadedAt || 42) + Number(uiState.sampleNonce || 0) + (schemaId === "fashion_mnist" ? 17 : 0));
         var samples = [];
         for (var c = 0; c < classNames.length; c += 1) {
           var arr = byClass[c] || [];
@@ -7290,7 +7289,6 @@
         defaultSplitMode: "stratified_label",
         defaultTotalCount: 1400,
         maxSamples: 60000,
-        rngSeedOffset: 17,
       }) : null;
     })(),
   };
@@ -16590,6 +16588,10 @@
         pTrain: Array.isArray(ds.pTrain) ? ds.pTrain.slice() : [],
         pVal: Array.isArray(ds.pVal) ? ds.pVal.slice() : [],
         pTest: Array.isArray(ds.pTest) ? ds.pTest.slice() : [],
+        labelsTrain: Array.isArray(ds.labelsTrain) ? ds.labelsTrain.slice() : [],
+        labelsVal: Array.isArray(ds.labelsVal) ? ds.labelsVal.slice() : [],
+        labelsTest: Array.isArray(ds.labelsTest) ? ds.labelsTest.slice() : [],
+        numClasses: Number(ds.numClasses || 0),
       },
       isSequence: Boolean(spec.isSequence),
       headConfigs: Array.isArray(spec.headConfigs) ? spec.headConfigs.slice() : [],
@@ -17263,15 +17265,6 @@
   var TEXT_ENCODER = (typeof TextEncoder !== "undefined") ? new TextEncoder() : null;
   var CRC_TABLE = null;
   var CELL_SEQ = 0;
-
-  function isTrajectorySchema(schemaId) {
-    var registry = GLOBAL.OSCSchemaRegistry || null;
-    if (registry && typeof registry.getDatasetSchema === "function") {
-      var schema = registry.getDatasetSchema(schemaId);
-      if (schema) return String(schema.sampleType || "").trim().toLowerCase() === "trajectory";
-    }
-    return false;
-  }
 
   function ensureCrcTable() {
     if (CRC_TABLE) return CRC_TABLE;
@@ -19468,10 +19461,10 @@
 
     // Decide notebook type based on schema
     var schemaId = datasetPack.schemaId || "";
-    var isTrajectoryBased = isTrajectorySchema(schemaId);
+    var isOscillator = schemaId === "oscillator";
     var notebook;
 
-    if (isTrajectoryBased) {
+    if (isOscillator) {
       // oscillator: use full pipeline notebook
       notebook = buildNotebookObject({
         packageLabel: "zip package",
@@ -19572,11 +19565,11 @@
     });
     var datasetPack = resolveDatasetCsvFromSessions(sessions, adapter);
     var schemaId = String(datasetPack.schemaId || "").trim().toLowerCase();
-    var isTrajectoryBased = isTrajectorySchema(schemaId);
+    var isOscillator = schemaId === "oscillator";
     var notebook;
     var runtime = { loaded: 0, total: 0 };
 
-    if (isTrajectoryBased) {
+    if (isOscillator) {
       runtime = await loadRuntimeSources(cfg);
       var pipelineSource = pickPipelineSource(runtime);
       if (!pipelineSource) {
@@ -29332,6 +29325,8 @@
               xVal: activeDs.xVal, yVal: activeDs.yVal, seqVal: activeDs.seqVal || [],
               xTest: activeDs.xTest || [], yTest: activeDs.yTest || [], seqTest: activeDs.seqTest || [],
               pTrain: activeDs.pTrain || [], pVal: activeDs.pVal || [], pTest: activeDs.pTest || [],
+              labelsTrain: activeDs.labelsTrain || [], labelsVal: activeDs.labelsVal || [], labelsTest: activeDs.labelsTest || [],
+              numClasses: activeDs.numClasses || activeDs.classCount || 0,
             },
             runtimeConfig: {
               runtimeId: "js_client",

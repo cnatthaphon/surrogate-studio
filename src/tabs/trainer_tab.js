@@ -2532,6 +2532,8 @@
               xVal: activeDs.xVal, yVal: activeDs.yVal, seqVal: activeDs.seqVal || [],
               xTest: activeDs.xTest || [], yTest: activeDs.yTest || [], seqTest: activeDs.seqTest || [],
               pTrain: activeDs.pTrain || [], pVal: activeDs.pVal || [], pTest: activeDs.pTest || [],
+              labelsTrain: activeDs.labelsTrain || [], labelsVal: activeDs.labelsVal || [], labelsTest: activeDs.labelsTest || [],
+              numClasses: activeDs.numClasses || activeDs.classCount || 0,
             },
             runtimeConfig: {
               runtimeId: "js_client",
