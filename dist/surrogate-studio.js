@@ -1,5 +1,5 @@
 // Surrogate Studio - concatenated bundle
-// Generated: 2026-04-23T10:14:40Z
+// Generated: 2026-04-23T10:32:32Z
 // Source files: 58
 
 
@@ -16588,6 +16588,10 @@
         pTrain: Array.isArray(ds.pTrain) ? ds.pTrain.slice() : [],
         pVal: Array.isArray(ds.pVal) ? ds.pVal.slice() : [],
         pTest: Array.isArray(ds.pTest) ? ds.pTest.slice() : [],
+        labelsTrain: Array.isArray(ds.labelsTrain) ? ds.labelsTrain.slice() : [],
+        labelsVal: Array.isArray(ds.labelsVal) ? ds.labelsVal.slice() : [],
+        labelsTest: Array.isArray(ds.labelsTest) ? ds.labelsTest.slice() : [],
+        numClasses: Number(ds.numClasses || 0),
       },
       isSequence: Boolean(spec.isSequence),
       headConfigs: Array.isArray(spec.headConfigs) ? spec.headConfigs.slice() : [],
@@ -29321,6 +29325,8 @@
               xVal: activeDs.xVal, yVal: activeDs.yVal, seqVal: activeDs.seqVal || [],
               xTest: activeDs.xTest || [], yTest: activeDs.yTest || [], seqTest: activeDs.seqTest || [],
               pTrain: activeDs.pTrain || [], pVal: activeDs.pVal || [], pTest: activeDs.pTest || [],
+              labelsTrain: activeDs.labelsTrain || [], labelsVal: activeDs.labelsVal || [], labelsTest: activeDs.labelsTest || [],
+              numClasses: activeDs.numClasses || activeDs.classCount || 0,
             },
             runtimeConfig: {
               runtimeId: "js_client",

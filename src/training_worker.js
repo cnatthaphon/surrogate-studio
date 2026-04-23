@@ -514,15 +514,27 @@
 
     headConfigs.forEach(function (head) {
       const target = String(head.target || "x");
-      const rowsTrain = extractHeadRows(ds.yTrain, ds.pTrain, targetMode, Object.assign({}, head, { paramSize: paramSize, paramNames: dsParamNames }));
-      const rowsVal = extractHeadRows(ds.yVal, ds.pVal, targetMode, Object.assign({}, head, { paramSize: paramSize, paramNames: dsParamNames }));
-      const rowsTest = extractHeadRows(ds.yTest, ds.pTest, targetMode, Object.assign({}, head, { paramSize: paramSize, paramNames: dsParamNames }));
-      const cols = target === "xv" ? 2
-        : (target === "params" ? Math.max(1, paramSize || (rowsTrain[0] && rowsTrain[0].length) || 1)
-          : (target === "traj" ? 1
-            : (target === "latent_diff" ? Math.max(1, Number(head.units || 1))
-              : (target === "latent_kl" ? Math.max(2, Number(head.units || 2))
-                : Math.max(1, (rowsTrain[0] && rowsTrain[0].length) || Number(head.units || 1))))));
+      const ht = String(head.headType || "regression");
+      // Classification heads use labels (one-hot) instead of raw y data — mirrors training_engine_core.js
+      var headYTrain = ds.yTrain;
+      var headYVal = ds.yVal;
+      var headYTest = ds.yTest;
+      if (ht === "classification" && Array.isArray(ds.labelsTrain) && ds.labelsTrain.length) {
+        headYTrain = ds.labelsTrain;
+        headYVal = ds.labelsVal || headYVal;
+        headYTest = ds.labelsTest || headYTest;
+      }
+      const rowsTrain = extractHeadRows(headYTrain, ds.pTrain, targetMode, Object.assign({}, head, { paramSize: paramSize, paramNames: dsParamNames }));
+      const rowsVal = extractHeadRows(headYVal, ds.pVal, targetMode, Object.assign({}, head, { paramSize: paramSize, paramNames: dsParamNames }));
+      const rowsTest = extractHeadRows(headYTest, ds.pTest, targetMode, Object.assign({}, head, { paramSize: paramSize, paramNames: dsParamNames }));
+      const inferredCols = rowsTrain[0] ? (Array.isArray(rowsTrain[0]) ? rowsTrain[0].length : 1) : 1;
+      const cols = (ht === "classification") ? Math.max(1, Number(ds.numClasses || inferredCols))
+        : (target === "xv" ? 2
+          : (target === "params" ? Math.max(1, paramSize || inferredCols)
+            : (target === "traj" ? 1
+              : (target === "latent_diff" ? Math.max(1, Number(head.units || 1))
+                : (target === "latent_kl" ? Math.max(2, Number(head.units || 2))
+                  : Math.max(1, inferredCols))))));
       yTrainTensors.push(rowsToTensor(rowsTrain, cols));
       yValTensors.push(rowsToTensor(rowsVal, cols));
       yTestTensors.push(rowsToTensor(rowsTest, cols));
