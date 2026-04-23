@@ -1,6 +1,6 @@
 # Surrogate Studio — Demo Gallery
 
-Detailed descriptions, benchmark results, screenshots, and paper citations for all 15 demos. Each demo is a self-contained plugin folder with its own [README](demo/) — click through for architecture diagrams and step-by-step usage guides.
+Detailed descriptions, benchmark results, screenshots, and paper citations for all 16 demos. Each demo is a self-contained plugin folder with its own [README](demo/) — click through for architecture diagrams and step-by-step usage guides.
 
 All demos run live on [GitHub Pages](https://cnatthaphon.github.io/surrogate-studio/).
 
@@ -139,10 +139,12 @@ Reproduces the LSTM-VAE from Jadhav & Barati Farimani (2022) for ant trajectory 
 |:---:|:---:|
 | ![Training](demo/LSTM-VAE-for-dominant-motion-extraction/images/training.gif) | ![Generation](demo/LSTM-VAE-for-dominant-motion-extraction/images/generation.gif) |
 
-| Model | Params | Test R² | Test RMSE |
+| Model | Params | Expected Test R² | Expected Test RMSE |
 |-------|:------:|:-------:|:---------:|
-| LSTM-VAE | 77,100 | **0.9970** | 0.0164 |
-| MLP-AE (baseline) | 19,312 | 0.9882 | 0.0325 |
+| LSTM-VAE | 77,100 | ~0.997 | ~0.016 |
+| MLP-AE (baseline) | 19,312 | ~0.988 | ~0.033 |
+
+*Metrics are expected values after 200 epochs of training. No pretrained weights shipped — train from the Trainer tab.*
 
 > Jadhav & Barati Farimani, *"LSTM-VAE for dominant motion extraction"*, 2022. [arXiv:2104.12722](https://arxiv.org/abs/2104.12722)
 

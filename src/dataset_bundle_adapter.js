@@ -66,9 +66,10 @@
     if (!Number.isFinite(train)) train = 0.70;
     if (!Number.isFinite(val)) val = 0.15;
     if (!Number.isFinite(test)) test = 0.15;
-    train = clamp(train, 0.01, 0.98);
-    val = clamp(val, 0.01, 0.98);
-    test = clamp(test, 0.01, 0.98);
+    // Allow 0 for val/test (e.g. GANs use all data for training)
+    train = clamp(train, 0.01, 1.0);
+    val = clamp(val, 0, 1.0);
+    test = clamp(test, 0, 1.0);
     var s = train + val + test;
     if (s <= 1e-9) return { mode: mode, train: 0.70, val: 0.15, test: 0.15 };
     return { mode: mode, train: train / s, val: val / s, test: test / s };
