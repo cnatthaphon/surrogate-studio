@@ -1,5 +1,5 @@
 // Surrogate Studio - concatenated bundle
-// Generated: 2026-04-23T09:20:12Z
+// Generated: 2026-04-23T09:57:35Z
 // Source files: 58
 
 
@@ -16692,7 +16692,12 @@
         }
       };
       worker.onerror = function (evt) {
-        fail(new Error(evt && evt.message ? evt.message : "Worker error"));
+        var msg = (evt && evt.message) || "";
+        var file = (evt && evt.filename) || "";
+        var line = (evt && evt.lineno) || "";
+        var detail = msg || "Worker error";
+        if (file) detail += " at " + file + (line ? ":" + line : "");
+        fail(new Error(detail));
       };
       try {
         worker.postMessage(payload, transfer);
@@ -29272,11 +29277,16 @@
         // resolve worker path from script tags (handles subdirectory demos)
         var _workerUrl = "./src/training_worker.js";
         try {
-          var _scripts = document.querySelectorAll("script[src*='training_worker']");
-          if (_scripts.length) _workerUrl = _scripts[0].src;
-          else {
-            var _anySrc = document.querySelector("script[src*='training_engine_core']");
-            if (_anySrc) _workerUrl = _anySrc.src.replace("training_engine_core", "training_worker");
+          // Try 1: root page — derive from training_engine_core.js script tag
+          var _engineScript = document.querySelector("script[src*='training_engine_core']");
+          if (_engineScript && _engineScript.src) {
+            _workerUrl = _engineScript.src.replace(/training_engine_core\.js/, "training_worker.js");
+          } else {
+            // Try 2: demo pages — derive from dist bundle path
+            var _bundleScript = document.querySelector("script[src*='surrogate-studio']");
+            if (_bundleScript && _bundleScript.src) {
+              _workerUrl = _bundleScript.src.replace(/dist\/surrogate-studio\.js.*$/, "src/training_worker.js");
+            }
           }
         } catch (_) {}
         try { var _tw = new Worker(_workerUrl); _tw.terminate(); } catch (e) { useWorker = false; console.warn("[trainer] Worker not available:", e.message); }
