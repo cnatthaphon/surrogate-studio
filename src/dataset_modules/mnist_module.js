@@ -104,6 +104,7 @@
     var defaultTotalCount = Number(cfg.defaultTotalCount || 1400);
     var hasOriginalSplit = cfg.hasOriginalSplit !== false;
     var maxSamples = Number(cfg.maxSamples || 60000); // source max (MNIST=65000, CIFAR-10=10000)
+    var rngSeedOffset = Number(cfg.rngSeedOffset || 0);
     var defaultDatasetConfig = {
       seed: 42,
       splitMode: defaultSplitMode,
@@ -194,7 +195,7 @@
           if (!byClass[lbl]) byClass[lbl] = [];
           byClass[lbl].push(i);
         }
-        var rng = createRng(Number(source.loadedAt || 42) + Number(uiState.sampleNonce || 0) + (schemaId === "fashion_mnist" ? 17 : 0));
+        var rng = createRng(Number(source.loadedAt || 42) + Number(uiState.sampleNonce || 0) + rngSeedOffset);
         var samples = [];
         for (var c = 0; c < classNames.length; c += 1) {
           var arr = byClass[c] || [];

@@ -96,6 +96,7 @@
         defaultSplitMode: "stratified_label",
         defaultTotalCount: 1400,
         maxSamples: 60000,
+        rngSeedOffset: 17,
       }) : null;
     })(),
   };

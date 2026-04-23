@@ -1,5 +1,5 @@
 // Surrogate Studio - concatenated bundle
-// Generated: 2026-04-23T09:57:35Z
+// Generated: 2026-04-23T11:01:20Z
 // Source files: 58
 
 
@@ -182,6 +182,7 @@
       taskRecipeId: _normalizeTaskRecipeId(def, dataset, def.metadata),
       preconfig: preconfig,
       metadata: (def.metadata && typeof def.metadata === "object") ? _clone(def.metadata) : {},
+      notebookType: def.notebookType ? String(def.notebookType) : "",
     };
 
     _schemas[sid] = entry;
@@ -888,6 +889,7 @@
     label: "oscillator",
     description: "ODE oscillator trajectories (spring / pendulum / bouncing)",
     taskRecipeId: "sequence_forecast",
+    notebookType: "embedded_pipeline",
     dataset: {
       id: "oscillator",
       label: "Oscillator trajectories",
@@ -6205,6 +6207,7 @@
     var defaultTotalCount = Number(cfg.defaultTotalCount || 1400);
     var hasOriginalSplit = cfg.hasOriginalSplit !== false;
     var maxSamples = Number(cfg.maxSamples || 60000); // source max (MNIST=65000, CIFAR-10=10000)
+    var rngSeedOffset = Number(cfg.rngSeedOffset || 0);
     var defaultDatasetConfig = {
       seed: 42,
       splitMode: defaultSplitMode,
@@ -6295,7 +6298,7 @@
           if (!byClass[lbl]) byClass[lbl] = [];
           byClass[lbl].push(i);
         }
-        var rng = createRng(Number(source.loadedAt || 42) + Number(uiState.sampleNonce || 0) + (schemaId === "fashion_mnist" ? 17 : 0));
+        var rng = createRng(Number(source.loadedAt || 42) + Number(uiState.sampleNonce || 0) + rngSeedOffset);
         var samples = [];
         for (var c = 0; c < classNames.length; c += 1) {
           var arr = byClass[c] || [];
@@ -7289,6 +7292,7 @@
         defaultSplitMode: "stratified_label",
         defaultTotalCount: 1400,
         maxSamples: 60000,
+        rngSeedOffset: 17,
       }) : null;
     })(),
   };
@@ -16588,6 +16592,10 @@
         pTrain: Array.isArray(ds.pTrain) ? ds.pTrain.slice() : [],
         pVal: Array.isArray(ds.pVal) ? ds.pVal.slice() : [],
         pTest: Array.isArray(ds.pTest) ? ds.pTest.slice() : [],
+        labelsTrain: Array.isArray(ds.labelsTrain) ? ds.labelsTrain.slice() : [],
+        labelsVal: Array.isArray(ds.labelsVal) ? ds.labelsVal.slice() : [],
+        labelsTest: Array.isArray(ds.labelsTest) ? ds.labelsTest.slice() : [],
+        numClasses: Number(ds.numClasses || 0),
       },
       isSequence: Boolean(spec.isSequence),
       headConfigs: Array.isArray(spec.headConfigs) ? spec.headConfigs.slice() : [],
@@ -17261,6 +17269,23 @@
   var TEXT_ENCODER = (typeof TextEncoder !== "undefined") ? new TextEncoder() : null;
   var CRC_TABLE = null;
   var CELL_SEQ = 0;
+
+  function usesEmbeddedPipelineNotebook(schemaId) {
+    // Check schema property notebookType (set on schemas with a custom Python pipeline)
+    var registry = GLOBAL.OSCSchemaRegistry || null;
+    if (!registry && isNode) {
+      try { registry = require("./schema_registry.js"); } catch (_) {}
+    }
+    if (registry && typeof registry.getSchema === "function") {
+      var schema = registry.getSchema(schemaId);
+      // Verify the returned schema actually matches the requested ID
+      // (getSchema falls back to default schema for unknown IDs)
+      if (schema && String(schema.id) === String(schemaId).trim().toLowerCase() && schema.notebookType) {
+        return String(schema.notebookType) === "embedded_pipeline";
+      }
+    }
+    return false;
+  }
 
   function ensureCrcTable() {
     if (CRC_TABLE) return CRC_TABLE;
@@ -19457,10 +19482,10 @@
 
     // Decide notebook type based on schema
     var schemaId = datasetPack.schemaId || "";
-    var isOscillator = schemaId === "oscillator";
+    var useEmbeddedPipeline = usesEmbeddedPipelineNotebook(schemaId);
     var notebook;
 
-    if (isOscillator) {
+    if (useEmbeddedPipeline) {
       // oscillator: use full pipeline notebook
       notebook = buildNotebookObject({
         packageLabel: "zip package",
@@ -19561,11 +19586,11 @@
     });
     var datasetPack = resolveDatasetCsvFromSessions(sessions, adapter);
     var schemaId = String(datasetPack.schemaId || "").trim().toLowerCase();
-    var isOscillator = schemaId === "oscillator";
+    var useEmbeddedPipeline = usesEmbeddedPipelineNotebook(schemaId);
     var notebook;
     var runtime = { loaded: 0, total: 0 };
 
-    if (isOscillator) {
+    if (useEmbeddedPipeline) {
       runtime = await loadRuntimeSources(cfg);
       var pipelineSource = pickPipelineSource(runtime);
       if (!pipelineSource) {
@@ -29321,6 +29346,8 @@
               xVal: activeDs.xVal, yVal: activeDs.yVal, seqVal: activeDs.seqVal || [],
               xTest: activeDs.xTest || [], yTest: activeDs.yTest || [], seqTest: activeDs.seqTest || [],
               pTrain: activeDs.pTrain || [], pVal: activeDs.pVal || [], pTest: activeDs.pTest || [],
+              labelsTrain: activeDs.labelsTrain || [], labelsVal: activeDs.labelsVal || [], labelsTest: activeDs.labelsTest || [],
+              numClasses: activeDs.numClasses || activeDs.classCount || 0,
             },
             runtimeConfig: {
               runtimeId: "js_client",

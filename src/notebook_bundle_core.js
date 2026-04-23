@@ -19,6 +19,23 @@
   var CRC_TABLE = null;
   var CELL_SEQ = 0;
 
+  function usesEmbeddedPipelineNotebook(schemaId) {
+    // Check schema property notebookType (set on schemas with a custom Python pipeline)
+    var registry = GLOBAL.OSCSchemaRegistry || null;
+    if (!registry && isNode) {
+      try { registry = require("./schema_registry.js"); } catch (_) {}
+    }
+    if (registry && typeof registry.getSchema === "function") {
+      var schema = registry.getSchema(schemaId);
+      // Verify the returned schema actually matches the requested ID
+      // (getSchema falls back to default schema for unknown IDs)
+      if (schema && String(schema.id) === String(schemaId).trim().toLowerCase() && schema.notebookType) {
+        return String(schema.notebookType) === "embedded_pipeline";
+      }
+    }
+    return false;
+  }
+
   function ensureCrcTable() {
     if (CRC_TABLE) return CRC_TABLE;
     CRC_TABLE = new Uint32Array(256);
@@ -2214,10 +2231,10 @@
 
     // Decide notebook type based on schema
     var schemaId = datasetPack.schemaId || "";
-    var isOscillator = schemaId === "oscillator";
+    var useEmbeddedPipeline = usesEmbeddedPipelineNotebook(schemaId);
     var notebook;
 
-    if (isOscillator) {
+    if (useEmbeddedPipeline) {
       // oscillator: use full pipeline notebook
       notebook = buildNotebookObject({
         packageLabel: "zip package",
@@ -2318,11 +2335,11 @@
     });
     var datasetPack = resolveDatasetCsvFromSessions(sessions, adapter);
     var schemaId = String(datasetPack.schemaId || "").trim().toLowerCase();
-    var isOscillator = schemaId === "oscillator";
+    var useEmbeddedPipeline = usesEmbeddedPipelineNotebook(schemaId);
     var notebook;
     var runtime = { loaded: 0, total: 0 };
 
-    if (isOscillator) {
+    if (useEmbeddedPipeline) {
       runtime = await loadRuntimeSources(cfg);
       var pipelineSource = pickPipelineSource(runtime);
       if (!pipelineSource) {

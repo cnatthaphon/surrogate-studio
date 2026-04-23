@@ -110,11 +110,13 @@
   }
 
   function mapLossAlias(lossName, fallback) {
-    const v = String(lossName || fallback || "mse");
-    if (v === "mse") return "meanSquaredError";
-    if (v === "mae") return "meanAbsoluteError";
-    if (v === "huber") return "huberLoss";
-    if (v === "use_global") return "meanSquaredError";
+    const v = String(lossName || fallback || "mse").toLowerCase();
+    if (v === "mse" || v === "meansquarederror") return "meanSquaredError";
+    if (v === "mae" || v === "meanabsoluteerror") return "meanAbsoluteError";
+    if (v === "huber" || v === "huberloss") return "huberLoss";
+    if (v === "bce" || v === "binary_crossentropy" || v === "binarycrossentropy") return "binaryCrossentropy";
+    if (v === "cross_entropy" || v === "crossentropy" || v === "categoricalcrossentropy" || v === "categorical_crossentropy") return "categoricalCrossentropy";
+    if (v === "use_global") return String(fallback || "meanSquaredError");
     return fallback || "meanSquaredError";
   }
 
@@ -129,6 +131,19 @@
       const quadratic = tf.minimum(a, delta);
       const linear = tf.sub(a, quadratic);
       return tf.mean(tf.add(tf.mul(0.5, tf.square(quadratic)), tf.mul(delta, linear)));
+    }
+    if (type === "binaryCrossentropy") {
+      const eps = 1e-7;
+      const clipped = tf.clipByValue(pred, eps, 1 - eps);
+      return tf.mean(tf.neg(tf.add(
+        tf.mul(truth, tf.log(clipped)),
+        tf.mul(tf.sub(tf.scalar(1), truth), tf.log(tf.sub(tf.scalar(1), clipped)))
+      )));
+    }
+    if (type === "categoricalCrossentropy") {
+      const eps = 1e-7;
+      const clipped = tf.clipByValue(pred, eps, 1 - eps);
+      return tf.mean(tf.neg(tf.sum(tf.mul(truth, tf.log(clipped)), -1)));
     }
     return tf.mean(tf.square(tf.sub(pred, truth)));
   }
@@ -241,7 +256,10 @@
       if (String(targetMode) === "v") return rowsMain.map(function (r) { return [Number(r[0] || 0)]; });
       return rowsMain.map(function (r) { return [Number(r[1] || 0)]; });
     }
-    throw new Error("Unsupported output head target: " + String(headTarget));
+    // Pass-through for non-oscillator head types: classification (label/logits),
+    // segmentation (mask), detection (bbox), reconstruction, custom, none.
+    // The dataset module already provides y data in the correct format.
+    return rowsMain.map(function (r) { return Array.isArray(r) ? r : [Number(r || 0)]; });
   }
 
   function rowsToTensor(rows, cols) {
@@ -478,9 +496,7 @@
     }
 
     const xTrain = isRnn ? tf.tensor3d(ds.seqTrain) : tf.tensor2d(ds.xTrain, [ds.xTrain.length, Number(ds.featureSize || 1)]);
-    const yTrain = tf.tensor2d(ds.yTrain, [ds.yTrain.length, ySize]);
     const xVal = isRnn ? tf.tensor3d(ds.seqVal) : tf.tensor2d(ds.xVal, [ds.xVal.length, Number(ds.featureSize || 1)]);
-    const yVal = tf.tensor2d(ds.yVal, [ds.yVal.length, ySize]);
     const xTest = isRnn ? tf.tensor3d(ds.seqTest) : tf.tensor2d(ds.xTest, [ds.xTest.length, Number(ds.featureSize || 1)]);
     const xTrainInputs = buildInputSet(xTrain, ds.xTrain.length);
     const xValInputs = buildInputSet(xVal, ds.xVal.length);
@@ -496,17 +512,49 @@
     const dsParamNames = Array.isArray(ds.paramNames) ? ds.paramNames.slice() : [];
     const paramSize = Math.max(1, dsParamSize);
 
+    function oneHotRows(rows, nClasses) {
+      return rows.map(function (r) {
+        var idx = Math.max(0, Math.min(nClasses - 1, Math.round(Number(Array.isArray(r) ? r[0] : r) || 0)));
+        var oh = new Array(nClasses);
+        for (var i = 0; i < nClasses; i++) oh[i] = (i === idx) ? 1 : 0;
+        return oh;
+      });
+    }
+
     headConfigs.forEach(function (head) {
       const target = String(head.target || "x");
-      const rowsTrain = extractHeadRows(ds.yTrain, ds.pTrain, targetMode, Object.assign({}, head, { paramSize: paramSize, paramNames: dsParamNames }));
-      const rowsVal = extractHeadRows(ds.yVal, ds.pVal, targetMode, Object.assign({}, head, { paramSize: paramSize, paramNames: dsParamNames }));
-      const rowsTest = extractHeadRows(ds.yTest, ds.pTest, targetMode, Object.assign({}, head, { paramSize: paramSize, paramNames: dsParamNames }));
-      const cols = target === "xv" ? 2
-        : (target === "params" ? Math.max(1, paramSize || (rowsTrain[0] && rowsTrain[0].length) || 1)
-          : (target === "traj" ? 1
-            : (target === "latent_diff" ? Math.max(1, Number(head.units || 1))
-              : (target === "latent_kl" ? Math.max(2, Number(head.units || 2))
-                : 1))));
+      const ht = String(head.headType || "regression");
+      // Classification heads use labels (one-hot) instead of raw y data
+      var headYTrain = ds.yTrain;
+      var headYVal = ds.yVal;
+      var headYTest = ds.yTest;
+      if (ht === "classification" && Array.isArray(ds.labelsTrain) && ds.labelsTrain.length) {
+        headYTrain = ds.labelsTrain;
+        headYVal = ds.labelsVal || headYVal;
+        headYTest = ds.labelsTest || headYTest;
+      }
+      var rowsTrain = extractHeadRows(headYTrain, ds.pTrain, targetMode, Object.assign({}, head, { paramSize: paramSize, paramNames: dsParamNames }));
+      var rowsVal = extractHeadRows(headYVal, ds.pVal, targetMode, Object.assign({}, head, { paramSize: paramSize, paramNames: dsParamNames }));
+      var rowsTest = extractHeadRows(headYTest, ds.pTest, targetMode, Object.assign({}, head, { paramSize: paramSize, paramNames: dsParamNames }));
+      var inferredCols = rowsTrain[0] ? (Array.isArray(rowsTrain[0]) ? rowsTrain[0].length : 1) : 1;
+      var cols;
+      if (ht === "classification") {
+        var nClasses = Math.max(2, Number(ds.numClasses || head.units || inferredCols));
+        // One-hot encode scalar labels if needed (e.g. text_classification emits [0], [1])
+        if (inferredCols < nClasses) {
+          rowsTrain = oneHotRows(rowsTrain, nClasses);
+          rowsVal = oneHotRows(rowsVal, nClasses);
+          rowsTest = oneHotRows(rowsTest, nClasses);
+        }
+        cols = nClasses;
+      } else {
+        cols = target === "xv" ? 2
+          : (target === "params" ? Math.max(1, paramSize || inferredCols)
+            : (target === "traj" ? 1
+              : (target === "latent_diff" ? Math.max(1, Number(head.units || 1))
+                : (target === "latent_kl" ? Math.max(2, Number(head.units || 2))
+                  : Math.max(1, inferredCols)))));
+      }
       yTrainTensors.push(rowsToTensor(rowsTrain, cols));
       yValTensors.push(rowsToTensor(rowsVal, cols));
       yTestTensors.push(rowsToTensor(rowsTest, cols));
