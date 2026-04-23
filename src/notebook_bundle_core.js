@@ -27,7 +27,11 @@
     }
     if (registry && typeof registry.getSchema === "function") {
       var schema = registry.getSchema(schemaId);
-      if (schema && schema.notebookType) return String(schema.notebookType) === "embedded_pipeline";
+      // Verify the returned schema actually matches the requested ID
+      // (getSchema falls back to default schema for unknown IDs)
+      if (schema && String(schema.id) === String(schemaId).trim().toLowerCase() && schema.notebookType) {
+        return String(schema.notebookType) === "embedded_pipeline";
+      }
     }
     return false;
   }
