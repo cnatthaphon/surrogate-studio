@@ -512,10 +512,19 @@
     const dsParamNames = Array.isArray(ds.paramNames) ? ds.paramNames.slice() : [];
     const paramSize = Math.max(1, dsParamSize);
 
+    function oneHotRows(rows, nClasses) {
+      return rows.map(function (r) {
+        var idx = Math.max(0, Math.min(nClasses - 1, Math.round(Number(Array.isArray(r) ? r[0] : r) || 0)));
+        var oh = new Array(nClasses);
+        for (var i = 0; i < nClasses; i++) oh[i] = (i === idx) ? 1 : 0;
+        return oh;
+      });
+    }
+
     headConfigs.forEach(function (head) {
       const target = String(head.target || "x");
       const ht = String(head.headType || "regression");
-      // Classification heads use labels (one-hot) instead of raw y data — mirrors training_engine_core.js
+      // Classification heads use labels (one-hot) instead of raw y data
       var headYTrain = ds.yTrain;
       var headYVal = ds.yVal;
       var headYTest = ds.yTest;
@@ -524,17 +533,28 @@
         headYVal = ds.labelsVal || headYVal;
         headYTest = ds.labelsTest || headYTest;
       }
-      const rowsTrain = extractHeadRows(headYTrain, ds.pTrain, targetMode, Object.assign({}, head, { paramSize: paramSize, paramNames: dsParamNames }));
-      const rowsVal = extractHeadRows(headYVal, ds.pVal, targetMode, Object.assign({}, head, { paramSize: paramSize, paramNames: dsParamNames }));
-      const rowsTest = extractHeadRows(headYTest, ds.pTest, targetMode, Object.assign({}, head, { paramSize: paramSize, paramNames: dsParamNames }));
-      const inferredCols = rowsTrain[0] ? (Array.isArray(rowsTrain[0]) ? rowsTrain[0].length : 1) : 1;
-      const cols = (ht === "classification") ? Math.max(1, Number(ds.numClasses || inferredCols))
-        : (target === "xv" ? 2
+      var rowsTrain = extractHeadRows(headYTrain, ds.pTrain, targetMode, Object.assign({}, head, { paramSize: paramSize, paramNames: dsParamNames }));
+      var rowsVal = extractHeadRows(headYVal, ds.pVal, targetMode, Object.assign({}, head, { paramSize: paramSize, paramNames: dsParamNames }));
+      var rowsTest = extractHeadRows(headYTest, ds.pTest, targetMode, Object.assign({}, head, { paramSize: paramSize, paramNames: dsParamNames }));
+      var inferredCols = rowsTrain[0] ? (Array.isArray(rowsTrain[0]) ? rowsTrain[0].length : 1) : 1;
+      var cols;
+      if (ht === "classification") {
+        var nClasses = Math.max(2, Number(ds.numClasses || head.units || inferredCols));
+        // One-hot encode scalar labels if needed (e.g. text_classification emits [0], [1])
+        if (inferredCols < nClasses) {
+          rowsTrain = oneHotRows(rowsTrain, nClasses);
+          rowsVal = oneHotRows(rowsVal, nClasses);
+          rowsTest = oneHotRows(rowsTest, nClasses);
+        }
+        cols = nClasses;
+      } else {
+        cols = target === "xv" ? 2
           : (target === "params" ? Math.max(1, paramSize || inferredCols)
             : (target === "traj" ? 1
               : (target === "latent_diff" ? Math.max(1, Number(head.units || 1))
                 : (target === "latent_kl" ? Math.max(2, Number(head.units || 2))
-                  : Math.max(1, inferredCols))))));
+                  : Math.max(1, inferredCols)))));
+      }
       yTrainTensors.push(rowsToTensor(rowsTrain, cols));
       yValTensors.push(rowsToTensor(rowsVal, cols));
       yTestTensors.push(rowsToTensor(rowsTest, cols));
