@@ -176,6 +176,7 @@
       taskRecipeId: _normalizeTaskRecipeId(def, dataset, def.metadata),
       preconfig: preconfig,
       metadata: (def.metadata && typeof def.metadata === "object") ? _clone(def.metadata) : {},
+      notebookType: def.notebookType ? String(def.notebookType) : "",
     };
 
     _schemas[sid] = entry;

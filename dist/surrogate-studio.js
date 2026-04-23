@@ -1,5 +1,5 @@
 // Surrogate Studio - concatenated bundle
-// Generated: 2026-04-23T10:32:32Z
+// Generated: 2026-04-23T10:39:33Z
 // Source files: 58
 
 
@@ -182,6 +182,7 @@
       taskRecipeId: _normalizeTaskRecipeId(def, dataset, def.metadata),
       preconfig: preconfig,
       metadata: (def.metadata && typeof def.metadata === "object") ? _clone(def.metadata) : {},
+      notebookType: def.notebookType ? String(def.notebookType) : "",
     };
 
     _schemas[sid] = entry;
@@ -888,6 +889,7 @@
     label: "oscillator",
     description: "ODE oscillator trajectories (spring / pendulum / bouncing)",
     taskRecipeId: "sequence_forecast",
+    notebookType: "embedded_pipeline",
     dataset: {
       id: "oscillator",
       label: "Oscillator trajectories",
@@ -6205,6 +6207,7 @@
     var defaultTotalCount = Number(cfg.defaultTotalCount || 1400);
     var hasOriginalSplit = cfg.hasOriginalSplit !== false;
     var maxSamples = Number(cfg.maxSamples || 60000); // source max (MNIST=65000, CIFAR-10=10000)
+    var rngSeedOffset = Number(cfg.rngSeedOffset || 0);
     var defaultDatasetConfig = {
       seed: 42,
       splitMode: defaultSplitMode,
@@ -6295,7 +6298,7 @@
           if (!byClass[lbl]) byClass[lbl] = [];
           byClass[lbl].push(i);
         }
-        var rng = createRng(Number(source.loadedAt || 42) + Number(uiState.sampleNonce || 0) + (schemaId === "fashion_mnist" ? 17 : 0));
+        var rng = createRng(Number(source.loadedAt || 42) + Number(uiState.sampleNonce || 0) + rngSeedOffset);
         var samples = [];
         for (var c = 0; c < classNames.length; c += 1) {
           var arr = byClass[c] || [];
@@ -7289,6 +7292,7 @@
         defaultSplitMode: "stratified_label",
         defaultTotalCount: 1400,
         maxSamples: 60000,
+        rngSeedOffset: 17,
       }) : null;
     })(),
   };
@@ -17266,6 +17270,19 @@
   var CRC_TABLE = null;
   var CELL_SEQ = 0;
 
+  function usesEmbeddedPipelineNotebook(schemaId) {
+    // Check schema property notebookType (set on schemas with a custom Python pipeline)
+    var registry = GLOBAL.OSCSchemaRegistry || null;
+    if (!registry && isNode) {
+      try { registry = require("./schema_registry.js"); } catch (_) {}
+    }
+    if (registry && typeof registry.getSchema === "function") {
+      var schema = registry.getSchema(schemaId);
+      if (schema && schema.notebookType) return String(schema.notebookType) === "embedded_pipeline";
+    }
+    return false;
+  }
+
   function ensureCrcTable() {
     if (CRC_TABLE) return CRC_TABLE;
     CRC_TABLE = new Uint32Array(256);
@@ -19461,10 +19478,10 @@
 
     // Decide notebook type based on schema
     var schemaId = datasetPack.schemaId || "";
-    var isOscillator = schemaId === "oscillator";
+    var useEmbeddedPipeline = usesEmbeddedPipelineNotebook(schemaId);
     var notebook;
 
-    if (isOscillator) {
+    if (useEmbeddedPipeline) {
       // oscillator: use full pipeline notebook
       notebook = buildNotebookObject({
         packageLabel: "zip package",
@@ -19565,11 +19582,11 @@
     });
     var datasetPack = resolveDatasetCsvFromSessions(sessions, adapter);
     var schemaId = String(datasetPack.schemaId || "").trim().toLowerCase();
-    var isOscillator = schemaId === "oscillator";
+    var useEmbeddedPipeline = usesEmbeddedPipelineNotebook(schemaId);
     var notebook;
     var runtime = { loaded: 0, total: 0 };
 
-    if (isOscillator) {
+    if (useEmbeddedPipeline) {
       runtime = await loadRuntimeSources(cfg);
       var pipelineSource = pickPipelineSource(runtime);
       if (!pipelineSource) {

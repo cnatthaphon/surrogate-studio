@@ -126,6 +126,7 @@
     label: "oscillator",
     description: "ODE oscillator trajectories (spring / pendulum / bouncing)",
     taskRecipeId: "sequence_forecast",
+    notebookType: "embedded_pipeline",
     dataset: {
       id: "oscillator",
       label: "Oscillator trajectories",
