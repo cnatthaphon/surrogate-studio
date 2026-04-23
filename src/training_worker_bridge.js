@@ -164,7 +164,12 @@
         }
       };
       worker.onerror = function (evt) {
-        fail(new Error(evt && evt.message ? evt.message : "Worker error"));
+        var msg = (evt && evt.message) || "";
+        var file = (evt && evt.filename) || "";
+        var line = (evt && evt.lineno) || "";
+        var detail = msg || "Worker error";
+        if (file) detail += " at " + file + (line ? ":" + line : "");
+        fail(new Error(detail));
       };
       try {
         worker.postMessage(payload, transfer);
