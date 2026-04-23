@@ -1,5 +1,5 @@
 // Surrogate Studio - concatenated bundle
-// Generated: 2026-04-23T10:14:40Z
+// Generated: 2026-04-23T10:19:44Z
 // Source files: 58
 
 
@@ -6205,6 +6205,7 @@
     var defaultTotalCount = Number(cfg.defaultTotalCount || 1400);
     var hasOriginalSplit = cfg.hasOriginalSplit !== false;
     var maxSamples = Number(cfg.maxSamples || 60000); // source max (MNIST=65000, CIFAR-10=10000)
+    var rngSeedOffset = Number(cfg.rngSeedOffset || 0);
     var defaultDatasetConfig = {
       seed: 42,
       splitMode: defaultSplitMode,
@@ -6295,7 +6296,7 @@
           if (!byClass[lbl]) byClass[lbl] = [];
           byClass[lbl].push(i);
         }
-        var rng = createRng(Number(source.loadedAt || 42) + Number(uiState.sampleNonce || 0) + (schemaId === "fashion_mnist" ? 17 : 0));
+        var rng = createRng(Number(source.loadedAt || 42) + Number(uiState.sampleNonce || 0) + rngSeedOffset);
         var samples = [];
         for (var c = 0; c < classNames.length; c += 1) {
           var arr = byClass[c] || [];
@@ -7289,6 +7290,7 @@
         defaultSplitMode: "stratified_label",
         defaultTotalCount: 1400,
         maxSamples: 60000,
+        rngSeedOffset: 17,
       }) : null;
     })(),
   };
@@ -17262,6 +17264,15 @@
   var CRC_TABLE = null;
   var CELL_SEQ = 0;
 
+  function isTrajectorySchema(schemaId) {
+    var registry = GLOBAL.OSCSchemaRegistry || null;
+    if (registry && typeof registry.getDatasetSchema === "function") {
+      var schema = registry.getDatasetSchema(schemaId);
+      if (schema) return String(schema.sampleType || "").trim().toLowerCase() === "trajectory";
+    }
+    return false;
+  }
+
   function ensureCrcTable() {
     if (CRC_TABLE) return CRC_TABLE;
     CRC_TABLE = new Uint32Array(256);
@@ -19457,10 +19468,10 @@
 
     // Decide notebook type based on schema
     var schemaId = datasetPack.schemaId || "";
-    var isOscillator = schemaId === "oscillator";
+    var isTrajectoryBased = isTrajectorySchema(schemaId);
     var notebook;
 
-    if (isOscillator) {
+    if (isTrajectoryBased) {
       // oscillator: use full pipeline notebook
       notebook = buildNotebookObject({
         packageLabel: "zip package",
@@ -19561,11 +19572,11 @@
     });
     var datasetPack = resolveDatasetCsvFromSessions(sessions, adapter);
     var schemaId = String(datasetPack.schemaId || "").trim().toLowerCase();
-    var isOscillator = schemaId === "oscillator";
+    var isTrajectoryBased = isTrajectorySchema(schemaId);
     var notebook;
     var runtime = { loaded: 0, total: 0 };
 
-    if (isOscillator) {
+    if (isTrajectoryBased) {
       runtime = await loadRuntimeSources(cfg);
       var pipelineSource = pickPipelineSource(runtime);
       if (!pipelineSource) {

@@ -19,6 +19,15 @@
   var CRC_TABLE = null;
   var CELL_SEQ = 0;
 
+  function isTrajectorySchema(schemaId) {
+    var registry = GLOBAL.OSCSchemaRegistry || null;
+    if (registry && typeof registry.getDatasetSchema === "function") {
+      var schema = registry.getDatasetSchema(schemaId);
+      if (schema) return String(schema.sampleType || "").trim().toLowerCase() === "trajectory";
+    }
+    return false;
+  }
+
   function ensureCrcTable() {
     if (CRC_TABLE) return CRC_TABLE;
     CRC_TABLE = new Uint32Array(256);
@@ -2214,10 +2223,10 @@
 
     // Decide notebook type based on schema
     var schemaId = datasetPack.schemaId || "";
-    var isOscillator = schemaId === "oscillator";
+    var isTrajectoryBased = isTrajectorySchema(schemaId);
     var notebook;
 
-    if (isOscillator) {
+    if (isTrajectoryBased) {
       // oscillator: use full pipeline notebook
       notebook = buildNotebookObject({
         packageLabel: "zip package",
@@ -2318,11 +2327,11 @@
     });
     var datasetPack = resolveDatasetCsvFromSessions(sessions, adapter);
     var schemaId = String(datasetPack.schemaId || "").trim().toLowerCase();
-    var isOscillator = schemaId === "oscillator";
+    var isTrajectoryBased = isTrajectorySchema(schemaId);
     var notebook;
     var runtime = { loaded: 0, total: 0 };
 
-    if (isOscillator) {
+    if (isTrajectoryBased) {
       runtime = await loadRuntimeSources(cfg);
       var pipelineSource = pickPipelineSource(runtime);
       if (!pipelineSource) {
