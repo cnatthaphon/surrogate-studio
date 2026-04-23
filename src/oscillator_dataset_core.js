@@ -407,6 +407,37 @@
 
   function generateDataset(cfg) {
     var normalizedCfg = cfg && typeof cfg === "object" ? cfg : {};
+    // Ensure critical defaults for fields that may not come from UI forms
+    if (!Number.isFinite(Number(normalizedCfg.windowSize)) || Number(normalizedCfg.windowSize) < 2) {
+      normalizedCfg.windowSize = 20;
+    } else {
+      normalizedCfg.windowSize = Math.max(2, Math.floor(Number(normalizedCfg.windowSize)));
+    }
+    if (!Number.isFinite(Number(normalizedCfg.dt)) || Number(normalizedCfg.dt) < 0.001) {
+      normalizedCfg.dt = 0.02;
+    }
+    if (!Number.isFinite(Number(normalizedCfg.durationSec)) || Number(normalizedCfg.durationSec) < 0.1) {
+      normalizedCfg.durationSec = 16.0;
+    }
+    if (!Number.isFinite(Number(normalizedCfg.numTraj)) || Number(normalizedCfg.numTraj) < 1) {
+      normalizedCfg.numTraj = Number(normalizedCfg.totalCount) || 150;
+    }
+    if (!Number.isFinite(Number(normalizedCfg.steps))) {
+      normalizedCfg.steps = Math.max(2, Math.round(normalizedCfg.durationSec / normalizedCfg.dt) + 1);
+    }
+    // Bridge trainFrac/valFrac → splitConfig when splitConfig is absent
+    if (!normalizedCfg.splitConfig && (normalizedCfg.trainFrac != null || normalizedCfg.valFrac != null)) {
+      var _tr = Number(normalizedCfg.trainFrac);
+      var _va = Number(normalizedCfg.valFrac);
+      if (!Number.isFinite(_tr)) _tr = 0.70;
+      if (!Number.isFinite(_va)) _va = 0.15;
+      normalizedCfg.splitConfig = {
+        mode: String(normalizedCfg.splitMode || "stratified_scenario"),
+        train: _tr,
+        val: _va,
+        test: Math.max(0.01, 1 - _tr - _va),
+      };
+    }
     var trainFlat = [];
     var trainSeq = [];
     var trainY = [];

@@ -105,6 +105,8 @@ Headless benchmark: 50 epochs, batch=32, lr=5e-4, Adam, plateau scheduler, seed=
 | **Test RMSE** | 0.0164 | 0.0325 | — |
 | **Test Bias** | -1.54e-3 | 2.78e-4 | — |
 
+*Metrics obtained from training runs (200 epochs, seed 42). No pretrained weights shipped — reproduce by training from the Trainer tab.*
+
 **Key findings:**
 
 - **R²=0.997** — the VAE reconstructs ant trajectories with <0.3% unexplained variance, consistent with the paper's qualitative figures showing near-perfect original-vs-reconstructed overlap
