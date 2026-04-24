@@ -675,13 +675,38 @@
     let mse = 0, mae = 0, testMse = 0, testMae = 0;
     var trainedArtifacts = null;
 
+    // Extract model artifacts manually — avoids model.save() which calls
+    // async .data() internally and can crash with minified TF.js errors.
     try {
-      // Save model artifacts FIRST (before any tensor disposal or prediction)
-      trainedArtifacts = await model.save(tf.io.withSaveHandler(async function (artifacts) {
-        return artifacts;
-      }));
+      var _weights = model.getWeights();
+      var _specs = [];
+      var _totalBytes = 0;
+      var _dataArrays = [];
+      for (var wi = 0; wi < _weights.length; wi++) {
+        var w = _weights[wi];
+        var arr = w.dataSync();  // sync, no async .data() issues
+        var bytes = arr.byteLength || (arr.length * 4);
+        _specs.push({ name: w.name, shape: w.shape.slice(), dtype: w.dtype || "float32" });
+        _dataArrays.push(arr);
+        _totalBytes += bytes;
+      }
+      var _buf = new ArrayBuffer(_totalBytes);
+      var _view = new Float32Array(_buf);
+      var _offset = 0;
+      for (var di = 0; di < _dataArrays.length; di++) {
+        var src = _dataArrays[di] instanceof Float32Array ? _dataArrays[di] : new Float32Array(_dataArrays[di]);
+        _view.set(src, _offset);
+        _offset += src.length;
+      }
+      trainedArtifacts = {
+        modelTopology: model.toJSON(),
+        weightSpecs: _specs,
+        weightData: _buf,
+        format: "tfjs",
+        generatedBy: "training_worker",
+      };
     } catch (saveErr) {
-      self.postMessage({ kind: "log", message: "Warning: weight serialization failed: " + String(saveErr.message || saveErr) });
+      self.postMessage({ kind: "log", message: "Warning: weight extraction failed: " + String(saveErr.message || saveErr) });
     }
 
     try {
