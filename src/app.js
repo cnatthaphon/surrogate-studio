@@ -14550,12 +14550,15 @@
           throw new Error("Training worker returned invalid result.");
         }
         const workerArtifacts = result.modelArtifacts || null;
-        if (!workerArtifacts) throw new Error("Training worker did not return trained model artifacts.");
-        const finalModel = await loadModelFromArtifactForTrainingArtifacts(workerArtifacts);
-        if (!finalModel) throw new Error("Failed to load trained model artifacts.");
+        var finalModel = null;
+        if (workerArtifacts) {
+          try {
+            finalModel = await loadModelFromArtifactForTrainingArtifacts(workerArtifacts);
+          } catch (_loadErr) { finalModel = null; }
+        }
         return {
           model: finalModel,
-          evalModel: Array.isArray(finalModel.outputs)
+          evalModel: finalModel && Array.isArray(finalModel.outputs)
             ? tf.model({ inputs: finalModel.inputs, outputs: finalModel.outputs[predHeadIdx] })
             : finalModel,
           metrics: result.metrics,

@@ -1,5 +1,5 @@
 // Surrogate Studio - concatenated bundle
-// Generated: 2026-04-23T18:30:55Z
+// Generated: 2026-04-24T10:19:35Z
 // Source files: 58
 
 
@@ -16502,15 +16502,12 @@
     if (!result.metrics || typeof result.metrics !== "object") {
       throw new Error("Training worker result is missing metrics.");
     }
-    if (!result.modelArtifacts || typeof result.modelArtifacts !== "object") {
-      throw new Error("Training worker result is missing modelArtifacts.");
-    }
     return {
       runId: spec.runId,
       runtimeConfig: spec.runtimeConfig,
       metrics: result.metrics,
       history: result.history || null,
-      modelArtifacts: result.modelArtifacts,
+      modelArtifacts: (result.modelArtifacts && typeof result.modelArtifacts === "object") ? result.modelArtifacts : null,
       generatedBy: toStr(result.generatedBy, "training_worker"),
     };
   }
