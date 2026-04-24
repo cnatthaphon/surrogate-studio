@@ -668,65 +668,65 @@
       try { model.setWeights(bestWeights); } catch (_) {}
     }
 
-    const predValRaw = model.predict(xValInputs);
-    const predTestRaw = model.predict(xTestInputs);
-    const predVals = Array.isArray(predValRaw) ? predValRaw : [predValRaw];
-    const predTests = Array.isArray(predTestRaw) ? predTestRaw : [predTestRaw];
-    let mse = 0;
-    let mae = 0;
-    let testMse = 0;
-    let testMae = 0;
-
-    function safeMetric(yTensor, pTensor, metricFn) {
-      try {
-        // Flatten both to 2D [batch, features] so shapes always match
-        var yFlat = yTensor.reshape([yTensor.shape[0], -1]);
-        var pFlat = pTensor.reshape([pTensor.shape[0], -1]);
-        var result = metricFn(yFlat, pFlat);
-        var val = result.dataSync()[0];
-        result.dispose();
-        if (yFlat !== yTensor) yFlat.dispose();
-        if (pFlat !== pTensor) pFlat.dispose();
-        return Number.isFinite(val) ? val : 0;
-      } catch (_) { return 0; }
-    }
-
-    for (let i = 0; i < predVals.length; i += 1) {
-      const pv = predVals[i];
-      const pt = predTests[i];
-      const yv = yValTensors[i];
-      const yt = yTestTensors[i];
-      if (!pv || !yv) continue;
-      mse += safeMetric(yv, pv, tf.losses.meanSquaredError);
-      mae += safeMetric(yv, pv, tf.metrics.meanAbsoluteError);
-      if (pt && yt) {
-        testMse += safeMetric(yt, pt, tf.losses.meanSquaredError);
-        testMae += safeMetric(yt, pt, tf.metrics.meanAbsoluteError);
-      }
-    }
-    const denom = Math.max(1, predVals.length);
-    mse /= denom;
-    mae /= denom;
-    testMse /= denom;
-    testMae /= denom;
-
-    // Save model artifacts BEFORE disposing anything — model.save calls
-    // .data() on weight tensors, which fails if they've been disposed.
+    // === Post-training: eval metrics + save weights ===
+    // Entire section wrapped in try/catch — training succeeded if we reach here,
+    // post-training eval failure must not block returning the result.
     const artifactHistory = Object.assign({}, history);
+    let mse = 0, mae = 0, testMse = 0, testMae = 0;
     var trainedArtifacts = null;
+
     try {
+      // Save model artifacts FIRST (before any tensor disposal or prediction)
       trainedArtifacts = await model.save(tf.io.withSaveHandler(async function (artifacts) {
         return artifacts;
       }));
     } catch (saveErr) {
-      self.postMessage({ kind: "log", message: "Warning: could not serialize model weights: " + String(saveErr.message || saveErr) });
+      self.postMessage({ kind: "log", message: "Warning: weight serialization failed: " + String(saveErr.message || saveErr) });
+    }
+
+    try {
+      const predValRaw = model.predict(xValInputs);
+      const predTestRaw = model.predict(xTestInputs);
+      const predVals = Array.isArray(predValRaw) ? predValRaw : [predValRaw];
+      const predTests = Array.isArray(predTestRaw) ? predTestRaw : [predTestRaw];
+
+      function safeMetric(yTensor, pTensor, metricFn) {
+        try {
+          var yFlat = yTensor.reshape([yTensor.shape[0], -1]);
+          var pFlat = pTensor.reshape([pTensor.shape[0], -1]);
+          var result = metricFn(yFlat, pFlat);
+          var val = result.dataSync()[0];
+          result.dispose();
+          if (yFlat !== yTensor) yFlat.dispose();
+          if (pFlat !== pTensor) pFlat.dispose();
+          return Number.isFinite(val) ? val : 0;
+        } catch (_) { return 0; }
+      }
+
+      for (let i = 0; i < predVals.length; i += 1) {
+        const pv = predVals[i];
+        const pt = predTests[i];
+        const yv = yValTensors[i];
+        const yt = yTestTensors[i];
+        if (!pv || !yv) continue;
+        mse += safeMetric(yv, pv, tf.losses.meanSquaredError);
+        mae += safeMetric(yv, pv, tf.metrics.meanAbsoluteError);
+        if (pt && yt) {
+          testMse += safeMetric(yt, pt, tf.losses.meanSquaredError);
+          testMae += safeMetric(yt, pt, tf.metrics.meanAbsoluteError);
+        }
+      }
+      const denom = Math.max(1, predVals.length);
+      mse /= denom; mae /= denom; testMse /= denom; testMae /= denom;
+      disposeTensorArray(predVals);
+      disposeTensorArray(predTests);
+    } catch (evalErr) {
+      self.postMessage({ kind: "log", message: "Warning: post-training eval failed: " + String(evalErr.message || evalErr) });
     }
 
     disposeTensorArray(yTrainTensors);
     disposeTensorArray(yValTensors);
     disposeTensorArray(yTestTensors);
-    disposeTensorArray(predVals);
-    disposeTensorArray(predTests);
     disposeInputSet(xTrainInputs, xTrain);
     disposeInputSet(xValInputs, xVal);
     disposeInputSet(xTestInputs, xTest);
