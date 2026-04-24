@@ -1,5 +1,5 @@
 // Surrogate Studio - concatenated bundle
-// Generated: 2026-04-24T11:46:23Z
+// Generated: 2026-04-24T18:14:10Z
 // Source files: 58
 
 
@@ -29452,7 +29452,12 @@
           });
 
           return { modelArtifactsInfo: { dateSaved: new Date(), modelTopologyType: "JSON" } };
-        }));
+        })).catch(function (saveErr) {
+          // model.save() internally calls .data() on weights — can fail with
+          // "u.data is not a function" in minified TF.js. Log but don't crash
+          // since the worker already has the artifacts from the callback.
+          console.error("[trainer] Main-thread model.save() rejected:", saveErr && saveErr.message, saveErr && saveErr.stack);
+        });
 
       } else {
         // === FALLBACK: main thread (will freeze UI) ===
