@@ -1,5 +1,5 @@
 // Surrogate Studio - concatenated bundle
-// Generated: 2026-04-24T10:33:05Z
+// Generated: 2026-04-24T11:46:23Z
 // Source files: 58
 
 
@@ -29446,6 +29446,7 @@
             });
             if (store) store.upsertTrainerCard(tCard);
             onStatus("Worker error: " + err.message);
+            if (err.reason) console.error("[trainer] Worker stack trace:\n" + err.reason);
             if (_isTrainerTrainViewVisible(activeId) || (stateApi && stateApi.getActiveTrainer() === activeId)) { _renderLeftPanel(); _renderMainPanel(); _renderRightPanel(); }
             buildResult.model.dispose();
           });

@@ -679,6 +679,10 @@
     // async .data() internally and can crash with minified TF.js errors.
     try {
       var _weights = model.getWeights();
+      var _badWeights = _weights.filter(function (w) { return !w || typeof w.dataSync !== "function"; });
+      if (_badWeights.length) {
+        throw new Error("Non-tensor weights found: " + _badWeights.length + "/" + _weights.length + ". Likely a custom layer returning raw data.");
+      }
       var _specs = [];
       var _totalBytes = 0;
       var _dataArrays = [];

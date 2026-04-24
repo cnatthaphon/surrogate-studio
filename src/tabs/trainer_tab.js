@@ -2635,6 +2635,7 @@
             });
             if (store) store.upsertTrainerCard(tCard);
             onStatus("Worker error: " + err.message);
+            if (err.reason) console.error("[trainer] Worker stack trace:\n" + err.reason);
             if (_isTrainerTrainViewVisible(activeId) || (stateApi && stateApi.getActiveTrainer() === activeId)) { _renderLeftPanel(); _renderMainPanel(); _renderRightPanel(); }
             buildResult.model.dispose();
           });
