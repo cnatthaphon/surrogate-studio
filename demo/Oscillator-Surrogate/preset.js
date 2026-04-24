@@ -133,7 +133,7 @@
       name: "Oscillator Trajectories",
       schemaId: "oscillator",
       status: "draft",
-      config: { seed: 42, splitMode: "random", trainFrac: 0.8, valFrac: 0.1, testFrac: 0.1 },
+      config: { seed: 42, splitMode: "random", trainFrac: 0.8, valFrac: 0.1, testFrac: 0.1, targetMode: "xv" },
       data: null,
       createdAt: Date.now(),
     },
