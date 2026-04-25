@@ -379,7 +379,12 @@ def main():
                 total = total + hl["weight"] * hl["fn"](head_pred, target)
                 continue
             else:
-                target = yb
+                # Reconstruction/autoencoder/denoiser heads use input (xb) as target
+                head_htype2 = str(head_configs[i].get("headType", "")) if i < len(head_configs) else ""
+                if head_htype2 in ("reconstruction", "autoencoder", "denoiser"):
+                    target = xb
+                else:
+                    target = yb
             # match target shape to prediction shape
             if target.shape != head_pred.shape:
                 if head_pred.shape[-1] == 1 and target.dim() > 1:
