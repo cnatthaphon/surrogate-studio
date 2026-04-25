@@ -23,6 +23,12 @@ def _ensure_split(out: Dict[str, List[Any]], key: str) -> None:
 
 
 def _load_csv_manifest(dataset_path: Path, manifest: Dict[str, Any]) -> Dict[str, Any]:
+    if not dataset_path.exists():
+        kind = manifest.get("kind", manifest.get("format", "unknown"))
+        raise FileNotFoundError(
+            f"Dataset file not found: {dataset_path} (descriptor kind={kind}). "
+            f"This path is not available in Pyodide/JupyterLite — use embedded CSV instead."
+        )
     x = {"train": [], "val": [], "test": []}
     y = {"train": [], "val": [], "test": []}
     labels = {"train": [], "val": [], "test": []}

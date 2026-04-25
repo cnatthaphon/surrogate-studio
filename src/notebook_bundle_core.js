@@ -1529,18 +1529,27 @@
       "labels_train_tensor = None\n" +
       "labels_val_tensor = None\n" +
       "labels_test_tensor = None\n" +
-      "_source_desc = None\n" +
-      "if EMBEDDED_SOURCE_DESCRIPTOR_B64:\n" +
+      "df = None\n" +
+      "_source_desc = None\n\n" +
+      "# Priority: embedded CSV (Pyodide-safe) > source descriptor > disk CSV\n" +
+      "if EMBEDDED_DATASET_CSV_B64:\n" +
+      "    df = pd.read_csv(io.StringIO(base64.b64decode(EMBEDDED_DATASET_CSV_B64).decode('utf-8')))\n" +
+      "    print(f'Dataset (embedded CSV): {len(df)} rows')\n" +
+      "elif EMBEDDED_SOURCE_DESCRIPTOR_B64:\n" +
       "    _source_desc = json.loads(base64.b64decode(EMBEDDED_SOURCE_DESCRIPTOR_B64).decode('utf-8'))\n" +
       "elif DATASET_SOURCE_DESCRIPTOR_PATH:\n" +
       "    from pathlib import Path\n" +
       "    _src_path = Path(DATASET_SOURCE_DESCRIPTOR_PATH)\n" +
       "    if _src_path.exists():\n" +
-      "        _source_desc = json.loads(_src_path.read_text(encoding='utf-8'))\n\n" +
-      "if _source_desc is not None:\n" +
+      "        _source_desc = json.loads(_src_path.read_text(encoding='utf-8'))\n" +
+      "    else:\n" +
+      "        print(f'[warn] Source descriptor path not found: {DATASET_SOURCE_DESCRIPTOR_PATH}')\n" +
+      "elif DATASET_CSV and DATASET_CSV != '(embedded)':\n" +
+      "    df = pd.read_csv(DATASET_CSV)\n" +
+      "    print(f'Dataset (disk CSV): {len(df)} rows')\n\n" +
+      "if _source_desc is not None and df is None:\n" +
       "    from dataset_source_loader import load_dataset_from_source_descriptor\n" +
       "    _payload = load_dataset_from_source_descriptor(_source_desc)\n" +
-      "    df = None\n" +
       "    feature_cols = ['f' + str(i) for i in range(int(_payload.get('featureSize', 0) or 0))]\n" +
       "    target_cols = ['t' + str(i) for i in range(int(_payload.get('targetSize', 0) or 0))]\n" +
       "    x_train = torch.tensor(np.array(_payload.get('xTrain', []), dtype=np.float32))\n" +
@@ -1556,19 +1565,13 @@
       "    if _payload.get('labelsTest'):\n" +
       "        labels_test_tensor = torch.tensor(np.array(_payload.get('labelsTest', []), dtype=np.float32))\n" +
       "    print(f\"Dataset loaded from source descriptor: {_source_desc.get('kind', 'unknown')}\")\n" +
-      "else:\n" +
-      "    if EMBEDDED_DATASET_CSV_B64:\n" +
-      "        df = pd.read_csv(io.StringIO(base64.b64decode(EMBEDDED_DATASET_CSV_B64).decode('utf-8')))\n" +
-      "    else:\n" +
-      "        df = pd.read_csv(DATASET_CSV)\n" +
-      "    print(f'Dataset: {len(df)} rows, columns: {list(df.columns[:5])}...')\n\n" +
-      "    # Split by 'split' column\n" +
+      "elif df is not None:\n" +
       "    feature_cols = [c for c in df.columns if c.startswith('f')]\n" +
       "    target_cols = [c for c in df.columns if c.startswith('t')]\n" +
-      "    print(f'Features: {len(feature_cols)}, Targets: {len(target_cols)}')\n\n" +
+      "    print(f'Features: {len(feature_cols)}, Targets: {len(target_cols)}')\n" +
       "    train_df = df[df['split'] == 'train']\n" +
       "    val_df = df[df['split'] == 'val']\n" +
-      "    test_df = df[df['split'] == 'test'] if 'test' in df['split'].values else val_df\n\n" +
+      "    test_df = df[df['split'] == 'test'] if 'test' in df['split'].values else val_df\n" +
       "    x_train = torch.tensor(train_df[feature_cols].values, dtype=torch.float32)\n" +
       "    y_train = torch.tensor(train_df[target_cols].values, dtype=torch.float32)\n" +
       "    x_val = torch.tensor(val_df[feature_cols].values, dtype=torch.float32)\n" +
@@ -1577,7 +1580,9 @@
       "    y_test = torch.tensor(test_df[target_cols].values, dtype=torch.float32)\n" +
       "    labels_train_tensor = y_train.clone() if y_train.ndim > 1 and y_train.shape[-1] > 1 else None\n" +
       "    labels_val_tensor = y_val.clone() if y_val.ndim > 1 and y_val.shape[-1] > 1 else None\n" +
-      "    labels_test_tensor = y_test.clone() if y_test.ndim > 1 and y_test.shape[-1] > 1 else None\n\n" +
+      "    labels_test_tensor = y_test.clone() if y_test.ndim > 1 and y_test.shape[-1] > 1 else None\n" +
+      "else:\n" +
+      "    raise RuntimeError('No dataset available: provide EMBEDDED_DATASET_CSV_B64, source descriptor, or DATASET_CSV path.')\n\n" +
       "print(f'Train: {len(x_train)}, Val: {len(x_val)}, Test: {len(x_test)}')\n" +
       "print(f'Feature dim: {x_train.shape[1] if x_train.ndim > 1 else 1}, Target dim: {y_train.shape[1] if y_train.ndim > 1 else 1}')\n"
     ));
@@ -1674,9 +1679,14 @@
         "from runtime_weight_loader import load_weights_into_model\n\n" +
         "if EMBEDDED_ARTIFACTS_B64:\n" +
         "    _art = json.loads(base64.b64decode(EMBEDDED_ARTIFACTS_B64).decode('utf-8'))\n" +
-        "    _ok = load_weights_into_model(model, _art)\n" +
-        "    model = model.to(device)\n" +
-        "    print(f'Loaded weights from trainer: {\"success\" if _ok else \"failed\"} (resume)')\n" +
+        "    _expected = sum(int(np.prod(s.get('shape', []))) for s in _art.get('weightSpecs', []))\n" +
+        "    _actual = len(_art.get('weightValues', []))\n" +
+        "    if _expected != _actual:\n" +
+        "        print(f'[warn] weightValues length mismatch: expected {_expected}, got {_actual} — skipping initial-weight load')\n" +
+        "    else:\n" +
+        "        _ok = load_weights_into_model(model, _art)\n" +
+        "        model = model.to(device)\n" +
+        "        print(f'Loaded weights from trainer: {\"success\" if _ok else \"failed\"} (resume)')\n" +
         "else:\n" +
         "    print('Training from scratch (no initial weights)')\n",
       {
