@@ -1,5 +1,5 @@
 // Surrogate Studio - concatenated bundle
-// Generated: 2026-04-25T11:35:33Z
+// Generated: 2026-04-25T10:38:40Z
 // Source files: 58
 
 
@@ -16567,7 +16567,9 @@
       kind: "run",
       runId: runId,
       runtimeConfig: spec.runtimeConfig || { runtimeId: "js_client", backend: "auto" },
-      modelArtifacts: spec.modelArtifacts || {},
+      graphSpec: spec.graphSpec || null,
+      datasetMeta: spec.datasetMeta || {},
+      modelArtifacts: spec.modelArtifacts || null,
       dataset: {
         mode: String(ds.mode || "autoregressive"),
         windowSize: Number(ds.windowSize || 20),
@@ -16662,6 +16664,8 @@
       };
       cancelFn = function () {
         if (settled) return;
+        // Signal the worker to stop gracefully before terminating
+        try { if (worker) worker.postMessage({ kind: "stop" }); } catch (_) {}
         settled = true;
         finalize();
         reject(new Error("Training worker canceled."));
@@ -29332,12 +29336,23 @@
           note: "Training in TF.js worker.",
         });
         // === WORKER PATH (non-blocking) ===
-        buildResult.model.save(tf.io.withSaveHandler(function (artifacts) {
+        // Send graph spec to worker — worker rebuilds model from graph using
+        // the same model_builder_core.js. Graph IS the model, no save/load round-trip.
+        (function () {
           onStatus("Training via TF.js Worker (" + (config.runtimeBackend || "auto") + ")...");
 
           var workerRun = workerBridge.runTrainingInWorker({
             runId: runtimeRunId,
-            modelArtifacts: artifacts,
+            graphSpec: model.graph,
+            datasetMeta: {
+              mode: graphMode, featureSize: featureSize,
+              seqFeatureSize: Number(activeDs.seqFeatureSize || featureSize),
+              windowSize: Number(activeDs.windowSize || 1),
+              allowedOutputKeys: allowedOutputKeys, defaultTarget: defaultTarget,
+              paramNames: activeDs.paramNames, paramSize: activeDs.paramSize,
+              numClasses: activeDs.numClasses || activeDs.classCount || 10,
+            },
+            modelArtifacts: null,
             isSequence: buildResult.isSequence,
             headConfigs: buildResult.headConfigs,
             dataset: {
@@ -29461,13 +29476,7 @@
             buildResult.model.dispose();
           });
 
-          return { modelArtifactsInfo: { dateSaved: new Date(), modelTopologyType: "JSON" } };
-        })).catch(function (saveErr) {
-          // model.save() internally calls .data() on weights — can fail with
-          // "u.data is not a function" in minified TF.js. Log but don't crash
-          // since the worker already has the artifacts from the callback.
-          console.error("[trainer] Main-thread model.save() rejected:", saveErr && saveErr.message, saveErr && saveErr.stack);
-        });
+        })();
 
       } else {
         // === FALLBACK: main thread (will freeze UI) ===
