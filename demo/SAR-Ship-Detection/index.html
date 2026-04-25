@@ -15,6 +15,8 @@
   <script src="../../dist/surrogate-studio.js"></script>
   <script src="./hrsid_ships_64x64.js"></script>
   <script src="./preset.js"></script>
+  <script src="./cnn_ship_detector_pretrained.js"></script>
+  <script src="./mlp_baseline_pretrained.js"></script>
 </head>
 <body>
   <div id="app"></div>
@@ -24,11 +26,11 @@
     if (preset) {
       if (preset.dataset) store.upsertDataset(preset.dataset);
       if (preset.models) preset.models.forEach(function (m) { store.upsertModel(m); });
-      if (preset.trainers) preset.trainers.forEach(function (t) { store.upsertTrainerCard(t); });
+      if (preset.trainers) OSCPretrainedLoader.loadAll(store, preset.trainers);
       store.initTables({ tables: ["generationRuns", "evaluations"] });
       if (preset.evaluations) preset.evaluations.forEach(function (e) { store.save({ table: "evaluations", values: [e] }); });
     }
-    SurrogateStudio.init({ mountEl: document.getElementById("app"), defaultSchemaId: "sar_ship_detection", defaultTab: "dataset", store: store });
+    SurrogateStudio.init({ mountEl: document.getElementById("app"), defaultSchemaId: "sar_ship_detection", defaultTab: "trainer", store: store });
   </script>
 </body>
 </html>

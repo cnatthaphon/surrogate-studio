@@ -229,6 +229,13 @@
           runtimeBackend: "auto",
         },
       },
+      // Pre-trained (PyTorch CUDA, 50 epochs)
+      { id: "demo-vae-pre", name: "LSTM-VAE (pre-trained)", schemaId: "ant_trajectory", datasetId: "demo-ant-ds", modelId: "demo-lstm-vae", status: "done",
+        _pretrainedVar: "LSTM_VAE_PAPER_PRE_TRAINED_PRETRAINED_BIN_B64",
+        config: { epochs: 50, batchSize: 32, learningRate: 0.0005, optimizerType: "adam" } },
+      { id: "demo-ae-pre", name: "MLP-AE (pre-trained)", schemaId: "ant_trajectory", datasetId: "demo-ant-ds", modelId: "demo-mlp-ae", status: "done",
+        _pretrainedVar: "MLP_AE_BASELINE_PRE_TRAINED_PRETRAINED_BIN_B64",
+        config: { epochs: 50, batchSize: 32, learningRate: 0.0005, optimizerType: "adam" } },
     ],
 
     generations: [
@@ -236,7 +243,7 @@
         id: "demo-vae-gen",
         name: "LSTM-VAE Generation",
         schemaId: "ant_trajectory",
-        trainerId: "demo-vae-trainer",
+        trainerId: "demo-vae-pre",
         family: "vae",
         config: { method: "reconstruct", numSamples: 16, steps: 100, lr: 0.01, temperature: 1.0, seed: 42 },
         status: "draft",
@@ -247,7 +254,7 @@
         id: "demo-ae-gen",
         name: "MLP-AE Generation",
         schemaId: "ant_trajectory",
-        trainerId: "demo-ae-trainer",
+        trainerId: "demo-ae-pre",
         family: "supervised",
         config: { method: "reconstruct", numSamples: 16, steps: 100, lr: 0.01, temperature: 1.0, seed: 42 },
         status: "draft",
@@ -259,10 +266,10 @@
     evaluations: [
       {
         id: "demo-eval-benchmark",
-        name: "VAE vs AE Benchmark",
+        name: "VAE vs AE Benchmark (pre-trained)",
         schemaId: "ant_trajectory",
         datasetId: "demo-ant-ds",
-        trainerIds: ["demo-vae-trainer", "demo-ae-trainer"],
+        trainerIds: ["demo-vae-pre", "demo-ae-pre"],
         evaluatorIds: ["mae", "rmse", "r2", "bias", "worst_ant_mae", "mde"],
         status: "draft",
         runs: [],

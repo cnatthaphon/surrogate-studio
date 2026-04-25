@@ -1,5 +1,5 @@
 // Surrogate Studio - concatenated bundle
-// Generated: 2026-04-25T10:38:40Z
+// Generated: 2026-04-25T18:31:40Z
 // Source files: 58
 
 
@@ -16567,9 +16567,7 @@
       kind: "run",
       runId: runId,
       runtimeConfig: spec.runtimeConfig || { runtimeId: "js_client", backend: "auto" },
-      graphSpec: spec.graphSpec || null,
-      datasetMeta: spec.datasetMeta || {},
-      modelArtifacts: spec.modelArtifacts || null,
+      modelArtifacts: spec.modelArtifacts || {},
       dataset: {
         mode: String(ds.mode || "autoregressive"),
         windowSize: Number(ds.windowSize || 20),
@@ -16664,8 +16662,6 @@
       };
       cancelFn = function () {
         if (settled) return;
-        // Signal the worker to stop gracefully before terminating
-        try { if (worker) worker.postMessage({ kind: "stop" }); } catch (_) {}
         settled = true;
         finalize();
         reject(new Error("Training worker canceled."));
@@ -21862,7 +21858,8 @@
 
     headConfigs.forEach(function (head) {
       var ht = String(head.headType || "regression");
-      // for multi-head models: classification heads use labels, reconstruction heads use pixels
+      // Route targets by headType — no per-model special cases:
+      // classification → one-hot labels, reconstruction → input pixels, else → yTrain
       var headYTrain = dataset.yTrain;
       var headYVal = dataset.yVal;
       var headYTest = dataset.yTest;
@@ -21870,6 +21867,10 @@
         headYTrain = dataset.labelsTrain;
         headYVal = dataset.labelsVal || headYVal;
         headYTest = dataset.labelsTest || headYTest;
+      } else if ((ht === "reconstruction" || ht === "autoencoder" || ht === "denoiser") && dataset.xTrain) {
+        headYTrain = dataset.xTrain;
+        headYVal = dataset.xVal || headYVal;
+        headYTest = dataset.xTest || headYTest;
       }
       var trainRows = extractHeadRows(headYTrain, dataset.pTrain, targetMode, head, datasetMeta);
       var valRows = extractHeadRows(headYVal, dataset.pVal, targetMode, head, datasetMeta);
@@ -29336,23 +29337,12 @@
           note: "Training in TF.js worker.",
         });
         // === WORKER PATH (non-blocking) ===
-        // Send graph spec to worker — worker rebuilds model from graph using
-        // the same model_builder_core.js. Graph IS the model, no save/load round-trip.
-        (function () {
+        buildResult.model.save(tf.io.withSaveHandler(function (artifacts) {
           onStatus("Training via TF.js Worker (" + (config.runtimeBackend || "auto") + ")...");
 
           var workerRun = workerBridge.runTrainingInWorker({
             runId: runtimeRunId,
-            graphSpec: model.graph,
-            datasetMeta: {
-              mode: graphMode, featureSize: featureSize,
-              seqFeatureSize: Number(activeDs.seqFeatureSize || featureSize),
-              windowSize: Number(activeDs.windowSize || 1),
-              allowedOutputKeys: allowedOutputKeys, defaultTarget: defaultTarget,
-              paramNames: activeDs.paramNames, paramSize: activeDs.paramSize,
-              numClasses: activeDs.numClasses || activeDs.classCount || 10,
-            },
-            modelArtifacts: null,
+            modelArtifacts: artifacts,
             isSequence: buildResult.isSequence,
             headConfigs: buildResult.headConfigs,
             dataset: {
@@ -29476,7 +29466,13 @@
             buildResult.model.dispose();
           });
 
-        })();
+          return { modelArtifactsInfo: { dateSaved: new Date(), modelTopologyType: "JSON" } };
+        })).catch(function (saveErr) {
+          // model.save() internally calls .data() on weights — can fail with
+          // "u.data is not a function" in minified TF.js. Log but don't crash
+          // since the worker already has the artifacts from the callback.
+          console.error("[trainer] Main-thread model.save() rejected:", saveErr && saveErr.message, saveErr && saveErr.stack);
+        });
 
       } else {
         // === FALLBACK: main thread (will freeze UI) ===

@@ -144,12 +144,27 @@
         runtime: "js_client", runtimeBackend: "auto", status: "draft",
         trainCfg: { epochs: 50, batchSize: 16, learningRate: 0.001, optimizer: "adam" },
       },
+      // Pre-trained — weights loaded on init
+      {
+        id: "nuc_unet_trainer-pre", name: "Nucleus UNet (pre-trained)", schemaId: sid,
+        datasetId: DS_ID, modelId: "nuc_unet",
+        runtime: "js_client", runtimeBackend: "auto", status: "done",
+        _pretrainedVar: "NUCLEUS_UNET_SKIP_CONNECTIONS_PRE_TRAINED_PRETRAINED_BIN_B64",
+        trainCfg: { epochs: 50, batchSize: 16, learningRate: 0.001, optimizer: "adam", earlyStoppingPatience: 15 },
+      },
+      {
+        id: "nuc_mlp_trainer-pre", name: "MLP Baseline (pre-trained)", schemaId: sid,
+        datasetId: DS_ID, modelId: "nuc_mlp",
+        runtime: "js_client", runtimeBackend: "auto", status: "done",
+        _pretrainedVar: "MLP_BASELINE_PRE_TRAINED_PRETRAINED_BIN_B64",
+        trainCfg: { epochs: 50, batchSize: 16, learningRate: 0.001, optimizer: "adam" },
+      },
     ],
     generations: [],
     evaluations: [
       {
         id: "nuc_eval", name: "Nucleus Segmentation: UNet vs MLP", schemaId: sid, datasetId: DS_ID,
-        trainerIds: ["nuc_unet_trainer", "nuc_mlp_trainer"],
+        trainerIds: ["nuc_unet_trainer-pre", "nuc_mlp_trainer-pre"],
         evaluatorIds: ["mask_iou", "dice", "pixel_accuracy"],
         status: "draft", runs: [], createdAt: Date.now(),
       },

@@ -98,12 +98,27 @@
         runtime: "js_client", runtimeBackend: "auto", status: "draft",
         trainCfg: { epochs: 50, batchSize: 16, learningRate: 0.001, optimizer: "adam" },
       },
+      // Pre-trained (PyTorch CUDA)
+      {
+        id: "sar_cnn_trainer-pre", name: "CNN Detector (pre-trained)", schemaId: sid,
+        datasetId: DS_ID, modelId: "sar_cnn",
+        runtime: "js_client", runtimeBackend: "auto", status: "done",
+        _pretrainedVar: "CNN_SHIP_DETECTOR_PRE_TRAINED_PRETRAINED_BIN_B64",
+        trainCfg: { epochs: 50, batchSize: 16, learningRate: 0.001, optimizer: "adam", earlyStoppingPatience: 15 },
+      },
+      {
+        id: "sar_mlp_trainer-pre", name: "MLP Baseline (pre-trained)", schemaId: sid,
+        datasetId: DS_ID, modelId: "sar_mlp",
+        runtime: "js_client", runtimeBackend: "auto", status: "done",
+        _pretrainedVar: "MLP_BASELINE_PRE_TRAINED_PRETRAINED_BIN_B64",
+        trainCfg: { epochs: 50, batchSize: 16, learningRate: 0.001, optimizer: "adam" },
+      },
     ],
     generations: [],
     evaluations: [
       {
         id: "sar_eval", name: "Ship Detection: CNN vs MLP", schemaId: sid, datasetId: DS_ID,
-        trainerIds: ["sar_cnn_trainer", "sar_mlp_trainer"],
+        trainerIds: ["sar_cnn_trainer-pre", "sar_mlp_trainer-pre"],
         evaluatorIds: ["mae", "rmse", "r2"],
         status: "draft", runs: [], createdAt: Date.now(),
       },

@@ -379,7 +379,12 @@ def main():
                 total = total + hl["weight"] * hl["fn"](head_pred, target)
                 continue
             else:
-                target = yb
+                # Reconstruction/autoencoder/denoiser heads use input (xb) as target
+                head_htype2 = str(head_configs[i].get("headType", "")) if i < len(head_configs) else ""
+                if head_htype2 in ("reconstruction", "autoencoder", "denoiser"):
+                    target = xb
+                else:
+                    target = yb
             # match target shape to prediction shape
             if target.shape != head_pred.shape:
                 if head_pred.shape[-1] == 1 and target.dim() > 1:
@@ -1171,7 +1176,7 @@ def build_model_from_graph(graph, feature_size, target_size, num_classes=0):
                     pad_mode = str(c.get("padding", "same"))
                     use_bias = _cfg_bool(c.get("useBias", True), True)
                     # match TF.js 'same' padding: output = ceil(input / stride)
-                    pad = (ks - 1) // 2 if pad_mode == "same" and st == 1 else (ks - st) // 2 if pad_mode == "same" else 0
+                    pad = (ks - 1) // 2 if pad_mode == "same" else 0
                     in_ch = in_dim[-1] if isinstance(in_dim, list) else 1
                     conv_mod = nn.Conv2d(in_ch, filters, ks, st, pad, bias=use_bias)
                     _apply_module_initializers(conv_mod, c, t)

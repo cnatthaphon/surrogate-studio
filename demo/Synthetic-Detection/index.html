@@ -14,6 +14,7 @@
   <!-- Surrogate Studio bundle -->
   <script src="../../dist/surrogate-studio.js"></script>
   <script src="./preset.js"></script>
+  <script src="./single_box_detector_pretrained.js"></script>
 </head>
 <body>
   <div id="app"></div>
@@ -23,7 +24,7 @@
     if (preset) {
       if (preset.dataset) store.upsertDataset(preset.dataset);
       if (preset.models) preset.models.forEach(function (m) { store.upsertModel(m); });
-      if (preset.trainers) preset.trainers.forEach(function (t) { store.upsertTrainerCard(t); });
+      if (preset.trainers) OSCPretrainedLoader.loadAll(store, preset.trainers);
       store.initTables({ tables: ["generationRuns", "evaluations"] });
       if (preset.generations) preset.generations.forEach(function (g) { store.save({ table: "generationRuns", values: [g] }); });
       if (preset.evaluations) preset.evaluations.forEach(function (e) { store.save({ table: "evaluations", values: [e] }); });
@@ -31,7 +32,7 @@
     SurrogateStudio.init({
       mountEl: document.getElementById("app"),
       defaultSchemaId: "synthetic_detection",
-      defaultTab: "dataset",
+      defaultTab: "trainer",
       store: store
     });
   </script>
