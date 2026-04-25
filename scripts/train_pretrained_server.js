@@ -221,7 +221,16 @@ async function buildDataset() {
 
 function exportPretrained(trainerName, config, result, outputPath) {
   var weightSpecs = result.weightSpecs || [];
+  // Normalize: server may return weightData (flat array) or weightValues
   var weightValues = result.weightValues || [];
+  if (!weightValues.length && result.weightData) {
+    weightValues = Array.isArray(result.weightData) ? result.weightData : Array.from(new Float32Array(result.weightData));
+  }
+  // Integrity check
+  var expectedLen = weightSpecs.reduce(function (sum, s) { return sum + (s.shape || []).reduce(function (a, b) { return a * b; }, 1); }, 0);
+  if (weightValues.length !== expectedLen) {
+    console.warn("  WARNING: weightValues length " + weightValues.length + " != expected " + expectedLen + " from specs");
+  }
   var metrics = result.metrics || {};
 
   var meta = {
@@ -257,12 +266,25 @@ async function trainOneModel(modelDef, dataset, trainerDef) {
   var featureSize = dataset.featureSize || (dataset.xTrain[0] && dataset.xTrain[0].length) || 1;
   var tc = trainerDef.trainCfg || trainerDef.config || {};
 
+  // Build headConfigs from graph — same contract as browser/worker
+  var graphHeadConfigs = [];
+  try {
+    var tf = { layers: {}, sequential: function(){}, model: function(){} };  // stub — only need headConfigs, not actual model
+    var buildInfo = MBC.buildModelFromGraph(require("../src/tfjs_node_loader.js").loadTfjs(), graph, {
+      mode: "direct", featureSize: featureSize, windowSize: 1, seqFeatureSize: featureSize,
+      allowedOutputKeys: outputKeys, defaultTarget: defaultTarget,
+      numClasses: dataset.numClasses || dataset.classCount || 10,
+    });
+    graphHeadConfigs = buildInfo.headConfigs || [];
+    if (buildInfo.model) try { buildInfo.model.dispose(); } catch (_) {}
+  } catch (e) { console.warn("  Could not extract headConfigs from graph:", e.message); }
+
   // Build payload for server
   var payload = {
     runId: "pretrain-" + slugify(modelDef.name) + "-" + Date.now().toString(36),
     graph: graph,
     schemaId: schemaId,
-    headConfigs: [],  // let server infer from graph
+    headConfigs: graphHeadConfigs,
     dataset: {
       xTrain: dataset.xTrain,
       yTrain: dataset.yTrain,
