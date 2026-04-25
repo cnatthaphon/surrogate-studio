@@ -315,7 +315,8 @@
 
     headConfigs.forEach(function (head) {
       var ht = String(head.headType || "regression");
-      // for multi-head models: classification heads use labels, reconstruction heads use pixels
+      // Route targets by headType — no per-model special cases:
+      // classification → one-hot labels, reconstruction → input pixels, else → yTrain
       var headYTrain = dataset.yTrain;
       var headYVal = dataset.yVal;
       var headYTest = dataset.yTest;
@@ -323,6 +324,10 @@
         headYTrain = dataset.labelsTrain;
         headYVal = dataset.labelsVal || headYVal;
         headYTest = dataset.labelsTest || headYTest;
+      } else if ((ht === "reconstruction" || ht === "autoencoder" || ht === "denoiser") && dataset.xTrain) {
+        headYTrain = dataset.xTrain;
+        headYVal = dataset.xVal || headYVal;
+        headYTest = dataset.xTest || headYTest;
       }
       var trainRows = extractHeadRows(headYTrain, dataset.pTrain, targetMode, head, datasetMeta);
       var valRows = extractHeadRows(headYVal, dataset.pVal, targetMode, head, datasetMeta);

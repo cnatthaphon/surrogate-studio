@@ -258,9 +258,9 @@ async function trainModel(modelDef, dataset, trainerDef) {
   if (!buildResult.model) { console.log("  SKIP (model build failed)"); return null; }
   console.log("  Model:", buildResult.model.countParams(), "params");
 
-  // Pass xTrain as yTrain — the training engine reads headType from graph
-  // and routes reconstruction heads to pixels, classification to labels.
-  // No per-model special cases here.
+  // yTrain = xTrain (pixels) for reconstruction heads, real labels for others.
+  // The training engine reads headType from the graph and routes accordingly:
+  // reconstruction → uses yTrain (pixels), classification → uses labelsTrain.
 
   var tc = trainerDef.trainCfg || trainerDef.config || {};
   var epochs = [];
@@ -269,9 +269,9 @@ async function trainModel(modelDef, dataset, trainerDef) {
     isSequence: false,
     headConfigs: buildResult.headConfigs,
     dataset: {
-      xTrain: dataset.xTrain, yTrain: dataset.xTrain,
-      xVal: dataset.xVal, yVal: dataset.xVal,
-      xTest: dataset.xTest, yTest: dataset.xTest,
+      xTrain: dataset.xTrain, yTrain: dataset.yTrain,
+      xVal: dataset.xVal, yVal: dataset.yVal,
+      xTest: dataset.xTest, yTest: dataset.yTest,
       labelsTrain: dataset.labelsTrain || dataset.yTrain,
       labelsVal: dataset.labelsVal || dataset.yVal,
       labelsTest: dataset.labelsTest || dataset.yTest,
