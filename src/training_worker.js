@@ -419,7 +419,12 @@
       userDefinedMetadata: modelArtifacts.userDefinedMetadata || null,
       modelInitializer: modelArtifacts.modelInitializer || null,
     };
-    const model = await tf.loadLayersModel(tf.io.fromMemory(artifactLike));
+    var model;
+    try {
+      model = await tf.loadLayersModel(tf.io.fromMemory(artifactLike));
+    } catch (loadErr) {
+      throw new Error("Failed to load model in worker (tf.loadLayersModel): " + String(loadErr.message || loadErr));
+    }
     const modelInputs = Array.isArray(model.inputs) ? model.inputs : [];
 
     function inferSyntheticInputSpec(input, idx) {
@@ -688,11 +693,15 @@
       var _dataArrays = [];
       for (var wi = 0; wi < _weights.length; wi++) {
         var w = _weights[wi];
-        var arr = w.dataSync();  // sync, no async .data() issues
-        var bytes = arr.byteLength || (arr.length * 4);
-        _specs.push({ name: w.name, shape: w.shape.slice(), dtype: w.dtype || "float32" });
-        _dataArrays.push(arr);
-        _totalBytes += bytes;
+        try {
+          var arr = w.dataSync();  // sync, no async .data() issues
+          var bytes = arr.byteLength || (arr.length * 4);
+          _specs.push({ name: w.name, shape: w.shape.slice(), dtype: w.dtype || "float32" });
+          _dataArrays.push(arr);
+          _totalBytes += bytes;
+        } catch (wErr) {
+          throw new Error("Weight extraction failed on weight[" + wi + "] name=" + String(w && w.name) + " shape=" + JSON.stringify(w && w.shape) + ": " + String(wErr.message || wErr));
+        }
       }
       var _buf = new ArrayBuffer(_totalBytes);
       var _view = new Float32Array(_buf);
@@ -702,15 +711,21 @@
         _view.set(src, _offset);
         _offset += src.length;
       }
+      var _topology;
+      try {
+        _topology = model.toJSON();
+      } catch (topoErr) {
+        throw new Error("model.toJSON() failed: " + String(topoErr.message || topoErr));
+      }
       trainedArtifacts = {
-        modelTopology: model.toJSON(),
+        modelTopology: _topology,
         weightSpecs: _specs,
         weightData: _buf,
         format: "tfjs",
         generatedBy: "training_worker",
       };
     } catch (saveErr) {
-      self.postMessage({ kind: "log", message: "Warning: weight extraction failed: " + String(saveErr.message || saveErr) });
+      self.postMessage({ kind: "log", message: "Warning: weight extraction failed at [" + String(saveErr.message || saveErr) + "]" });
     }
 
     try {
