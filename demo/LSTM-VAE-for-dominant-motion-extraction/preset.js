@@ -229,6 +229,13 @@
           runtimeBackend: "auto",
         },
       },
+      // Pre-trained (PyTorch CUDA, 50 epochs)
+      { id: "demo-vae-pre", name: "LSTM-VAE (pre-trained)", schemaId: "ant_trajectory", datasetId: "demo-ant-ds", modelId: "demo-lstm-vae", status: "done",
+        _pretrainedVar: "LSTM_VAE_PAPER_PRE_TRAINED_PRETRAINED_BIN_B64",
+        config: { epochs: 50, batchSize: 32, learningRate: 0.0005, optimizerType: "adam" } },
+      { id: "demo-ae-pre", name: "MLP-AE (pre-trained)", schemaId: "ant_trajectory", datasetId: "demo-ant-ds", modelId: "demo-mlp-ae", status: "done",
+        _pretrainedVar: "MLP_AE_BASELINE_PRE_TRAINED_PRETRAINED_BIN_B64",
+        config: { epochs: 50, batchSize: 32, learningRate: 0.0005, optimizerType: "adam" } },
     ],
 
     generations: [

@@ -105,7 +105,7 @@ Headless benchmark: 50 epochs, batch=32, lr=5e-4, Adam, plateau scheduler, seed=
 | **Test RMSE** | 0.0164 | 0.0325 | — |
 | **Test Bias** | -1.54e-3 | 2.78e-4 | — |
 
-*Metrics obtained from training runs (200 epochs, seed 42). No pretrained weights shipped — reproduce by training from the Trainer tab.*
+*Pretrained weights shipped (PyTorch CUDA, 50 epochs). Test MAE: LSTM-VAE=0.0165, MLP-AE=0.0319 on MinMax-normalized ant trajectories.*
 
 **Key findings:**
 

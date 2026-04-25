@@ -139,12 +139,12 @@ Reproduces the LSTM-VAE from Jadhav & Barati Farimani (2022) for ant trajectory 
 |:---:|:---:|
 | ![Training](demo/LSTM-VAE-for-dominant-motion-extraction/images/training.gif) | ![Generation](demo/LSTM-VAE-for-dominant-motion-extraction/images/generation.gif) |
 
-| Model | Params | Expected Test R² | Expected Test RMSE |
+| Model | Params | Test MAE | Test MSE |
 |-------|:------:|:-------:|:---------:|
-| LSTM-VAE | 77,100 | ~0.997 | ~0.016 |
-| MLP-AE (baseline) | 19,312 | ~0.988 | ~0.033 |
+| LSTM-VAE | 77,100 | **0.0165** | 4.48e-4 |
+| MLP-AE (baseline) | 19,312 | 0.0319 | 1.74e-3 |
 
-*Metrics are expected values after 200 epochs of training. No pretrained weights shipped — train from the Trainer tab.*
+*Pretrained weights shipped (PyTorch CUDA, 50 epochs). MAE on MinMax-normalized [0,1] ant trajectories.*
 
 > Jadhav & Barati Farimani, *"LSTM-VAE for dominant motion extraction"*, 2022. [arXiv:2104.12722](https://arxiv.org/abs/2104.12722)
 
