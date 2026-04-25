@@ -104,7 +104,7 @@
     evaluations: [
       {
         id: "csv_eval", name: "MLP vs Simple: Classification", schemaId: sid, datasetId: DS_ID,
-        trainerIds: ["csv_mlp_trainer", "csv_simple_trainer"],
+        trainerIds: ["csv_mlp_pre", "csv_simple_pre"],
         evaluatorIds: ["accuracy", "macro_f1"],
         status: "draft", runs: [], createdAt: Date.now(),
       },

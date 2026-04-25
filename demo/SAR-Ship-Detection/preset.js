@@ -118,7 +118,7 @@
     evaluations: [
       {
         id: "sar_eval", name: "Ship Detection: CNN vs MLP", schemaId: sid, datasetId: DS_ID,
-        trainerIds: ["sar_cnn_trainer", "sar_mlp_trainer", "sar_mlp_trainer-pre"],
+        trainerIds: ["sar_cnn_trainer-pre", "sar_mlp_trainer-pre"],
         evaluatorIds: ["mae", "rmse", "r2"],
         status: "draft", runs: [], createdAt: Date.now(),
       },

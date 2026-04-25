@@ -164,7 +164,7 @@
     evaluations: [
       {
         id: "nuc_eval", name: "Nucleus Segmentation: UNet vs MLP", schemaId: sid, datasetId: DS_ID,
-        trainerIds: ["nuc_unet_trainer", "nuc_mlp_trainer", "nuc_unet_trainer-pre", "nuc_mlp_trainer-pre"],
+        trainerIds: ["nuc_unet_trainer-pre", "nuc_mlp_trainer-pre"],
         evaluatorIds: ["mask_iou", "dice", "pixel_accuracy"],
         status: "draft", runs: [], createdAt: Date.now(),
       },

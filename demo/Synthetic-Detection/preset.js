@@ -145,7 +145,7 @@
         name: "BBox Quality",
         schemaId: sid,
         datasetId: DS_ID,
-        trainerIds: ["synthetic_detection_trainer", "synthetic_detection_trainer-pre"],
+        trainerIds: ["synthetic_detection_trainer-pre"],
         evaluatorIds: ["bbox_mae", "class_accuracy", "iou_mean"],
         status: "draft",
         runs: [],
