@@ -119,6 +119,24 @@
           learningRate: 0.001,
           optimizerType: "adam",
         }
+      },
+      // Pre-trained — weights loaded on init
+      {
+        id: "synthetic_detection_trainer-pre",
+        name: "Single-Box Detector (pre-trained)",
+        schemaId: sid,
+        datasetId: DS_ID,
+        modelId: "synthetic_detection_model",
+        runtime: "server_pytorch",
+        runtimeBackend: "auto",
+        status: "done",
+        _pretrainedVar: "SINGLE_BOX_DETECTOR_PRE_TRAINED_PRETRAINED_BIN_B64",
+        trainCfg: {
+          epochs: 18,
+          batchSize: 64,
+          learningRate: 0.001,
+          optimizerType: "adam",
+        }
       }
     ],
     evaluations: [
@@ -127,7 +145,7 @@
         name: "BBox Quality",
         schemaId: sid,
         datasetId: DS_ID,
-        trainerIds: ["synthetic_detection_trainer"],
+        trainerIds: ["synthetic_detection_trainer", "synthetic_detection_trainer-pre"],
         evaluatorIds: ["bbox_mae", "class_accuracy", "iou_mean"],
         status: "draft",
         runs: [],
