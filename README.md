@@ -23,7 +23,7 @@ The goal is not to advance state-of-the-art on any benchmark. It is to show that
 | | Feature | What it means |
 |---|---------|--------------|
 | **1** | **Visual graph editor** | Design neural networks by dragging nodes — no model code needed. 35+ node types: MLP, CNN, RNN, VAE, GAN, Diffusion, Transformer, NLP. |
-| **2** | **3 runtimes, 1 graph** | Same visual graph trains in TF.js (browser), PyTorch (server with CUDA), or the built-in JupyterLite notebook runner. Train anywhere, compare everywhere. |
+| **2** | **3 runtimes, 1 graph** | Same visual graph trains in TF.js (browser), PyTorch (server with CUDA), or the built-in notebook runner (Pyodide / server kernel). Train anywhere, compare everywhere. |
 | **3** | **Cross-runtime weight transfer** | Weights trained in PyTorch load into TF.js and vice versa. Handles Dense transpose, LSTM gate reorder, Conv NCHW/NHWC shuffle, BatchNorm stats — per layer type. |
 | **4** | **Built-in + exported notebooks** | Run the generated notebook inside Surrogate Studio, or export `.ipynb` + `dataset.csv` + `model.graph.json` as a reproducible PyTorch training bundle for JupyterLab, Colab, or any PyTorch environment. Weights transfer back to the browser. |
 | **5** | **Pretrained instant results** | Most demos ship with trained weights. Open the page, see loss curves and metrics immediately. Retrain or modify if you want. |
@@ -140,8 +140,14 @@ docker build -t surrogate-studio . && docker run -p 3777:3777 surrogate-studio
 |-------|----------|
 | Contract tests | 31 scripts |
 | Multi-schema pipeline | 11 schemas (5 full train+eval, 6 module-verified) |
-| GitHub Pages E2E | 297 checks across all 15 demos |
+| GitHub Pages E2E | 297 checks across all 16 demos |
 | CI | Every push/PR via GitHub Actions |
+
+---
+
+## How This Was Built
+
+Surrogate Studio was architected and designed by a human (the schema-driven pipeline, plugin demo pattern, cross-runtime weight contract, and 3-runtime notebook export were all deliberate architectural decisions). Implementation was done with AI coding agents (Claude Code + Codex) acting as pair programmers — the human set the design constraints, the agents wrote the code, and a multi-round review cycle caught 10 bugs before launch. The value of this project is in the architecture, not in any single line of code.
 
 ---
 
