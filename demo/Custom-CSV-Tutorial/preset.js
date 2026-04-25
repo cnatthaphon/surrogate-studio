@@ -92,6 +92,13 @@
         runtime: "js_client", runtimeBackend: "auto", status: "draft",
         trainCfg: { epochs: 50, batchSize: 16, learningRate: 0.01, optimizer: "adam" },
       },
+      // Pre-trained (TF.js CPU)
+      { id: "csv_mlp_pre", name: "MLP (pre-trained)", schemaId: sid, datasetId: DS_ID, modelId: "csv_mlp", status: "done",
+        _pretrainedVar: "MLP_CLASSIFIER_WITH_BN_DROPOUT_PRE_TRAINED_PRETRAINED_BIN_B64",
+        config: { epochs: 50, batchSize: 16, learningRate: 0.01, optimizerType: "adam" } },
+      { id: "csv_simple_pre", name: "Simple MLP (pre-trained)", schemaId: sid, datasetId: DS_ID, modelId: "csv_simple", status: "done",
+        _pretrainedVar: "SIMPLE_MLP_BASELINE_PRE_TRAINED_PRETRAINED_BIN_B64",
+        config: { epochs: 50, batchSize: 16, learningRate: 0.01, optimizerType: "adam" } },
     ],
     generations: [],
     evaluations: [

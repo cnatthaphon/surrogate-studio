@@ -32,8 +32,14 @@ try {
 }
 
 var sr = require("../src/schema_registry.js");
+global.OSCSchemaRegistry = sr;
 require("../src/schema_definitions_builtin.js");
 var dm = require("../src/dataset_modules.js");
+global.OSCDatasetModules = dm;
+try {
+  var _srcReg = require("../src/dataset_source_registry.js");
+  global.OSCDatasetSourceRegistry = _srcReg;
+} catch (_) {}
 var MBC = require("../src/model_builder_core.js");
 var TEC = require("../src/training_engine_core.js");
 var WS = require("../src/workspace_store.js");
@@ -46,6 +52,31 @@ if (!demoDir || !fs.existsSync(path.join(demoDir, "preset.js"))) {
   process.exit(1);
 }
 
+// Load demo-local schema + data + module files if present (e.g. LSTM-VAE, TrAISformer)
+var demoJsFiles = fs.readdirSync(demoDir).filter(function (f) {
+  return f.endsWith(".js") && f !== "preset.js" && !f.includes("pretrained");
+}).sort(function (a, b) {
+  // data files first, then schema, then module, then preset
+  var order = function (n) { return n.includes("data") ? 0 : n.includes("schema") ? 1 : 2; };
+  return order(a) - order(b);
+});
+demoJsFiles.forEach(function (f) {
+  try {
+    // Data files (var X = ...) need to run in global scope so modules can find them
+    if (f.includes("data") && !f.includes("module") && !f.includes("schema")) {
+      var vm = require("vm");
+      var src = fs.readFileSync(path.resolve(demoDir, f), "utf8");
+      vm.runInThisContext(src, { filename: f });
+      return;
+    }
+    var exported = require(path.resolve(demoDir, f));
+    // Register demo-local modules with the global dataset module registry
+    if (exported && exported.id && exported.build && typeof dm.registerModule === "function") {
+      dm.registerModule(exported);
+    }
+  } catch (e) { console.warn("  [load] " + f + ": " + e.message); }
+});
+
 // Load preset
 require(path.resolve(demoDir, "preset.js"));
 var presetKey = Object.keys(global).find(function (k) { return k.endsWith("_PRESET"); });
@@ -53,7 +84,8 @@ if (!presetKey) { console.error("No preset found"); process.exit(1); }
 var preset = global[presetKey];
 console.log("Preset:", presetKey, "models:", preset.models.length, "trainers:", preset.trainers.length);
 
-var schemaId = (preset.datasets && preset.datasets[0] && preset.datasets[0].schemaId) ||
+var schemaId = (preset.dataset && preset.dataset.schemaId) ||
+  (preset.datasets && preset.datasets[0] && preset.datasets[0].schemaId) ||
   (preset.models && preset.models[0] && preset.models[0].schemaId) || "";
 console.log("Schema:", schemaId);
 
@@ -87,7 +119,7 @@ async function buildDataset() {
   var result = await mod.build(cfg);
   if (!result) throw new Error("build returned null");
 
-  // flat array format
+  // flat array format (oscillator, synthetic, custom_csv)
   if (result.xTrain && result.xTrain.length) {
     // one-hot encode scalar labels for classification
     if (result.targetMode === "label" && typeof result.yTrain[0] === "number") {
@@ -99,11 +131,69 @@ async function buildDataset() {
     }
     return result;
   }
-  throw new Error("Unsupported build result format");
+
+  // records format (image classification: MNIST, Fashion-MNIST, CIFAR)
+  if (result.records) {
+    var train = result.records.train || {};
+    var val = result.records.val || {};
+    var test = result.records.test || {};
+    var nc2 = result.classCount || result.numClasses || 10;
+    result.xTrain = train.x || []; result.yTrain = (train.y || []).map(function (l) { return typeof l === "number" ? oneHot(l, nc2) : l; });
+    result.xVal = val.x || []; result.yVal = (val.y || []).map(function (l) { return typeof l === "number" ? oneHot(l, nc2) : l; });
+    result.xTest = test.x || []; result.yTest = (test.y || []).map(function (l) { return typeof l === "number" ? oneHot(l, nc2) : l; });
+    result.featureSize = result.featureSize || (result.xTrain[0] && result.xTrain[0].length) || 784;
+    result.targetMode = "logits";
+    result.labelsTrain = result.yTrain;
+    result.labelsVal = result.yVal;
+    result.labelsTest = result.yTest;
+    if (result.xTrain.length) return result;
+  }
+
+  // zero-copy format with splitIndices (MNIST-like, ant trajectory)
+  if (result.splitIndices) {
+    // Resolve through source registry if available
+    var _srcReg = global.OSCDatasetSourceRegistry || null;
+    if (_srcReg && typeof _srcReg.resolveDatasetSplit === "function") {
+      var tr = _srcReg.resolveDatasetSplit(result, "train");
+      var va = _srcReg.resolveDatasetSplit(result, "val");
+      var te = _srcReg.resolveDatasetSplit(result, "test");
+      if (tr.x && tr.x.length) {
+        var nc3 = result.classCount || 10;
+        result.xTrain = tr.x; result.yTrain = (tr.y || []).map(function (l) { return typeof l === "number" ? oneHot(l, nc3) : l; });
+        result.xVal = va.x || []; result.yVal = (va.y || []).map(function (l) { return typeof l === "number" ? oneHot(l, nc3) : l; });
+        result.xTest = te.x || []; result.yTest = (te.y || []).map(function (l) { return typeof l === "number" ? oneHot(l, nc3) : l; });
+        result.featureSize = result.featureSize || (result.xTrain[0] && result.xTrain[0].length) || 1;
+        result.targetMode = "logits";
+        result.labelsTrain = result.yTrain;
+        result.labelsVal = result.yVal;
+        result.labelsTest = result.yTest;
+        if (result.xTrain.length) return result;
+      }
+    }
+    // For modules that provide raw data arrays (ant trajectory etc.)
+    // The module should populate xTrain/yTrain via its own resolution
+    console.log("  splitIndices format without source registry — trying direct resolution...");
+  }
+
+  // bundle format (oscillator buildDatasetBundle)
+  if (result.kind === "dataset_bundle" && result.datasets) {
+    var activeKey = result.activeVariantId || Object.keys(result.datasets)[0];
+    var active = result.datasets[activeKey];
+    if (active && active.xTrain && active.xTrain.length) {
+      active.featureSize = active.featureSize || (active.xTrain[0] && active.xTrain[0].length) || 1;
+      return active;
+    }
+  }
+
+  console.log("  Dataset keys:", Object.keys(result).join(", "));
+  throw new Error("Unsupported build result format — no xTrain, records, or splitIndices found");
 }
 
 function slugify(name) {
-  return name.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
+  var s = name.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
+  // Ensure valid JS identifier (no leading digit)
+  if (/^[0-9]/.test(s)) s = "m" + s;
+  return s;
 }
 
 function exportPretrained(trainerName, config, metrics, epochs, model, outputPath) {
@@ -168,6 +258,10 @@ async function trainModel(modelDef, dataset, trainerDef) {
   if (!buildResult.model) { console.log("  SKIP (model build failed)"); return null; }
   console.log("  Model:", buildResult.model.countParams(), "params");
 
+  // Pass xTrain as yTrain — the training engine reads headType from graph
+  // and routes reconstruction heads to pixels, classification to labels.
+  // No per-model special cases here.
+
   var tc = trainerDef.trainCfg || trainerDef.config || {};
   var epochs = [];
   var trainResult = await TEC.trainModel(tf, {
@@ -175,11 +269,15 @@ async function trainModel(modelDef, dataset, trainerDef) {
     isSequence: false,
     headConfigs: buildResult.headConfigs,
     dataset: {
-      xTrain: dataset.xTrain, yTrain: dataset.yTrain,
-      xVal: dataset.xVal, yVal: dataset.yVal,
-      xTest: dataset.xTest, yTest: dataset.yTest,
+      xTrain: dataset.xTrain, yTrain: dataset.xTrain,
+      xVal: dataset.xVal, yVal: dataset.xVal,
+      xTest: dataset.xTest, yTest: dataset.xTest,
+      labelsTrain: dataset.labelsTrain || dataset.yTrain,
+      labelsVal: dataset.labelsVal || dataset.yVal,
+      labelsTest: dataset.labelsTest || dataset.yTest,
       targetMode: dataset.targetMode || defaultTarget,
       numClasses: dataset.numClasses || dataset.classCount,
+      paramNames: dataset.paramNames, paramSize: dataset.paramSize,
     },
     epochs: tc.epochs || 30,
     batchSize: tc.batchSize || 32,

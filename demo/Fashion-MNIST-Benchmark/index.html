@@ -13,6 +13,16 @@
 
   <!-- Surrogate Studio bundle -->
   <script src="../../dist/surrogate-studio.js"></script>
+  <script src="../../src/pretrained_loader.js"></script>
+
+  <!-- Pretrained weights (TF.js CPU, 20 epochs) -->
+  <script src="./m1_mlp_baseline_pretrained.js"></script>
+  <script src="./m3_dense_autoencoder_pretrained.js"></script>
+  <script src="./m4_conv_autoencoder_pretrained.js"></script>
+  <script src="./m5_vae_pretrained.js"></script>
+  <script src="./m6_vae_classifier_pretrained.js"></script>
+  <script src="./m7_denoising_ae_pretrained.js"></script>
+
   <script src="./preset.js"></script>
 </head>
 <body>
@@ -24,11 +34,12 @@
       if (preset.dataset) store.upsertDataset(preset.dataset);
       if (preset.models) preset.models.forEach(function (m) { store.upsertModel(m); });
       if (preset.trainers) preset.trainers.forEach(function (t) { store.upsertTrainerCard(t); });
+      if (preset.trainers) OSCPretrainedLoader.loadAll(store, preset.trainers);
       store.initTables({ tables: ["generationRuns", "evaluations"] });
       if (preset.generations) preset.generations.forEach(function (g) { store.save({ table: "generationRuns", values: [g] }); });
       if (preset.evaluations) preset.evaluations.forEach(function (e) { store.save({ table: "evaluations", values: [e] }); });
     }
-    SurrogateStudio.init({ mountEl: document.getElementById("app"), defaultSchemaId: "fashion_mnist", defaultTab: "dataset", store: store });
+    SurrogateStudio.init({ mountEl: document.getElementById("app"), defaultSchemaId: "fashion_mnist", defaultTab: "trainer", store: store });
   </script>
 </body>
 </html>

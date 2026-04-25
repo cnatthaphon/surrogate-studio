@@ -202,6 +202,13 @@
       { id: "t-vae",      name: "VAE Trainer",         schemaId: sid, datasetId: DS_ID, modelId: "m-vae",      status: "draft", config: { epochs: 20, batchSize: 128, learningRate: 0.0005, optimizerType: "adam", useServer: true } },
       { id: "t-vae-cls",  name: "VAE+Cls Trainer",     schemaId: sid, datasetId: DS_ID, modelId: "m-vae-cls",  status: "draft", config: { epochs: 20, batchSize: 128, learningRate: 0.0005, optimizerType: "adam", useServer: true } },
       { id: "t-denoiser", name: "Denoiser Trainer",    schemaId: sid, datasetId: DS_ID, modelId: "m-denoiser", status: "draft", config: { epochs: 20, batchSize: 128, learningRate: 0.001, optimizerType: "adam", useServer: true } },
+      // Pre-trained (TF.js CPU, 20 epochs)
+      { id: "t-mlp-pre",      name: "MLP (pre-trained)",      schemaId: sid, datasetId: DS_ID, modelId: "m-mlp",      status: "done", _pretrainedVar: "M1_MLP_BASELINE_PRE_TRAINED_PRETRAINED_BIN_B64", config: { epochs: 20, batchSize: 128, learningRate: 0.001, optimizerType: "adam" } },
+      { id: "t-ae-pre",       name: "AE (pre-trained)",       schemaId: sid, datasetId: DS_ID, modelId: "m-ae",       status: "done", _pretrainedVar: "M3_DENSE_AUTOENCODER_PRE_TRAINED_PRETRAINED_BIN_B64", config: { epochs: 20, batchSize: 128, learningRate: 0.001, optimizerType: "adam" } },
+      { id: "t-conv-ae-pre",  name: "Conv-AE (pre-trained)",  schemaId: sid, datasetId: DS_ID, modelId: "m-conv-ae",  status: "done", _pretrainedVar: "M4_CONV_AUTOENCODER_PRE_TRAINED_PRETRAINED_BIN_B64", config: { epochs: 20, batchSize: 128, learningRate: 0.001, optimizerType: "adam" } },
+      { id: "t-vae-pre",      name: "VAE (pre-trained)",      schemaId: sid, datasetId: DS_ID, modelId: "m-vae",      status: "done", _pretrainedVar: "M5_VAE_PRE_TRAINED_PRETRAINED_BIN_B64", config: { epochs: 20, batchSize: 128, learningRate: 0.0005, optimizerType: "adam" } },
+      { id: "t-vae-cls-pre",  name: "VAE+Cls (pre-trained)",  schemaId: sid, datasetId: DS_ID, modelId: "m-vae-cls",  status: "done", _pretrainedVar: "M6_VAE_CLASSIFIER_PRE_TRAINED_PRETRAINED_BIN_B64", config: { epochs: 20, batchSize: 128, learningRate: 0.0005, optimizerType: "adam" } },
+      { id: "t-denoiser-pre", name: "Denoiser (pre-trained)", schemaId: sid, datasetId: DS_ID, modelId: "m-denoiser", status: "done", _pretrainedVar: "M7_DENOISING_AE_PRE_TRAINED_PRETRAINED_BIN_B64", config: { epochs: 20, batchSize: 128, learningRate: 0.001, optimizerType: "adam" } },
     ],
 
     generations: [
