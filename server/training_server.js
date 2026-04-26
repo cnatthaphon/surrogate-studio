@@ -191,19 +191,45 @@ function startTraining(jobId) {
     if (text) broadcast(jobId, "status", "[stderr] " + text.slice(0, 500));
   });
 
+  // Record exit code but do NOT close clients yet — stdout may still have
+  // buffered data (the "complete" JSON line). The "close" event fires after
+  // all stdio streams are fully consumed, so that is where we finalize.
+  var _exitCode = null;
   proc.on("exit", function (code) {
+    _exitCode = code;
+  });
+
+  // "close" fires after exit AND after all stdio is drained — safe to finalize
+  proc.on("close", function () {
+    // process any remaining buffer that wasn't terminated by newline
+    if (buffer.trim()) {
+      try {
+        var msg = JSON.parse(buffer.trim());
+        if (msg.kind === "complete" && !job.result) {
+          job.result = msg.result;
+          job.status = "done";
+          var lightResult = Object.assign({}, msg.result);
+          delete lightResult.modelArtifacts;
+          delete lightResult.testPredictions;
+          delete lightResult.testTruth;
+          lightResult.hasArtifacts = !!(msg.result.modelArtifacts);
+          broadcast(jobId, "complete", lightResult);
+        }
+      } catch (e) { /* not valid JSON */ }
+    }
+
     if (job.status === "stopping" || job.status === "killed") {
       job.status = "stopped";
-    } else if (job.status === "running") {
-      if (code === 0 && job.result) {
+    } else if (job.status !== "done") {
+      if (_exitCode === 0 && job.result) {
         job.status = "done";
-      } else {
+      } else if (job.status === "running") {
         job.status = "error";
-        job.error = "Process exited with code " + code;
+        job.error = "Process exited with code " + _exitCode;
         broadcast(jobId, "error", { message: job.error });
       }
     }
-    // cleanup
+    // cleanup — now safe because all stdout data has been consumed
     try { fs.unlinkSync(configPath); } catch (e) {}
     job.clients.forEach(function (res) { try { res.end(); } catch (e) {} });
     job.clients = [];
@@ -508,9 +534,14 @@ var server = http.createServer(function (req, res) {
       res.write("event: epoch\ndata: " + JSON.stringify(ep) + "\n\n");
     });
 
-    // if already done, send result and close
+    // if already done, send lightweight result (same as live broadcast — no weights)
     if (job.status === "done" && job.result) {
-      res.write("event: complete\ndata: " + JSON.stringify(job.result) + "\n\n");
+      var doneResult = Object.assign({}, job.result);
+      delete doneResult.modelArtifacts;
+      delete doneResult.testPredictions;
+      delete doneResult.testTruth;
+      doneResult.hasArtifacts = !!(job.result.modelArtifacts);
+      res.write("event: complete\ndata: " + JSON.stringify(doneResult) + "\n\n");
       res.end();
       return;
     }

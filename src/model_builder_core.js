@@ -671,8 +671,6 @@
 
       var targetKey = String(target || nd.targetType || nd.target || "").trim().toLowerCase();
 
-      if (targetKey === "x" || targetKey === "v") return 1;
-      if (targetKey === "xv") return 2;
       if (targetKey === "label" || targetKey === "logits") {
         return Math.max(1, Number(datasetMeta.numClasses || datasetMeta.classCount || 1));
       }
