@@ -2878,7 +2878,16 @@
 
       var dataset = store ? store.getDataset(tCard.datasetId) : null;
       var model = store ? store.getModel(tCard.modelId) : null;
-      if (!dataset || !dataset.data) { onStatus("Generate the dataset first"); return; }
+      if (!dataset) { onStatus("Generate the dataset first"); return; }
+      // Check that dataset has actual records (not just config metadata)
+      var dsData = dataset.data || dataset;
+      var hasRecords = (dsData.records && (dsData.records.train || dsData.records.val)) ||
+        (dsData.xTrain && dsData.xTrain.length > 0) ||
+        (dsData.sourceDescriptor);
+      if (!hasRecords) {
+        onStatus("Dataset records not loaded — switch to Dataset tab and click Generate Dataset, then retry.");
+        return;
+      }
       if (!model || !model.graph) { onStatus("Model has no graph"); return; }
 
       var NBC = W.OSCNotebookCore || null;

@@ -64,5 +64,65 @@
     });
   }
 
-  return { loadAll: loadAll };
+  /**
+   * Auto-materialize dataset records for any dataset in the store that has
+   * a module but no records. Called after loadAll so pretrained cards have
+   * their datasets ready for Run Notebook without manual Generate step.
+   *
+   * Returns a Promise that resolves when all datasets are built (or immediately
+   * if all are already populated).
+   *
+   * Usage:
+   *   OSCPretrainedLoader.loadAll(store, preset.trainers);
+   *   OSCPretrainedLoader.ensureDatasetsReady(store).then(function () { ... });
+   */
+  function ensureDatasetsReady(store) {
+    if (!store || typeof store.listDatasets !== "function") return Promise.resolve();
+    var W = typeof window !== "undefined" ? window : {};
+    var dm = W.OSCDatasetModules || null;
+    if (!dm || typeof dm.getModuleForSchema !== "function") return Promise.resolve();
+
+    var datasets = store.listDatasets();
+    var pending = [];
+    datasets.forEach(function (ds) {
+      // Skip if records already populated
+      var d = ds.data || ds;
+      if ((d.records && (d.records.train || d.records.val)) ||
+          (d.xTrain && d.xTrain.length > 0)) {
+        return;
+      }
+      // Find module for this dataset's schema
+      var schemaId = ds.schemaId || d.schemaId || "";
+      var moduleId = ds.datasetModuleId || d.datasetModuleId || "";
+      var modList = dm.getModuleForSchema(schemaId);
+      if (!modList || !modList.length) return;
+      var mod = dm.getModule(moduleId || modList[0].id);
+      if (!mod || typeof mod.build !== "function") return;
+
+      // Build the dataset
+      var cfg = Object.assign({
+        seed: d.seed || ds.seed || 42,
+        schemaId: schemaId,
+        moduleId: mod.id,
+        sourceMode: "synthetic",
+      }, d.config || ds.config || d.splitConfig ? { splitConfig: d.splitConfig } : {});
+      if (d.totalCount || d.sourceTotalExamples) cfg.totalCount = d.totalCount || d.sourceTotalExamples;
+
+      var p;
+      try { p = mod.build(cfg); } catch (e) { console.warn("[pretrained] Dataset build failed:", ds.id, e.message); return; }
+      if (!p || typeof p.then !== "function") p = Promise.resolve(p);
+
+      pending.push(p.then(function (result) {
+        if (!result) return;
+        var updated = Object.assign({}, ds, { data: result, status: "ready", generatedAt: Date.now() });
+        store.upsertDataset(updated);
+      }).catch(function (e) {
+        console.warn("[pretrained] Dataset build failed:", ds.id, e.message);
+      }));
+    });
+
+    return pending.length ? Promise.all(pending) : Promise.resolve();
+  }
+
+  return { loadAll: loadAll, ensureDatasetsReady: ensureDatasetsReady };
 });
