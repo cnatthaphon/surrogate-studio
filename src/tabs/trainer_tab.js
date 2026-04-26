@@ -855,8 +855,8 @@
 
       var capturedMountId = _mountId;
 
-      // defer heavy work to let spinner render
-      setTimeout(function () {
+      // defer heavy work to let spinner render — async to yield between batches
+      setTimeout(async function () {
         if (_mountId !== capturedMountId) return; // tab switched away
 
         try {
@@ -963,6 +963,8 @@
             if (Array.isArray(inputTensors)) inputTensors.forEach(function (t) { if (t !== bTensor) t.dispose(); });
             bTensor.dispose();
             if (Array.isArray(bRaw)) bRaw.forEach(function (pt) { pt.dispose(); }); else bRaw.dispose();
+            // yield to renderer between batches so UI stays responsive
+            if (tf.nextFrame) await tf.nextFrame();
           }
           allPreds = allPredsArr;
 
