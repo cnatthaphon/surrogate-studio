@@ -25,7 +25,7 @@
       if (preset.dataset) store.upsertDataset(preset.dataset);
       if (preset.models) preset.models.forEach(function (m) { store.upsertModel(m); });
       if (preset.trainers) OSCPretrainedLoader.loadAll(store, preset.trainers);
-      OSCPretrainedLoader.ensureDatasetsReady(store);
+      if (typeof OSCPretrainedLoader !== "undefined" && typeof OSCPretrainedLoader.ensureDatasetsReady === "function") OSCPretrainedLoader.ensureDatasetsReady(store);
       store.initTables({ tables: ["generationRuns", "evaluations"] });
       if (preset.generations) preset.generations.forEach(function (g) { store.save({ table: "generationRuns", values: [g] }); });
       if (preset.evaluations) preset.evaluations.forEach(function (e) { store.save({ table: "evaluations", values: [e] }); });

@@ -1,5 +1,5 @@
 // Surrogate Studio - concatenated bundle
-// Generated: 2026-04-25T18:31:40Z
+// Generated: 2026-04-26T16:59:16Z
 // Source files: 58
 
 
@@ -20192,7 +20192,67 @@
     });
   }
 
-  return { loadAll: loadAll };
+  /**
+   * Auto-materialize dataset records for any dataset in the store that has
+   * a module but no records. Called after loadAll so pretrained cards have
+   * their datasets ready for Run Notebook without manual Generate step.
+   *
+   * Returns a Promise that resolves when all datasets are built (or immediately
+   * if all are already populated).
+   *
+   * Usage:
+   *   OSCPretrainedLoader.loadAll(store, preset.trainers);
+   *   OSCPretrainedLoader.ensureDatasetsReady(store).then(function () { ... });
+   */
+  function ensureDatasetsReady(store) {
+    if (!store || typeof store.listDatasets !== "function") return Promise.resolve();
+    var W = typeof window !== "undefined" ? window : {};
+    var dm = W.OSCDatasetModules || null;
+    if (!dm || typeof dm.getModuleForSchema !== "function") return Promise.resolve();
+
+    var datasets = store.listDatasets();
+    var pending = [];
+    datasets.forEach(function (ds) {
+      // Skip if records already populated
+      var d = ds.data || ds;
+      if ((d.records && (d.records.train || d.records.val)) ||
+          (d.xTrain && d.xTrain.length > 0)) {
+        return;
+      }
+      // Find module for this dataset's schema
+      var schemaId = ds.schemaId || d.schemaId || "";
+      var moduleId = ds.datasetModuleId || d.datasetModuleId || "";
+      var modList = dm.getModuleForSchema(schemaId);
+      if (!modList || !modList.length) return;
+      var mod = dm.getModule(moduleId || modList[0].id);
+      if (!mod || typeof mod.build !== "function") return;
+
+      // Build the dataset
+      var cfg = Object.assign({
+        seed: d.seed || ds.seed || 42,
+        schemaId: schemaId,
+        moduleId: mod.id,
+        sourceMode: "synthetic",
+      }, d.config || ds.config || d.splitConfig ? { splitConfig: d.splitConfig } : {});
+      if (d.totalCount || d.sourceTotalExamples) cfg.totalCount = d.totalCount || d.sourceTotalExamples;
+
+      var p;
+      try { p = mod.build(cfg); } catch (e) { console.warn("[pretrained] Dataset build failed:", ds.id, e.message); return; }
+      if (!p || typeof p.then !== "function") p = Promise.resolve(p);
+
+      pending.push(p.then(function (result) {
+        if (!result) return;
+        var updated = Object.assign({}, ds, { data: result, status: "ready", generatedAt: Date.now() });
+        store.upsertDataset(updated);
+      }).catch(function (e) {
+        console.warn("[pretrained] Dataset build failed:", ds.id, e.message);
+      }));
+    });
+
+    return pending.length ? Promise.all(pending) : Promise.resolve();
+  }
+
+  return { loadAll: loadAll, ensureDatasetsReady: ensureDatasetsReady };
 });
 
 
@@ -20870,8 +20930,6 @@
 
       var targetKey = String(target || nd.targetType || nd.target || "").trim().toLowerCase();
 
-      if (targetKey === "x" || targetKey === "v") return 1;
-      if (targetKey === "xv") return 2;
       if (targetKey === "label" || targetKey === "logits") {
         return Math.max(1, Number(datasetMeta.numClasses || datasetMeta.classCount || 1));
       }
@@ -29704,7 +29762,16 @@
 
       var dataset = store ? store.getDataset(tCard.datasetId) : null;
       var model = store ? store.getModel(tCard.modelId) : null;
-      if (!dataset || !dataset.data) { onStatus("Generate the dataset first"); return; }
+      if (!dataset) { onStatus("Generate the dataset first"); return; }
+      // Check that dataset has actual records (not just config metadata)
+      var dsData = dataset.data || dataset;
+      var hasRecords = (dsData.records && (dsData.records.train || dsData.records.val)) ||
+        (dsData.xTrain && dsData.xTrain.length > 0) ||
+        (dsData.sourceDescriptor);
+      if (!hasRecords) {
+        onStatus("Dataset records not loaded — switch to Dataset tab and click Generate Dataset, then retry.");
+        return;
+      }
       if (!model || !model.graph) { onStatus("Model has no graph"); return; }
 
       var NBC = W.OSCNotebookCore || null;
