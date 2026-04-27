@@ -213,7 +213,8 @@
     var statusEl = _el("span", { style: "font-size:11px;color:#64748b;margin-left:8px;" }, "Starting kernel...");
     toolbar.appendChild(statusEl);
 
-    var runAllBtn = _el("button", { style: "margin-left:auto;padding:4px 12px;background:#0ea5e9;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:12px;" }, "Run All");
+    var runAllBtn = _el("button", { style: "margin-left:auto;padding:4px 12px;background:#334155;color:#94a3b8;border:none;border-radius:4px;cursor:not-allowed;font-size:12px;" }, "Run All (waiting for kernel...)");
+    runAllBtn.disabled = true;
     toolbar.appendChild(runAllBtn);
 
     var closeBtn = _el("button", { style: "padding:4px 12px;background:#334155;color:#e2e8f0;border:none;border-radius:4px;cursor:pointer;font-size:12px;" }, "Close");
@@ -329,14 +330,20 @@
 
     document.body.appendChild(_overlay);
 
-    // Start kernel
+    // Start kernel — enable Run All only after kernel is ready
     _startKernel(function (err, kid) {
       if (err) {
         statusEl.textContent = "Kernel failed: " + (err.message || err);
         statusEl.style.color = "#f43f5e";
+        runAllBtn.textContent = "Run All (kernel failed)";
       } else {
         statusEl.textContent = "Kernel ready (" + kid + ")";
         statusEl.style.color = "#4ade80";
+        runAllBtn.disabled = false;
+        runAllBtn.textContent = "Run All";
+        runAllBtn.style.background = "#0ea5e9";
+        runAllBtn.style.color = "#fff";
+        runAllBtn.style.cursor = "pointer";
       }
     });
   }

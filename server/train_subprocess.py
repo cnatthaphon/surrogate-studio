@@ -389,6 +389,10 @@ def main():
             if target.shape != head_pred.shape:
                 if head_pred.shape[-1] == 1 and target.dim() > 1:
                     target = target[:, :1] if target.shape[-1] >= 1 else torch.ones_like(head_pred)
+            # BCE requires both pred and target in [0,1]
+            if hl.get("bce_binary"):
+                target = target.float().clamp(0.0, 1.0)
+                head_pred = head_pred.clamp(0.0, 1.0)
             total = total + hl["weight"] * hl["fn"](head_pred, target)
         return total
 

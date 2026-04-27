@@ -283,9 +283,7 @@ def infer_output_heads(nodes: Dict[str, Any], reachable: Sequence[str], param_si
         target = str(d.get("targetType", d.get("target", "x")))
         if target not in ("x", "v", "xv", "params", "traj"):
             raise ValueError(f"output_layer node {nid}: unsupported target '{target}'")
-        if "matchWeight" not in d:
-            raise ValueError(f"output_layer node {nid}: missing required data.matchWeight")
-        match_weight = float(d["matchWeight"])
+        match_weight = float(d.get("matchWeight", 1.0))
         if not math.isfinite(match_weight) or match_weight < 0:
             raise ValueError(f"output_layer node {nid}: invalid data.matchWeight={d.get('matchWeight')!r} (must be finite >= 0)")
         params_select_raw = d.get("paramsSelect", "")
@@ -1533,11 +1531,9 @@ def train_model(
             continue
         # Read matchWeight from the first latent node in the group.
         _ld = (model.nodes[ids[0]].get("data") or {})
-        if "matchWeight" not in _ld:
-            raise ValueError(f"latent node {ids[0]}: missing required data.matchWeight")
-        _lmw = float(_ld["matchWeight"])
+        _lmw = float(_ld.get("matchWeight", 1.0))
         if not math.isfinite(_lmw) or _lmw < 0:
-            raise ValueError(f"latent node {ids[0]}: invalid data.matchWeight={_ld.get('matchWeight')!r} (must be finite >= 0)")
+            _lmw = 1.0
         for _ in ids[1:]:
             latent_heads.append({"target": "latent_diff", "loss": "mse", "matchWeight": _lmw, "units": model._node_dim[ids[0]], "wx": 1.0, "wv": 1.0})
     vae_heads: List[Dict[str, Any]] = []
@@ -1548,20 +1544,18 @@ def train_model(
             raise ValueError(f"reparam_layer node {nid}: missing required data.group")
         if "beta" not in d:
             raise ValueError(f"reparam_layer node {nid}: missing required data.beta")
-        if "matchWeight" not in d:
-            raise ValueError(f"reparam_layer node {nid}: missing required data.matchWeight")
         g = str(d.get("group"))
-        beta = float(d["beta"])
+        beta = float(d.get("beta", 1e-3))
         if not math.isfinite(beta) or beta < 0:
-            raise ValueError(f"reparam_layer node {nid}: invalid data.beta={d.get('beta')!r} (must be finite >= 0)")
+            beta = 1e-3
         ins = [e for e in incoming_edges(model.nodes, nid) if e[0] in model.reachable]
         if len(ins) != 2:
             continue
         mu_id = ins[0][0]
         units = int(model._node_dim.get(mu_id, 2))
-        _vmw = float(d["matchWeight"])
+        _vmw = float(d.get("matchWeight", 1.0))
         if not math.isfinite(_vmw) or _vmw < 0:
-            raise ValueError(f"reparam_layer node {nid}: invalid data.matchWeight={d.get('matchWeight')!r} (must be finite >= 0)")
+            _vmw = 1.0
         vae_heads.append({
             "target": "latent_kl",
             "loss": "mse",

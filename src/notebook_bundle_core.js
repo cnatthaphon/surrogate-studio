@@ -1813,10 +1813,16 @@
 
     // Cell 7: Evaluate on test set
     cells.push(makeCodeCell(
+      "# Safe defaults in case prediction fails\n" +
+      "mae = float('nan'); mse = float('nan'); r2 = float('nan')\n\n" +
       "model.eval()\n" +
       "with torch.no_grad():\n" +
-      "    pred = model(x_test.to(device)).cpu().numpy()\n" +
-      "    truth = y_test.numpy()\n\n" +
+      "    _raw = model(x_test.to(device))\n" +
+      "    pred = (_raw[0] if isinstance(_raw, list) else _raw).cpu().numpy()\n" +
+      "    truth = y_test.numpy()\n" +
+      "    # Align shapes: if pred has fewer columns (e.g. regression head on detection), slice truth\n" +
+      "    if pred.shape != truth.shape and pred.ndim == truth.ndim == 2 and pred.shape[0] == truth.shape[0]:\n" +
+      "        truth = truth[:, :pred.shape[1]]\n\n" +
       "mae = np.mean(np.abs(pred - truth))\n" +
       "mse = np.mean((pred - truth) ** 2)\n" +
       "ss_res = np.sum((truth - pred) ** 2)\n" +

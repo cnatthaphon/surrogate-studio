@@ -2918,7 +2918,14 @@
         var exportPrepared = _prepareDatasetForNotebookExport(dataset.data, W);
         var exportDsData = exportPrepared.dataset;
 
-        var notebookRowLimit = Math.max(1000, Math.floor(Number((config && config.notebookRowLimit) || (tCard && tCard.config && tCard.config.notebookRowLimit) || 10000) || 10000));
+        // Cap notebook dataset by total value count (not just rows) to prevent
+        // multi-MB CSV embedding that freezes the page. 500K values keeps CSV under ~4MB.
+        var maxRowsCfg = Math.max(100, Math.floor(Number((config && config.notebookRowLimit) || (tCard && tCard.config && tCard.config.notebookRowLimit) || 10000) || 10000));
+        var dsFeatureSize = Number((exportDsData && exportDsData.featureSize) ||
+          (exportDsData && exportDsData.xTrain && exportDsData.xTrain[0] && exportDsData.xTrain[0].length) ||
+          (exportDsData && exportDsData.records && exportDsData.records.train && exportDsData.records.train.x && exportDsData.records.train.x[0] && exportDsData.records.train.x[0].length) || 1);
+        var maxValues = 500000;
+        var notebookRowLimit = Math.min(maxRowsCfg, Math.max(100, Math.floor(maxValues / Math.max(1, dsFeatureSize))));
         var preview = exportPrepared.usesServerReference
           ? { dataset: exportDsData, truncated: false, totalRows: 0, keptRows: 0 }
           : _limitNotebookDatasetRows(exportDsData, notebookRowLimit);
