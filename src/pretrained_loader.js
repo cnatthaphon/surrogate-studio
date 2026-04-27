@@ -99,13 +99,12 @@
       var mod = dm.getModule(moduleId || modList[0].id);
       if (!mod || typeof mod.build !== "function") return;
 
-      // Build the dataset
+      // Build the dataset — don't force sourceMode; let the module + preset config decide
       var cfg = Object.assign({
         seed: d.seed || ds.seed || 42,
         schemaId: schemaId,
         moduleId: mod.id,
-        sourceMode: "synthetic",
-      }, d.config || ds.config || d.splitConfig ? { splitConfig: d.splitConfig } : {});
+      }, d.config || ds.config || {}, d.splitConfig ? { splitConfig: d.splitConfig } : {});
       if (d.totalCount || d.sourceTotalExamples) cfg.totalCount = d.totalCount || d.sourceTotalExamples;
 
       var p;
