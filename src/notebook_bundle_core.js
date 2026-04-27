@@ -1754,11 +1754,20 @@
       "    val_dl = DataLoader(TensorDataset(x_val, y_val), batch_size=BATCH_SIZE)\n\n" +
       "def compute_loss(pred, xb, yb, phase):\n" +
       "    total = torch.tensor(0.0, device=device)\n" +
-      "    for hl in head_losses:\n" +
+      "    preds = pred if isinstance(pred, list) else [pred]\n" +
+      "    for i, hl in enumerate(head_losses):\n" +
       "        if hl['phase'] != phase and hl['phase'] != '' and phase != '': continue\n" +
-      "        t = yb\n" +
-      "        if hl['cls']: total = total + hl['weight'] * hl['fn'](pred, t.argmax(dim=-1) if t.ndim > 1 and t.shape[-1] > 1 else t.long().squeeze(-1))\n" +
-      "        else: total = total + hl['weight'] * hl['fn'](pred, t)\n" +
+      "        hp = preds[i] if i < len(preds) else preds[0]\n" +
+      "        t = yb if not isinstance(yb, list) else torch.tensor(yb, dtype=torch.float32, device=device)\n" +
+      "        if hl['cls']:\n" +
+      "            total = total + hl['weight'] * hl['fn'](hp, t.argmax(dim=-1) if t.ndim > 1 and t.shape[-1] > 1 else t.long().squeeze(-1))\n" +
+      "        else:\n" +
+      "            if isinstance(hl['fn'], nn.BCELoss):\n" +
+      "                t = t.float().clamp(0.0, 1.0)\n" +
+      "                hp = hp.clamp(0.0, 1.0)\n" +
+      "            if t.shape != hp.shape and t.ndim == hp.ndim == 2 and t.shape[0] == hp.shape[0]:\n" +
+      "                t = t[:, :hp.shape[1]]\n" +
+      "            total = total + hl['weight'] * hl['fn'](hp, t)\n" +
       "    return total\n\n" +
       "history = {'train_loss': [], 'val_loss': []}\n" +
       "best_val = float('inf')\n" +
@@ -1914,7 +1923,8 @@
       "# For VAE: sample z ~ N(0,1) and pass through decoder.\n" +
       "# For AE/supervised: skip this cell.\n\n" +
       "# Try to find the bottleneck dimension from the model\n" +
-      "min_dim = min(p.shape[0] for p in model.parameters() if p.dim() == 2)\n" +
+      "_linear_dims = [p.shape[0] for p in model.parameters() if p.dim() == 2]\n" +
+      "min_dim = min(_linear_dims) if _linear_dims else 32\n" +
       "latent_dim = min(min_dim, 128)  # heuristic: smallest linear layer = bottleneck\n" +
       "print(f'Estimated latent dim: {latent_dim}')\n\n" +
       "try:\n" +

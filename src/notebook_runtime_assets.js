@@ -4,10 +4,5 @@
   function get(name) { return FILES[name] || ""; }
   function has(name) { return name in FILES; }
   function list() { return Object.keys(FILES); }
-  global.OSCNotebookRuntimeAssets = {
-    files: FILES,
-    get: get,
-    has: has,
-    list: list,
-  };
+  global.OSCNotebookRuntimeAssets = { files: FILES, get: get, has: has, list: list };
 })(typeof window !== "undefined" ? window : globalThis);
