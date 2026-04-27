@@ -1760,7 +1760,9 @@
       "        hp = preds[i] if i < len(preds) else preds[0]\n" +
       "        t = yb if not isinstance(yb, list) else torch.tensor(yb, dtype=torch.float32, device=device)\n" +
       "        if hl['cls']:\n" +
-      "            total = total + hl['weight'] * hl['fn'](hp, t.argmax(dim=-1) if t.ndim > 1 and t.shape[-1] > 1 else t.long().squeeze(-1))\n" +
+      "            _cls_t = t.argmax(dim=-1) if t.ndim > 1 and t.shape[-1] > 1 else t.long().squeeze(-1)\n" +
+      "            _cls_t = _cls_t.clamp(0, hp.shape[-1] - 1)  # guard: label must be < num_classes\n" +
+      "            total = total + hl['weight'] * hl['fn'](hp, _cls_t)\n" +
       "        else:\n" +
       "            if isinstance(hl['fn'], nn.BCELoss):\n" +
       "                t = t.float().clamp(0.0, 1.0)\n" +
