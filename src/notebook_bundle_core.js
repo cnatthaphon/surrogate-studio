@@ -1490,6 +1490,35 @@
       "- Learning rate: " + (trainCfg.learningRate || 0.001) + "\n"
     ));
 
+    // Optional kernel-environment probe (diagnostic for BUG-27) — opt-in only.
+    // Default off to preserve canonical cell ordering for downstream consumers
+    // (e.g. test_headless_generic_notebook_export expects setup at codeCells[0]
+    // and runtime-loader at codeCells[3]). Enable per call via opts.includeKernelProbe
+    // = true. The probe prints sys.executable / sys.path / torch availability
+    // before any imports so a failing kernel can be diagnosed without rebuilds.
+    if (opts.includeKernelProbe) {
+      cells.push(makeCodeCell(
+        "# Kernel diagnostic probe (BUG-27)\n" +
+        "import sys, os\n" +
+        "print('executable:', sys.executable)\n" +
+        "print('cwd:', os.getcwd())\n" +
+        "print('PYTHONPATH:', os.environ.get('PYTHONPATH', '<unset>'))\n" +
+        "print('sys.path:')\n" +
+        "for _p in sys.path:\n" +
+        "    print('  -', _p)\n" +
+        "try:\n" +
+        "    import torch\n" +
+        "    print('torch OK:', torch.__version__, 'from', torch.__file__)\n" +
+        "except ImportError as _e:\n" +
+        "    print('torch FAIL:', _e)\n",
+      {
+        surrogate: {
+          role: "diagnostic",
+          summary: "Kernel/venv probe — prints sys.executable, sys.path, torch availability"
+        }
+      }));
+    }
+
     // Cell 1: Setup
     cells.push(makeCodeCell(
       "# Configuration — edit paths here\n" +
@@ -2279,6 +2308,7 @@
         datasetSourceDescriptorPath: datasetPack.sourceDescriptorRef || "",
         trainSubprocessSource: genericRuntime.trainSubprocessSource,
         serverHelperSources: genericRuntime.helperSources,
+        includeKernelProbe: !!cfg.includeKernelProbe,
       });
     }
 
@@ -2395,6 +2425,7 @@
         datasetSourceDescriptorPath: datasetPack.sourceDescriptorRef || "",
         embedDataset: true,
         embedGraph: true,
+        includeKernelProbe: !!cfg.includeKernelProbe,
         graphPayload: sessions[0] && sessions[0].drawflowGraph ? sessions[0].drawflowGraph : null,
         trainSubprocessSource: genericRuntime.trainSubprocessSource,
         serverHelperSources: genericRuntime.helperSources,
