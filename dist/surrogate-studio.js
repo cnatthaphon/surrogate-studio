@@ -1,5 +1,5 @@
 // Surrogate Studio - concatenated bundle
-// Generated: 2026-04-28T09:40:47Z
+// Generated: 2026-04-28T10:08:06Z
 // Source files: 58
 
 
@@ -19147,20 +19147,29 @@
       "            if len(_batch) > 2: model._class_labels = _batch[2].to(device)\n" +
       "            optimizer.zero_grad()\n" +
       "            loss = compute_loss(model(xb), xb, yb, phase)\n" +
-      "            loss.backward()\n" +
-      "            optimizer.step()\n" +
-      "            tl += loss.item(); nb += 1\n" +
+      "            # Skip backward when no head contributed (e.g. GAN generator phase\n" +
+      "            # where every active head has loss=none). loss.requires_grad is\n" +
+      "            # False whenever the loss tensor has no grad_fn — calling backward()\n" +
+      "            # would raise 'element 0 ... does not require grad and does not\n" +
+      "            # have a grad_fn'. Phase still runs; just no parameter update this step.\n" +
+      "            if loss.requires_grad:\n" +
+      "                loss.backward()\n" +
+      "                optimizer.step()\n" +
+      "            tl += float(loss.item()); nb += 1\n" +
       "        phase_losses[phase] = tl / max(nb, 1)\n\n" +
       "    tl = sum(phase_losses.values()) / max(len(phase_losses), 1)\n" +
       "    model.eval()\n" +
       "    vl = 0; nv = 0\n" +
-      "    with torch.no_grad():\n" +
-      "        for _batchv in val_dl:\n" +
-      "            xb, yb = _batchv[0].to(device), _batchv[1].to(device)\n" +
-      "            if len(_batchv) > 2: model._class_labels = _batchv[2].to(device)\n" +
-      "            vl += compute_loss(model(xb), xb, yb, '').item(); nv += 1\n" +
-      "    vl /= max(nv, 1)\n" +
-      "    scheduler.step(vl)\n\n" +
+      "    # Skip val pass when split is empty (some presets train on full source\n" +
+      "    # with valFrac=0, e.g. GAN-only training).\n" +
+      "    if len(x_val) > 0:\n" +
+      "        with torch.no_grad():\n" +
+      "            for _batchv in val_dl:\n" +
+      "                xb, yb = _batchv[0].to(device), _batchv[1].to(device)\n" +
+      "                if len(_batchv) > 2: model._class_labels = _batchv[2].to(device)\n" +
+      "                vl += float(compute_loss(model(xb), xb, yb, '').item()); nv += 1\n" +
+      "    vl = vl / nv if nv > 0 else float(tl)\n" +
+      "    if len(x_val) > 0: scheduler.step(vl)\n\n" +
       "    improved = vl < best_val\n" +
       "    if improved:\n" +
       "        best_val = vl\n" +
@@ -19188,25 +19197,31 @@
     // Cell 7: Evaluate on test set
     cells.push(makeCodeCell(
       "# Safe defaults in case prediction fails\n" +
-      "mae = float('nan'); mse = float('nan'); r2 = float('nan')\n\n" +
-      "model.eval()\n" +
-      "with torch.no_grad():\n" +
-      "    _raw = model(x_test.to(device))\n" +
-      "    pred = (_raw[0] if isinstance(_raw, list) else _raw).cpu().numpy()\n" +
-      "    truth = y_test.numpy()\n" +
-      "    # Align shapes: if pred has fewer columns (e.g. regression head on detection), slice truth\n" +
-      "    if pred.shape != truth.shape and pred.ndim == truth.ndim == 2 and pred.shape[0] == truth.shape[0]:\n" +
-      "        truth = truth[:, :pred.shape[1]]\n\n" +
-      "mae = np.mean(np.abs(pred - truth))\n" +
-      "mse = np.mean((pred - truth) ** 2)\n" +
-      "ss_res = np.sum((truth - pred) ** 2)\n" +
-      "ss_tot = np.sum((truth - truth.mean(axis=0)) ** 2)\n" +
-      "r2 = 1 - ss_res / ss_tot if ss_tot > 0 else 0\n\n" +
-      "print(f'Test MAE:  {mae:.6f}')\n" +
-      "print(f'Test MSE:  {mse:.6f}')\n" +
-      "print(f'Test R²:   {r2:.6f}')\n\n" +
+      "mae = float('nan'); mse = float('nan'); r2 = float('nan')\n" +
+      "pred = None; truth = None\n\n" +
+      "if len(x_test) == 0:\n" +
+      "    # Empty test split (some presets train on full source with testFrac=0).\n" +
+      "    # Skip test metrics and shape-aligned truth/pred construction.\n" +
+      "    print('Test split is empty — skipping test-set metrics.')\n" +
+      "else:\n" +
+      "    model.eval()\n" +
+      "    with torch.no_grad():\n" +
+      "        _raw = model(x_test.to(device))\n" +
+      "        pred = (_raw[0] if isinstance(_raw, list) else _raw).cpu().numpy()\n" +
+      "        truth = y_test.numpy()\n" +
+      "        # Align shapes: if pred has fewer columns (e.g. regression head on detection), slice truth\n" +
+      "        if pred.shape != truth.shape and pred.ndim == truth.ndim == 2 and pred.shape[0] == truth.shape[0]:\n" +
+      "            truth = truth[:, :pred.shape[1]]\n\n" +
+      "    mae = np.mean(np.abs(pred - truth))\n" +
+      "    mse = np.mean((pred - truth) ** 2)\n" +
+      "    ss_res = np.sum((truth - pred) ** 2)\n" +
+      "    ss_tot = np.sum((truth - truth.mean(axis=0)) ** 2)\n" +
+      "    r2 = 1 - ss_res / ss_tot if ss_tot > 0 else 0\n\n" +
+      "    print(f'Test MAE:  {mae:.6f}')\n" +
+      "    print(f'Test MSE:  {mse:.6f}')\n" +
+      "    print(f'Test R\\u00b2:   {r2:.6f}')\n\n" +
       "# Classification metrics (if applicable)\n" +
-      "if is_cls:\n" +
+      "if is_cls and pred is not None and truth is not None:\n" +
       "    from sklearn.metrics import confusion_matrix, classification_report\n" +
       "    pred_labels = pred.argmax(axis=1)\n" +
       "    true_labels = truth.argmax(axis=1) if truth.ndim > 1 and truth.shape[1] > 1 else truth.flatten().astype(int)\n" +
@@ -19220,14 +19235,15 @@
       "    plt.colorbar(); plt.xlabel('Predicted'); plt.ylabel('True')\n" +
       "    plt.title(f'Confusion Matrix (Accuracy={accuracy:.2%})')\n" +
       "    plt.tight_layout(); plt.show()\n\n" +
-      "# Pred vs Truth scatter (first target dimension)\n" +
-      "plt.figure(figsize=(6, 6))\n" +
-      "plt.scatter(truth[:, 0], pred[:, 0], alpha=0.5, s=10)\n" +
-      "lims = [min(truth[:, 0].min(), pred[:, 0].min()), max(truth[:, 0].max(), pred[:, 0].max())]\n" +
-      "plt.plot(lims, lims, 'r--', alpha=0.5)\n" +
-      "plt.xlabel('Truth'); plt.ylabel('Predicted')\n" +
-      "plt.title(f'Pred vs Truth (dim 0) R²={r2:.4f}')\n" +
-      "plt.grid(True); plt.tight_layout(); plt.show()\n"
+      "# Pred vs Truth scatter (first target dimension) — skipped on empty test split\n" +
+      "if pred is not None and truth is not None and pred.size > 0 and truth.size > 0:\n" +
+      "    plt.figure(figsize=(6, 6))\n" +
+      "    plt.scatter(truth[:, 0], pred[:, 0], alpha=0.5, s=10)\n" +
+      "    lims = [min(truth[:, 0].min(), pred[:, 0].min()), max(truth[:, 0].max(), pred[:, 0].max())]\n" +
+      "    plt.plot(lims, lims, 'r--', alpha=0.5)\n" +
+      "    plt.xlabel('Truth'); plt.ylabel('Predicted')\n" +
+      "    plt.title(f'Pred vs Truth (dim 0) R\\u00b2={r2:.4f}')\n" +
+      "    plt.grid(True); plt.tight_layout(); plt.show()\n"
     ));
 
     // Cell 8: Generation — reconstruction + random sampling (for VAE/AE)
