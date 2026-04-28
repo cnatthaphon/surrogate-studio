@@ -7,3 +7,8 @@ __pycache__/
 debug.html
 index_legacy.html
 *.bkp
+
+# generated training artifacts (root-level)
+/dataset.csv
+/model_artifacts.json
+/model_weights.pth

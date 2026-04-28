@@ -69,6 +69,13 @@
    * a module but no records. Called after loadAll so pretrained cards have
    * their datasets ready for Run Notebook without manual Generate step.
    *
+   * Idempotent: skips datasets that already carry any recognized form of data
+   * (records / xTrain / sourceDescriptor / splitIndices+sourceId / trajectories).
+   *
+   * Stashes the in-flight Promise on `store._datasetsReadyPromise` so other
+   * consumers (e.g. the Run Notebook gate) can await readiness without
+   * re-entering this function.
+   *
    * Returns a Promise that resolves when all datasets are built (or immediately
    * if all are already populated).
    *
@@ -80,18 +87,32 @@
     if (!store || typeof store.listDatasets !== "function") return Promise.resolve();
     var W = typeof window !== "undefined" ? window : {};
     var dm = W.OSCDatasetModules || null;
-    if (!dm || typeof dm.getModuleForSchema !== "function") return Promise.resolve();
+    var reg = W.OSCDatasetSourceRegistry || null;
+    var hasData = reg && typeof reg.hasDatasetData === "function"
+      ? reg.hasDatasetData
+      : function (ds) {
+          var d = (ds && ds.data) || ds || {};
+          return !!((d.records && (d.records.train || d.records.val)) ||
+                    (d.xTrain && d.xTrain.length > 0) ||
+                    d.sourceDescriptor ||
+                    (d.splitIndices && (
+                      (d.splitIndices.train && d.splitIndices.train.length) ||
+                      (d.splitIndices.val && d.splitIndices.val.length) ||
+                      (d.splitIndices.test && d.splitIndices.test.length)
+                    )));
+        };
+    if (!dm || typeof dm.getModuleForSchema !== "function") {
+      var noopP = Promise.resolve();
+      try { store._datasetsReadyPromise = noopP; } catch (_e) {}
+      return noopP;
+    }
 
     var datasets = store.listDatasets();
     var pending = [];
     datasets.forEach(function (ds) {
-      // Skip if records already populated
-      var d = ds.data || ds;
-      if ((d.records && (d.records.train || d.records.val)) ||
-          (d.xTrain && d.xTrain.length > 0)) {
-        return;
-      }
+      if (hasData(ds)) return;
       // Find module for this dataset's schema
+      var d = ds.data || ds;
       var schemaId = ds.schemaId || d.schemaId || "";
       var moduleId = ds.datasetModuleId || d.datasetModuleId || "";
       var modList = dm.getModuleForSchema(schemaId);
@@ -120,8 +141,21 @@
       }));
     });
 
-    return pending.length ? Promise.all(pending) : Promise.resolve();
+    var readyP = pending.length ? Promise.all(pending).then(function () {}) : Promise.resolve();
+    try { store._datasetsReadyPromise = readyP; } catch (_e) {}
+    return readyP;
   }
 
-  return { loadAll: loadAll, ensureDatasetsReady: ensureDatasetsReady };
+  /**
+   * Await the in-flight readiness Promise stashed by ensureDatasetsReady,
+   * if any. Resolves immediately if no build was kicked off (or it has
+   * already completed).
+   */
+  function awaitDatasetsReady(store) {
+    if (!store) return Promise.resolve();
+    var p = store._datasetsReadyPromise;
+    return (p && typeof p.then === "function") ? p : Promise.resolve();
+  }
+
+  return { loadAll: loadAll, ensureDatasetsReady: ensureDatasetsReady, awaitDatasetsReady: awaitDatasetsReady };
 });
