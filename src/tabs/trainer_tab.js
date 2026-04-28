@@ -2999,6 +2999,11 @@
           runtimeFiles: runtimeFiles,
           runtimeLoader: runtimeLoader,
           returnObject: true,
+          // Opt-in BUG-27 diagnostic probe — set window.OSC_DEBUG_KERNEL_PROBE
+          // = true in the browser console before clicking Run Notebook to insert
+          // a kernel-env probe as the first code cell. Default off keeps cell
+          // ordering stable for downstream consumers/tests.
+          includeKernelProbe: !!(W && W.OSC_DEBUG_KERNEL_PROBE),
           sessions: [{
             id: tCard.id,
             name: tCard.name || "session",
