@@ -1,5 +1,5 @@
 // Surrogate Studio - concatenated bundle
-// Generated: 2026-04-28T10:20:41Z
+// Generated: 2026-04-28T10:53:04Z
 // Source files: 58
 
 
@@ -19062,19 +19062,49 @@
       "    head_losses = [{'fn': loss_fn, 'weight': 1.0, 'phase': '', 'cls': is_cls, 'target_key': '', 'head_type': ''}]\n\n" +
       "# Detect class_embed nodes — include labels in DataLoader if present\n" +
       "_has_class_embed = any(str(n.get('name','')).replace('_layer','') == 'class_embed' for n in data.values() if isinstance(n,dict))\n" +
+      "_nclasses = 10\n" +
+      "for _n in data.values():\n" +
+      "    if isinstance(_n, dict) and str(_n.get('name','')).replace('_layer','') == 'class_embed':\n" +
+      "        _nclasses = int((_n.get('data') or {}).get('numClasses', 10))\n" +
+      "        break\n" +
+      "\n" +
+      "def _compact_labels_for_class_embed(lbl, target_n):\n" +
+      "    \"\"\"Remap one-hot labels to compact `target_n`-wide one-hot.\n" +
+      "    Datasets often carry full-class one-hot (e.g. width 10 for Fashion-MNIST)\n" +
+      "    while a model conditions on a subset (e.g. classFilter=[0,1,7] → 3\n" +
+      "    classes). Without remap, model._class_labels (10-wide) feeds into a\n" +
+      "    class_embed expecting 3 dims and the next Linear sees a wider concat\n" +
+      "    than its in_features. Convention: observed class indices are mapped\n" +
+      "    to 0..target_n-1 in sorted order — same compact convention used by\n" +
+      "    classFilter pre-processing.\n" +
+      "    \"\"\"\n" +
+      "    if lbl is None or target_n <= 0: return lbl\n" +
+      "    if lbl.ndim < 2 or lbl.shape[-1] == target_n: return lbl\n" +
+      "    import torch.nn.functional as F\n" +
+      "    idx = lbl.argmax(dim=-1) if lbl.shape[-1] > 1 else lbl.long().squeeze(-1)\n" +
+      "    unique_vals = torch.unique(idx).sort().values\n" +
+      "    if unique_vals.numel() > target_n:\n" +
+      "        unique_vals = unique_vals[:target_n]\n" +
+      "    lut = torch.full((int(idx.max().item()) + 1,), -1, dtype=torch.long)\n" +
+      "    for ci, cv in enumerate(unique_vals.tolist()):\n" +
+      "        lut[cv] = ci\n" +
+      "    compact_idx = lut[idx].clamp_min(0)\n" +
+      "    return F.one_hot(compact_idx, target_n).float()\n" +
+      "\n" +
       "if _has_class_embed and hasattr(model, '_class_labels') is False:\n" +
-      "    _nclasses = 10\n" +
-      "    for _n in data.values():\n" +
-      "        if isinstance(_n, dict) and str(_n.get('name','')).replace('_layer','') == 'class_embed':\n" +
-      "            _nclasses = int((_n.get('data') or {}).get('numClasses', 10))\n" +
       "    if labels_train_tensor is not None and labels_val_tensor is not None:\n" +
+      "        labels_train_tensor = _compact_labels_for_class_embed(labels_train_tensor, _nclasses)\n" +
+      "        labels_val_tensor = _compact_labels_for_class_embed(labels_val_tensor, _nclasses)\n" +
+      "        labels_test_tensor = _compact_labels_for_class_embed(labels_test_tensor, _nclasses) if labels_test_tensor is not None else None\n" +
       "        train_dl = DataLoader(TensorDataset(x_train, y_train, labels_train_tensor), batch_size=BATCH_SIZE, shuffle=True)\n" +
       "        val_dl = DataLoader(TensorDataset(x_val, y_val, labels_val_tensor), batch_size=BATCH_SIZE)\n" +
-      "        print(f'Class conditioning: {_nclasses} classes')\n" +
+      "        print(f'Class conditioning: {_nclasses} classes (labels compacted to width {labels_train_tensor.shape[-1]})')\n" +
       "    elif 'df' in globals() and df is not None and 'label' in df.columns:\n" +
       "        import torch.nn.functional as F\n" +
-      "        _lbl_train = F.one_hot(torch.tensor(df[df['split']=='train']['label'].values.astype(int)), _nclasses).float()\n" +
-      "        _lbl_val = F.one_hot(torch.tensor(df[df['split']=='val']['label'].values.astype(int)), _nclasses).float()\n" +
+      "        _lbl_train_idx = torch.tensor(df[df['split']=='train']['label'].values.astype(int))\n" +
+      "        _lbl_val_idx = torch.tensor(df[df['split']=='val']['label'].values.astype(int))\n" +
+      "        _lbl_train = _compact_labels_for_class_embed(F.one_hot(_lbl_train_idx, max(_nclasses, int(_lbl_train_idx.max().item()) + 1)).float(), _nclasses)\n" +
+      "        _lbl_val = _compact_labels_for_class_embed(F.one_hot(_lbl_val_idx, max(_nclasses, int(_lbl_val_idx.max().item()) + 1)).float(), _nclasses)\n" +
       "        train_dl = DataLoader(TensorDataset(x_train, y_train, _lbl_train), batch_size=BATCH_SIZE, shuffle=True)\n" +
       "        val_dl = DataLoader(TensorDataset(x_val, y_val, _lbl_val), batch_size=BATCH_SIZE)\n" +
       "        print(f'Class conditioning: {_nclasses} classes')\n" +
@@ -19143,6 +19173,13 @@
       "        model.train()\n" +
       "        tl = 0; nb = 0\n" +
       "        for _batch in train_dl:\n" +
+      "            # Re-assert training mode each step. cuDNN RNN backward requires\n" +
+      "            # module.training=True; setting it once before the loop can drift\n" +
+      "            # if any submodule (val pass, eval cell run earlier, lr-scheduler\n" +
+      "            # interaction) flips it. Cheap (just sets a flag) and prevents\n" +
+      "            # 'cudnn RNN backward can only be called in training mode' on\n" +
+      "            # LSTM/GRU/RNN graphs.\n" +
+      "            model.train()\n" +
       "            xb, yb = _batch[0].to(device), _batch[1].to(device)\n" +
       "            if len(_batch) > 2: model._class_labels = _batch[2].to(device)\n" +
       "            optimizer.zero_grad()\n" +
