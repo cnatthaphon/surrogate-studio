@@ -257,7 +257,12 @@
   function getOutputKeys(schemaId) {
     var m = getModelSchema(schemaId);
     if (!m || !Array.isArray(m.outputs)) return [{ key: "x", headType: "regression" }];
-    return m.outputs.map(function (o) { return { key: String(o.key), headType: String(o.headType || "regression") }; });
+    return m.outputs.map(function (o) {
+      var out = { key: String(o.key), headType: String(o.headType || "regression") };
+      if (Number(o.featureSize) > 0) out.featureSize = Number(o.featureSize);
+      if (Number(o.numClasses) > 0) out.numClasses = Number(o.numClasses);
+      return out;
+    });
   }
 
   function getParamDefs(schemaId) {

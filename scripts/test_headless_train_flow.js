@@ -183,7 +183,8 @@ async function main() {
   console.log("Classification training: mae=" + classTrainResult.mae.toExponential(3));
 
   // predict and check accuracy
-  var predLabels = PC.batchPredictClassification(tf, classBuild.model, cxVal, {});
+  var predLabels = await PC.batchPredictClassification(tf, classBuild.model, cxVal, {});
+  assert(Array.isArray(predLabels), "batchPredictClassification must resolve to an array (caller awaited?)");
   var trueLabels = cyVal.map(function (oh) { return PC.argmax(oh); });
   var classMetrics = PC.computeClassificationMetrics(trueLabels, predLabels);
   console.log("Classification accuracy: " + (classMetrics.accuracy * 100).toFixed(1) + "%");

@@ -157,9 +157,9 @@
     },
     model: {
       outputs: [
-        { key: "x", label: "x", headType: "regression" },
-        { key: "v", label: "v", headType: "regression" },
-        { key: "xv", label: "x+v", headType: "regression" },
+        { key: "x", label: "x", headType: "regression", featureSize: 1 },
+        { key: "v", label: "v", headType: "regression", featureSize: 1 },
+        { key: "xv", label: "x+v", headType: "regression", featureSize: 2 },
         { key: "traj", label: "traj (full sequence)", headType: "regression" },
         { key: "params", label: "params", headType: "regression" },
       ],
