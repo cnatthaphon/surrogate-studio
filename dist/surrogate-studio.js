@@ -1,5 +1,5 @@
 // Surrogate Studio - concatenated bundle
-// Generated: 2026-04-28T08:41:22Z
+// Generated: 2026-04-28T09:40:47Z
 // Source files: 58
 
 
@@ -19031,23 +19031,35 @@
       "phases = sorted(set(str(n.get('data',{}).get('phase', '')).strip() for n in out_nodes))\n" +
       "is_phased = any(p != '' for p in phases)\n" +
       "print(f'Phases: {phases} (phased={is_phased})')\n\n" +
-      "# per-head loss\n" +
+      "# per-head loss — schema-agnostic, mirrors train_subprocess.compute_loss contract.\n" +
+      "# Carries skip / binary_target / target_key / head_type so multi-network graphs\n" +
+      "# (GAN, segmentation, autoencoder) wire targets correctly without special-cases.\n" +
       "head_losses = []\n" +
       "for n in out_nodes:\n" +
       "    nd = n.get('data', {})\n" +
-      "    ht = nd.get('target', 'xv')\n" +
-      "    hl = nd.get('loss', 'mse').lower()\n" +
+      "    ht = str(nd.get('target', nd.get('targetType', 'xv'))).lower()\n" +
+      "    hl = str(nd.get('loss', 'mse')).lower()\n" +
       "    hw = float(nd.get('matchWeight', 1))\n" +
       "    hp = str(nd.get('phase', '')).strip()\n" +
-      "    if ht in ('label', 'logits'): fn = nn.CrossEntropyLoss()\n" +
-      "    elif hl == 'bce': fn = nn.BCELoss()\n" +
-      "    elif hl == 'mae': fn = nn.L1Loss()\n" +
-      "    else: fn = nn.MSELoss()\n" +
-      "    head_losses.append({'fn': fn, 'weight': hw, 'phase': hp, 'cls': ht in ('label','logits')})\n" +
-      "    print(f'  Head: target={ht}, loss={hl}, phase={hp}, weight={hw}')\n\n" +
+      "    head_type = str(nd.get('headType', '')).lower()\n" +
+      "    if hl == 'none':\n" +
+      "        head_losses.append({'fn': None, 'weight': 0, 'phase': hp, 'cls': False, 'skip': True, 'target_key': ht, 'head_type': head_type})\n" +
+      "    elif hl in ('bce', 'binary_crossentropy', 'binarycrossentropy'):\n" +
+      "        head_losses.append({'fn': nn.BCELoss(), 'weight': hw, 'phase': hp, 'cls': False, 'binary_target': True, 'bce_binary': True, 'target_key': ht, 'head_type': head_type})\n" +
+      "    elif hl in ('wasserstein', 'wgan'):\n" +
+      "        head_losses.append({'fn': (lambda p, t: -torch.mean(t * p)), 'weight': hw, 'phase': hp, 'cls': False, 'binary_target': True, 'target_key': ht, 'head_type': head_type})\n" +
+      "    elif hl in ('cross_entropy', 'categorical_crossentropy', 'categoricalcrossentropy', 'sparsecategoricalcrossentropy'):\n" +
+      "        head_losses.append({'fn': nn.CrossEntropyLoss(), 'weight': hw, 'phase': hp, 'cls': True, 'target_key': ht, 'head_type': head_type})\n" +
+      "    elif hl == 'mae':\n" +
+      "        head_losses.append({'fn': nn.L1Loss(), 'weight': hw, 'phase': hp, 'cls': False, 'target_key': ht, 'head_type': head_type})\n" +
+      "    elif head_type == 'classification' or ht in ('label', 'logits'):\n" +
+      "        head_losses.append({'fn': nn.CrossEntropyLoss(), 'weight': hw, 'phase': hp, 'cls': True, 'target_key': ht, 'head_type': head_type})\n" +
+      "    else:\n" +
+      "        head_losses.append({'fn': nn.MSELoss(), 'weight': hw, 'phase': hp, 'cls': False, 'target_key': ht, 'head_type': head_type})\n" +
+      "    print(f'  Head: target={ht}, loss={hl}, phase={hp}, weight={hw}, headType={head_type}')\n\n" +
       "if not head_losses:\n" +
       "    loss_fn = nn.CrossEntropyLoss() if is_cls else nn.MSELoss()\n" +
-      "    head_losses = [{'fn': loss_fn, 'weight': 1.0, 'phase': '', 'cls': is_cls}]\n\n" +
+      "    head_losses = [{'fn': loss_fn, 'weight': 1.0, 'phase': '', 'cls': is_cls, 'target_key': '', 'head_type': ''}]\n\n" +
       "# Detect class_embed nodes — include labels in DataLoader if present\n" +
       "_has_class_embed = any(str(n.get('name','')).replace('_layer','') == 'class_embed' for n in data.values() if isinstance(n,dict))\n" +
       "if _has_class_embed and hasattr(model, '_class_labels') is False:\n" +
@@ -19073,23 +19085,54 @@
       "    train_dl = DataLoader(TensorDataset(x_train, y_train), batch_size=BATCH_SIZE, shuffle=True)\n" +
       "    val_dl = DataLoader(TensorDataset(x_val, y_val), batch_size=BATCH_SIZE)\n\n" +
       "def compute_loss(pred, xb, yb, phase):\n" +
+      "    # Schema-agnostic loss: honors skip / binary_target / cls / reconstruction\n" +
+      "    # head shapes. For GAN-style heads (target=custom + bce/wasserstein), pulls\n" +
+      "    # labels from model._custom_labels (set by the graph's PhaseSwitch+ConcatBatch\n" +
+      "    # during forward). For reconstruction/autoencoder, target is xb. For\n" +
+      "    # segmentation/mask BCE, target is yb. Everything else: target is yb.\n" +
       "    total = torch.tensor(0.0, device=device)\n" +
       "    preds = pred if isinstance(pred, list) else [pred]\n" +
+      "    out_ids = list(getattr(model, 'output_ids', []) or [])\n" +
+      "    custom_labels = getattr(model, '_custom_labels', {}) or {}\n" +
+      "    yb_t = yb if not isinstance(yb, list) else torch.tensor(yb, dtype=torch.float32, device=device)\n" +
       "    for i, hl in enumerate(head_losses):\n" +
+      "        if hl.get('skip'):\n" +
+      "            continue\n" +
+      "        # phase filter: blank phase always runs; non-blank only when matching\n" +
       "        if hl['phase'] != phase and hl['phase'] != '' and phase != '': continue\n" +
       "        hp = preds[i] if i < len(preds) else preds[0]\n" +
-      "        t = yb if not isinstance(yb, list) else torch.tensor(yb, dtype=torch.float32, device=device)\n" +
-      "        if hl['cls']:\n" +
-      "            _cls_t = t.argmax(dim=-1) if t.ndim > 1 and t.shape[-1] > 1 else t.long().squeeze(-1)\n" +
-      "            _cls_t = _cls_t.clamp(0, hp.shape[-1] - 1)  # guard: label must be < num_classes\n" +
-      "            total = total + hl['weight'] * hl['fn'](hp, _cls_t)\n" +
-      "        else:\n" +
-      "            if isinstance(hl['fn'], nn.BCELoss):\n" +
-      "                t = t.float().clamp(0.0, 1.0)\n" +
-      "                hp = hp.clamp(0.0, 1.0)\n" +
-      "            if t.shape != hp.shape and t.ndim == hp.ndim == 2 and t.shape[0] == hp.shape[0]:\n" +
-      "                t = t[:, :hp.shape[1]]\n" +
+      "        target_key = hl.get('target_key', '')\n" +
+      "        head_type = hl.get('head_type', '')\n" +
+      "        if hl.get('binary_target'):\n" +
+      "            if head_type == 'segmentation' or target_key in ('mask', 'segmentation_mask'):\n" +
+      "                t = yb_t\n" +
+      "            else:\n" +
+      "                # GAN-style: custom labels constructed by graph (PhaseSwitch + ConcatBatch).\n" +
+      "                oid = out_ids[i] if i < len(out_ids) else None\n" +
+      "                if oid is not None and oid in custom_labels:\n" +
+      "                    t = custom_labels[oid]\n" +
+      "                    if t.shape[0] != hp.shape[0]:\n" +
+      "                        t = t.expand_as(hp)\n" +
+      "                else:\n" +
+      "                    t = torch.ones_like(hp)\n" +
+      "        elif hl['cls']:\n" +
+      "            cls_src = yb_t\n" +
+      "            t = cls_src.argmax(dim=-1).long() if cls_src.ndim > 1 and cls_src.shape[-1] > 1 else cls_src.long().squeeze(-1)\n" +
+      "            t = t.clamp(0, hp.shape[-1] - 1)\n" +
       "            total = total + hl['weight'] * hl['fn'](hp, t)\n" +
+      "            continue\n" +
+      "        else:\n" +
+      "            if head_type in ('reconstruction', 'autoencoder', 'denoiser'):\n" +
+      "                t = xb\n" +
+      "            else:\n" +
+      "                t = yb_t\n" +
+      "        # trim mismatched feature width (e.g. yb=10 one-hot vs hp=1 binary)\n" +
+      "        if t.shape != hp.shape and t.ndim == hp.ndim == 2 and t.shape[0] == hp.shape[0]:\n" +
+      "            t = t[:, :hp.shape[1]]\n" +
+      "        if hl.get('bce_binary'):\n" +
+      "            t = t.float().clamp(0.0, 1.0)\n" +
+      "            hp = hp.clamp(0.0, 1.0)\n" +
+      "        total = total + hl['weight'] * hl['fn'](hp, t)\n" +
       "    return total\n\n" +
       "history = {'train_loss': [], 'val_loss': []}\n" +
       "best_val = float('inf')\n" +
@@ -19115,7 +19158,7 @@
       "        for _batchv in val_dl:\n" +
       "            xb, yb = _batchv[0].to(device), _batchv[1].to(device)\n" +
       "            if len(_batchv) > 2: model._class_labels = _batchv[2].to(device)\n" +
-      "            vl += compute_loss(model(xb), xb, yb, 0).item(); nv += 1\n" +
+      "            vl += compute_loss(model(xb), xb, yb, '').item(); nv += 1\n" +
       "    vl /= max(nv, 1)\n" +
       "    scheduler.step(vl)\n\n" +
       "    improved = vl < best_val\n" +
