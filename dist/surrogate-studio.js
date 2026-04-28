@@ -1,5 +1,5 @@
 // Surrogate Studio - concatenated bundle
-// Generated: 2026-04-28T14:45:29Z
+// Generated: 2026-04-28T16:33:31Z
 // Source files: 58
 
 
@@ -19401,7 +19401,11 @@
     cells.push(makeMarkdownCell("## 10) Langevin Generation\n\nIterative denoising from random noise using the trained model as a score function."));
     cells.push(makeCodeCell(
       "# --- Langevin Dynamics Generation ---\n" +
-      "# Start from random noise, iteratively denoise using model gradient\n" +
+      "# Start from random noise, iteratively denoise using model gradient.\n" +
+      "# autograd.grad backprops through a frozen, eval-mode model. cuDNN's RNN\n" +
+      "# backward refuses on eval graphs, so wrap the loop in cudnn.flags to\n" +
+      "# force PyTorch's non-cuDNN RNN kernel (correct, slightly slower; no\n" +
+      "# effect on non-RNN graphs).\n" +
       "import torch.autograd as autograd\n\n" +
       "if not bool(globals().get('can_sample_input_space', False)):\n" +
       "    print('Langevin skipped: model output space does not match input space.')\n" +
@@ -19412,14 +19416,15 @@
       "    step_size = 0.01\n" +
       "    temperature = 0.5\n\n" +
       "    x = torch.randn(n_samples, x_train.shape[1], device=device, requires_grad=True)\n\n" +
-      "    for step in range(n_steps):\n" +
-      "        pred = model(x)\n" +
-      "        if isinstance(pred, (tuple, list)):\n" +
-      "            pred = pred[0]\n" +
-      "        score = (pred - x).mean()\n" +
-      "        grad = autograd.grad(score, x, create_graph=False)[0]\n" +
-      "        noise = torch.randn_like(x) * (step_size ** 0.5) * temperature\n" +
-      "        x = (x + step_size * grad + noise).detach().requires_grad_(True)\n\n" +
+      "    with torch.backends.cudnn.flags(enabled=False):\n" +
+      "        for step in range(n_steps):\n" +
+      "            pred = model(x)\n" +
+      "            if isinstance(pred, (tuple, list)):\n" +
+      "                pred = pred[0]\n" +
+      "            score = (pred - x).mean()\n" +
+      "            grad = autograd.grad(score, x, create_graph=False)[0]\n" +
+      "            noise = torch.randn_like(x) * (step_size ** 0.5) * temperature\n" +
+      "            x = (x + step_size * grad + noise).detach().requires_grad_(True)\n\n" +
       "    samples = x.detach().cpu().numpy()\n" +
       "    print(f'Generated {n_samples} samples via Langevin dynamics ({n_steps} steps)')\n\n" +
       "    if is_image:\n" +
