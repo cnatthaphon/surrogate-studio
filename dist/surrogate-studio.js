@@ -1,5 +1,5 @@
 // Surrogate Studio - concatenated bundle
-// Generated: 2026-04-28T04:57:01Z
+// Generated: 2026-04-28T05:02:58Z
 // Source files: 58
 
 
@@ -5503,7 +5503,7 @@
 
   /**
    * Returns true if `datasetData` carries any populated payload — records, legacy
-   * xTrain arrays, a server-side source descriptor, or the zero-copy
+   * xTrain arrays, a server-side source descriptor, or a resolvable zero-copy
    * splitIndices+sourceId form. Accepts either the dataset wrapper record
    * (from store) or the inner `data` payload.
    *
@@ -5522,7 +5522,7 @@
     if (Array.isArray(d.xTrain) && d.xTrain.length > 0) return true;
     if (d.sourceDescriptor) return true;
     if (d.trajectories && d.trajectories.length) return true;
-    if (d.splitIndices) {
+    if (d.splitIndices && d.sourceId && has(d.sourceId)) {
       var si = d.splitIndices;
       var hasIndices = (Array.isArray(si.train) && si.train.length > 0) ||
                       (Array.isArray(si.val) && si.val.length > 0) ||
@@ -20278,7 +20278,7 @@
           return !!((d.records && (d.records.train || d.records.val)) ||
                     (d.xTrain && d.xTrain.length > 0) ||
                     d.sourceDescriptor ||
-                    (d.splitIndices && (
+                    (d.sourceId && d.splitIndices && (
                       (d.splitIndices.train && d.splitIndices.train.length) ||
                       (d.splitIndices.val && d.splitIndices.val.length) ||
                       (d.splitIndices.test && d.splitIndices.test.length)
@@ -29886,7 +29886,7 @@
             return !!((x.records && (x.records.train || x.records.val)) ||
                       (x.xTrain && x.xTrain.length > 0) ||
                       x.sourceDescriptor ||
-                      (x.splitIndices && (
+                      (x.sourceId && x.splitIndices && (
                         (x.splitIndices.train && x.splitIndices.train.length) ||
                         (x.splitIndices.val && x.splitIndices.val.length) ||
                         (x.splitIndices.test && x.splitIndices.test.length)

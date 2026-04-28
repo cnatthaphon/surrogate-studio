@@ -2898,7 +2898,7 @@
             return !!((x.records && (x.records.train || x.records.val)) ||
                       (x.xTrain && x.xTrain.length > 0) ||
                       x.sourceDescriptor ||
-                      (x.splitIndices && (
+                      (x.sourceId && x.splitIndices && (
                         (x.splitIndices.train && x.splitIndices.train.length) ||
                         (x.splitIndices.val && x.splitIndices.val.length) ||
                         (x.splitIndices.test && x.splitIndices.test.length)

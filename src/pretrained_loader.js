@@ -95,7 +95,7 @@
           return !!((d.records && (d.records.train || d.records.val)) ||
                     (d.xTrain && d.xTrain.length > 0) ||
                     d.sourceDescriptor ||
-                    (d.splitIndices && (
+                    (d.sourceId && d.splitIndices && (
                       (d.splitIndices.train && d.splitIndices.train.length) ||
                       (d.splitIndices.val && d.splitIndices.val.length) ||
                       (d.splitIndices.test && d.splitIndices.test.length)

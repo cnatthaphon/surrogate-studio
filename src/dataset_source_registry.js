@@ -162,7 +162,7 @@
 
   /**
    * Returns true if `datasetData` carries any populated payload — records, legacy
-   * xTrain arrays, a server-side source descriptor, or the zero-copy
+   * xTrain arrays, a server-side source descriptor, or a resolvable zero-copy
    * splitIndices+sourceId form. Accepts either the dataset wrapper record
    * (from store) or the inner `data` payload.
    *
@@ -181,7 +181,7 @@
     if (Array.isArray(d.xTrain) && d.xTrain.length > 0) return true;
     if (d.sourceDescriptor) return true;
     if (d.trajectories && d.trajectories.length) return true;
-    if (d.splitIndices) {
+    if (d.splitIndices && d.sourceId && has(d.sourceId)) {
       var si = d.splitIndices;
       var hasIndices = (Array.isArray(si.train) && si.train.length > 0) ||
                       (Array.isArray(si.val) && si.val.length > 0) ||

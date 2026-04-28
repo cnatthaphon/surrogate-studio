@@ -56,6 +56,12 @@ async function main() {
   var mnistTrainResolved = srcReg.resolveDatasetSplit(mnistDs, "train");
   assert(Array.isArray(mnistTrainResolved.x), "mnist resolved train.x must be array");
   assert(Array.isArray(mnistTrainResolved.y), "mnist resolved train.y must be array");
+  assert.strictEqual(srcReg.hasDatasetData(mnistDs), true, "registered splitIndices dataset should be data-ready");
+  const mnistMissingSource = Object.assign({}, mnistDs, { sourceId: "missing_source_for_contract_test" });
+  assert.strictEqual(srcReg.hasDatasetData(mnistMissingSource), false, "splitIndices without registered source must not be data-ready");
+  const mnistNoSource = Object.assign({}, mnistDs);
+  delete mnistNoSource.sourceId;
+  assert.strictEqual(srcReg.hasDatasetData(mnistNoSource), false, "splitIndices without sourceId must not be data-ready");
   assert(Number.isFinite(Number(mnistDs.trainCount)) && Number(mnistDs.trainCount) > 0, "mnist trainCount missing");
   assert(Number.isFinite(Number(mnistDs.valCount)) && Number(mnistDs.valCount) > 0, "mnist valCount missing");
   assert(Number.isFinite(Number(mnistDs.testCount)) && Number(mnistDs.testCount) > 0, "mnist testCount missing");
