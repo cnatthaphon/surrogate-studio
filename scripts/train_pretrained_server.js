@@ -226,10 +226,15 @@ function exportPretrained(trainerName, config, result, outputPath) {
   if (!weightValues.length && result.weightData) {
     weightValues = Array.isArray(result.weightData) ? result.weightData : Array.from(new Float32Array(result.weightData));
   }
-  // Integrity check
+  // Integrity check — fatal, never write a corrupt file
   var expectedLen = weightSpecs.reduce(function (sum, s) { return sum + (s.shape || []).reduce(function (a, b) { return a * b; }, 1); }, 0);
   if (weightValues.length !== expectedLen) {
-    console.warn("  WARNING: weightValues length " + weightValues.length + " != expected " + expectedLen + " from specs");
+    throw new Error(
+      "Weight data mismatch: got " + weightValues.length + " values, expected " + expectedLen +
+      " from " + weightSpecs.length + " specs. " +
+      "Refusing to write corrupt pretrained file. " +
+      "Check server response — likely missing weightValues/weightData field."
+    );
   }
   var metrics = result.metrics || {};
 
@@ -314,20 +319,48 @@ async function trainOneModel(modelDef, dataset, trainerDef) {
   if (!startRes.jobId) throw new Error("Server did not return jobId: " + JSON.stringify(startRes));
   console.log("  Job:", startRes.jobId);
 
-  // Wait for completion via SSE — the complete event includes the full result
+  // Wait for completion via SSE
   var sseResult = await waitForJob(startRes.jobId);
 
-  // Try SSE result first, fall back to explicit fetch
-  var result = sseResult;
-  if (!result || !result.weightSpecs) {
+  // SSE sends lightweight result (no modelArtifacts) — always fetch full result via GET
+  // Retry up to 3 times with delay to handle server stdout drain timing
+  var result = null;
+  var maxRetries = 3;
+  for (var attempt = 0; attempt < maxRetries; attempt++) {
+    if (attempt > 0) {
+      console.log("  Retry " + attempt + "/" + maxRetries + " (waiting for server to drain stdout)...");
+      await new Promise(function (r) { setTimeout(r, 2000); });
+    }
     console.log("  Fetching result from endpoint...");
     result = await httpRequest("GET", "/api/train/" + startRes.jobId + "/result");
+    if (result && result.modelArtifacts) break;
+    if (result && result.error) {
+      console.log("  Server: " + result.error);
+    }
   }
-  // Normalize result — server returns modelArtifacts with weightSpecs/weightValues inside
+
+  // Normalize result — server returns modelArtifacts with weightSpecs/weightData inside
   var artifacts = result.modelArtifacts || result;
-  if (!artifacts.weightSpecs && !artifacts.weightValues) throw new Error("No weight data in result. Keys: " + Object.keys(result || {}).join(","));
-  artifacts.metrics = result.metrics || { mae: result.mae, mse: result.mse, bestEpoch: result.bestEpoch, bestValLoss: result.bestValLoss };
-  console.log("  Training complete. Weights:", (artifacts.weightSpecs || []).length, "arrays, MAE:", result.mae || result.testMae || "?");
+  if (!artifacts.weightSpecs) {
+    throw new Error("No weightSpecs in result. Keys: " + Object.keys(result || {}).join(",") +
+      (artifacts !== result ? "; artifact keys: " + Object.keys(artifacts).join(",") : ""));
+  }
+
+  // Verify weight data is present (weightData from server, weightValues from TF.js)
+  var wv = artifacts.weightValues || artifacts.weightData || [];
+  var expectedCount = (artifacts.weightSpecs || []).reduce(function (sum, s) {
+    return sum + (s.shape || []).reduce(function (a, b) { return a * b; }, 1);
+  }, 0);
+  if (!wv.length || wv.length !== expectedCount) {
+    throw new Error(
+      "Weight data missing or incomplete in server response. " +
+      "Got " + wv.length + " values, expected " + expectedCount + ". " +
+      "Artifact keys: " + Object.keys(artifacts).join(",")
+    );
+  }
+
+  artifacts.metrics = result.metrics || sseResult || { mae: result.mae, mse: result.mse, bestEpoch: result.bestEpoch, bestValLoss: result.bestValLoss };
+  console.log("  Training complete. Weights:", artifacts.weightSpecs.length, "arrays (" + wv.length + " values), MAE:", (artifacts.metrics || {}).mae || "?");
   return artifacts;
 }
 

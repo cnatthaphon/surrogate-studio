@@ -82,7 +82,7 @@
 
   // --- generic batch predict for classification ---
 
-  function batchPredict(tf, model, xData, config) {
+  async function batchPredict(tf, model, xData, config) {
     var batchSize = config.batchSize || 32;
     var n = xData.length;
     var allPreds = [];
@@ -95,12 +95,14 @@
       allPreds = allPreds.concat(data);
       tensor.dispose();
       if (Array.isArray(predRaw)) { predRaw.forEach(function (t) { t.dispose(); }); } else { predRaw.dispose(); }
+      // yield to renderer between batches so UI stays responsive
+      if (tf.nextFrame) await tf.nextFrame();
     }
     return allPreds;
   }
 
-  function batchPredictClassification(tf, model, xData, config) {
-    var preds = batchPredict(tf, model, xData, config || {});
+  async function batchPredictClassification(tf, model, xData, config) {
+    var preds = await batchPredict(tf, model, xData, config || {});
     return preds.map(function (row) {
       return Array.isArray(row) ? argmax(row) : Number(row || 0);
     });

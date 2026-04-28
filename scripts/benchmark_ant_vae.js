@@ -93,7 +93,9 @@ async function trainModel(tf, ds, graphSpec, name, cfg) {
     // Build model from graph spec
     const built = ModelBuilder.buildModelFromGraph(tf, graphSpec, {
       mode: "direct", featureSize: ds.featureSize, windowSize: 1, seqFeatureSize: ds.featureSize,
-      allowedOutputKeys: ["xv"], defaultTarget: "xv", numClasses: 0,
+      targetSize: 2,
+      allowedOutputKeys: [{ key: "xv", headType: "regression", featureSize: 2 }],
+      defaultTarget: "xv", numClasses: 0,
     });
 
     const paramCount = built.model.countParams();

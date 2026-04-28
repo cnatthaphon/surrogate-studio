@@ -28,11 +28,17 @@
         var key = String(o && o.key != null ? o.key : "").trim().toLowerCase();
         if (!key) return null;
         var ht = String(o && o.headType != null ? o.headType : "regression").trim().toLowerCase();
-        return {
+        var entry = {
           key: key,
           label: String(o && o.label != null ? o.label : key),
           headType: ht,
         };
+        // Preserve schema-declared target widths so contract-driven consumers
+        // (model_builder_core.targetUnitsFromMode) can size output heads
+        // without inferring from upstream hidden width.
+        if (o && Number(o.featureSize) > 0) entry.featureSize = Number(o.featureSize);
+        if (o && Number(o.numClasses) > 0) entry.numClasses = Number(o.numClasses);
+        return entry;
       })
       .filter(Boolean);
     // no hardcoded fallback — if schema has no outputs, return empty
@@ -257,7 +263,12 @@
   function getOutputKeys(schemaId) {
     var m = getModelSchema(schemaId);
     if (!m || !Array.isArray(m.outputs)) return [{ key: "x", headType: "regression" }];
-    return m.outputs.map(function (o) { return { key: String(o.key), headType: String(o.headType || "regression") }; });
+    return m.outputs.map(function (o) {
+      var out = { key: String(o.key), headType: String(o.headType || "regression") };
+      if (Number(o.featureSize) > 0) out.featureSize = Number(o.featureSize);
+      if (Number(o.numClasses) > 0) out.numClasses = Number(o.numClasses);
+      return out;
+    });
   }
 
   function getParamDefs(schemaId) {

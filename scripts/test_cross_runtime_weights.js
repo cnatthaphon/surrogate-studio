@@ -101,10 +101,25 @@ var GRAPHS = {
   "VAE-LSTM-deep":      VAE_GRAPH("lstm", 64, 16, 64),
 };
 
-var meta = { mode: "direct", featureSize: F, windowSize: 1, seqFeatureSize: F, allowedOutputKeys: ["xv", "traj", "label", "logits"], defaultTarget: "xv", numClasses: 10 };
+var meta = {
+  mode: "direct",
+  featureSize: F,
+  targetSize: 2,
+  windowSize: 1,
+  seqFeatureSize: F,
+  allowedOutputKeys: [
+    { key: "xv", headType: "regression", featureSize: 2 },
+    { key: "traj", headType: "regression" },
+    { key: "label", headType: "classification", numClasses: 10 },
+    { key: "logits", headType: "classification", numClasses: 10 },
+  ],
+  defaultTarget: "xv",
+  numClasses: 10,
+};
 
 var passed = 0, failed = 0, errors = [];
 var dummyData = Array(8).fill(Array(F).fill(0.5)); // enough for BatchNorm (needs batch > 1)
+var dummyTarget = Array(8).fill(Array(2).fill(0.5));
 
 Object.keys(GRAPHS).forEach(function (name) {
   var graph = GRAPHS[name];
@@ -126,8 +141,25 @@ Object.keys(GRAPHS).forEach(function (name) {
 
   // PyTorch — use classification targets for classifier graphs
   var isClassifier = name.indexOf("Classifier") >= 0;
-  var yDummy = isClassifier ? Array(8).fill([0]) : dummyData;
-  var config = { graph: graph, dataset: { featureSize: F, targetMode: isClassifier ? "label" : "xv", numClasses: isClassifier ? 10 : 0, xTrain: dummyData, yTrain: yDummy, xVal: dummyData, yVal: yDummy }, epochs: 1, batchSize: 4, learningRate: 0.001 };
+  var yDummy = isClassifier ? Array(8).fill([0]) : dummyTarget;
+  var config = {
+    graph: graph,
+    dataset: {
+      featureSize: F,
+      targetSize: isClassifier ? 1 : 2,
+      targetMode: isClassifier ? "label" : "xv",
+      allowedOutputKeys: meta.allowedOutputKeys,
+      defaultTarget: meta.defaultTarget,
+      numClasses: isClassifier ? 10 : 0,
+      xTrain: dummyData,
+      yTrain: yDummy,
+      xVal: dummyData,
+      yVal: yDummy,
+    },
+    epochs: 1,
+    batchSize: 4,
+    learningRate: 0.001,
+  };
   fs.writeFileSync("/tmp/xrt_" + name.replace(/[^a-zA-Z0-9]/g, "_") + ".json", JSON.stringify(config));
   var pySpecs, pyTotal;
   try {

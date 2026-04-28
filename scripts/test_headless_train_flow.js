@@ -74,7 +74,8 @@ async function main() {
   assert.strictEqual(mode, "direct");
   var family = MBC.inferModelFamily(graphSpec);
   assert.strictEqual(family, "supervised");
-  var heads = MBC.inferOutputHeads(graphSpec, ["x"], "x");
+  var outputKeys = [{ key: "x", headType: "regression", featureSize: 1 }];
+  var heads = MBC.inferOutputHeads(graphSpec, outputKeys, "x");
   assert(heads.length >= 1);
   console.log("Graph: mode=" + mode + " family=" + family + " heads=" + heads.length);
 
@@ -82,9 +83,10 @@ async function main() {
   var buildResult = MBC.buildModelFromGraph(tf, graphSpec, {
     mode: "direct",
     featureSize: 2,
+    targetSize: 1,
     windowSize: 1,
     seqFeatureSize: 2,
-    allowedOutputKeys: ["x"],
+    allowedOutputKeys: outputKeys,
     defaultTarget: "x",
   });
   assert(buildResult.model, "model built");
@@ -154,7 +156,11 @@ async function main() {
 
   var classBuild = MBC.buildModelFromGraph(tf, classGraph, {
     mode: "direct", featureSize: 4, windowSize: 1, seqFeatureSize: 4,
-    allowedOutputKeys: ["logits", "label"], defaultTarget: "logits", numClasses: 3,
+    allowedOutputKeys: [
+      { key: "logits", headType: "classification", numClasses: 3 },
+      { key: "label", headType: "classification", numClasses: 3 },
+    ],
+    defaultTarget: "logits", numClasses: 3,
   });
   assert(classBuild.model, "classification model built");
   console.log("Classification model: params=" + classBuild.model.countParams());
@@ -183,7 +189,8 @@ async function main() {
   console.log("Classification training: mae=" + classTrainResult.mae.toExponential(3));
 
   // predict and check accuracy
-  var predLabels = PC.batchPredictClassification(tf, classBuild.model, cxVal, {});
+  var predLabels = await PC.batchPredictClassification(tf, classBuild.model, cxVal, {});
+  assert(Array.isArray(predLabels), "batchPredictClassification must resolve to an array (caller awaited?)");
   var trueLabels = cyVal.map(function (oh) { return PC.argmax(oh); });
   var classMetrics = PC.computeClassificationMetrics(trueLabels, predLabels);
   console.log("Classification accuracy: " + (classMetrics.accuracy * 100).toFixed(1) + "%");

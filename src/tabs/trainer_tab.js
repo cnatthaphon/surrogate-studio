@@ -855,8 +855,8 @@
 
       var capturedMountId = _mountId;
 
-      // defer heavy work to let spinner render
-      setTimeout(function () {
+      // defer heavy work to let spinner render — async to yield between batches
+      setTimeout(async function () {
         if (_mountId !== capturedMountId) return; // tab switched away
 
         try {
@@ -963,6 +963,8 @@
             if (Array.isArray(inputTensors)) inputTensors.forEach(function (t) { if (t !== bTensor) t.dispose(); });
             bTensor.dispose();
             if (Array.isArray(bRaw)) bRaw.forEach(function (pt) { pt.dispose(); }); else bRaw.dispose();
+            // yield to renderer between batches so UI stays responsive
+            if (tf.nextFrame) await tf.nextFrame();
           }
           allPreds = allPredsArr;
 
@@ -2878,13 +2880,30 @@
 
       var dataset = store ? store.getDataset(tCard.datasetId) : null;
       var model = store ? store.getModel(tCard.modelId) : null;
-      if (!dataset || !dataset.data) { onStatus("Generate the dataset first"); return; }
+      if (!dataset) { onStatus("Generate the dataset first"); return; }
       if (!model || !model.graph) { onStatus("Model has no graph"); return; }
 
       var NBC = W.OSCNotebookCore || null;
       if (!NBC || typeof NBC.createSingleNotebookFileFromConfig !== "function") {
         onStatus("Notebook export module not available"); return;
       }
+
+      // Contract-driven readiness check — recognizes records, xTrain,
+      // sourceDescriptor, trajectories, and zero-copy splitIndices+sourceId.
+      var srcReg0 = W.OSCDatasetSourceRegistry || null;
+      var hasData = srcReg0 && typeof srcReg0.hasDatasetData === "function"
+        ? srcReg0.hasDatasetData
+        : function (d) {
+            var x = (d && d.data) || d || {};
+            return !!((x.records && (x.records.train || x.records.val)) ||
+                      (x.xTrain && x.xTrain.length > 0) ||
+                      x.sourceDescriptor ||
+                      (x.sourceId && x.splitIndices && (
+                        (x.splitIndices.train && x.splitIndices.train.length) ||
+                        (x.splitIndices.val && x.splitIndices.val.length) ||
+                        (x.splitIndices.test && x.splitIndices.test.length)
+                      )));
+          };
 
       var config = _configFormApi && typeof _configFormApi.getConfig === "function" ? _configFormApi.getConfig() : {};
       var sra0 = getServerAdapter();
@@ -2903,11 +2922,66 @@
       var runtimeFiles = NRA && NRA.files ? Object.keys(NRA.files) : [];
       var runtimeLoader = NRA && NRA.files ? function (name) { return NRA.files[name] || ""; } : null;
 
+      // If the dataset isn't yet populated (in-flight or never started),
+      // await any pending bootstrap build before proceeding so the runner
+      // doesn't materialize empty splits.
+      var preloader = W.OSCPretrainedLoader || null;
+      var readyP;
+      if (hasData(dataset)) {
+        readyP = Promise.resolve();
+      } else if (preloader && typeof preloader.awaitDatasetsReady === "function") {
+        if (runner && typeof runner.updateBusy === "function") {
+          runner.updateBusy("Loading dataset (downloading source files)...");
+        }
+        readyP = preloader.awaitDatasetsReady(store).then(function () {
+          var refreshed = store ? store.getDataset(tCard.datasetId) : null;
+          if (refreshed) dataset = refreshed;
+        });
+      } else {
+        readyP = Promise.resolve();
+      }
+
+      readyP.then(function () {
+        if (!hasData(dataset)) {
+          _isNotebookPreparing = false;
+          if (runner && typeof runner.updateBusy === "function") {
+            runner.updateBusy("Dataset not ready — open the Dataset tab and click Generate Dataset.", "error");
+          }
+          onStatus("Dataset not ready");
+          if (stateApi && stateApi.getActiveTrainer && stateApi.getActiveTrainer() === activeId) _renderRightPanel();
+          return;
+        }
+        _runNotebookExport({
+          W: W, NBC: NBC, runner: runner, runtimeFiles: runtimeFiles, runtimeLoader: runtimeLoader,
+          dataset: dataset, tCard: tCard, model: model, config: config, activeId: activeId,
+          runnerServerUrl0: runnerServerUrl0, onStatus: onStatus,
+        });
+      }).catch(function (err) {
+        _isNotebookPreparing = false;
+        if (runner && typeof runner.updateBusy === "function") runner.updateBusy("Notebook error: " + err.message, "error");
+        onStatus("Notebook error: " + err.message);
+        if (stateApi && stateApi.getActiveTrainer && stateApi.getActiveTrainer() === activeId) _renderRightPanel();
+      });
+    }
+
+    function _runNotebookExport(args) {
+      var W = args.W, NBC = args.NBC, runner = args.runner;
+      var runtimeFiles = args.runtimeFiles, runtimeLoader = args.runtimeLoader;
+      var dataset = args.dataset, tCard = args.tCard, model = args.model;
+      var config = args.config, activeId = args.activeId;
+      var runnerServerUrl0 = args.runnerServerUrl0, onStatus = args.onStatus;
       setTimeout(function () {
         var exportPrepared = _prepareDatasetForNotebookExport(dataset.data, W);
         var exportDsData = exportPrepared.dataset;
 
-        var notebookRowLimit = Math.max(1000, Math.floor(Number((config && config.notebookRowLimit) || (tCard && tCard.config && tCard.config.notebookRowLimit) || 10000) || 10000));
+        // Cap notebook dataset by total value count (not just rows) to prevent
+        // multi-MB CSV embedding that freezes the page. 500K values keeps CSV under ~4MB.
+        var maxRowsCfg = Math.max(100, Math.floor(Number((config && config.notebookRowLimit) || (tCard && tCard.config && tCard.config.notebookRowLimit) || 10000) || 10000));
+        var dsFeatureSize = Number((exportDsData && exportDsData.featureSize) ||
+          (exportDsData && exportDsData.xTrain && exportDsData.xTrain[0] && exportDsData.xTrain[0].length) ||
+          (exportDsData && exportDsData.records && exportDsData.records.train && exportDsData.records.train.x && exportDsData.records.train.x[0] && exportDsData.records.train.x[0].length) || 1);
+        var maxValues = 500000;
+        var notebookRowLimit = Math.min(maxRowsCfg, Math.max(100, Math.floor(maxValues / Math.max(1, dsFeatureSize))));
         var preview = exportPrepared.usesServerReference
           ? { dataset: exportDsData, truncated: false, totalRows: 0, keptRows: 0 }
           : _limitNotebookDatasetRows(exportDsData, notebookRowLimit);

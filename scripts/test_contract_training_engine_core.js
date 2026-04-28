@@ -26,36 +26,29 @@ function main() {
   assert.strictEqual(TEC.mapLossAlias("huber"), "huberLoss");
   assert.strictEqual(TEC.mapLossAlias("use_global"), "meanSquaredError");
 
-  // --- extractHeadRows ---
+  // --- extractHeadRows (generalized: returns data as-is, no column extraction) ---
   var yMain = [[1, 2], [3, 4], [5, 6]];
   var pTrain = [[10, 20, 30], [40, 50, 60], [70, 80, 90]];
 
-  // x target
+  // all non-latent_kl heads return rowsMain as-is
   var xRows = TEC.extractHeadRows(yMain, null, "x", { target: "x" }, {});
-  assert.deepStrictEqual(xRows, [[1], [3], [5]]);
+  assert.deepStrictEqual(xRows, yMain);
 
-  // v target with xv mode
   var vRows = TEC.extractHeadRows(yMain, null, "xv", { target: "v" }, {});
-  assert.deepStrictEqual(vRows, [[2], [4], [6]]);
+  assert.deepStrictEqual(vRows, yMain);
 
-  // xv target
   var xvRows = TEC.extractHeadRows(yMain, null, "xv", { target: "xv" }, {});
   assert.deepStrictEqual(xvRows, yMain);
 
-  // params target
+  // params target (generalized: returns rowsMain as-is, routing handled upstream)
   var pRows = TEC.extractHeadRows(yMain, pTrain, "x", { target: "params", paramsSelect: "m,k" }, { paramNames: ["m", "c", "k"] });
   assert.strictEqual(pRows.length, 3);
-  assert.deepStrictEqual(pRows[0], [10, 30], "picks m(0) and k(2)");
+  assert.deepStrictEqual(pRows, yMain, "params returns rowsMain as-is");
 
-  // latent_diff target
-  var ldRows = TEC.extractHeadRows(yMain, null, "x", { target: "latent_diff", units: 4 }, {});
-  assert.strictEqual(ldRows.length, 3);
-  assert.strictEqual(ldRows[0].length, 4);
-  assert(ldRows[0].every(function (v) { return v === 0; }), "latent_diff zeros");
-
-  // latent_kl target
-  var klRows = TEC.extractHeadRows(yMain, null, "x", { target: "latent_kl", units: 8 }, {});
+  // latent_kl target — returns zeros (special case)
+  var klRows = TEC.extractHeadRows(yMain, null, "x", { headType: "latent_kl", units: 8 }, {});
   assert.strictEqual(klRows[0].length, 8);
+  assert(klRows[0].every(function (v) { return v === 0; }), "latent_kl zeros");
 
   // logits target (passthrough)
   var logitRows = TEC.extractHeadRows([[0, 0, 1], [1, 0, 0]], null, "x", { target: "logits" }, {});

@@ -44,18 +44,18 @@ function main() {
   var arCfg = MBC.inferArHistoryConfig(mockDrawflow, 20);
   assert(arCfg && typeof arCfg.windowSize === "number", "arConfig has windowSize");
 
-  // --- normalizeOutputTargetsList ---
+  // --- normalizeOutputTargetsList (single-target: takes first from CSV) ---
   var t1 = MBC.normalizeOutputTargetsList("x,v", null, ["x", "v", "params"]);
-  assert.deepStrictEqual(t1, ["x", "v"]);
+  assert.deepStrictEqual(t1, ["x"]);
   var t2 = MBC.normalizeOutputTargetsList("xv", null, ["x", "v", "xv"]);
-  assert.deepStrictEqual(t2, ["xv"], "xv removes x and v");
+  assert.deepStrictEqual(t2, ["xv"]);
   var t3 = MBC.normalizeOutputTargetsList(null, ["logits"], ["logits", "label"]);
   assert.deepStrictEqual(t3, ["logits"]);
 
-  // --- outputTargetsFromNodeData ---
+  // --- outputTargetsFromNodeData (reads single target from node data) ---
   var nodeData = { targets: ["x", "params"], loss: "mse" };
   var ot = MBC.outputTargetsFromNodeData(nodeData, ["x", "v", "params"], "x");
-  assert.deepStrictEqual(ot, ["x", "params"]);
+  assert.deepStrictEqual(ot, ["x"]);
 
   // --- VAE graph test ---
   var vaeGraph = {

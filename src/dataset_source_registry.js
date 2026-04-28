@@ -160,6 +160,37 @@
     return sample ? sample.length : 0;
   }
 
+  /**
+   * Returns true if `datasetData` carries any populated payload — records, legacy
+   * xTrain arrays, a server-side source descriptor, or a resolvable zero-copy
+   * splitIndices+sourceId form. Accepts either the dataset wrapper record
+   * (from store) or the inner `data` payload.
+   *
+   * Schema-agnostic: any module that emits a recognized contract counts as
+   * "data present" without per-schema branching.
+   */
+  function hasDatasetData(datasetData) {
+    var ds = datasetData || {};
+    var d = ds.data || ds;
+    if (!d || typeof d !== "object") return false;
+    if (d.records && (
+      (d.records.train && (Array.isArray(d.records.train.x) ? d.records.train.x.length > 0 : !!d.records.train)) ||
+      (d.records.val && (Array.isArray(d.records.val.x) ? d.records.val.x.length > 0 : !!d.records.val)) ||
+      (d.records.test && (Array.isArray(d.records.test.x) ? d.records.test.x.length > 0 : !!d.records.test))
+    )) return true;
+    if (Array.isArray(d.xTrain) && d.xTrain.length > 0) return true;
+    if (d.sourceDescriptor) return true;
+    if (d.trajectories && d.trajectories.length) return true;
+    if (d.splitIndices && d.sourceId && has(d.sourceId)) {
+      var si = d.splitIndices;
+      var hasIndices = (Array.isArray(si.train) && si.train.length > 0) ||
+                      (Array.isArray(si.val) && si.val.length > 0) ||
+                      (Array.isArray(si.test) && si.test.length > 0);
+      if (hasIndices) return true;
+    }
+    return false;
+  }
+
   return {
     register: register,
     get: get,
@@ -170,5 +201,6 @@
     createFromUint8: createFromUint8,
     resolveDatasetSplit: resolveDatasetSplit,
     getFeatureSize: getFeatureSize,
+    hasDatasetData: hasDatasetData,
   };
 });

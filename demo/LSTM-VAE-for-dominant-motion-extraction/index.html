@@ -34,6 +34,7 @@
       if(preset.models)preset.models.forEach(function(m){store.upsertModel(m)});
       if(preset.trainers)preset.trainers.forEach(function(t){store.upsertTrainerCard(t)});
       if(preset.trainers)OSCPretrainedLoader.loadAll(store,preset.trainers);
+      if (typeof OSCPretrainedLoader !== "undefined" && typeof OSCPretrainedLoader.ensureDatasetsReady === "function") OSCPretrainedLoader.ensureDatasetsReady(store);
       // generation + evaluation items use custom tables
       store.initTables({tables:["generationRuns","evaluations"]});
       if(preset.generations)preset.generations.forEach(function(g){store.save({table:"generationRuns",values:[g]})});

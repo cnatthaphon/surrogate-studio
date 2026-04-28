@@ -659,20 +659,28 @@
       return RL;
     })();
 
-    // Determine output units per head. Priority:
-    // 1. Explicit units/unitsHint in the output node config
-    // 2. Schema-defined output keys (with featureSize)
-    // 3. Infer from target type + dataset metadata
+    // Determine output units per head. Priority (contract-driven):
+    // 1. Explicit units/unitsHint on the output node
+    // 2. Schema-declared featureSize on the matching allowedOutputKeys entry
+    // 3. Universal target-key conventions (label/logits→numClasses, params, pixel_values, custom)
+    // 4. headType (classification→numClasses)
+    // 5. datasetMeta.targetSize
+    // 6. Simple-regression default = 1 (don't infer from hidden upstream width)
     var targetUnitsFromMode = function (target, paramsSelectRaw, nodeData, headType, upstreamUnits) {
-      // 1. explicit units on the output node
       var nd = nodeData || {};
+      // 1. explicit units on the output node
       if (nd.units && Number(nd.units) > 0) return Number(nd.units);
       if (nd.unitsHint && Number(nd.unitsHint) > 0) return Number(nd.unitsHint);
 
+      // 2. schema-declared featureSize for this target key (preferred contract path)
+      var spec = _lookupOutputSpec(target, datasetMeta.allowedOutputKeys);
+      if (spec && Number(spec.featureSize) > 0) {
+        return Math.max(1, Number(spec.featureSize));
+      }
+
       var targetKey = String(target || nd.targetType || nd.target || "").trim().toLowerCase();
 
-      if (targetKey === "x" || targetKey === "v") return 1;
-      if (targetKey === "xv") return 2;
+      // 3. universal target-key conventions
       if (targetKey === "label" || targetKey === "logits") {
         return Math.max(1, Number(datasetMeta.numClasses || datasetMeta.classCount || 1));
       }
@@ -682,26 +690,30 @@
         return Math.max(1, picks.length || Number(datasetMeta.paramSize || 1));
       }
       if (targetKey === "pixel_values") {
+        // reconstruction targets the input shape; falling back to upstream width is
+        // legitimate for autoencoders that already taper the bottleneck back up
         return Math.max(1, Number(datasetMeta.featureSize || upstreamUnits || 1));
       }
       if ((targetKey === "custom" || targetKey === "none") && Number(upstreamUnits) > 0) {
         return Math.max(1, Number(upstreamUnits));
       }
 
-      // 2. from headType (set by schema, not hardcoded target names)
-      var ht = String(headType || "regression");
+      // 4. headType-driven
+      var ht = String(headType || (spec && spec.headType) || "regression");
       if (ht === "classification") {
         return Math.max(1, Number(datasetMeta.numClasses || datasetMeta.classCount || upstreamUnits || 1));
       }
 
+      // 5. dataset-side targetSize
       if (Number(datasetMeta.targetSize) > 0) {
         return Math.max(1, Number(datasetMeta.targetSize));
       }
-      if (Number(upstreamUnits) > 0) {
-        return Math.max(1, Number(upstreamUnits));
-      }
-      // regression / reconstruction fallback
-      return Math.max(1, Number(datasetMeta.featureSize || 1));
+
+      // 6. simple-regression default. Don't infer from upstream hidden width:
+      // hidden width is incidental to the model architecture, not the target.
+      // Multi-output regression should declare width via output-node units,
+      // schema featureSize, or datasetMeta.targetSize.
+      return 1;
     };
 
     var applyNodeOp = function (node, inTensor, laterHasRecurrent, nodeId) {

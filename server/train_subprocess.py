@@ -303,10 +303,10 @@ def main():
         if hl == "none":
             head_losses.append({"fn": None, "weight": 0, "phase": hp, "cls": False, "skip": True})
         elif hl in ("bce", "binarycrossentropy", "binary_crossentropy"):
-            head_losses.append({"fn": nn.BCELoss(), "weight": hw, "phase": hp, "cls": False, "bce_binary": True})
+            head_losses.append({"fn": nn.BCELoss(), "weight": hw, "phase": hp, "cls": False, "binary_target": True, "bce_binary": True})
         elif hl in ("wasserstein", "wgan"):
             # Wasserstein loss: -mean(truth * pred)
-            head_losses.append({"fn": lambda p, t: -torch.mean(t * p), "weight": hw, "phase": hp, "cls": False, "bce_binary": True})
+            head_losses.append({"fn": lambda p, t: -torch.mean(t * p), "weight": hw, "phase": hp, "cls": False, "binary_target": True})
         elif hl in ("categoricalcrossentropy", "categorical_crossentropy", "cross_entropy", "sparsecategoricalcrossentropy"):
             head_losses.append({"fn": nn.CrossEntropyLoss(), "weight": hw, "phase": hp, "cls": True})
         elif hl == "mae":
@@ -352,7 +352,7 @@ def main():
             # get this head's prediction (by index, or first if single-output)
             head_pred = preds[i] if i < len(preds) else preds[0]
             # determine target for this head
-            if hl.get("bce_binary"):
+            if hl.get("binary_target"):
                 # Segmentation/mask heads: use real yb targets
                 head_htype = str(head_configs[i].get("headType", "")) if i < len(head_configs) else ""
                 head_target = str(head_configs[i].get("target", head_configs[i].get("targetType", ""))) if i < len(head_configs) else ""
@@ -389,6 +389,10 @@ def main():
             if target.shape != head_pred.shape:
                 if head_pred.shape[-1] == 1 and target.dim() > 1:
                     target = target[:, :1] if target.shape[-1] >= 1 else torch.ones_like(head_pred)
+            # BCE requires both pred and target in [0,1]
+            if hl.get("bce_binary"):
+                target = target.float().clamp(0.0, 1.0)
+                head_pred = head_pred.clamp(0.0, 1.0)
             total = total + hl["weight"] * hl["fn"](head_pred, target)
         return total
 

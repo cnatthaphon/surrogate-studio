@@ -64,5 +64,98 @@
     });
   }
 
-  return { loadAll: loadAll };
+  /**
+   * Auto-materialize dataset records for any dataset in the store that has
+   * a module but no records. Called after loadAll so pretrained cards have
+   * their datasets ready for Run Notebook without manual Generate step.
+   *
+   * Idempotent: skips datasets that already carry any recognized form of data
+   * (records / xTrain / sourceDescriptor / splitIndices+sourceId / trajectories).
+   *
+   * Stashes the in-flight Promise on `store._datasetsReadyPromise` so other
+   * consumers (e.g. the Run Notebook gate) can await readiness without
+   * re-entering this function.
+   *
+   * Returns a Promise that resolves when all datasets are built (or immediately
+   * if all are already populated).
+   *
+   * Usage:
+   *   OSCPretrainedLoader.loadAll(store, preset.trainers);
+   *   OSCPretrainedLoader.ensureDatasetsReady(store).then(function () { ... });
+   */
+  function ensureDatasetsReady(store) {
+    if (!store || typeof store.listDatasets !== "function") return Promise.resolve();
+    var W = typeof window !== "undefined" ? window : {};
+    var dm = W.OSCDatasetModules || null;
+    var reg = W.OSCDatasetSourceRegistry || null;
+    var hasData = reg && typeof reg.hasDatasetData === "function"
+      ? reg.hasDatasetData
+      : function (ds) {
+          var d = (ds && ds.data) || ds || {};
+          return !!((d.records && (d.records.train || d.records.val)) ||
+                    (d.xTrain && d.xTrain.length > 0) ||
+                    d.sourceDescriptor ||
+                    (d.sourceId && d.splitIndices && (
+                      (d.splitIndices.train && d.splitIndices.train.length) ||
+                      (d.splitIndices.val && d.splitIndices.val.length) ||
+                      (d.splitIndices.test && d.splitIndices.test.length)
+                    )));
+        };
+    if (!dm || typeof dm.getModuleForSchema !== "function") {
+      var noopP = Promise.resolve();
+      try { store._datasetsReadyPromise = noopP; } catch (_e) {}
+      return noopP;
+    }
+
+    var datasets = store.listDatasets();
+    var pending = [];
+    datasets.forEach(function (ds) {
+      if (hasData(ds)) return;
+      // Find module for this dataset's schema
+      var d = ds.data || ds;
+      var schemaId = ds.schemaId || d.schemaId || "";
+      var moduleId = ds.datasetModuleId || d.datasetModuleId || "";
+      var modList = dm.getModuleForSchema(schemaId);
+      if (!modList || !modList.length) return;
+      var mod = dm.getModule(moduleId || modList[0].id);
+      if (!mod || typeof mod.build !== "function") return;
+
+      // Build the dataset — don't force sourceMode; let the module + preset config decide
+      var cfg = Object.assign({
+        seed: d.seed || ds.seed || 42,
+        schemaId: schemaId,
+        moduleId: mod.id,
+      }, d.config || ds.config || {}, d.splitConfig ? { splitConfig: d.splitConfig } : {});
+      if (d.totalCount || d.sourceTotalExamples) cfg.totalCount = d.totalCount || d.sourceTotalExamples;
+
+      var p;
+      try { p = mod.build(cfg); } catch (e) { console.warn("[pretrained] Dataset build failed:", ds.id, e.message); return; }
+      if (!p || typeof p.then !== "function") p = Promise.resolve(p);
+
+      pending.push(p.then(function (result) {
+        if (!result) return;
+        var updated = Object.assign({}, ds, { data: result, status: "ready", generatedAt: Date.now() });
+        store.upsertDataset(updated);
+      }).catch(function (e) {
+        console.warn("[pretrained] Dataset build failed:", ds.id, e.message);
+      }));
+    });
+
+    var readyP = pending.length ? Promise.all(pending).then(function () {}) : Promise.resolve();
+    try { store._datasetsReadyPromise = readyP; } catch (_e) {}
+    return readyP;
+  }
+
+  /**
+   * Await the in-flight readiness Promise stashed by ensureDatasetsReady,
+   * if any. Resolves immediately if no build was kicked off (or it has
+   * already completed).
+   */
+  function awaitDatasetsReady(store) {
+    if (!store) return Promise.resolve();
+    var p = store._datasetsReadyPromise;
+    return (p && typeof p.then === "function") ? p : Promise.resolve();
+  }
+
+  return { loadAll: loadAll, ensureDatasetsReady: ensureDatasetsReady, awaitDatasetsReady: awaitDatasetsReady };
 });

@@ -216,10 +216,15 @@ async function testSchema(schemaId, store) {
   // 7. evaluate
   var isClassification = loss === "cross_entropy";
   if (isClassification) {
-    var predLabels = PC.batchPredictClassification(tf, buildResult.model, activeDs.xTest.slice(0, 20), {});
+    var predLabels = await PC.batchPredictClassification(tf, buildResult.model, activeDs.xTest.slice(0, 20), {});
+    assert(Array.isArray(predLabels), schemaId + " batchPredictClassification must resolve to array — caller awaited?");
     var trueLabels = activeDs.yTest.slice(0, 20).map(function (oh) { return Array.isArray(oh) ? PC.argmax(oh) : oh; });
     var classMetrics = PC.computeClassificationMetrics(trueLabels, predLabels);
     console.log("Eval: accuracy=" + (classMetrics.accuracy * 100).toFixed(1) + "%");
+    // Catches Promise/length leak: a Promise has no .length, so Math.min(N, undefined)
+    // → NaN → computeClassificationMetrics returns { n: 0 }. Real predictions on a
+    // 20-row test slice always yield n > 0 regardless of model quality.
+    assert(classMetrics.n > 0, schemaId + " classification metrics n must be > 0 (Promise/length leak otherwise)");
   } else {
     var predTensor = tf.tensor2d(activeDs.xTest.slice(0, 20));
     var predRaw = buildResult.model.predict(predTensor);

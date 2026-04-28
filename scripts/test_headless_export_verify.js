@@ -64,7 +64,9 @@ async function main() {
 
   var buildResult = MBC.buildModelFromGraph(tf, graph, {
     mode: "direct", featureSize: activeDs.featureSize, windowSize: 1, seqFeatureSize: activeDs.featureSize,
-    allowedOutputKeys: ["x"], defaultTarget: "x",
+    targetSize: 1,
+    allowedOutputKeys: [{ key: "x", headType: "regression", featureSize: 1 }],
+    defaultTarget: "x",
   });
 
   var epochLog = [];
