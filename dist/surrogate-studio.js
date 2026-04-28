@@ -1,5 +1,5 @@
 // Surrogate Studio - concatenated bundle
-// Generated: 2026-04-28T10:53:04Z
+// Generated: 2026-04-28T14:45:29Z
 // Source files: 58
 
 
@@ -19439,9 +19439,16 @@
     cells.push(makeMarkdownCell("## 11) Latent Optimization\n\nOptimize z in latent space to minimize a target objective."));
     cells.push(makeCodeCell(
       "# --- Latent Optimization ---\n" +
-      "# Find z that produces output closest to a target\n" +
-      "model.eval()\n\n" +
-      "if not bool(globals().get('can_sample_input_space', False)):\n" +
+      "# Find z that produces output closest to a target.\n" +
+      "# This cell does its own backward through the (frozen) model to optimise\n" +
+      "# z, not model weights. cuDNN's RNN backward kernel still requires\n" +
+      "# module.training=True for graphs that contain LSTM/GRU/RNN nodes — so we\n" +
+      "# disable cuDNN for this op (PyTorch falls back to a kernel that backprops\n" +
+      "# fine in eval mode). Equivalent in correctness, slightly slower for RNNs;\n" +
+      "# no effect on non-RNN graphs.\n" +
+      "if len(x_test) == 0:\n" +
+      "    print('Latent optimization skipped: empty test split.')\n" +
+      "elif not bool(globals().get('can_sample_input_space', False)):\n" +
       "    print('Latent optimization skipped: model output space does not match input space.')\n" +
       "else:\n" +
       "    try:\n" +
@@ -19449,14 +19456,16 @@
       "        target = x_test[:1].to(device)\n" +
       "        z = torch.randn(1, latent_dim, device=device, requires_grad=True)\n" +
       "        opt_z = torch.optim.Adam([z], lr=0.01)\n\n" +
-      "        for step in range(100):\n" +
-      "            opt_z.zero_grad()\n" +
-      "            recon = decoder(z) if 'decoder' in dir() else model(z)\n" +
-      "            loss = nn.MSELoss()(recon, target)\n" +
-      "            loss.backward()\n" +
-      "            opt_z.step()\n" +
-      "            if step % 20 == 0:\n" +
-      "                print(f'Step {step}: loss={loss.item():.6f}')\n\n" +
+      "        with torch.backends.cudnn.flags(enabled=False):\n" +
+      "            for step in range(100):\n" +
+      "                opt_z.zero_grad()\n" +
+      "                recon = decoder(z) if 'decoder' in dir() else model(z)\n" +
+      "                if isinstance(recon, (tuple, list)): recon = recon[0]\n" +
+      "                loss = nn.MSELoss()(recon, target)\n" +
+      "                loss.backward()\n" +
+      "                opt_z.step()\n" +
+      "                if step % 20 == 0:\n" +
+      "                    print(f'Step {step}: loss={loss.item():.6f}')\n\n" +
       "        optimized = recon.detach().cpu().numpy()[0]\n" +
       "        original = target.cpu().numpy()[0]\n\n" +
       "        if is_image:\n" +
@@ -19494,15 +19503,19 @@
       "            n_guided = 8\n" +
       "            z = torch.randn(n_guided, latent_dim, device=device, requires_grad=True)\n" +
       "            opt = torch.optim.Adam([z], lr=0.01)\n\n" +
-      "            for step in range(100):\n" +
-      "                opt.zero_grad()\n" +
-      "                dec = decoder(z) if 'decoder' in dir() else model(z)\n" +
-      "                cls_out = model(dec)\n" +
-      "                if isinstance(cls_out, (tuple, list)): cls_out = cls_out[-1]  # last output = classifier\n" +
-      "                guidance_loss = -torch.log(cls_out[:, target_class] + 1e-8).mean()\n" +
-      "                guidance_loss.backward()\n" +
-      "                opt.step()\n" +
-      "                if step % 25 == 0: print(f'Step {step}: guidance_loss={guidance_loss.item():.4f}')\n\n" +
+      "            # Disable cuDNN: optimisation backprops through a frozen model;\n" +
+      "            # cuDNN RNN backward refuses on eval graphs (BUG-33 family).\n" +
+      "            with torch.backends.cudnn.flags(enabled=False):\n" +
+      "                for step in range(100):\n" +
+      "                    opt.zero_grad()\n" +
+      "                    dec = decoder(z) if 'decoder' in dir() else model(z)\n" +
+      "                    if isinstance(dec, (tuple, list)): dec = dec[0]\n" +
+      "                    cls_out = model(dec)\n" +
+      "                    if isinstance(cls_out, (tuple, list)): cls_out = cls_out[-1]  # last output = classifier\n" +
+      "                    guidance_loss = -torch.log(cls_out[:, target_class] + 1e-8).mean()\n" +
+      "                    guidance_loss.backward()\n" +
+      "                    opt.step()\n" +
+      "                    if step % 25 == 0: print(f'Step {step}: guidance_loss={guidance_loss.item():.4f}')\n\n" +
       "            guided_samples = (decoder(z) if 'decoder' in dir() else model(z)).detach().cpu().numpy()\n" +
       "            if is_image:\n" +
       "                fig, axes = plt.subplots(1, n_guided, figsize=(n_guided*1.5, 2))\n" +
