@@ -189,11 +189,11 @@ function nextModel() {
 
   // Build model info
   var tf = require("@tensorflow/tfjs");
-  var allowedOutputKeys = [{ key: "xv", headType: "regression" }];
+  var allowedOutputKeys = [{ key: "xv", headType: "regression", featureSize: 2 }];
   // VAE+Classifier has a label head too
   var isMultiHead = m.name.indexOf("Classifier") >= 0;
   if (isMultiHead) {
-    allowedOutputKeys.push({ key: "label", headType: "classification" });
+    allowedOutputKeys.push({ key: "label", headType: "classification", numClasses: numClasses });
   }
   var built = mb.buildModelFromGraph(tf, m.graph, {
     mode: "direct", featureSize: featureSize, numClasses: numClasses,

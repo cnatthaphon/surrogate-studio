@@ -85,14 +85,20 @@ async function main() {
   // verify graph
   var mode = MBC.inferGraphMode(graphSpec, "direct");
   assert.strictEqual(mode, "direct");
-  var heads = MBC.inferOutputHeads(graphSpec, ["x", "v", "xv", "params"], "x");
+  var allowedOutputKeys = [
+    { key: "x", headType: "regression", featureSize: 1 },
+    { key: "v", headType: "regression", featureSize: 1 },
+    { key: "xv", headType: "regression", featureSize: 2 },
+    { key: "params", headType: "regression" },
+  ];
+  var heads = MBC.inferOutputHeads(graphSpec, allowedOutputKeys, "x");
   assert(heads.length >= 1);
   console.log("Model: mode=" + mode + " heads=" + heads.length);
 
   // build TF.js model
   var buildResult = MBC.buildModelFromGraph(tf, graphSpec, {
     mode: "direct", featureSize: activeDs.featureSize, windowSize: 1, seqFeatureSize: activeDs.featureSize,
-    allowedOutputKeys: ["x", "v", "xv", "params"], defaultTarget: "x",
+    allowedOutputKeys: allowedOutputKeys, defaultTarget: "x",
   });
   assert(buildResult.model, "TF.js model built");
   console.log("TF.js model: params=" + buildResult.model.countParams());
