@@ -23,7 +23,7 @@
 - Initial bootstrap state on FM-GAN: `trainCount: 6000`, `source: "mnist_idx_gzip_worker"` (was `source: "synthetic"` with trainCount 80 before).
 - The preset-side resolver now correctly identifies the real Fashion-MNIST data path.
 
-**But the actual record materialization still doesn't complete:** 
+**But the actual record materialization still doesn't complete:**
 
 ```js
 // On freshly loaded /demo/Fashion-MNIST-GAN/?nb1, after 25s + after 60s + after Run Notebook click + 100s wait:
