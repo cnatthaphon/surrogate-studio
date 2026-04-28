@@ -25,6 +25,32 @@ function main() {
   const oscOutputs = schemaRegistry.getOutputKeys("oscillator");
   assert(Array.isArray(oscOutputs) && oscOutputs.map(function(o){return typeof o === "object" ? o.key : o;}).includes("x"), "oscillator outputs should include x");
 
+  // Schema-declared target widths must survive normalization. model_builder_core
+  // depends on featureSize/numClasses surviving _normalizeModel → getOutputKeys
+  // to size output heads correctly. Stripping these fields would silently
+  // regress to the old "infer from upstream hidden width" failure mode.
+  function _findOutput(outs, key) {
+    for (var i = 0; i < outs.length; i++) {
+      var o = outs[i];
+      if (o && (typeof o === "object" ? o.key : o) === key) return o;
+    }
+    return null;
+  }
+  const oscX = _findOutput(oscOutputs, "x");
+  const oscV = _findOutput(oscOutputs, "v");
+  const oscXv = _findOutput(oscOutputs, "xv");
+  assert(oscX && oscX.featureSize === 1, "oscillator output 'x' must declare featureSize=1 (got " + (oscX && oscX.featureSize) + ")");
+  assert(oscV && oscV.featureSize === 1, "oscillator output 'v' must declare featureSize=1 (got " + (oscV && oscV.featureSize) + ")");
+  assert(oscXv && oscXv.featureSize === 2, "oscillator output 'xv' must declare featureSize=2 (got " + (oscXv && oscXv.featureSize) + ")");
+
+  // Cross-check the underlying getModelSchema path (what consumers like
+  // _lookupOutputSpec hit via datasetMeta.allowedOutputKeys also resolve through).
+  const oscModel = schemaRegistry.getModelSchema("oscillator");
+  const oscModelXv = oscModel && Array.isArray(oscModel.outputs)
+    ? oscModel.outputs.find(function (o) { return o && o.key === "xv"; })
+    : null;
+  assert(oscModelXv && oscModelXv.featureSize === 2, "getModelSchema('oscillator') outputs xv must preserve featureSize=2");
+
   ids.forEach(function (sid) {
     const modelSchema = schemaRegistry.getModelSchema(sid);
     const pre = schemaRegistry.getModelPreconfig(sid);
