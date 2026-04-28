@@ -1964,21 +1964,39 @@
       "# --- Reconstruction / prediction preview ---\n" +
       "model.eval()\n" +
       "n_show = min(16, len(x_test))\n" +
-      "with torch.no_grad():\n" +
-      "    x_in = x_test[:n_show].to(device)\n" +
-      "    x_recon = model(x_in)\n" +
-      "    if isinstance(x_recon, (tuple, list)):\n" +
-      "        x_recon = x_recon[0]\n" +
-      "    x_recon = x_recon.cpu().numpy()\n" +
-      "    x_orig = x_test[:n_show].numpy()\n\n" +
-      "can_sample_input_space = bool(x_recon.shape == x_orig.shape)\n" +
+      "x_orig = None\n" +
+      "x_recon = None\n" +
       "recon_mse = None\n" +
-      "recon_status = 'skipped'\n" +
-      "dim = x_orig.shape[1]\n" +
+      "recon_status = 'skipped'\n\n" +
+      "# Probe input/output shape compatibility from x_train (always populated)\n" +
+      "# instead of x_test so downstream generation cells (Langevin/DDPM) still\n" +
+      "# fire on training-only presets that have testFrac=0.\n" +
+      "_probe_in = x_train[:1].to(device)\n" +
+      "with torch.no_grad():\n" +
+      "    _probe_out = model(_probe_in)\n" +
+      "    if isinstance(_probe_out, (tuple, list)): _probe_out = _probe_out[0]\n" +
+      "    _probe_out = _probe_out.cpu().numpy()\n" +
+      "    _probe_in_np = x_train[:1].numpy()\n" +
+      "can_sample_input_space = bool(_probe_out.shape == _probe_in_np.shape)\n" +
+      "dim = _probe_in_np.shape[1] if _probe_in_np.ndim > 1 else _probe_in_np.shape[0]\n" +
       "is_image = dim in (784, 1024, 3072)\n" +
       "img_h = {784: 28, 1024: 32, 3072: 32}.get(dim, int(dim**0.5))\n" +
       "img_w = dim // img_h if img_h > 0 else dim\n\n" +
-      "if can_sample_input_space:\n" +
+      "# Reconstruction preview needs real test samples. Skip on testFrac=0\n" +
+      "# (e.g. GAN-only training) — matplotlib.subplots(*, ncols=0) would raise\n" +
+      "# ValueError. The downstream Langevin/DDPM cells use the train-probed\n" +
+      "# can_sample_input_space and still run.\n" +
+      "if n_show == 0:\n" +
+      "    print('No test samples (testFrac=0); skipping reconstruction preview.')\n" +
+      "else:\n" +
+      "    with torch.no_grad():\n" +
+      "        x_in = x_test[:n_show].to(device)\n" +
+      "        x_recon = model(x_in)\n" +
+      "        if isinstance(x_recon, (tuple, list)):\n" +
+      "            x_recon = x_recon[0]\n" +
+      "        x_recon = x_recon.cpu().numpy()\n" +
+      "        x_orig = x_test[:n_show].numpy()\n\n" +
+      "if n_show > 0 and can_sample_input_space and x_orig is not None and x_recon is not None:\n" +
       "    recon_mse = np.mean((x_orig - x_recon) ** 2)\n" +
       "    recon_status = 'ok'\n" +
       "    print(f'Reconstruction MSE ({n_show} samples): {recon_mse:.6f}')\n" +
@@ -2002,7 +2020,7 @@
       "            axes[i].legend(fontsize=8); axes[i].set_ylabel(f'Sample {i}')\n" +
       "        plt.suptitle(f'Reconstruction (MSE={recon_mse:.4f})', fontsize=12)\n" +
       "        plt.tight_layout(); plt.show()\n" +
-      "else:\n" +
+      "elif n_show > 0:\n" +
       "    print(f'Reconstruction skipped: output shape {tuple(x_recon.shape)} does not match input shape {tuple(x_orig.shape)}.')\n"
     ));
 
