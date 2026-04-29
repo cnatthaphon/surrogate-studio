@@ -11,13 +11,11 @@
  * error.
  *
  * What this test verifies:
- *   - _preflightHealth() exists in OSCNotebookRunnerUI's compiled internal scope
- *   - When called against an unreachable URL, it resolves within ~5s (well
- *     under the 30s "Preparing..." hang the polish PR replaces) with
- *     {ok: false, message: ...} where the message contains the operator
- *     guidance ("Run All requires a local server" or related text).
- *   - When called against a known-bad URL via _startKernel, the callback
- *     fires within the budget with an Error whose message is actionable.
+ *   - OSCNotebookRunnerUI.open() drives the internal _preflightHealth path.
+ *   - _preflightHealth calls /api/health with an AbortController signal,
+ *     returns within budget, and skips /api/notebook/start when health fails.
+ *   - When called against a known-bad URL, the callback fires within the
+ *     budget with an Error whose message is actionable.
  */
 
 var path = require("path");
@@ -56,52 +54,128 @@ async function main() {
     });
     ok(moduleLoaded, "OSCNotebookRunnerUI loaded");
 
-    // === Test 1: showBusy() with bad serverUrl, then attempting to start
-    // kernel — _startKernel should call its callback within the budget with
-    // an actionable error from _preflightHealth, not hang.
-    console.log("\n--- preflight on unreachable server ---");
+    // === Test 1: drive the real runner.open() path, but intercept fetch so
+    // /api/health hangs until the runner's AbortController aborts it.
+    console.log("\n--- runner.open invokes internal health preflight ---");
     var t0 = Date.now();
     var preflightResult = await page.evaluate(function () {
       return new Promise(function (resolve) {
         var W = window;
         var NRA = W.OSCNotebookRunnerUI;
         if (!NRA) { resolve({ ok: false, where: "no-module" }); return; }
-        // Drive into showBusy first so the module's internal _serverUrl is set
-        NRA.showBusy({ serverUrl: "http://127.0.0.1:1", message: "Probe" });
-        // Now we need to invoke the internal _startKernel via a public surface.
-        // The polish PR doesn't expose _preflightHealth directly, but the
-        // first call inside open() / kernel start would trigger it. We can't
-        // call _startKernel directly without a notebook payload, so we
-        // instead test the timing characteristic by issuing a fetch with
-        // the same 3s-AbortController behavior the preflight uses.
-        var ctrl = new AbortController();
-        var timer = setTimeout(function () { ctrl.abort(); }, 3000);
+        var originalFetch = W.fetch;
+        var calls = [];
         var startedAt = performance.now();
-        fetch("http://127.0.0.1:1/api/health", { method: "GET", signal: ctrl.signal })
-          .then(function () {
-            clearTimeout(timer);
-            resolve({ ok: true, elapsedMs: performance.now() - startedAt });
-          })
-          .catch(function (e) {
-            clearTimeout(timer);
-            resolve({
-              ok: false,
-              name: e && e.name,
-              message: String(e && e.message || e),
-              elapsedMs: performance.now() - startedAt,
-            });
+
+        function abortError() {
+          try { return new DOMException("The operation was aborted.", "AbortError"); }
+          catch (e) {
+            var err = new Error("The operation was aborted.");
+            err.name = "AbortError";
+            return err;
+          }
+        }
+
+        function restoreAndResolve(value) {
+          W.fetch = originalFetch;
+          if (NRA && typeof NRA.close === "function") NRA.close();
+          resolve(value);
+        }
+
+        W.fetch = function (url, opts) {
+          var fullUrl = String(url || "");
+          var hasSignal = !!(opts && opts.signal);
+          calls.push({
+            url: fullUrl,
+            method: String((opts && opts.method) || "GET"),
+            hasSignal: hasSignal,
           });
+          if (fullUrl.indexOf("/api/health") >= 0) {
+            return new Promise(function (_resolve, reject) {
+              var signal = opts && opts.signal;
+              if (signal && signal.aborted) {
+                reject(abortError());
+                return;
+              }
+              if (signal && typeof signal.addEventListener === "function") {
+                signal.addEventListener("abort", function () {
+                  reject(abortError());
+                }, { once: true });
+              }
+            });
+          }
+          if (fullUrl.indexOf("/api/notebook/start") >= 0) {
+            return Promise.resolve({
+              ok: true,
+              json: function () { return Promise.resolve({ kernelId: "should-not-start" }); },
+            });
+          }
+          return originalFetch.apply(this, arguments);
+        };
+
+        var fakeNotebook = {
+          cells: [
+            { cell_type: "markdown", source: ["test"], metadata: {} },
+          ],
+          metadata: {},
+          nbformat: 4, nbformat_minor: 5,
+        };
+        try {
+          NRA.open({
+            notebook: fakeNotebook,
+            serverUrl: "http://127.0.0.1:3777",
+            onArtifacts: function () {},
+          });
+        } catch (e) {
+          restoreAndResolve({ ok: false, threw: String((e && e.message) || e), calls: calls });
+          return;
+        }
+
+        var deadline = performance.now() + 7000;
+        function poll() {
+          var bodyText = document.body.innerText || document.body.textContent || "";
+          var healthCalls = calls.filter(function (c) { return c.url.indexOf("/api/health") >= 0; });
+          var startCalls = calls.filter(function (c) { return c.url.indexOf("/api/notebook/start") >= 0; });
+          var hasActionable =
+            bodyText.indexOf("Local notebook server did not respond") >= 0 ||
+            bodyText.indexOf("Run All requires a local server") >= 0;
+          if (hasActionable) {
+            restoreAndResolve({
+              ok: true,
+              elapsedMs: performance.now() - startedAt,
+              healthCalls: healthCalls.length,
+              healthHasSignal: healthCalls.some(function (c) { return c.hasSignal; }),
+              startCalls: startCalls.length,
+            });
+            return;
+          }
+          if (performance.now() > deadline) {
+            restoreAndResolve({
+              ok: false,
+              elapsedMs: performance.now() - startedAt,
+              healthCalls: healthCalls.length,
+              healthHasSignal: healthCalls.some(function (c) { return c.hasSignal; }),
+              startCalls: startCalls.length,
+              snippet: bodyText.slice(0, 400),
+              calls: calls,
+            });
+            return;
+          }
+          setTimeout(poll, 100);
+        }
+        poll();
       });
     });
     var elapsed = Date.now() - t0;
     console.log("  evaluate result:", JSON.stringify(preflightResult));
-    ok(preflightResult.ok === false, "preflight surfaces failure (not stuck waiting)");
+    ok(preflightResult.ok, "runner.open() surfaces preflight timeout failure");
+    ok(preflightResult.healthCalls === 1, "runner preflight calls /api/health once");
+    ok(preflightResult.healthHasSignal, "runner preflight supplies AbortController signal");
+    ok(preflightResult.startCalls === 0, "kernel start is skipped when preflight fails");
     ok(preflightResult.elapsedMs < 5000, "preflight returns within 5s budget (got " + Math.round(preflightResult.elapsedMs) + "ms)");
     ok(elapsed < 8000, "round-trip including evaluate < 8s (got " + elapsed + "ms)");
 
-    // === Test 2: confirm _preflightHealth function shape (closure-internal,
-    // so we test by invoking the runner.open path with bad url and watching
-    // the busy overlay get an error message instead of spinning).
+    // === Test 2: confirm the real browser failure path with a known-bad URL.
     console.log("\n--- runner.open with unreachable server surfaces actionable error ---");
     var openResult = await page.evaluate(function () {
       return new Promise(function (resolve) {
