@@ -1,5 +1,5 @@
 // Surrogate Studio - concatenated bundle
-// Generated: 2026-04-29T07:31:28Z
+// Generated: 2026-04-29T08:48:39Z
 // Source files: 58
 
 
@@ -19027,7 +19027,20 @@
       "data = graph.get('drawflow', {}).get('Home', {}).get('data', graph)\n" +
       "out_nodes = [data[k] for k in data if data[k].get('name','').endswith('output_layer')]\n" +
       "loss_name = out_nodes[0].get('data',{}).get('loss','mse') if out_nodes else 'mse'\n" +
-      "is_cls = any(n.get('data',{}).get('target','') in ('label','logits') for n in out_nodes)\n" +
+      "# is_cls follows the same schema-agnostic contract used downstream by\n" +
+      "# head_losses construction: any of target / targetType / headType signals\n" +
+      "# classification. Reading only `target` would miss graphs that label the\n" +
+      "# head purely by `targetType` (e.g. `targetType: 'label'` with a generic\n" +
+      "# target string) or by `headType: 'classification'` (any custom target key).\n" +
+      "def _is_cls_node(n):\n" +
+      "    nd = n.get('data', {}) if isinstance(n, dict) else {}\n" +
+      "    tk = str(nd.get('target', '') or '').lower()\n" +
+      "    tt = str(nd.get('targetType', '') or '').lower()\n" +
+      "    ht = str(nd.get('headType', '') or '').lower()\n" +
+      "    return (tk in ('label', 'logits')\n" +
+      "            or tt in ('label', 'logits')\n" +
+      "            or ht == 'classification')\n" +
+      "is_cls = any(_is_cls_node(n) for n in out_nodes)\n" +
       "phases = sorted(set(str(n.get('data',{}).get('phase', '')).strip() for n in out_nodes))\n" +
       "is_phased = any(p != '' for p in phases)\n" +
       "print(f'Phases: {phases} (phased={is_phased})')\n\n" +
@@ -19068,53 +19081,109 @@
       "        _nclasses = int((_n.get('data') or {}).get('numClasses', 10))\n" +
       "        break\n" +
       "\n" +
-      "def _compact_labels_for_class_embed(lbl, target_n):\n" +
-      "    \"\"\"Remap one-hot labels to compact `target_n`-wide one-hot.\n" +
-      "    Datasets often carry full-class one-hot (e.g. width 10 for Fashion-MNIST)\n" +
-      "    while a model conditions on a subset (e.g. classFilter=[0,1,7] → 3\n" +
-      "    classes). Without remap, model._class_labels (10-wide) feeds into a\n" +
-      "    class_embed expecting 3 dims and the next Linear sees a wider concat\n" +
-      "    than its in_features. Convention: observed class indices are mapped\n" +
-      "    to 0..target_n-1 in sorted order — same compact convention used by\n" +
-      "    classFilter pre-processing.\n" +
+      "def _idx_from_onehot_or_int(lbl):\n" +
+      "    \"\"\"Convert a label tensor (one-hot or integer) to a 1-D LongTensor of\n" +
+      "    class indices. Returns None when the input is unusable.\n" +
       "    \"\"\"\n" +
-      "    if lbl is None or target_n <= 0: return lbl\n" +
-      "    if lbl.ndim < 2 or lbl.shape[-1] == target_n: return lbl\n" +
-      "    # Guard empty splits before calling .max() / .argmax() / .unique() —\n" +
-      "    # those raise on zero-element tensors. Defends in depth against\n" +
-      "    # earlier guards being bypassed by a partial failure.\n" +
-      "    if lbl.shape[0] == 0:\n" +
-      "        return lbl.new_zeros((0, target_n))\n" +
-      "    import torch.nn.functional as F\n" +
-      "    idx = lbl.argmax(dim=-1) if lbl.shape[-1] > 1 else lbl.long().squeeze(-1)\n" +
-      "    if idx.numel() == 0:\n" +
-      "        return lbl.new_zeros((0, target_n))\n" +
-      "    unique_vals = torch.unique(idx).sort().values\n" +
+      "    if lbl is None: return None\n" +
+      "    if not torch.is_tensor(lbl): return None\n" +
+      "    if lbl.numel() == 0: return None\n" +
+      "    if lbl.ndim >= 2 and lbl.shape[-1] > 1:\n" +
+      "        return lbl.argmax(dim=-1).long()\n" +
+      "    return lbl.long().reshape(-1)\n" +
+      "\n" +
+      "def _build_class_compact_lut(label_tensors, target_n):\n" +
+      "    \"\"\"Build a stable original→compact LUT once from the UNION of class\n" +
+      "    indices observed across all provided label tensors (train+val+test).\n" +
+      "    Compacting each split independently would let class 7 in the val set\n" +
+      "    map to compact ID 1 if the train set didn't see 7 — different IDs for\n" +
+      "    the same original class across splits, breaking the conditioning\n" +
+      "    contract. One LUT keeps the mapping consistent.\n" +
+      "    Returns (lut, compact_count). lut[orig] == -1 for unseen classes;\n" +
+      "    callers should clamp_min(0) when materialising.\n" +
+      "    \"\"\"\n" +
+      "    idx_parts = []\n" +
+      "    for lbl in label_tensors:\n" +
+      "        idx = _idx_from_onehot_or_int(lbl)\n" +
+      "        if idx is not None and idx.numel() > 0:\n" +
+      "            idx_parts.append(idx)\n" +
+      "    if not idx_parts:\n" +
+      "        return torch.zeros((0,), dtype=torch.long), 0\n" +
+      "    union_idx = torch.cat(idx_parts)\n" +
+      "    unique_vals = torch.unique(union_idx).sort().values\n" +
       "    if unique_vals.numel() > target_n:\n" +
       "        unique_vals = unique_vals[:target_n]\n" +
-      "    lut = torch.full((int(idx.max().item()) + 1,), -1, dtype=torch.long)\n" +
+      "    max_orig = int(union_idx.max().item()) + 1\n" +
+      "    lut = torch.full((max(max_orig, target_n),), -1, dtype=torch.long)\n" +
       "    for ci, cv in enumerate(unique_vals.tolist()):\n" +
       "        lut[cv] = ci\n" +
+      "    return lut, int(unique_vals.numel())\n" +
+      "\n" +
+      "def _apply_compact_lut(lbl, lut, target_n):\n" +
+      "    \"\"\"Apply a pre-built LUT to relabel a one-hot or integer label tensor.\n" +
+      "    Empty splits return a zero-shape compact tensor. The LUT itself was\n" +
+      "    built from the union across all splits in _build_class_compact_lut so\n" +
+      "    every split shares the same original→compact mapping.\n" +
+      "    \"\"\"\n" +
+      "    import torch.nn.functional as F\n" +
+      "    if lbl is None or target_n <= 0: return lbl\n" +
+      "    if lbl.ndim < 2 or lbl.shape[-1] == target_n: return lbl\n" +
+      "    if lbl.shape[0] == 0:\n" +
+      "        return lbl.new_zeros((0, target_n))\n" +
+      "    idx = _idx_from_onehot_or_int(lbl)\n" +
+      "    if idx is None or idx.numel() == 0:\n" +
+      "        return lbl.new_zeros((0, target_n))\n" +
+      "    if lut is None or lut.numel() == 0:\n" +
+      "        return lbl.new_zeros((idx.shape[0], target_n))\n" +
+      "    # extend LUT if we ever see an idx larger than the cached LUT covers\n" +
+      "    max_idx = int(idx.max().item())\n" +
+      "    if max_idx >= lut.shape[0]:\n" +
+      "        new_lut = torch.full((max_idx + 1,), -1, dtype=torch.long)\n" +
+      "        new_lut[: lut.shape[0]] = lut\n" +
+      "        lut = new_lut\n" +
       "    compact_idx = lut[idx].clamp_min(0)\n" +
       "    return F.one_hot(compact_idx, target_n).float()\n" +
       "\n" +
       "if _has_class_embed and hasattr(model, '_class_labels') is False:\n" +
       "    if labels_train_tensor is not None and labels_val_tensor is not None:\n" +
-      "        labels_train_tensor = _compact_labels_for_class_embed(labels_train_tensor, _nclasses)\n" +
-      "        labels_val_tensor = _compact_labels_for_class_embed(labels_val_tensor, _nclasses)\n" +
-      "        labels_test_tensor = _compact_labels_for_class_embed(labels_test_tensor, _nclasses) if labels_test_tensor is not None else None\n" +
+      "        # Build ONE LUT from the union across all splits, then apply it.\n" +
+      "        _shared_lut, _compact_n = _build_class_compact_lut(\n" +
+      "            [labels_train_tensor, labels_val_tensor, labels_test_tensor], _nclasses)\n" +
+      "        labels_train_tensor = _apply_compact_lut(labels_train_tensor, _shared_lut, _nclasses)\n" +
+      "        labels_val_tensor = _apply_compact_lut(labels_val_tensor, _shared_lut, _nclasses)\n" +
+      "        labels_test_tensor = _apply_compact_lut(labels_test_tensor, _shared_lut, _nclasses) if labels_test_tensor is not None else None\n" +
       "        train_dl = DataLoader(TensorDataset(x_train, y_train, labels_train_tensor), batch_size=BATCH_SIZE, shuffle=True)\n" +
       "        val_dl = DataLoader(TensorDataset(x_val, y_val, labels_val_tensor), batch_size=BATCH_SIZE)\n" +
-      "        print(f'Class conditioning: {_nclasses} classes (labels compacted to width {labels_train_tensor.shape[-1]})')\n" +
+      "        print(f'Class conditioning: {_nclasses} classes (compacted to {_compact_n} observed, shared LUT across splits)')\n" +
       "    elif 'df' in globals() and df is not None and 'label' in df.columns:\n" +
       "        import torch.nn.functional as F\n" +
-      "        _lbl_train_idx = torch.tensor(df[df['split']=='train']['label'].values.astype(int))\n" +
-      "        _lbl_val_idx = torch.tensor(df[df['split']=='val']['label'].values.astype(int))\n" +
-      "        _lbl_train = _compact_labels_for_class_embed(F.one_hot(_lbl_train_idx, max(_nclasses, int(_lbl_train_idx.max().item()) + 1)).float(), _nclasses)\n" +
-      "        _lbl_val = _compact_labels_for_class_embed(F.one_hot(_lbl_val_idx, max(_nclasses, int(_lbl_val_idx.max().item()) + 1)).float(), _nclasses)\n" +
+      "        _train_rows = df[df['split']=='train']['label'].values.astype(int)\n" +
+      "        _val_rows = df[df['split']=='val']['label'].values.astype(int) if 'val' in df['split'].values else _train_rows[:0]\n" +
+      "        _test_rows = df[df['split']=='test']['label'].values.astype(int) if 'test' in df['split'].values else _train_rows[:0]\n" +
+      "        # Build LUT from the union before any .max()/.argmax() — handles\n" +
+      "        # empty val/test splits without raising on the int-array fallback.\n" +
+      "        _lbl_train_idx = torch.tensor(_train_rows, dtype=torch.long)\n" +
+      "        _lbl_val_idx = torch.tensor(_val_rows, dtype=torch.long)\n" +
+      "        _lbl_test_idx = torch.tensor(_test_rows, dtype=torch.long)\n" +
+      "        _shared_lut, _compact_n = _build_class_compact_lut(\n" +
+      "            [_lbl_train_idx, _lbl_val_idx, _lbl_test_idx], _nclasses)\n" +
+      "        def _df_compact_onehot(idx_t):\n" +
+      "            if idx_t.numel() == 0:\n" +
+      "                return torch.zeros((0, _nclasses), dtype=torch.float32)\n" +
+      "            # ensure LUT covers idx_t.max()\n" +
+      "            mx = int(idx_t.max().item())\n" +
+      "            lut = _shared_lut\n" +
+      "            if mx >= lut.shape[0]:\n" +
+      "                new_lut = torch.full((mx + 1,), -1, dtype=torch.long)\n" +
+      "                new_lut[: lut.shape[0]] = lut\n" +
+      "                lut = new_lut\n" +
+      "            compact = lut[idx_t].clamp_min(0)\n" +
+      "            return F.one_hot(compact, _nclasses).float()\n" +
+      "        _lbl_train = _df_compact_onehot(_lbl_train_idx)\n" +
+      "        _lbl_val = _df_compact_onehot(_lbl_val_idx)\n" +
       "        train_dl = DataLoader(TensorDataset(x_train, y_train, _lbl_train), batch_size=BATCH_SIZE, shuffle=True)\n" +
-      "        val_dl = DataLoader(TensorDataset(x_val, y_val, _lbl_val), batch_size=BATCH_SIZE)\n" +
-      "        print(f'Class conditioning: {_nclasses} classes')\n" +
+      "        val_dl = DataLoader(TensorDataset(x_val, y_val, _lbl_val), batch_size=BATCH_SIZE) if _lbl_val.shape[0] > 0 else DataLoader(TensorDataset(x_val, y_val), batch_size=BATCH_SIZE)\n" +
+      "        print(f'Class conditioning: {_nclasses} classes (df fallback, {_compact_n} observed)')\n" +
       "    else:\n" +
       "        train_dl = DataLoader(TensorDataset(x_train, y_train), batch_size=BATCH_SIZE, shuffle=True)\n" +
       "        val_dl = DataLoader(TensorDataset(x_val, y_val), batch_size=BATCH_SIZE)\n" +
