@@ -1789,8 +1789,15 @@
       "    \"\"\"\n" +
       "    if lbl is None or target_n <= 0: return lbl\n" +
       "    if lbl.ndim < 2 or lbl.shape[-1] == target_n: return lbl\n" +
+      "    # Guard empty splits before calling .max() / .argmax() / .unique() —\n" +
+      "    # those raise on zero-element tensors. Defends in depth against\n" +
+      "    # earlier guards being bypassed by a partial failure.\n" +
+      "    if lbl.shape[0] == 0:\n" +
+      "        return lbl.new_zeros((0, target_n))\n" +
       "    import torch.nn.functional as F\n" +
       "    idx = lbl.argmax(dim=-1) if lbl.shape[-1] > 1 else lbl.long().squeeze(-1)\n" +
+      "    if idx.numel() == 0:\n" +
+      "        return lbl.new_zeros((0, target_n))\n" +
       "    unique_vals = torch.unique(idx).sort().values\n" +
       "    if unique_vals.numel() > target_n:\n" +
       "        unique_vals = unique_vals[:target_n]\n" +
@@ -1846,14 +1853,24 @@
       "            if head_type == 'segmentation' or target_key in ('mask', 'segmentation_mask'):\n" +
       "                t = yb_t\n" +
       "            else:\n" +
-      "                # GAN-style: custom labels constructed by graph (PhaseSwitch + ConcatBatch).\n" +
+      "                # GAN-style: custom labels constructed by the graph (PhaseSwitch +\n" +
+      "                # ConcatBatch) live on model._custom_labels keyed by output node id.\n" +
+      "                # Need explicit branching for the batch-dim cases — expand_as only\n" +
+      "                # works when t has a singleton batch (size 1) that broadcasts to hp.\n" +
+      "                # A stale full-batch tensor (e.g. 128 vs current 64) would crash.\n" +
       "                oid = out_ids[i] if i < len(out_ids) else None\n" +
-      "                if oid is not None and oid in custom_labels:\n" +
-      "                    t = custom_labels[oid]\n" +
-      "                    if t.shape[0] != hp.shape[0]:\n" +
-      "                        t = t.expand_as(hp)\n" +
+      "                cl_t = custom_labels[oid] if (oid is not None and oid in custom_labels) else None\n" +
+      "                if cl_t is not None and cl_t.shape[0] == hp.shape[0]:\n" +
+      "                    t = cl_t\n" +
+      "                elif cl_t is not None and cl_t.shape[0] == 1 and cl_t.dim() >= 2:\n" +
+      "                    t = cl_t.expand(hp.shape[0], *([-1] * (cl_t.dim() - 1))).contiguous()\n" +
       "                else:\n" +
-      "                    t = torch.ones_like(hp)\n" +
+      "                    # No usable custom labels and not segmentation/mask. Default to\n" +
+      "                    # the data's yb (plain binary BCE training). The width-trim\n" +
+      "                    # guard below narrows yb to hp's width when needed. Falling\n" +
+      "                    # back to torch.ones_like would silently train the model to\n" +
+      "                    # output 1.0 everywhere — wrong for normal binary classification.\n" +
+      "                    t = yb_t\n" +
       "        elif hl['cls']:\n" +
       "            cls_src = yb_t\n" +
       "            t = cls_src.argmax(dim=-1).long() if cls_src.ndim > 1 and cls_src.shape[-1] > 1 else cls_src.long().squeeze(-1)\n" +
@@ -2336,8 +2353,13 @@
       "    print('Reconstruction MSE: skipped (model output does not match input space)')\n" +
       "else:\n" +
       "    print(f'Reconstruction MSE: {recon_mse:.6f}')\n" +
-      "if is_cls:\n" +
+      "# Only print test accuracy if the classification block above actually computed\n" +
+      "# it. is_cls + empty test split would leave `accuracy` undefined; the locals\n" +
+      "# guard makes this cell safe to run regardless of whether test was empty.\n" +
+      "if is_cls and 'accuracy' in dir():\n" +
       "    print(f'Test Accuracy: {accuracy:.4f}')\n" +
+      "elif is_cls:\n" +
+      "    print('Test Accuracy: skipped (empty test split or no predictions)')\n" +
       "print(f'\\nGeneration methods tested:')\n" +
       "print('  Reconstruction: ✓' if recon_status == 'ok' else '  Reconstruction: skipped')\n" +
       "if 'samples' in dir(): print(f'  Random Sampling: ✓ ({len(samples)} samples)')\n" +

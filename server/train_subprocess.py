@@ -1342,30 +1342,64 @@ def build_model_from_graph(graph, feature_size, target_size, num_classes=0):
                     #       or 1). If labels carry batch==1, broadcast; otherwise
                     #       fall back to random per-batch labels so sampling cells
                     #       never crash on a torch.cat batch-dim mismatch.
+                    # Stability: the original→compact mapping is cached on the model
+                    # the first time it's built so the same original class always
+                    # maps to the same compact ID across batches and across the
+                    # train/eval boundary. Recomputing per batch would let class 0
+                    # in batch 1 collide with class 7 in batch 2.
                     nclasses = int(self.node_configs[nid].get("numClasses", 10))
                     cl = getattr(self, "_class_labels", None)
                     batch_n = x.shape[0]
+
+                    def _stable_lut(idx_tensor, dataset_width):
+                        """Return (or build+cache) the compact-class LUT."""
+                        cache = getattr(self, "_class_compact_luts", None)
+                        if cache is None:
+                            cache = {}
+                            self._class_compact_luts = cache
+                        cache_key = (str(nid), int(dataset_width))
+                        if cache_key in cache:
+                            return cache[cache_key]
+                        if idx_tensor.numel() == 0:
+                            lut = torch.full((max(dataset_width, 1),), -1, dtype=torch.long)
+                        else:
+                            uniq = torch.unique(idx_tensor).sort().values[:nclasses]
+                            max_idx = int(idx_tensor.max().item()) + 1
+                            lut = torch.full((max(max_idx, dataset_width),), -1, dtype=torch.long)
+                            for ci, cv in enumerate(uniq.tolist()):
+                                lut[cv] = ci
+                        cache[cache_key] = lut.to(idx_tensor.device if idx_tensor.numel() else x.device)
+                        return cache[cache_key]
 
                     def _compact_to_nclasses(t):
                         if t.dim() < 2 or t.shape[-1] == nclasses:
                             return t
                         idx = t.argmax(dim=-1) if t.shape[-1] > 1 else t.long().squeeze(-1)
-                        uniq = torch.unique(idx).sort().values[:nclasses]
-                        max_idx = int(idx.max().item()) + 1
-                        lut = torch.full((max_idx,), -1, device=t.device, dtype=torch.long)
-                        for ci, cv in enumerate(uniq.tolist()):
-                            lut[cv] = ci
+                        if idx.numel() == 0:
+                            return torch.zeros(0, nclasses, device=t.device)
+                        lut = _stable_lut(idx, int(t.shape[-1]))
+                        # extend lut on-device if a new index was seen; -1 stays for unseen
+                        if int(idx.max().item()) >= lut.shape[0]:
+                            new_lut = torch.full((int(idx.max().item()) + 1,), -1, dtype=torch.long, device=lut.device)
+                            new_lut[: lut.shape[0]] = lut
+                            lut = new_lut
+                            cache_key = (str(nid), int(t.shape[-1]))
+                            self._class_compact_luts[cache_key] = lut
                         compact = lut[idx].clamp_min(0)
                         return torch.nn.functional.one_hot(compact, nclasses).float()
 
                     if cl is not None and cl.shape[0] == batch_n:
                         tensors[nid] = _compact_to_nclasses(cl)
                     elif cl is not None and cl.shape[0] == 1 and cl.dim() >= 2:
-                        # single class label — broadcast across the batch
+                        # single class label — compact + broadcast across the batch
                         compact = _compact_to_nclasses(cl)
-                        tensors[nid] = compact.expand(batch_n, -1).contiguous()
+                        if compact.shape[0] == 0:
+                            rand_cls = torch.randint(0, nclasses, (batch_n,), device=x.device)
+                            tensors[nid] = torch.nn.functional.one_hot(rand_cls, nclasses).float()
+                        else:
+                            tensors[nid] = compact.expand(batch_n, -1).contiguous()
                     else:
-                        # no labels or batch mismatch — random per-batch
+                        # no labels or batch mismatch beyond broadcasting — random per-batch
                         rand_cls = torch.randint(0, nclasses, (batch_n,), device=x.device)
                         tensors[nid] = torch.nn.functional.one_hot(rand_cls, nclasses).float()
                     continue

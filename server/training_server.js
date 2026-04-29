@@ -51,37 +51,42 @@ process.argv.slice(2).forEach(function (arg, i, arr) {
 
 if (!PYTHON) {
   // Resolution priority (top wins):
-  //   1. --python <path> CLI arg                    (handled above)
+  //   1. --python <path> CLI arg                    (handled above, explicit)
   //   2. $PYTHON / $SURROGATE_STUDIO_PYTHON env     (explicit override)
   //   3. an active venv ($VIRTUAL_ENV/bin/python)   (so `source venv/bin/activate` works)
   //   4. system "python3" / "python"                (fallback)
-  // Among working candidates, prefer one that can `import torch`.
-  var venvPy = process.env.VIRTUAL_ENV ? path.join(process.env.VIRTUAL_ENV, "bin", "python") : null;
-  var candidates = [
-    process.env.PYTHON,
-    process.env.SURROGATE_STUDIO_PYTHON,
-    venvPy,
-    "python3",
-    "python",
-  ].filter(Boolean);
-  // First pass: pick the first candidate that has torch.
-  for (var ci = 0; ci < candidates.length; ci++) {
-    if (_pythonWorks(candidates[ci]) && _pythonHasTorch(candidates[ci])) {
-      PYTHON = candidates[ci];
-      PYTHON_HAS_TORCH = true;
-      break;
+  // Explicit operator overrides (1, 2) are respected even if they lack torch
+  // — the operator chose them for a reason, we just warn. Auto-discovery
+  // candidates (3, 4) prefer torch-capable to avoid silent ModuleNotFoundError.
+  var explicitOverride =
+    (process.env.PYTHON && _pythonWorks(process.env.PYTHON) && process.env.PYTHON) ||
+    (process.env.SURROGATE_STUDIO_PYTHON && _pythonWorks(process.env.SURROGATE_STUDIO_PYTHON) && process.env.SURROGATE_STUDIO_PYTHON) ||
+    null;
+  if (explicitOverride) {
+    PYTHON = explicitOverride;
+    PYTHON_HAS_TORCH = _pythonHasTorch(PYTHON);
+  } else {
+    var venvPy = process.env.VIRTUAL_ENV ? path.join(process.env.VIRTUAL_ENV, "bin", "python") : null;
+    var candidates = [venvPy, "python3", "python"].filter(Boolean);
+    // First pass: pick the first candidate that has torch.
+    for (var ci = 0; ci < candidates.length; ci++) {
+      if (_pythonWorks(candidates[ci]) && _pythonHasTorch(candidates[ci])) {
+        PYTHON = candidates[ci];
+        PYTHON_HAS_TORCH = true;
+        break;
+      }
     }
-  }
-  // Second pass: if no torch-capable candidate, accept the first working one.
-  // The server will still start, but training/notebook subprocesses will
-  // produce a clear "No module named 'torch'" error so the operator can fix
-  // the env (activate venv, pip install torch, etc.) without cell cascades.
-  if (!PYTHON) {
-    for (var cj = 0; cj < candidates.length; cj++) {
-      if (_pythonWorks(candidates[cj])) { PYTHON = candidates[cj]; break; }
+    // Second pass: if no torch-capable candidate, accept the first working one.
+    // The server will still start, but training/notebook subprocesses will
+    // produce a clear "No module named 'torch'" error so the operator can fix
+    // the env (activate venv, pip install torch, etc.) without cell cascades.
+    if (!PYTHON) {
+      for (var cj = 0; cj < candidates.length; cj++) {
+        if (_pythonWorks(candidates[cj])) { PYTHON = candidates[cj]; break; }
+      }
     }
+    if (!PYTHON) PYTHON = "python3"; // last-ditch fallback
   }
-  if (!PYTHON) PYTHON = "python3"; // last-ditch fallback
 }
 if (!PYTHON_HAS_TORCH) PYTHON_HAS_TORCH = _pythonHasTorch(PYTHON);
 

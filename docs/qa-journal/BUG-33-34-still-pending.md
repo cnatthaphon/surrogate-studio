@@ -64,7 +64,7 @@ The user-visible result for these 2 demos is that the visitor gets:
 
 ## Recommendation
 
-You have spent ~30+ test rounds getting from "10 demos working with multiple regressions" to "16/16 demos training + test work, 2 with advanced-cell residue". This is excellent for a LinkedIn portfolio. 
+You have spent ~30+ test rounds getting from "10 demos working with multiple regressions" to "16/16 demos training + test work, 2 with advanced-cell residue". This is excellent for a LinkedIn portfolio.
 
 **Two paths forward:**
 
