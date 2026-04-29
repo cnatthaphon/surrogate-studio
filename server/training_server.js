@@ -25,10 +25,22 @@ var url = require("url");
 // --- config ---
 var PORT = 3777;
 var PYTHON = null; // auto-detect
+var PYTHON_HAS_TORCH = false; // recorded at selection time for startup banner
 var SUBPROCESS_SCRIPT = path.join(__dirname, "train_subprocess.py");
 
 function _pythonWorks(cmd) {
   try { return spawnSync(cmd, ["--version"], { stdio: "pipe" }).status === 0; } catch (e) { return false; }
+}
+
+// Probe a Python interpreter for torch importability. The notebook kernel and
+// train_subprocess both need torch; without it every notebook cell-2 fails
+// with ModuleNotFoundError (BUG-27 root cause). Picking a torch-capable
+// interpreter at server startup avoids that failure mode.
+function _pythonHasTorch(cmd) {
+  try {
+    var r = spawnSync(cmd, ["-c", "import torch"], { stdio: "pipe" });
+    return r.status === 0;
+  } catch (e) { return false; }
 }
 
 // parse CLI args
@@ -38,12 +50,45 @@ process.argv.slice(2).forEach(function (arg, i, arr) {
 });
 
 if (!PYTHON) {
-  var candidates = [process.env.PYTHON, process.env.SURROGATE_STUDIO_PYTHON, "python3", "python"].filter(Boolean);
-  for (var ci = 0; ci < candidates.length; ci++) {
-    if (_pythonWorks(candidates[ci])) { PYTHON = candidates[ci]; break; }
+  // Resolution priority (top wins):
+  //   1. --python <path> CLI arg                    (handled above, explicit)
+  //   2. $PYTHON / $SURROGATE_STUDIO_PYTHON env     (explicit override)
+  //   3. an active venv ($VIRTUAL_ENV/bin/python)   (so `source venv/bin/activate` works)
+  //   4. system "python3" / "python"                (fallback)
+  // Explicit operator overrides (1, 2) are respected even if they lack torch
+  // — the operator chose them for a reason, we just warn. Auto-discovery
+  // candidates (3, 4) prefer torch-capable to avoid silent ModuleNotFoundError.
+  var explicitOverride =
+    (process.env.PYTHON && _pythonWorks(process.env.PYTHON) && process.env.PYTHON) ||
+    (process.env.SURROGATE_STUDIO_PYTHON && _pythonWorks(process.env.SURROGATE_STUDIO_PYTHON) && process.env.SURROGATE_STUDIO_PYTHON) ||
+    null;
+  if (explicitOverride) {
+    PYTHON = explicitOverride;
+    PYTHON_HAS_TORCH = _pythonHasTorch(PYTHON);
+  } else {
+    var venvPy = process.env.VIRTUAL_ENV ? path.join(process.env.VIRTUAL_ENV, "bin", "python") : null;
+    var candidates = [venvPy, "python3", "python"].filter(Boolean);
+    // First pass: pick the first candidate that has torch.
+    for (var ci = 0; ci < candidates.length; ci++) {
+      if (_pythonWorks(candidates[ci]) && _pythonHasTorch(candidates[ci])) {
+        PYTHON = candidates[ci];
+        PYTHON_HAS_TORCH = true;
+        break;
+      }
+    }
+    // Second pass: if no torch-capable candidate, accept the first working one.
+    // The server will still start, but training/notebook subprocesses will
+    // produce a clear "No module named 'torch'" error so the operator can fix
+    // the env (activate venv, pip install torch, etc.) without cell cascades.
+    if (!PYTHON) {
+      for (var cj = 0; cj < candidates.length; cj++) {
+        if (_pythonWorks(candidates[cj])) { PYTHON = candidates[cj]; break; }
+      }
+    }
+    if (!PYTHON) PYTHON = "python3"; // last-ditch fallback
   }
-  if (!PYTHON) PYTHON = "python3"; // fallback even if not found
 }
+if (!PYTHON_HAS_TORCH) PYTHON_HAS_TORCH = _pythonHasTorch(PYTHON);
 
 // --- job storage ---
 var jobs = {}; // jobId → { status, process, clients[], result }
@@ -616,9 +661,15 @@ var server = http.createServer(function (req, res) {
 server.listen(PORT, function () {
   console.log("Surrogate Studio Training Server");
   console.log("  Port:   " + PORT);
-  console.log("  Python: " + PYTHON);
+  console.log("  Python: " + PYTHON + (PYTHON_HAS_TORCH ? " (torch OK)" : " (torch MISSING — training/notebook will fail)"));
   console.log("  URL:    http://localhost:" + PORT);
   console.log("  Health: http://localhost:" + PORT + "/api/health");
+  if (!PYTHON_HAS_TORCH) {
+    console.log("");
+    console.log("  WARNING: the selected Python cannot 'import torch'.");
+    console.log("  Activate a venv with torch installed before starting, or pass --python /path/to/venv-python,");
+    console.log("  or set the PYTHON env var.  Otherwise every notebook 'import torch' will ModuleNotFoundError.");
+  }
   console.log("");
   console.log("Open http://localhost:" + PORT + " in browser to use Surrogate Studio");
   console.log("Select 'PyTorch Server' as backend in Trainer config");

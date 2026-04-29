@@ -1736,45 +1736,219 @@
       "data = graph.get('drawflow', {}).get('Home', {}).get('data', graph)\n" +
       "out_nodes = [data[k] for k in data if data[k].get('name','').endswith('output_layer')]\n" +
       "loss_name = out_nodes[0].get('data',{}).get('loss','mse') if out_nodes else 'mse'\n" +
-      "is_cls = any(n.get('data',{}).get('target','') in ('label','logits') for n in out_nodes)\n" +
+      "# is_cls follows the same schema-agnostic contract used downstream by\n" +
+      "# head_losses construction: any of target / targetType / headType signals\n" +
+      "# classification. Reading only `target` would miss graphs that label the\n" +
+      "# head purely by `targetType` (e.g. `targetType: 'label'` with a generic\n" +
+      "# target string) or by `headType: 'classification'` (any custom target key).\n" +
+      "def _is_cls_node(n):\n" +
+      "    nd = n.get('data', {}) if isinstance(n, dict) else {}\n" +
+      "    tk = str(nd.get('target', '') or '').lower()\n" +
+      "    tt = str(nd.get('targetType', '') or '').lower()\n" +
+      "    ht = str(nd.get('headType', '') or '').lower()\n" +
+      "    return (tk in ('label', 'logits')\n" +
+      "            or tt in ('label', 'logits')\n" +
+      "            or ht == 'classification')\n" +
+      "is_cls = any(_is_cls_node(n) for n in out_nodes)\n" +
       "phases = sorted(set(str(n.get('data',{}).get('phase', '')).strip() for n in out_nodes))\n" +
       "is_phased = any(p != '' for p in phases)\n" +
       "print(f'Phases: {phases} (phased={is_phased})')\n\n" +
-      "# per-head loss\n" +
+      "# per-head loss — schema-agnostic, mirrors train_subprocess.compute_loss contract.\n" +
+      "# Carries skip / binary_target / target_key / head_type so multi-network graphs\n" +
+      "# (GAN, segmentation, autoencoder) wire targets correctly without special-cases.\n" +
       "head_losses = []\n" +
       "for n in out_nodes:\n" +
       "    nd = n.get('data', {})\n" +
-      "    ht = nd.get('target', 'xv')\n" +
-      "    hl = nd.get('loss', 'mse').lower()\n" +
+      "    ht = str(nd.get('target', nd.get('targetType', 'xv'))).lower()\n" +
+      "    hl = str(nd.get('loss', 'mse')).lower()\n" +
       "    hw = float(nd.get('matchWeight', 1))\n" +
       "    hp = str(nd.get('phase', '')).strip()\n" +
-      "    if ht in ('label', 'logits'): fn = nn.CrossEntropyLoss()\n" +
-      "    elif hl == 'bce': fn = nn.BCELoss()\n" +
-      "    elif hl == 'mae': fn = nn.L1Loss()\n" +
-      "    else: fn = nn.MSELoss()\n" +
-      "    head_losses.append({'fn': fn, 'weight': hw, 'phase': hp, 'cls': ht in ('label','logits')})\n" +
-      "    print(f'  Head: target={ht}, loss={hl}, phase={hp}, weight={hw}')\n\n" +
+      "    head_type = str(nd.get('headType', '')).lower()\n" +
+      "    if hl == 'none':\n" +
+      "        head_losses.append({'fn': None, 'weight': 0, 'phase': hp, 'cls': False, 'skip': True, 'target_key': ht, 'head_type': head_type})\n" +
+      "    elif hl in ('bce', 'binary_crossentropy', 'binarycrossentropy'):\n" +
+      "        head_losses.append({'fn': nn.BCELoss(), 'weight': hw, 'phase': hp, 'cls': False, 'binary_target': True, 'bce_binary': True, 'target_key': ht, 'head_type': head_type})\n" +
+      "    elif hl in ('wasserstein', 'wgan'):\n" +
+      "        head_losses.append({'fn': (lambda p, t: -torch.mean(t * p)), 'weight': hw, 'phase': hp, 'cls': False, 'binary_target': True, 'target_key': ht, 'head_type': head_type})\n" +
+      "    elif hl in ('cross_entropy', 'categorical_crossentropy', 'categoricalcrossentropy', 'sparsecategoricalcrossentropy'):\n" +
+      "        head_losses.append({'fn': nn.CrossEntropyLoss(), 'weight': hw, 'phase': hp, 'cls': True, 'target_key': ht, 'head_type': head_type})\n" +
+      "    elif hl == 'mae':\n" +
+      "        head_losses.append({'fn': nn.L1Loss(), 'weight': hw, 'phase': hp, 'cls': False, 'target_key': ht, 'head_type': head_type})\n" +
+      "    elif head_type == 'classification' or ht in ('label', 'logits'):\n" +
+      "        head_losses.append({'fn': nn.CrossEntropyLoss(), 'weight': hw, 'phase': hp, 'cls': True, 'target_key': ht, 'head_type': head_type})\n" +
+      "    else:\n" +
+      "        head_losses.append({'fn': nn.MSELoss(), 'weight': hw, 'phase': hp, 'cls': False, 'target_key': ht, 'head_type': head_type})\n" +
+      "    print(f'  Head: target={ht}, loss={hl}, phase={hp}, weight={hw}, headType={head_type}')\n\n" +
       "if not head_losses:\n" +
       "    loss_fn = nn.CrossEntropyLoss() if is_cls else nn.MSELoss()\n" +
-      "    head_losses = [{'fn': loss_fn, 'weight': 1.0, 'phase': '', 'cls': is_cls}]\n\n" +
+      "    head_losses = [{'fn': loss_fn, 'weight': 1.0, 'phase': '', 'cls': is_cls, 'target_key': '', 'head_type': ''}]\n\n" +
       "# Detect class_embed nodes — include labels in DataLoader if present\n" +
       "_has_class_embed = any(str(n.get('name','')).replace('_layer','') == 'class_embed' for n in data.values() if isinstance(n,dict))\n" +
+      "_nclasses = 10\n" +
+      "for _n in data.values():\n" +
+      "    if isinstance(_n, dict) and str(_n.get('name','')).replace('_layer','') == 'class_embed':\n" +
+      "        _nclasses = int((_n.get('data') or {}).get('numClasses', 10))\n" +
+      "        break\n" +
+      "\n" +
+      "def _idx_from_onehot_or_int(lbl):\n" +
+      "    \"\"\"Convert a label tensor (one-hot or integer) to a 1-D LongTensor of\n" +
+      "    class indices. Returns None when the input is unusable.\n" +
+      "    \"\"\"\n" +
+      "    if lbl is None: return None\n" +
+      "    if not torch.is_tensor(lbl): return None\n" +
+      "    if lbl.numel() == 0: return None\n" +
+      "    if lbl.ndim >= 2 and lbl.shape[-1] > 1:\n" +
+      "        return lbl.argmax(dim=-1).long()\n" +
+      "    return lbl.long().reshape(-1)\n" +
+      "\n" +
+      "def _build_class_compact_lut(train_labels, target_n, class_filter=None):\n" +
+      "    \"\"\"Build the canonical original→compact LUT from the TRAINING class set\n" +
+      "    (or an explicit class_filter when provided). Reused across all splits\n" +
+      "    AND stashed on the model so the python-side class_embed forward sees\n" +
+      "    the same mapping during sampling and inference.\n" +
+      "    Important: the LUT is fit from training/filter only, NOT from a\n" +
+      "    train+val+test union. Mixing in val/test would let val classes that\n" +
+      "    appear earlier in sorted order push later training classes out of\n" +
+      "    the [:target_n] truncation — dropped training classes would then\n" +
+      "    silently map to compact 0 via the caller's clamp_min(0).\n" +
+      "    Returns (lut, compact_count, original_classes).\n" +
+      "      lut[orig] == ci for known classes (0..compact_count-1)\n" +
+      "      lut[orig] == -1 for orig values not in the training/filter set\n" +
+      "    Callers should warn-and-fallback on -1, never silently clamp to 0.\n" +
+      "    \"\"\"\n" +
+      "    if class_filter is not None and len(class_filter) > 0:\n" +
+      "        unique_vals = torch.tensor(sorted(int(c) for c in class_filter), dtype=torch.long)\n" +
+      "    else:\n" +
+      "        idx = _idx_from_onehot_or_int(train_labels)\n" +
+      "        if idx is None or idx.numel() == 0:\n" +
+      "            return torch.zeros((0,), dtype=torch.long), 0, []\n" +
+      "        unique_vals = torch.unique(idx).sort().values\n" +
+      "    if unique_vals.numel() > target_n:\n" +
+      "        unique_vals = unique_vals[:target_n]\n" +
+      "    max_orig = int(unique_vals.max().item()) + 1 if unique_vals.numel() else target_n\n" +
+      "    lut = torch.full((max(max_orig, target_n),), -1, dtype=torch.long)\n" +
+      "    for ci, cv in enumerate(unique_vals.tolist()):\n" +
+      "        lut[int(cv)] = ci\n" +
+      "    return lut, int(unique_vals.numel()), unique_vals.tolist()\n" +
+      "\n" +
+      "def _apply_compact_lut(lbl, lut, target_n, split_name='split'):\n" +
+      "    \"\"\"Apply a canonical LUT to relabel a one-hot/integer label tensor.\n" +
+      "    Empty splits return a zero-shape compact tensor.\n" +
+      "    Unseen classes (idx outside the training/filter set) are reported via\n" +
+      "    a warning print AND mapped to compact 0 only as a last resort. Silent\n" +
+      "    clamp-to-0 would corrupt val/test conditioning without any signal —\n" +
+      "    the warning gives the operator a clear breadcrumb to fix the dataset\n" +
+      "    or widen the filter.\n" +
+      "    \"\"\"\n" +
+      "    import torch.nn.functional as F\n" +
+      "    if lbl is None or target_n <= 0: return lbl\n" +
+      "    if lbl.ndim < 2 or lbl.shape[-1] == target_n: return lbl\n" +
+      "    if lbl.shape[0] == 0:\n" +
+      "        return lbl.new_zeros((0, target_n))\n" +
+      "    idx = _idx_from_onehot_or_int(lbl)\n" +
+      "    if idx is None or idx.numel() == 0:\n" +
+      "        return lbl.new_zeros((0, target_n))\n" +
+      "    if lut is None or lut.numel() == 0:\n" +
+      "        return lbl.new_zeros((idx.shape[0], target_n))\n" +
+      "    # Extend LUT in-bounds if seeing a higher original index than the\n" +
+      "    # canonical LUT covers — those positions remain -1 and are reported.\n" +
+      "    max_idx = int(idx.max().item())\n" +
+      "    if max_idx >= lut.shape[0]:\n" +
+      "        new_lut = torch.full((max_idx + 1,), -1, dtype=torch.long)\n" +
+      "        new_lut[: lut.shape[0]] = lut\n" +
+      "        lut = new_lut\n" +
+      "    raw = lut[idx]\n" +
+      "    unseen_mask = (raw == -1)\n" +
+      "    if unseen_mask.any():\n" +
+      "        unseen_orig = sorted(set(idx[unseen_mask].tolist()))\n" +
+      "        print(f'[class_embed] {split_name}: {int(unseen_mask.sum().item())} samples '\n" +
+      "              f'reference classes {unseen_orig} not in the training/filter set; '\n" +
+      "              f'mapping them to compact 0 as a fallback. Widen classFilter or '\n" +
+      "              f'clean the dataset to avoid silent label corruption.')\n" +
+      "    compact_idx = raw.clamp_min(0)\n" +
+      "    return F.one_hot(compact_idx, target_n).float()\n" +
+      "\n" +
+      "def _stash_class_lut_on_model(lut, dataset_width):\n" +
+      "    \"\"\"Stash the canonical LUT on the model under each class_embed node\n" +
+      "    so train_subprocess.py's class_embed forward reuses the same mapping\n" +
+      "    during training, validation, and (especially) sampling cells —\n" +
+      "    instead of lazy-building from a per-batch idx that only sees a\n" +
+      "    subset of training classes.\n" +
+      "    \"\"\"\n" +
+      "    if not hasattr(model, '_class_compact_luts'):\n" +
+      "        model._class_compact_luts = {}\n" +
+      "    for _nid, _ndata in data.items():\n" +
+      "        if not isinstance(_ndata, dict): continue\n" +
+      "        if str(_ndata.get('name','')).replace('_layer','') != 'class_embed': continue\n" +
+      "        try:\n" +
+      "            model._class_compact_luts[(str(_nid), int(dataset_width))] = lut.clone()\n" +
+      "        except Exception:\n" +
+      "            model._class_compact_luts[(str(_nid), int(dataset_width))] = lut\n" +
+      "\n" +
       "if _has_class_embed and hasattr(model, '_class_labels') is False:\n" +
-      "    _nclasses = 10\n" +
-      "    for _n in data.values():\n" +
-      "        if isinstance(_n, dict) and str(_n.get('name','')).replace('_layer','') == 'class_embed':\n" +
-      "            _nclasses = int((_n.get('data') or {}).get('numClasses', 10))\n" +
-      "    if labels_train_tensor is not None and labels_val_tensor is not None:\n" +
-      "        train_dl = DataLoader(TensorDataset(x_train, y_train, labels_train_tensor), batch_size=BATCH_SIZE, shuffle=True)\n" +
-      "        val_dl = DataLoader(TensorDataset(x_val, y_val, labels_val_tensor), batch_size=BATCH_SIZE)\n" +
-      "        print(f'Class conditioning: {_nclasses} classes')\n" +
+      "    # classFilter from the dataset config (preset) takes precedence as the\n" +
+      "    # canonical class set, since it survives empty val/test splits and any\n" +
+      "    # accidental absence of a class in training labels (e.g. very small N).\n" +
+      "    _class_filter = None\n" +
+      "    try:\n" +
+      "        _class_filter = list(globals().get('CLASS_FILTER') or []) or None\n" +
+      "    except Exception:\n" +
+      "        _class_filter = None\n" +
+      "    if labels_train_tensor is not None:\n" +
+      "        # Canonical LUT fit from TRAINING labels (or class_filter). Val/test\n" +
+      "        # use the same LUT — unseen classes there print a warning, never\n" +
+      "        # silently corrupt the conditioning by clamping to 0.\n" +
+      "        _shared_lut, _compact_n, _orig_classes = _build_class_compact_lut(\n" +
+      "            labels_train_tensor, _nclasses, class_filter=_class_filter)\n" +
+      "        _train_width = int(labels_train_tensor.shape[-1] if labels_train_tensor.ndim >= 2 else 0)\n" +
+      "        _stash_class_lut_on_model(_shared_lut, _train_width)\n" +
+      "        labels_train_tensor = _apply_compact_lut(labels_train_tensor, _shared_lut, _nclasses, 'train')\n" +
+      "        labels_val_tensor = _apply_compact_lut(labels_val_tensor, _shared_lut, _nclasses, 'val') if labels_val_tensor is not None else None\n" +
+      "        labels_test_tensor = _apply_compact_lut(labels_test_tensor, _shared_lut, _nclasses, 'test') if labels_test_tensor is not None else None\n" +
+      "        if labels_val_tensor is not None:\n" +
+      "            train_dl = DataLoader(TensorDataset(x_train, y_train, labels_train_tensor), batch_size=BATCH_SIZE, shuffle=True)\n" +
+      "            val_dl = DataLoader(TensorDataset(x_val, y_val, labels_val_tensor), batch_size=BATCH_SIZE) if labels_val_tensor.shape[0] > 0 else DataLoader(TensorDataset(x_val, y_val), batch_size=BATCH_SIZE)\n" +
+      "        else:\n" +
+      "            train_dl = DataLoader(TensorDataset(x_train, y_train, labels_train_tensor), batch_size=BATCH_SIZE, shuffle=True)\n" +
+      "            val_dl = DataLoader(TensorDataset(x_val, y_val), batch_size=BATCH_SIZE)\n" +
+      "        print(f'Class conditioning: {_nclasses} model classes; LUT fit from training (orig={_orig_classes}, compact_count={_compact_n})')\n" +
       "    elif 'df' in globals() and df is not None and 'label' in df.columns:\n" +
       "        import torch.nn.functional as F\n" +
-      "        _lbl_train = F.one_hot(torch.tensor(df[df['split']=='train']['label'].values.astype(int)), _nclasses).float()\n" +
-      "        _lbl_val = F.one_hot(torch.tensor(df[df['split']=='val']['label'].values.astype(int)), _nclasses).float()\n" +
+      "        _train_rows = df[df['split']=='train']['label'].values.astype(int)\n" +
+      "        _val_rows = df[df['split']=='val']['label'].values.astype(int) if 'val' in df['split'].values else _train_rows[:0]\n" +
+      "        _test_rows = df[df['split']=='test']['label'].values.astype(int) if 'test' in df['split'].values else _train_rows[:0]\n" +
+      "        _lbl_train_idx = torch.tensor(_train_rows, dtype=torch.long)\n" +
+      "        _lbl_val_idx = torch.tensor(_val_rows, dtype=torch.long)\n" +
+      "        # Canonical LUT fit from training only. _build_class_compact_lut\n" +
+      "        # short-circuits cleanly on numel()==0 so val/test emptiness is\n" +
+      "        # never observed via .max() on an empty tensor.\n" +
+      "        _shared_lut, _compact_n, _orig_classes = _build_class_compact_lut(\n" +
+      "            _lbl_train_idx, _nclasses, class_filter=_class_filter)\n" +
+      "        _train_width = int(_lbl_train_idx.max().item()) + 1 if _lbl_train_idx.numel() > 0 else _nclasses\n" +
+      "        _stash_class_lut_on_model(_shared_lut, _train_width)\n" +
+      "        def _df_compact_onehot(idx_t, split_name):\n" +
+      "            if idx_t.numel() == 0:\n" +
+      "                return torch.zeros((0, _nclasses), dtype=torch.float32)\n" +
+      "            mx = int(idx_t.max().item())\n" +
+      "            lut = _shared_lut\n" +
+      "            if mx >= lut.shape[0]:\n" +
+      "                new_lut = torch.full((mx + 1,), -1, dtype=torch.long)\n" +
+      "                new_lut[: lut.shape[0]] = lut\n" +
+      "                lut = new_lut\n" +
+      "            raw = lut[idx_t]\n" +
+      "            unseen = (raw == -1)\n" +
+      "            if unseen.any():\n" +
+      "                unseen_orig = sorted(set(idx_t[unseen].tolist()))\n" +
+      "                print(f'[class_embed] {split_name}: {int(unseen.sum().item())} samples '\n" +
+      "                      f'reference classes {unseen_orig} not in training set; '\n" +
+      "                      f'mapping them to compact 0 as a fallback. Widen classFilter or '\n" +
+      "                      f'clean the dataset to avoid silent label corruption.')\n" +
+      "            return F.one_hot(raw.clamp_min(0), _nclasses).float()\n" +
+      "        _lbl_train = _df_compact_onehot(_lbl_train_idx, 'train')\n" +
+      "        _lbl_val = _df_compact_onehot(_lbl_val_idx, 'val')\n" +
       "        train_dl = DataLoader(TensorDataset(x_train, y_train, _lbl_train), batch_size=BATCH_SIZE, shuffle=True)\n" +
-      "        val_dl = DataLoader(TensorDataset(x_val, y_val, _lbl_val), batch_size=BATCH_SIZE)\n" +
-      "        print(f'Class conditioning: {_nclasses} classes')\n" +
+      "        val_dl = DataLoader(TensorDataset(x_val, y_val, _lbl_val), batch_size=BATCH_SIZE) if _lbl_val.shape[0] > 0 else DataLoader(TensorDataset(x_val, y_val), batch_size=BATCH_SIZE)\n" +
+      "        print(f'Class conditioning: {_nclasses} model classes; LUT fit from training (df fallback, orig={_orig_classes}, compact_count={_compact_n})')\n" +
       "    else:\n" +
       "        train_dl = DataLoader(TensorDataset(x_train, y_train), batch_size=BATCH_SIZE, shuffle=True)\n" +
       "        val_dl = DataLoader(TensorDataset(x_val, y_val), batch_size=BATCH_SIZE)\n" +
@@ -1782,23 +1956,64 @@
       "    train_dl = DataLoader(TensorDataset(x_train, y_train), batch_size=BATCH_SIZE, shuffle=True)\n" +
       "    val_dl = DataLoader(TensorDataset(x_val, y_val), batch_size=BATCH_SIZE)\n\n" +
       "def compute_loss(pred, xb, yb, phase):\n" +
+      "    # Schema-agnostic loss: honors skip / binary_target / cls / reconstruction\n" +
+      "    # head shapes. For GAN-style heads (target=custom + bce/wasserstein), pulls\n" +
+      "    # labels from model._custom_labels (set by the graph's PhaseSwitch+ConcatBatch\n" +
+      "    # during forward). For reconstruction/autoencoder, target is xb. For\n" +
+      "    # segmentation/mask BCE, target is yb. Everything else: target is yb.\n" +
       "    total = torch.tensor(0.0, device=device)\n" +
       "    preds = pred if isinstance(pred, list) else [pred]\n" +
+      "    out_ids = list(getattr(model, 'output_ids', []) or [])\n" +
+      "    custom_labels = getattr(model, '_custom_labels', {}) or {}\n" +
+      "    yb_t = yb if not isinstance(yb, list) else torch.tensor(yb, dtype=torch.float32, device=device)\n" +
       "    for i, hl in enumerate(head_losses):\n" +
+      "        if hl.get('skip'):\n" +
+      "            continue\n" +
+      "        # phase filter: blank phase always runs; non-blank only when matching\n" +
       "        if hl['phase'] != phase and hl['phase'] != '' and phase != '': continue\n" +
       "        hp = preds[i] if i < len(preds) else preds[0]\n" +
-      "        t = yb if not isinstance(yb, list) else torch.tensor(yb, dtype=torch.float32, device=device)\n" +
-      "        if hl['cls']:\n" +
-      "            _cls_t = t.argmax(dim=-1) if t.ndim > 1 and t.shape[-1] > 1 else t.long().squeeze(-1)\n" +
-      "            _cls_t = _cls_t.clamp(0, hp.shape[-1] - 1)  # guard: label must be < num_classes\n" +
-      "            total = total + hl['weight'] * hl['fn'](hp, _cls_t)\n" +
-      "        else:\n" +
-      "            if isinstance(hl['fn'], nn.BCELoss):\n" +
-      "                t = t.float().clamp(0.0, 1.0)\n" +
-      "                hp = hp.clamp(0.0, 1.0)\n" +
-      "            if t.shape != hp.shape and t.ndim == hp.ndim == 2 and t.shape[0] == hp.shape[0]:\n" +
-      "                t = t[:, :hp.shape[1]]\n" +
+      "        target_key = hl.get('target_key', '')\n" +
+      "        head_type = hl.get('head_type', '')\n" +
+      "        if hl.get('binary_target'):\n" +
+      "            if head_type == 'segmentation' or target_key in ('mask', 'segmentation_mask'):\n" +
+      "                t = yb_t\n" +
+      "            else:\n" +
+      "                # GAN-style: custom labels constructed by the graph (PhaseSwitch +\n" +
+      "                # ConcatBatch) live on model._custom_labels keyed by output node id.\n" +
+      "                # Need explicit branching for the batch-dim cases — expand_as only\n" +
+      "                # works when t has a singleton batch (size 1) that broadcasts to hp.\n" +
+      "                # A stale full-batch tensor (e.g. 128 vs current 64) would crash.\n" +
+      "                oid = out_ids[i] if i < len(out_ids) else None\n" +
+      "                cl_t = custom_labels[oid] if (oid is not None and oid in custom_labels) else None\n" +
+      "                if cl_t is not None and cl_t.shape[0] == hp.shape[0]:\n" +
+      "                    t = cl_t\n" +
+      "                elif cl_t is not None and cl_t.shape[0] == 1 and cl_t.dim() >= 2:\n" +
+      "                    t = cl_t.expand(hp.shape[0], *([-1] * (cl_t.dim() - 1))).contiguous()\n" +
+      "                else:\n" +
+      "                    # No usable custom labels and not segmentation/mask. Default to\n" +
+      "                    # the data's yb (plain binary BCE training). The width-trim\n" +
+      "                    # guard below narrows yb to hp's width when needed. Falling\n" +
+      "                    # back to torch.ones_like would silently train the model to\n" +
+      "                    # output 1.0 everywhere — wrong for normal binary classification.\n" +
+      "                    t = yb_t\n" +
+      "        elif hl['cls']:\n" +
+      "            cls_src = yb_t\n" +
+      "            t = cls_src.argmax(dim=-1).long() if cls_src.ndim > 1 and cls_src.shape[-1] > 1 else cls_src.long().squeeze(-1)\n" +
+      "            t = t.clamp(0, hp.shape[-1] - 1)\n" +
       "            total = total + hl['weight'] * hl['fn'](hp, t)\n" +
+      "            continue\n" +
+      "        else:\n" +
+      "            if head_type in ('reconstruction', 'autoencoder', 'denoiser'):\n" +
+      "                t = xb\n" +
+      "            else:\n" +
+      "                t = yb_t\n" +
+      "        # trim mismatched feature width (e.g. yb=10 one-hot vs hp=1 binary)\n" +
+      "        if t.shape != hp.shape and t.ndim == hp.ndim == 2 and t.shape[0] == hp.shape[0]:\n" +
+      "            t = t[:, :hp.shape[1]]\n" +
+      "        if hl.get('bce_binary'):\n" +
+      "            t = t.float().clamp(0.0, 1.0)\n" +
+      "            hp = hp.clamp(0.0, 1.0)\n" +
+      "        total = total + hl['weight'] * hl['fn'](hp, t)\n" +
       "    return total\n\n" +
       "history = {'train_loss': [], 'val_loss': []}\n" +
       "best_val = float('inf')\n" +
@@ -1809,24 +2024,40 @@
       "        model.train()\n" +
       "        tl = 0; nb = 0\n" +
       "        for _batch in train_dl:\n" +
+      "            # Re-assert training mode each step. cuDNN RNN backward requires\n" +
+      "            # module.training=True; setting it once before the loop can drift\n" +
+      "            # if any submodule (val pass, eval cell run earlier, lr-scheduler\n" +
+      "            # interaction) flips it. Cheap (just sets a flag) and prevents\n" +
+      "            # 'cudnn RNN backward can only be called in training mode' on\n" +
+      "            # LSTM/GRU/RNN graphs.\n" +
+      "            model.train()\n" +
       "            xb, yb = _batch[0].to(device), _batch[1].to(device)\n" +
       "            if len(_batch) > 2: model._class_labels = _batch[2].to(device)\n" +
       "            optimizer.zero_grad()\n" +
       "            loss = compute_loss(model(xb), xb, yb, phase)\n" +
-      "            loss.backward()\n" +
-      "            optimizer.step()\n" +
-      "            tl += loss.item(); nb += 1\n" +
+      "            # Skip backward when no head contributed (e.g. GAN generator phase\n" +
+      "            # where every active head has loss=none). loss.requires_grad is\n" +
+      "            # False whenever the loss tensor has no grad_fn — calling backward()\n" +
+      "            # would raise 'element 0 ... does not require grad and does not\n" +
+      "            # have a grad_fn'. Phase still runs; just no parameter update this step.\n" +
+      "            if loss.requires_grad:\n" +
+      "                loss.backward()\n" +
+      "                optimizer.step()\n" +
+      "            tl += float(loss.item()); nb += 1\n" +
       "        phase_losses[phase] = tl / max(nb, 1)\n\n" +
       "    tl = sum(phase_losses.values()) / max(len(phase_losses), 1)\n" +
       "    model.eval()\n" +
       "    vl = 0; nv = 0\n" +
-      "    with torch.no_grad():\n" +
-      "        for _batchv in val_dl:\n" +
-      "            xb, yb = _batchv[0].to(device), _batchv[1].to(device)\n" +
-      "            if len(_batchv) > 2: model._class_labels = _batchv[2].to(device)\n" +
-      "            vl += compute_loss(model(xb), xb, yb, 0).item(); nv += 1\n" +
-      "    vl /= max(nv, 1)\n" +
-      "    scheduler.step(vl)\n\n" +
+      "    # Skip val pass when split is empty (some presets train on full source\n" +
+      "    # with valFrac=0, e.g. GAN-only training).\n" +
+      "    if len(x_val) > 0:\n" +
+      "        with torch.no_grad():\n" +
+      "            for _batchv in val_dl:\n" +
+      "                xb, yb = _batchv[0].to(device), _batchv[1].to(device)\n" +
+      "                if len(_batchv) > 2: model._class_labels = _batchv[2].to(device)\n" +
+      "                vl += float(compute_loss(model(xb), xb, yb, '').item()); nv += 1\n" +
+      "    vl = vl / nv if nv > 0 else float(tl)\n" +
+      "    if len(x_val) > 0: scheduler.step(vl)\n\n" +
       "    improved = vl < best_val\n" +
       "    if improved:\n" +
       "        best_val = vl\n" +
@@ -1854,25 +2085,31 @@
     // Cell 7: Evaluate on test set
     cells.push(makeCodeCell(
       "# Safe defaults in case prediction fails\n" +
-      "mae = float('nan'); mse = float('nan'); r2 = float('nan')\n\n" +
-      "model.eval()\n" +
-      "with torch.no_grad():\n" +
-      "    _raw = model(x_test.to(device))\n" +
-      "    pred = (_raw[0] if isinstance(_raw, list) else _raw).cpu().numpy()\n" +
-      "    truth = y_test.numpy()\n" +
-      "    # Align shapes: if pred has fewer columns (e.g. regression head on detection), slice truth\n" +
-      "    if pred.shape != truth.shape and pred.ndim == truth.ndim == 2 and pred.shape[0] == truth.shape[0]:\n" +
-      "        truth = truth[:, :pred.shape[1]]\n\n" +
-      "mae = np.mean(np.abs(pred - truth))\n" +
-      "mse = np.mean((pred - truth) ** 2)\n" +
-      "ss_res = np.sum((truth - pred) ** 2)\n" +
-      "ss_tot = np.sum((truth - truth.mean(axis=0)) ** 2)\n" +
-      "r2 = 1 - ss_res / ss_tot if ss_tot > 0 else 0\n\n" +
-      "print(f'Test MAE:  {mae:.6f}')\n" +
-      "print(f'Test MSE:  {mse:.6f}')\n" +
-      "print(f'Test R²:   {r2:.6f}')\n\n" +
+      "mae = float('nan'); mse = float('nan'); r2 = float('nan')\n" +
+      "pred = None; truth = None\n\n" +
+      "if len(x_test) == 0:\n" +
+      "    # Empty test split (some presets train on full source with testFrac=0).\n" +
+      "    # Skip test metrics and shape-aligned truth/pred construction.\n" +
+      "    print('Test split is empty — skipping test-set metrics.')\n" +
+      "else:\n" +
+      "    model.eval()\n" +
+      "    with torch.no_grad():\n" +
+      "        _raw = model(x_test.to(device))\n" +
+      "        pred = (_raw[0] if isinstance(_raw, list) else _raw).cpu().numpy()\n" +
+      "        truth = y_test.numpy()\n" +
+      "        # Align shapes: if pred has fewer columns (e.g. regression head on detection), slice truth\n" +
+      "        if pred.shape != truth.shape and pred.ndim == truth.ndim == 2 and pred.shape[0] == truth.shape[0]:\n" +
+      "            truth = truth[:, :pred.shape[1]]\n\n" +
+      "    mae = np.mean(np.abs(pred - truth))\n" +
+      "    mse = np.mean((pred - truth) ** 2)\n" +
+      "    ss_res = np.sum((truth - pred) ** 2)\n" +
+      "    ss_tot = np.sum((truth - truth.mean(axis=0)) ** 2)\n" +
+      "    r2 = 1 - ss_res / ss_tot if ss_tot > 0 else 0\n\n" +
+      "    print(f'Test MAE:  {mae:.6f}')\n" +
+      "    print(f'Test MSE:  {mse:.6f}')\n" +
+      "    print(f'Test R\\u00b2:   {r2:.6f}')\n\n" +
       "# Classification metrics (if applicable)\n" +
-      "if is_cls:\n" +
+      "if is_cls and pred is not None and truth is not None:\n" +
       "    from sklearn.metrics import confusion_matrix, classification_report\n" +
       "    pred_labels = pred.argmax(axis=1)\n" +
       "    true_labels = truth.argmax(axis=1) if truth.ndim > 1 and truth.shape[1] > 1 else truth.flatten().astype(int)\n" +
@@ -1886,14 +2123,15 @@
       "    plt.colorbar(); plt.xlabel('Predicted'); plt.ylabel('True')\n" +
       "    plt.title(f'Confusion Matrix (Accuracy={accuracy:.2%})')\n" +
       "    plt.tight_layout(); plt.show()\n\n" +
-      "# Pred vs Truth scatter (first target dimension)\n" +
-      "plt.figure(figsize=(6, 6))\n" +
-      "plt.scatter(truth[:, 0], pred[:, 0], alpha=0.5, s=10)\n" +
-      "lims = [min(truth[:, 0].min(), pred[:, 0].min()), max(truth[:, 0].max(), pred[:, 0].max())]\n" +
-      "plt.plot(lims, lims, 'r--', alpha=0.5)\n" +
-      "plt.xlabel('Truth'); plt.ylabel('Predicted')\n" +
-      "plt.title(f'Pred vs Truth (dim 0) R²={r2:.4f}')\n" +
-      "plt.grid(True); plt.tight_layout(); plt.show()\n"
+      "# Pred vs Truth scatter (first target dimension) — skipped on empty test split\n" +
+      "if pred is not None and truth is not None and pred.size > 0 and truth.size > 0:\n" +
+      "    plt.figure(figsize=(6, 6))\n" +
+      "    plt.scatter(truth[:, 0], pred[:, 0], alpha=0.5, s=10)\n" +
+      "    lims = [min(truth[:, 0].min(), pred[:, 0].min()), max(truth[:, 0].max(), pred[:, 0].max())]\n" +
+      "    plt.plot(lims, lims, 'r--', alpha=0.5)\n" +
+      "    plt.xlabel('Truth'); plt.ylabel('Predicted')\n" +
+      "    plt.title(f'Pred vs Truth (dim 0) R\\u00b2={r2:.4f}')\n" +
+      "    plt.grid(True); plt.tight_layout(); plt.show()\n"
     ));
 
     // Cell 8: Generation — reconstruction + random sampling (for VAE/AE)
@@ -1905,21 +2143,39 @@
       "# --- Reconstruction / prediction preview ---\n" +
       "model.eval()\n" +
       "n_show = min(16, len(x_test))\n" +
-      "with torch.no_grad():\n" +
-      "    x_in = x_test[:n_show].to(device)\n" +
-      "    x_recon = model(x_in)\n" +
-      "    if isinstance(x_recon, (tuple, list)):\n" +
-      "        x_recon = x_recon[0]\n" +
-      "    x_recon = x_recon.cpu().numpy()\n" +
-      "    x_orig = x_test[:n_show].numpy()\n\n" +
-      "can_sample_input_space = bool(x_recon.shape == x_orig.shape)\n" +
+      "x_orig = None\n" +
+      "x_recon = None\n" +
       "recon_mse = None\n" +
-      "recon_status = 'skipped'\n" +
-      "dim = x_orig.shape[1]\n" +
+      "recon_status = 'skipped'\n\n" +
+      "# Probe input/output shape compatibility from x_train (always populated)\n" +
+      "# instead of x_test so downstream generation cells (Langevin/DDPM) still\n" +
+      "# fire on training-only presets that have testFrac=0.\n" +
+      "_probe_in = x_train[:1].to(device)\n" +
+      "with torch.no_grad():\n" +
+      "    _probe_out = model(_probe_in)\n" +
+      "    if isinstance(_probe_out, (tuple, list)): _probe_out = _probe_out[0]\n" +
+      "    _probe_out = _probe_out.cpu().numpy()\n" +
+      "    _probe_in_np = x_train[:1].numpy()\n" +
+      "can_sample_input_space = bool(_probe_out.shape == _probe_in_np.shape)\n" +
+      "dim = _probe_in_np.shape[1] if _probe_in_np.ndim > 1 else _probe_in_np.shape[0]\n" +
       "is_image = dim in (784, 1024, 3072)\n" +
       "img_h = {784: 28, 1024: 32, 3072: 32}.get(dim, int(dim**0.5))\n" +
       "img_w = dim // img_h if img_h > 0 else dim\n\n" +
-      "if can_sample_input_space:\n" +
+      "# Reconstruction preview needs real test samples. Skip on testFrac=0\n" +
+      "# (e.g. GAN-only training) — matplotlib.subplots(*, ncols=0) would raise\n" +
+      "# ValueError. The downstream Langevin/DDPM cells use the train-probed\n" +
+      "# can_sample_input_space and still run.\n" +
+      "if n_show == 0:\n" +
+      "    print('No test samples (testFrac=0); skipping reconstruction preview.')\n" +
+      "else:\n" +
+      "    with torch.no_grad():\n" +
+      "        x_in = x_test[:n_show].to(device)\n" +
+      "        x_recon = model(x_in)\n" +
+      "        if isinstance(x_recon, (tuple, list)):\n" +
+      "            x_recon = x_recon[0]\n" +
+      "        x_recon = x_recon.cpu().numpy()\n" +
+      "        x_orig = x_test[:n_show].numpy()\n\n" +
+      "if n_show > 0 and can_sample_input_space and x_orig is not None and x_recon is not None:\n" +
       "    recon_mse = np.mean((x_orig - x_recon) ** 2)\n" +
       "    recon_status = 'ok'\n" +
       "    print(f'Reconstruction MSE ({n_show} samples): {recon_mse:.6f}')\n" +
@@ -1943,7 +2199,7 @@
       "            axes[i].legend(fontsize=8); axes[i].set_ylabel(f'Sample {i}')\n" +
       "        plt.suptitle(f'Reconstruction (MSE={recon_mse:.4f})', fontsize=12)\n" +
       "        plt.tight_layout(); plt.show()\n" +
-      "else:\n" +
+      "elif n_show > 0:\n" +
       "    print(f'Reconstruction skipped: output shape {tuple(x_recon.shape)} does not match input shape {tuple(x_orig.shape)}.')\n"
     ));
 
@@ -1996,7 +2252,11 @@
     cells.push(makeMarkdownCell("## 10) Langevin Generation\n\nIterative denoising from random noise using the trained model as a score function."));
     cells.push(makeCodeCell(
       "# --- Langevin Dynamics Generation ---\n" +
-      "# Start from random noise, iteratively denoise using model gradient\n" +
+      "# Start from random noise, iteratively denoise using model gradient.\n" +
+      "# autograd.grad backprops through a frozen, eval-mode model. cuDNN's RNN\n" +
+      "# backward refuses on eval graphs, so wrap the loop in cudnn.flags to\n" +
+      "# force PyTorch's non-cuDNN RNN kernel (correct, slightly slower; no\n" +
+      "# effect on non-RNN graphs).\n" +
       "import torch.autograd as autograd\n\n" +
       "if not bool(globals().get('can_sample_input_space', False)):\n" +
       "    print('Langevin skipped: model output space does not match input space.')\n" +
@@ -2007,14 +2267,15 @@
       "    step_size = 0.01\n" +
       "    temperature = 0.5\n\n" +
       "    x = torch.randn(n_samples, x_train.shape[1], device=device, requires_grad=True)\n\n" +
-      "    for step in range(n_steps):\n" +
-      "        pred = model(x)\n" +
-      "        if isinstance(pred, (tuple, list)):\n" +
-      "            pred = pred[0]\n" +
-      "        score = (pred - x).mean()\n" +
-      "        grad = autograd.grad(score, x, create_graph=False)[0]\n" +
-      "        noise = torch.randn_like(x) * (step_size ** 0.5) * temperature\n" +
-      "        x = (x + step_size * grad + noise).detach().requires_grad_(True)\n\n" +
+      "    with torch.backends.cudnn.flags(enabled=False):\n" +
+      "        for step in range(n_steps):\n" +
+      "            pred = model(x)\n" +
+      "            if isinstance(pred, (tuple, list)):\n" +
+      "                pred = pred[0]\n" +
+      "            score = (pred - x).mean()\n" +
+      "            grad = autograd.grad(score, x, create_graph=False)[0]\n" +
+      "            noise = torch.randn_like(x) * (step_size ** 0.5) * temperature\n" +
+      "            x = (x + step_size * grad + noise).detach().requires_grad_(True)\n\n" +
       "    samples = x.detach().cpu().numpy()\n" +
       "    print(f'Generated {n_samples} samples via Langevin dynamics ({n_steps} steps)')\n\n" +
       "    if is_image:\n" +
@@ -2034,9 +2295,16 @@
     cells.push(makeMarkdownCell("## 11) Latent Optimization\n\nOptimize z in latent space to minimize a target objective."));
     cells.push(makeCodeCell(
       "# --- Latent Optimization ---\n" +
-      "# Find z that produces output closest to a target\n" +
-      "model.eval()\n\n" +
-      "if not bool(globals().get('can_sample_input_space', False)):\n" +
+      "# Find z that produces output closest to a target.\n" +
+      "# This cell does its own backward through the (frozen) model to optimise\n" +
+      "# z, not model weights. cuDNN's RNN backward kernel still requires\n" +
+      "# module.training=True for graphs that contain LSTM/GRU/RNN nodes — so we\n" +
+      "# disable cuDNN for this op (PyTorch falls back to a kernel that backprops\n" +
+      "# fine in eval mode). Equivalent in correctness, slightly slower for RNNs;\n" +
+      "# no effect on non-RNN graphs.\n" +
+      "if len(x_test) == 0:\n" +
+      "    print('Latent optimization skipped: empty test split.')\n" +
+      "elif not bool(globals().get('can_sample_input_space', False)):\n" +
       "    print('Latent optimization skipped: model output space does not match input space.')\n" +
       "else:\n" +
       "    try:\n" +
@@ -2044,14 +2312,16 @@
       "        target = x_test[:1].to(device)\n" +
       "        z = torch.randn(1, latent_dim, device=device, requires_grad=True)\n" +
       "        opt_z = torch.optim.Adam([z], lr=0.01)\n\n" +
-      "        for step in range(100):\n" +
-      "            opt_z.zero_grad()\n" +
-      "            recon = decoder(z) if 'decoder' in dir() else model(z)\n" +
-      "            loss = nn.MSELoss()(recon, target)\n" +
-      "            loss.backward()\n" +
-      "            opt_z.step()\n" +
-      "            if step % 20 == 0:\n" +
-      "                print(f'Step {step}: loss={loss.item():.6f}')\n\n" +
+      "        with torch.backends.cudnn.flags(enabled=False):\n" +
+      "            for step in range(100):\n" +
+      "                opt_z.zero_grad()\n" +
+      "                recon = decoder(z) if 'decoder' in dir() else model(z)\n" +
+      "                if isinstance(recon, (tuple, list)): recon = recon[0]\n" +
+      "                loss = nn.MSELoss()(recon, target)\n" +
+      "                loss.backward()\n" +
+      "                opt_z.step()\n" +
+      "                if step % 20 == 0:\n" +
+      "                    print(f'Step {step}: loss={loss.item():.6f}')\n\n" +
       "        optimized = recon.detach().cpu().numpy()[0]\n" +
       "        original = target.cpu().numpy()[0]\n\n" +
       "        if is_image:\n" +
@@ -2089,15 +2359,19 @@
       "            n_guided = 8\n" +
       "            z = torch.randn(n_guided, latent_dim, device=device, requires_grad=True)\n" +
       "            opt = torch.optim.Adam([z], lr=0.01)\n\n" +
-      "            for step in range(100):\n" +
-      "                opt.zero_grad()\n" +
-      "                dec = decoder(z) if 'decoder' in dir() else model(z)\n" +
-      "                cls_out = model(dec)\n" +
-      "                if isinstance(cls_out, (tuple, list)): cls_out = cls_out[-1]  # last output = classifier\n" +
-      "                guidance_loss = -torch.log(cls_out[:, target_class] + 1e-8).mean()\n" +
-      "                guidance_loss.backward()\n" +
-      "                opt.step()\n" +
-      "                if step % 25 == 0: print(f'Step {step}: guidance_loss={guidance_loss.item():.4f}')\n\n" +
+      "            # Disable cuDNN: optimisation backprops through a frozen model;\n" +
+      "            # cuDNN RNN backward refuses on eval graphs (BUG-33 family).\n" +
+      "            with torch.backends.cudnn.flags(enabled=False):\n" +
+      "                for step in range(100):\n" +
+      "                    opt.zero_grad()\n" +
+      "                    dec = decoder(z) if 'decoder' in dir() else model(z)\n" +
+      "                    if isinstance(dec, (tuple, list)): dec = dec[0]\n" +
+      "                    cls_out = model(dec)\n" +
+      "                    if isinstance(cls_out, (tuple, list)): cls_out = cls_out[-1]  # last output = classifier\n" +
+      "                    guidance_loss = -torch.log(cls_out[:, target_class] + 1e-8).mean()\n" +
+      "                    guidance_loss.backward()\n" +
+      "                    opt.step()\n" +
+      "                    if step % 25 == 0: print(f'Step {step}: guidance_loss={guidance_loss.item():.4f}')\n\n" +
       "            guided_samples = (decoder(z) if 'decoder' in dir() else model(z)).detach().cpu().numpy()\n" +
       "            if is_image:\n" +
       "                fig, axes = plt.subplots(1, n_guided, figsize=(n_guided*1.5, 2))\n" +
@@ -2204,8 +2478,13 @@
       "    print('Reconstruction MSE: skipped (model output does not match input space)')\n" +
       "else:\n" +
       "    print(f'Reconstruction MSE: {recon_mse:.6f}')\n" +
-      "if is_cls:\n" +
+      "# Only print test accuracy if the classification block above actually computed\n" +
+      "# it. is_cls + empty test split would leave `accuracy` undefined; the locals\n" +
+      "# guard makes this cell safe to run regardless of whether test was empty.\n" +
+      "if is_cls and 'accuracy' in dir():\n" +
       "    print(f'Test Accuracy: {accuracy:.4f}')\n" +
+      "elif is_cls:\n" +
+      "    print('Test Accuracy: skipped (empty test split or no predictions)')\n" +
       "print(f'\\nGeneration methods tested:')\n" +
       "print('  Reconstruction: ✓' if recon_status == 'ok' else '  Reconstruction: skipped')\n" +
       "if 'samples' in dir(): print(f'  Random Sampling: ✓ ({len(samples)} samples)')\n" +

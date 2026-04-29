@@ -323,6 +323,54 @@ def main():
     labels_train = np.array(ds.get("labelsTrain", []), dtype=np.float32) if ds.get("labelsTrain") else None
     labels_val = np.array(ds.get("labelsVal", []), dtype=np.float32) if ds.get("labelsVal") else None
 
+    # --- Build canonical class-compaction LUTs from training labels ---
+    # When the graph has class_embed nodes whose declared numClasses is smaller
+    # than the labels' width (e.g. classFilter=[0,1,7] → 3 model classes vs
+    # 10-wide one-hot), the class_embed forward needs a stable LUT to remap
+    # original→compact IDs. Building this lazily inside the forward pass would
+    # see only one batch's classes; later batches' unseen classes would then
+    # silently clamp to compact 0 — corrupted conditioning. Pre-build here from
+    # the FULL training labels (or classFilter) so every forward (train, val,
+    # test, sampling) shares the same mapping.
+    def _build_canonical_class_lut(label_arr, target_n, class_filter=None):
+        if class_filter is not None and len(class_filter) > 0:
+            uniq = sorted(int(c) for c in class_filter)
+            unique_vals = torch.tensor(uniq, dtype=torch.long)
+        elif label_arr is not None and len(label_arr) > 0:
+            t = torch.tensor(label_arr, dtype=torch.float32)
+            if t.ndim >= 2 and t.shape[-1] > 1:
+                idx = t.argmax(dim=-1).long()
+            else:
+                idx = t.long().reshape(-1)
+            if idx.numel() == 0:
+                return None, 0
+            unique_vals = torch.unique(idx).sort().values
+        else:
+            return None, 0
+        if unique_vals.numel() > target_n:
+            unique_vals = unique_vals[:target_n]
+        max_orig = int(unique_vals.max().item()) + 1 if unique_vals.numel() else target_n
+        lut = torch.full((max(max_orig, target_n),), -1, dtype=torch.long)
+        for ci, cv in enumerate(unique_vals.tolist()):
+            lut[int(cv)] = ci
+        return lut, int(unique_vals.numel())
+
+    if _has_class_embed and labels_train is not None and len(labels_train) > 0:
+        if not hasattr(model, "_class_compact_luts"):
+            model._class_compact_luts = {}
+        _ds_class_filter = config.get("classFilter") or (ds.get("classFilter") if isinstance(ds, dict) else None)
+        for _gid, _gnode in (graph.get("drawflow", {}).get("Home", {}).get("data", {}) or {}).items():
+            if not isinstance(_gnode, dict): continue
+            if str(_gnode.get("name", "")).replace("_layer", "") != "class_embed": continue
+            _ndata = _gnode.get("data") or {}
+            _nc = int(_ndata.get("numClasses", 10))
+            _lut, _compact_count = _build_canonical_class_lut(labels_train, _nc, _ds_class_filter)
+            if _lut is not None:
+                _train_width = int(labels_train.shape[-1]) if hasattr(labels_train, "shape") and len(labels_train.shape) >= 2 else 0
+                model._class_compact_luts[(str(_gid), int(_train_width))] = _lut
+                print(f"[class_embed nid={_gid}] canonical LUT built from training labels: "
+                      f"{_compact_count}/{_nc} compact slots filled")
+
     # --- Build DataLoaders (now that labels_train is available) ---
     _include_labels = (_has_class_embed or _any_cls_head) and labels_train is not None and len(labels_train) > 0
     if _include_labels:
@@ -1332,12 +1380,87 @@ def build_model_from_graph(graph, feature_size, target_size, num_classes=0):
                     tensors[nid] = _make_time_embedding(runtime_time, tdim)
                     continue
                 if t == "class_embed":
-                    # one-hot class label: use labels from _custom_labels or random
+                    # one-hot class label: prefer model._class_labels (set by the
+                    # cell-template / data loader). Robust to two common drifts:
+                    #   (a) BUG-32 width: labels were left at dataset width when the
+                    #       model declares a smaller numClasses (compactified subset).
+                    #       Remap to compact one-hot at the model's nclasses.
+                    #   (b) BUG-34 batch: stale labels from the last training batch
+                    #       leak into a sampling cell's forward. If labels carry
+                    #       batch==1, broadcast; otherwise fall back to random
+                    #       per-batch labels so sampling cells never crash on a
+                    #       torch.cat batch-dim mismatch.
+                    # Stability contract (Codex P1):
+                    #   The original→compact LUT must be FIT FROM A CANONICAL
+                    #   SOURCE (cell-template stashes it on model._class_compact_luts
+                    #   built from training labels / classFilter). Per-batch lazy
+                    #   build is incorrect because batch 1 doesn't observe all
+                    #   training classes; later batches' classes would silently
+                    #   map to compact 0 via a clamp_min. Here we ONLY use the
+                    #   pre-stashed LUT; if missing, we report and fall back to
+                    #   random per-batch labels rather than building a broken LUT.
                     nclasses = int(self.node_configs[nid].get("numClasses", 10))
-                    if hasattr(self, "_class_labels") and self._class_labels is not None:
-                        tensors[nid] = self._class_labels
+                    cl = getattr(self, "_class_labels", None)
+                    batch_n = x.shape[0]
+                    lut_cache = getattr(self, "_class_compact_luts", None) or {}
+
+                    def _looked_up_lut(dataset_width):
+                        return lut_cache.get((str(nid), int(dataset_width)))
+
+                    def _compact_to_nclasses(t):
+                        if t.dim() < 2 or t.shape[-1] == nclasses:
+                            return t
+                        idx = t.argmax(dim=-1) if t.shape[-1] > 1 else t.long().squeeze(-1)
+                        if idx.numel() == 0:
+                            return torch.zeros(0, nclasses, device=t.device)
+                        lut = _looked_up_lut(int(t.shape[-1]))
+                        if lut is None:
+                            # No canonical LUT was provided. Building one here from
+                            # the current idx alone would corrupt later batches,
+                            # so report once and fall back to random labels.
+                            if not getattr(self, "_class_lut_warned", False):
+                                self._class_lut_warned = True
+                                print(f"[class_embed nid={nid}] no canonical LUT on model; "
+                                      f"falling back to random labels. Cell-template should "
+                                      f"build _class_compact_luts from training labels.",
+                                      file=sys.stderr)
+                            rand_cls = torch.randint(0, nclasses, (idx.shape[0],), device=t.device)
+                            return torch.nn.functional.one_hot(rand_cls, nclasses).float()
+                        # Move LUT to idx device if needed
+                        if lut.device != idx.device:
+                            lut = lut.to(idx.device)
+                        # Extend if idx exceeds LUT range — extension positions stay -1
+                        max_idx = int(idx.max().item())
+                        if max_idx >= lut.shape[0]:
+                            new_lut = torch.full((max_idx + 1,), -1, dtype=torch.long, device=lut.device)
+                            new_lut[: lut.shape[0]] = lut
+                            lut = new_lut
+                        raw = lut[idx]
+                        unseen = (raw == -1)
+                        if unseen.any():
+                            # Surface the breadcrumb instead of silently clamping —
+                            # operator can widen classFilter or clean the dataset.
+                            unseen_origs = sorted(set(idx[unseen].tolist()))
+                            print(f"[class_embed nid={nid}] {int(unseen.sum().item())} samples "
+                                  f"reference classes {unseen_origs} not in training/filter set; "
+                                  f"mapping to compact 0 as fallback.",
+                                  file=sys.stderr)
+                        compact = raw.clamp_min(0)
+                        return torch.nn.functional.one_hot(compact, nclasses).float()
+
+                    if cl is not None and cl.shape[0] == batch_n:
+                        tensors[nid] = _compact_to_nclasses(cl)
+                    elif cl is not None and cl.shape[0] == 1 and cl.dim() >= 2:
+                        # single class label — compact + broadcast across the batch
+                        compact = _compact_to_nclasses(cl)
+                        if compact.shape[0] == 0:
+                            rand_cls = torch.randint(0, nclasses, (batch_n,), device=x.device)
+                            tensors[nid] = torch.nn.functional.one_hot(rand_cls, nclasses).float()
+                        else:
+                            tensors[nid] = compact.expand(batch_n, -1).contiguous()
                     else:
-                        rand_cls = torch.randint(0, nclasses, (x.shape[0],), device=x.device)
+                        # no labels or batch mismatch beyond broadcasting — random per-batch
+                        rand_cls = torch.randint(0, nclasses, (batch_n,), device=x.device)
                         tensors[nid] = torch.nn.functional.one_hot(rand_cls, nclasses).float()
                     continue
 
