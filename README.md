@@ -16,6 +16,8 @@ Reproducing ML papers means rebuilding the same pipeline over and over: load dat
 
 The goal is not to advance state-of-the-art on any benchmark. It is to show that 16 different architectures — from MLPs to GANs to Diffusion to Transformers — can run through the same schema-driven pipeline, with the same training engine, the same evaluation, and the same weight format. Like Papers With Code, but the code actually runs live in your browser.
 
+This is an independent portfolio project focused on ML systems architecture: schema contracts, reusable runtimes, visual graph execution, notebook export, and cross-runtime weight transfer.
+
 ---
 
 ## Key Features
@@ -100,7 +102,7 @@ Browser (TF.js)                    Server (PyTorch)
 ┌──────────────────────┐          ┌─────────────────────┐
 │  Visual Graph Editor │          │  training_server.js  │
 │  (Drawflow, 35+ nodes)│  ──────>│  train_subprocess.py │
-│  Training Engine     │  SSE     │  generate_subprocess │
+│  Training Engine     │ HTTP/SSE │  generate_subprocess │
 │  Generation Engine   │  <────── │  predict_subprocess  │
 │  Evaluation / Export │          │  CUDA auto-detected  │
 └──────────────────────┘          └─────────────────────┘
@@ -110,6 +112,8 @@ Browser (TF.js)                    Server (PyTorch)
 ```
 
 **Zero hardcode**: everything from schema/config. **Plugin demos**: no core changes per paper. **Same contract**: TF.js, PyTorch, and exported notebook all produce identical results.
+
+**SSE = Server-Sent Events**: the browser starts a PyTorch job over HTTP, then receives one-way live progress events from the server for status, epochs, losses, and completion. It is used for streaming training progress, not for trading or exchange connectivity.
 
 Full architecture details, file map, supported schemas (13), and node types (35+) in [DEMOS.md](DEMOS.md#architecture).
 
@@ -144,7 +148,14 @@ docker build -t surrogate-studio . && docker run -p 3777:3777 surrogate-studio
 | Contract tests | 31 scripts |
 | Multi-schema pipeline | 11 schemas (5 full train+eval, 6 module-verified) |
 | GitHub Pages E2E | 297 checks across all 16 demos |
+| Browser polish checks | Puppeteer spot-checks for mobile layout and Run Notebook preflight |
 | CI | Every push/PR via GitHub Actions |
+
+---
+
+## Contributing
+
+This is an independent portfolio project, but focused bug fixes, documentation improvements, reproducible demo additions, and schema/runtime improvements are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for branch naming, PR checks, and merge policy.
 
 ---
 

@@ -11,8 +11,10 @@
     "test": "node scripts/test_contract_all.js",
     "test:unit": "node scripts/test_contract_prediction_core.js",
     "test:pipeline": "node scripts/test_headless_multi_schema_pipeline.js",
-    "test:browser": "node scripts/test_browser_ui.js",
-    "test:all": "node scripts/test_contract_all.js && node scripts/test_headless_multi_schema_pipeline.js && node scripts/test_browser_ui.js",
+    "test:browser": "node scripts/test_browser_ui.js && node scripts/test_browser_mobile_responsive.js && node scripts/test_browser_runner_preflight.js",
+    "test:browser:mobile": "node scripts/test_browser_mobile_responsive.js",
+    "test:browser:preflight": "node scripts/test_browser_runner_preflight.js",
+    "test:all": "node scripts/test_contract_all.js && node scripts/test_headless_multi_schema_pipeline.js && npm run test:browser",
     "test:ghpages": "node scripts/test_github_pages_e2e.js",
     "test:ghpages:local": "node scripts/test_github_pages_e2e.js --local"
   },
