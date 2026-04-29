@@ -66,8 +66,45 @@
     }).then(function (r) { return r.json(); });
   }
 
+  function _fetchWithTimeout(url, opts, timeoutMs) {
+    var ctrl = (typeof AbortController !== "undefined") ? new AbortController() : null;
+    var t = setTimeout(function () { if (ctrl) ctrl.abort(); }, Math.max(100, Number(timeoutMs) || 3000));
+    var fetchOpts = Object.assign({}, opts || {});
+    if (ctrl) fetchOpts.signal = ctrl.signal;
+    return fetch(url, fetchOpts).finally(function () { clearTimeout(t); });
+  }
+
   function _isLoopbackServer(url) {
     return /^http:\/\/(?:127\.0\.0\.1|localhost|0\.0\.0\.0|\[::1\])(?::\d+)?(?:\/|$)/i.test(String(url || ""));
+  }
+
+  // Health-check preflight before kernel start. On a static GitHub Pages
+  // deploy with no local server running, the kernel-start fetch can stall
+  // (CORS preflight, browser blocking loopback from HTTPS) and the user
+  // sits at "Preparing..." indefinitely. A short-timeout health probe
+  // surfaces the actionable error in seconds instead of forever.
+  // Returns Promise<{ok: boolean, message: string}>.
+  function _preflightHealth() {
+    if (!_serverUrl) return Promise.resolve({ ok: false, message: "No server URL configured." });
+    return _fetchWithTimeout(_serverUrl + "/api/health", { method: "GET", mode: "cors" }, 3000)
+      .then(function (r) {
+        if (!r || !r.ok) {
+          return { ok: false, message: "Server health check returned status " + (r && r.status) };
+        }
+        return { ok: true, message: "" };
+      })
+      .catch(function (e) {
+        var name = String((e && e.name) || "");
+        var raw = String((e && e.message) || e || "Unknown error");
+        var onSecurePage = typeof window !== "undefined" && String(window.location.protocol || "") === "https:";
+        if (name === "AbortError") {
+          return { ok: false, message: "Local notebook server did not respond at " + _serverUrl + " within 3s. Run All requires a local server (see README — Quick Start → Local server)." };
+        }
+        if (onSecurePage && _isLoopbackServer(_serverUrl)) {
+          return { ok: false, message: "Cannot reach local notebook server from this HTTPS page. The browser may be blocking loopback access. Open this app via http://localhost:3777 (start `npm start` first), or allow local network access for this site." };
+        }
+        return { ok: false, message: "Failed to reach notebook server at " + _serverUrl + ": " + raw };
+      });
   }
 
   function _formatKernelStartError(err) {
@@ -102,11 +139,23 @@
   }
 
   function _startKernel(callback) {
-    _postJSON(_serverUrl + "/api/notebook/start", {}).then(function (r) {
-      _kernelId = r.kernelId;
-      callback(null, r.kernelId);
-    }).catch(function (e) {
-      callback(new Error(_formatKernelStartError(e)));
+    // Preflight: confirm the server is reachable before issuing the
+    // longer-running kernel-spawn POST. Without this, a static-deploy
+    // visitor (no local server) sits in "Preparing..." until a hung CORS
+    // preflight or AbortController-less fetch eventually times out (or
+    // never does on some browsers). The 3s health probe yields a clear
+    // "Run All requires a local server" message instead.
+    _preflightHealth().then(function (h) {
+      if (!h.ok) {
+        callback(new Error(h.message));
+        return;
+      }
+      _postJSON(_serverUrl + "/api/notebook/start", {}).then(function (r) {
+        _kernelId = r.kernelId;
+        callback(null, r.kernelId);
+      }).catch(function (e) {
+        callback(new Error(_formatKernelStartError(e)));
+      });
     });
   }
 
