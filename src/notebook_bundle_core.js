@@ -1801,38 +1801,44 @@
       "        return lbl.argmax(dim=-1).long()\n" +
       "    return lbl.long().reshape(-1)\n" +
       "\n" +
-      "def _build_class_compact_lut(label_tensors, target_n):\n" +
-      "    \"\"\"Build a stable original→compact LUT once from the UNION of class\n" +
-      "    indices observed across all provided label tensors (train+val+test).\n" +
-      "    Compacting each split independently would let class 7 in the val set\n" +
-      "    map to compact ID 1 if the train set didn't see 7 — different IDs for\n" +
-      "    the same original class across splits, breaking the conditioning\n" +
-      "    contract. One LUT keeps the mapping consistent.\n" +
-      "    Returns (lut, compact_count). lut[orig] == -1 for unseen classes;\n" +
-      "    callers should clamp_min(0) when materialising.\n" +
+      "def _build_class_compact_lut(train_labels, target_n, class_filter=None):\n" +
+      "    \"\"\"Build the canonical original→compact LUT from the TRAINING class set\n" +
+      "    (or an explicit class_filter when provided). Reused across all splits\n" +
+      "    AND stashed on the model so the python-side class_embed forward sees\n" +
+      "    the same mapping during sampling and inference.\n" +
+      "    Important: the LUT is fit from training/filter only, NOT from a\n" +
+      "    train+val+test union. Mixing in val/test would let val classes that\n" +
+      "    appear earlier in sorted order push later training classes out of\n" +
+      "    the [:target_n] truncation — dropped training classes would then\n" +
+      "    silently map to compact 0 via the caller's clamp_min(0).\n" +
+      "    Returns (lut, compact_count, original_classes).\n" +
+      "      lut[orig] == ci for known classes (0..compact_count-1)\n" +
+      "      lut[orig] == -1 for orig values not in the training/filter set\n" +
+      "    Callers should warn-and-fallback on -1, never silently clamp to 0.\n" +
       "    \"\"\"\n" +
-      "    idx_parts = []\n" +
-      "    for lbl in label_tensors:\n" +
-      "        idx = _idx_from_onehot_or_int(lbl)\n" +
-      "        if idx is not None and idx.numel() > 0:\n" +
-      "            idx_parts.append(idx)\n" +
-      "    if not idx_parts:\n" +
-      "        return torch.zeros((0,), dtype=torch.long), 0\n" +
-      "    union_idx = torch.cat(idx_parts)\n" +
-      "    unique_vals = torch.unique(union_idx).sort().values\n" +
+      "    if class_filter is not None and len(class_filter) > 0:\n" +
+      "        unique_vals = torch.tensor(sorted(int(c) for c in class_filter), dtype=torch.long)\n" +
+      "    else:\n" +
+      "        idx = _idx_from_onehot_or_int(train_labels)\n" +
+      "        if idx is None or idx.numel() == 0:\n" +
+      "            return torch.zeros((0,), dtype=torch.long), 0, []\n" +
+      "        unique_vals = torch.unique(idx).sort().values\n" +
       "    if unique_vals.numel() > target_n:\n" +
       "        unique_vals = unique_vals[:target_n]\n" +
-      "    max_orig = int(union_idx.max().item()) + 1\n" +
+      "    max_orig = int(unique_vals.max().item()) + 1 if unique_vals.numel() else target_n\n" +
       "    lut = torch.full((max(max_orig, target_n),), -1, dtype=torch.long)\n" +
       "    for ci, cv in enumerate(unique_vals.tolist()):\n" +
-      "        lut[cv] = ci\n" +
-      "    return lut, int(unique_vals.numel())\n" +
+      "        lut[int(cv)] = ci\n" +
+      "    return lut, int(unique_vals.numel()), unique_vals.tolist()\n" +
       "\n" +
-      "def _apply_compact_lut(lbl, lut, target_n):\n" +
-      "    \"\"\"Apply a pre-built LUT to relabel a one-hot or integer label tensor.\n" +
-      "    Empty splits return a zero-shape compact tensor. The LUT itself was\n" +
-      "    built from the union across all splits in _build_class_compact_lut so\n" +
-      "    every split shares the same original→compact mapping.\n" +
+      "def _apply_compact_lut(lbl, lut, target_n, split_name='split'):\n" +
+      "    \"\"\"Apply a canonical LUT to relabel a one-hot/integer label tensor.\n" +
+      "    Empty splits return a zero-shape compact tensor.\n" +
+      "    Unseen classes (idx outside the training/filter set) are reported via\n" +
+      "    a warning print AND mapped to compact 0 only as a last resort. Silent\n" +
+      "    clamp-to-0 would corrupt val/test conditioning without any signal —\n" +
+      "    the warning gives the operator a clear breadcrumb to fix the dataset\n" +
+      "    or widen the filter.\n" +
       "    \"\"\"\n" +
       "    import torch.nn.functional as F\n" +
       "    if lbl is None or target_n <= 0: return lbl\n" +
@@ -1844,55 +1850,105 @@
       "        return lbl.new_zeros((0, target_n))\n" +
       "    if lut is None or lut.numel() == 0:\n" +
       "        return lbl.new_zeros((idx.shape[0], target_n))\n" +
-      "    # extend LUT if we ever see an idx larger than the cached LUT covers\n" +
+      "    # Extend LUT in-bounds if seeing a higher original index than the\n" +
+      "    # canonical LUT covers — those positions remain -1 and are reported.\n" +
       "    max_idx = int(idx.max().item())\n" +
       "    if max_idx >= lut.shape[0]:\n" +
       "        new_lut = torch.full((max_idx + 1,), -1, dtype=torch.long)\n" +
       "        new_lut[: lut.shape[0]] = lut\n" +
       "        lut = new_lut\n" +
-      "    compact_idx = lut[idx].clamp_min(0)\n" +
+      "    raw = lut[idx]\n" +
+      "    unseen_mask = (raw == -1)\n" +
+      "    if unseen_mask.any():\n" +
+      "        unseen_orig = sorted(set(idx[unseen_mask].tolist()))\n" +
+      "        print(f'[class_embed] {split_name}: {int(unseen_mask.sum().item())} samples '\n" +
+      "              f'reference classes {unseen_orig} not in the training/filter set; '\n" +
+      "              f'mapping them to compact 0 as a fallback. Widen classFilter or '\n" +
+      "              f'clean the dataset to avoid silent label corruption.')\n" +
+      "    compact_idx = raw.clamp_min(0)\n" +
       "    return F.one_hot(compact_idx, target_n).float()\n" +
       "\n" +
+      "def _stash_class_lut_on_model(lut, dataset_width):\n" +
+      "    \"\"\"Stash the canonical LUT on the model under each class_embed node\n" +
+      "    so train_subprocess.py's class_embed forward reuses the same mapping\n" +
+      "    during training, validation, and (especially) sampling cells —\n" +
+      "    instead of lazy-building from a per-batch idx that only sees a\n" +
+      "    subset of training classes.\n" +
+      "    \"\"\"\n" +
+      "    if not hasattr(model, '_class_compact_luts'):\n" +
+      "        model._class_compact_luts = {}\n" +
+      "    for _nid, _ndata in data.items():\n" +
+      "        if not isinstance(_ndata, dict): continue\n" +
+      "        if str(_ndata.get('name','')).replace('_layer','') != 'class_embed': continue\n" +
+      "        try:\n" +
+      "            model._class_compact_luts[(str(_nid), int(dataset_width))] = lut.clone()\n" +
+      "        except Exception:\n" +
+      "            model._class_compact_luts[(str(_nid), int(dataset_width))] = lut\n" +
+      "\n" +
       "if _has_class_embed and hasattr(model, '_class_labels') is False:\n" +
-      "    if labels_train_tensor is not None and labels_val_tensor is not None:\n" +
-      "        # Build ONE LUT from the union across all splits, then apply it.\n" +
-      "        _shared_lut, _compact_n = _build_class_compact_lut(\n" +
-      "            [labels_train_tensor, labels_val_tensor, labels_test_tensor], _nclasses)\n" +
-      "        labels_train_tensor = _apply_compact_lut(labels_train_tensor, _shared_lut, _nclasses)\n" +
-      "        labels_val_tensor = _apply_compact_lut(labels_val_tensor, _shared_lut, _nclasses)\n" +
-      "        labels_test_tensor = _apply_compact_lut(labels_test_tensor, _shared_lut, _nclasses) if labels_test_tensor is not None else None\n" +
-      "        train_dl = DataLoader(TensorDataset(x_train, y_train, labels_train_tensor), batch_size=BATCH_SIZE, shuffle=True)\n" +
-      "        val_dl = DataLoader(TensorDataset(x_val, y_val, labels_val_tensor), batch_size=BATCH_SIZE)\n" +
-      "        print(f'Class conditioning: {_nclasses} classes (compacted to {_compact_n} observed, shared LUT across splits)')\n" +
+      "    # classFilter from the dataset config (preset) takes precedence as the\n" +
+      "    # canonical class set, since it survives empty val/test splits and any\n" +
+      "    # accidental absence of a class in training labels (e.g. very small N).\n" +
+      "    _class_filter = None\n" +
+      "    try:\n" +
+      "        _class_filter = list(globals().get('CLASS_FILTER') or []) or None\n" +
+      "    except Exception:\n" +
+      "        _class_filter = None\n" +
+      "    if labels_train_tensor is not None:\n" +
+      "        # Canonical LUT fit from TRAINING labels (or class_filter). Val/test\n" +
+      "        # use the same LUT — unseen classes there print a warning, never\n" +
+      "        # silently corrupt the conditioning by clamping to 0.\n" +
+      "        _shared_lut, _compact_n, _orig_classes = _build_class_compact_lut(\n" +
+      "            labels_train_tensor, _nclasses, class_filter=_class_filter)\n" +
+      "        _train_width = int(labels_train_tensor.shape[-1] if labels_train_tensor.ndim >= 2 else 0)\n" +
+      "        _stash_class_lut_on_model(_shared_lut, _train_width)\n" +
+      "        labels_train_tensor = _apply_compact_lut(labels_train_tensor, _shared_lut, _nclasses, 'train')\n" +
+      "        labels_val_tensor = _apply_compact_lut(labels_val_tensor, _shared_lut, _nclasses, 'val') if labels_val_tensor is not None else None\n" +
+      "        labels_test_tensor = _apply_compact_lut(labels_test_tensor, _shared_lut, _nclasses, 'test') if labels_test_tensor is not None else None\n" +
+      "        if labels_val_tensor is not None:\n" +
+      "            train_dl = DataLoader(TensorDataset(x_train, y_train, labels_train_tensor), batch_size=BATCH_SIZE, shuffle=True)\n" +
+      "            val_dl = DataLoader(TensorDataset(x_val, y_val, labels_val_tensor), batch_size=BATCH_SIZE) if labels_val_tensor.shape[0] > 0 else DataLoader(TensorDataset(x_val, y_val), batch_size=BATCH_SIZE)\n" +
+      "        else:\n" +
+      "            train_dl = DataLoader(TensorDataset(x_train, y_train, labels_train_tensor), batch_size=BATCH_SIZE, shuffle=True)\n" +
+      "            val_dl = DataLoader(TensorDataset(x_val, y_val), batch_size=BATCH_SIZE)\n" +
+      "        print(f'Class conditioning: {_nclasses} model classes; LUT fit from training (orig={_orig_classes}, compact_count={_compact_n})')\n" +
       "    elif 'df' in globals() and df is not None and 'label' in df.columns:\n" +
       "        import torch.nn.functional as F\n" +
       "        _train_rows = df[df['split']=='train']['label'].values.astype(int)\n" +
       "        _val_rows = df[df['split']=='val']['label'].values.astype(int) if 'val' in df['split'].values else _train_rows[:0]\n" +
       "        _test_rows = df[df['split']=='test']['label'].values.astype(int) if 'test' in df['split'].values else _train_rows[:0]\n" +
-      "        # Build LUT from the union before any .max()/.argmax() — handles\n" +
-      "        # empty val/test splits without raising on the int-array fallback.\n" +
       "        _lbl_train_idx = torch.tensor(_train_rows, dtype=torch.long)\n" +
       "        _lbl_val_idx = torch.tensor(_val_rows, dtype=torch.long)\n" +
-      "        _lbl_test_idx = torch.tensor(_test_rows, dtype=torch.long)\n" +
-      "        _shared_lut, _compact_n = _build_class_compact_lut(\n" +
-      "            [_lbl_train_idx, _lbl_val_idx, _lbl_test_idx], _nclasses)\n" +
-      "        def _df_compact_onehot(idx_t):\n" +
+      "        # Canonical LUT fit from training only. _build_class_compact_lut\n" +
+      "        # short-circuits cleanly on numel()==0 so val/test emptiness is\n" +
+      "        # never observed via .max() on an empty tensor.\n" +
+      "        _shared_lut, _compact_n, _orig_classes = _build_class_compact_lut(\n" +
+      "            _lbl_train_idx, _nclasses, class_filter=_class_filter)\n" +
+      "        _train_width = int(_lbl_train_idx.max().item()) + 1 if _lbl_train_idx.numel() > 0 else _nclasses\n" +
+      "        _stash_class_lut_on_model(_shared_lut, _train_width)\n" +
+      "        def _df_compact_onehot(idx_t, split_name):\n" +
       "            if idx_t.numel() == 0:\n" +
       "                return torch.zeros((0, _nclasses), dtype=torch.float32)\n" +
-      "            # ensure LUT covers idx_t.max()\n" +
       "            mx = int(idx_t.max().item())\n" +
       "            lut = _shared_lut\n" +
       "            if mx >= lut.shape[0]:\n" +
       "                new_lut = torch.full((mx + 1,), -1, dtype=torch.long)\n" +
       "                new_lut[: lut.shape[0]] = lut\n" +
       "                lut = new_lut\n" +
-      "            compact = lut[idx_t].clamp_min(0)\n" +
-      "            return F.one_hot(compact, _nclasses).float()\n" +
-      "        _lbl_train = _df_compact_onehot(_lbl_train_idx)\n" +
-      "        _lbl_val = _df_compact_onehot(_lbl_val_idx)\n" +
+      "            raw = lut[idx_t]\n" +
+      "            unseen = (raw == -1)\n" +
+      "            if unseen.any():\n" +
+      "                unseen_orig = sorted(set(idx_t[unseen].tolist()))\n" +
+      "                print(f'[class_embed] {split_name}: {int(unseen.sum().item())} samples '\n" +
+      "                      f'reference classes {unseen_orig} not in training set; '\n" +
+      "                      f'mapping them to compact 0 as a fallback. Widen classFilter or '\n" +
+      "                      f'clean the dataset to avoid silent label corruption.')\n" +
+      "            return F.one_hot(raw.clamp_min(0), _nclasses).float()\n" +
+      "        _lbl_train = _df_compact_onehot(_lbl_train_idx, 'train')\n" +
+      "        _lbl_val = _df_compact_onehot(_lbl_val_idx, 'val')\n" +
       "        train_dl = DataLoader(TensorDataset(x_train, y_train, _lbl_train), batch_size=BATCH_SIZE, shuffle=True)\n" +
       "        val_dl = DataLoader(TensorDataset(x_val, y_val, _lbl_val), batch_size=BATCH_SIZE) if _lbl_val.shape[0] > 0 else DataLoader(TensorDataset(x_val, y_val), batch_size=BATCH_SIZE)\n" +
-      "        print(f'Class conditioning: {_nclasses} classes (df fallback, {_compact_n} observed)')\n" +
+      "        print(f'Class conditioning: {_nclasses} model classes; LUT fit from training (df fallback, orig={_orig_classes}, compact_count={_compact_n})')\n" +
       "    else:\n" +
       "        train_dl = DataLoader(TensorDataset(x_train, y_train), batch_size=BATCH_SIZE, shuffle=True)\n" +
       "        val_dl = DataLoader(TensorDataset(x_val, y_val), batch_size=BATCH_SIZE)\n" +
