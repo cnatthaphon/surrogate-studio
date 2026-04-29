@@ -12935,7 +12935,62 @@
     });
   }
 
+  function _injectMobileStylesOnce() {
+    // Narrow-viewport rules so the layout doesn't catastrophically break on
+    // a phone — Drawflow's editor canvas is a fixed pixel size and Plotly
+    // already supports `responsive: true`, so the main mobile pain points
+    // are: (1) the editor needing horizontal scroll instead of clipping,
+    // (2) sidebar padding eating most of the viewport, (3) any flex row
+    // that assumed >=720px viewport. These rules are additive — desktop
+    // layout is unchanged.
+    if (typeof document === "undefined") return;
+    if (document.getElementById("osc-mobile-styles")) return;
+    var styleEl = document.createElement("style");
+    styleEl.id = "osc-mobile-styles";
+    styleEl.textContent = [
+      "@media (max-width: 720px) {",
+      "  body { font-size: 13px; }",
+      // Drawflow editor: allow horizontal pan instead of clipping
+      "  #drawflow, .drawflow { overflow-x: auto !important; }",
+      // Tab bars and toolbars: wrap instead of overflow
+      "  .osc-tabbar, .osc-toolbar, .osc-controls { flex-wrap: wrap !important; gap: 4px !important; }",
+      // Reduce dense padding on cards/panels
+      "  .osc-panel, .osc-card { padding: 8px !important; }",
+      // Plotly charts: keep them responsive (Plotly handles this with `responsive: true`),",
+      // just guard the wrapper so it doesn't push the page wider than viewport.",
+      "  .js-plotly-plot, .plotly-graph-div { max-width: 100% !important; }",
+      // The runner overlay 520px card already uses min(520px, 100%) — no fix needed",
+      "}",
+      // Small one-time hint banner on very narrow viewports (only the first
+      // page load this session). Doesn't block anything; just informational.",
+      "@media (max-width: 480px) {",
+      "  #osc-mobile-hint { display: block !important; }",
+      "}",
+    ].join("\n");
+    document.head.appendChild(styleEl);
+
+    // Hint banner (hidden by default; CSS above makes it visible <480px)
+    var hintEl = document.createElement("div");
+    hintEl.id = "osc-mobile-hint";
+    hintEl.style.cssText = [
+      "display:none;",
+      "position:fixed; bottom:10px; left:10px; right:10px; z-index:9999;",
+      "background:#0f172a; color:#cbd5e1; border:1px solid #1e293b;",
+      "border-radius:8px; padding:10px 12px; font-size:12px; line-height:1.4;",
+      "box-shadow:0 4px 14px rgba(0,0,0,0.3);"
+    ].join("");
+    hintEl.innerHTML = '<strong style="color:#67e8f9;">Mobile view</strong> — Drawflow editor pans horizontally; for full editing, open on a wider screen. Tap to dismiss.';
+    hintEl.addEventListener("click", function () { hintEl.remove(); });
+    if (document.body) {
+      document.body.appendChild(hintEl);
+    } else {
+      document.addEventListener("DOMContentLoaded", function () { document.body.appendChild(hintEl); });
+    }
+  }
+
   function init() {
+    _injectMobileStylesOnce();
+
     window.addEventListener("error", function (ev) {
       const msg = (ev && ev.message) ? ev.message : "Unknown runtime error";
       setStatus("Runtime error: " + msg);

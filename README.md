@@ -121,11 +121,14 @@ Full architecture details, file map, supported schemas (13), and node types (35+
 ```
 https://cnatthaphon.github.io/surrogate-studio/demo/Fashion-MNIST-Benchmark/
 ```
+The browser-only path runs Pretrained Generate, Test, and Evaluation in TF.js — no setup. **Run Notebook** (in-browser cell-by-cell training) needs the local server below: it spawns a Python kernel via `/api/notebook/start`, so a static GitHub Pages deploy can't serve it.
 
-**Local server** — full platform with PyTorch training:
+**Local server** — full platform with PyTorch training + Run Notebook:
 ```bash
-npm install && npm start    # http://localhost:3777
+source ~/venv/bin/activate    # any venv with torch installed
+npm install && npm start      # http://localhost:3777
 ```
+Server logs will show `Python: <path> (torch OK)` when the venv is wired correctly. If you see `(torch MISSING — training/notebook will fail)`, activate the venv first or set `PYTHON=/path/to/venv-python`.
 
 **Docker** — everything in one container (Node.js + PyTorch):
 ```bash
