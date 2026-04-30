@@ -676,13 +676,39 @@
         _plotLossChart(epochs);
       } else {
         var Plotly = (typeof window !== "undefined" && window.Plotly) ? window.Plotly : null;
+        var isDonePretrained = t && t.status === "done" && t.status !== "running";
+        var titleText = isDonePretrained
+          ? "Per-epoch loss history not captured for this pretrained checkpoint"
+          : "Training Progress (waiting...)";
         if (Plotly) {
           Plotly.newPlot(_lossChartDiv, [], {
             paper_bgcolor: "#0b1220", plot_bgcolor: "#0b1220", font: { color: "#e2e8f0", size: 10 },
-            title: { text: "Training Progress (waiting...)", font: { size: 12 } },
+            title: { text: titleText, font: { size: 12 } },
             xaxis: { title: "Epoch", gridcolor: "#1e293b" }, yaxis: { title: "Loss", gridcolor: "#1e293b" },
             margin: { t: 30, b: 50, l: 50, r: 10 },
           }, { responsive: true });
+        }
+      }
+
+      // For pretrained checkpoints whose per-epoch logs were not captured at
+      // export time, surface what IS available — config (epochs/lr/optimizer)
+      // and final metrics — so the card is informative instead of blank.
+      if (!epochs.length && t && t.status === "done") {
+        var cfg = (t.config) || {};
+        var mtr = (t.metrics) || {};
+        var infoLines = [];
+        if (cfg.epochs) infoLines.push("Trained " + cfg.epochs + " epochs");
+        if (cfg.batchSize) infoLines.push("batch=" + cfg.batchSize);
+        if (cfg.learningRate) infoLines.push("lr=" + cfg.learningRate);
+        if (cfg.optimizerType) infoLines.push(cfg.optimizerType);
+        if (mtr.bestEpoch != null) infoLines.push("best epoch=" + mtr.bestEpoch);
+        if (mtr.bestValLoss != null) infoLines.push("best val_loss=" + Number(mtr.bestValLoss).toExponential(3));
+        if (mtr.testMae != null) infoLines.push("test MAE=" + Number(mtr.testMae).toExponential(3));
+        if (mtr.testR2 != null) infoLines.push("test R²=" + Number(mtr.testR2).toFixed(4));
+        if (infoLines.length) {
+          mainEl.appendChild(el("div", {
+            style: "background:#0c2340;border:1px solid #1e3a5f;color:#cbd5e1;padding:8px 12px;border-radius:6px;font-size:11px;margin-bottom:8px;line-height:1.5;",
+          }, infoLines.join("  •  ")));
         }
       }
 
@@ -701,12 +727,25 @@
 
       if (!epochs.length && t.status !== "running") {
         var emptyRow = el("tr", {});
-        emptyRow.appendChild(el("td", { style: "color:#64748b;text-align:center;", colspan: "5" }, "Waiting for training..."));
+        var msg = t && t.status === "done"
+          ? "Per-epoch logs not captured for this checkpoint"
+          : "Waiting for training...";
+        emptyRow.appendChild(el("td", { style: "color:#64748b;text-align:center;", colspan: "5" }, msg));
         tbody.appendChild(emptyRow);
       }
 
       tableWrap.appendChild(table);
       mainEl.appendChild(tableWrap);
+    }
+
+    // Normalize epoch loss field — older pretrained (e.g. UNet conv_ae,
+    // unet_pretrained) export each epoch with `train_loss`; newer pipelines
+    // use `loss`. Fall back to either so the chart always renders.
+    function _epochTrainLoss(ep) {
+      if (ep == null) return null;
+      if (ep.loss != null) return ep.loss;
+      if (ep.train_loss != null) return ep.train_loss;
+      return null;
     }
 
     function _appendEpochRow(ep) {
@@ -720,7 +759,8 @@
       }
       var tr = el("tr", {});
       tr.appendChild(el("td", {}, String(ep.epoch || "")));
-      tr.appendChild(el("td", {}, ep.loss != null ? Number(ep.loss).toExponential(3) : "\u2014"));
+      var _trL = _epochTrainLoss(ep);
+      tr.appendChild(el("td", {}, _trL != null ? Number(_trL).toExponential(3) : "\u2014"));
       // show per-phase losses if available, otherwise val_loss
       if (ep.phaseLosses && typeof ep.phaseLosses === "object") {
         var phKeys = Object.keys(ep.phaseLosses);
@@ -1433,7 +1473,7 @@
         var epochs = store && typeof store.getTrainerEpochs === "function" ? store.getTrainerEpochs(activeId) : [];
         if (epochs.length) {
           Plotly.newPlot(chartDiv, [
-            { x: epochs.map(function (e) { return e.epoch; }), y: epochs.map(function (e) { return e.loss; }), mode: "lines+markers", name: "Train Loss", line: { color: "#22d3ee" } },
+            { x: epochs.map(function (e) { return e.epoch; }), y: epochs.map(function (e) { return _epochTrainLoss(e); }), mode: "lines+markers", name: "Train Loss", line: { color: "#22d3ee" } },
             { x: epochs.map(function (e) { return e.epoch; }), y: epochs.map(function (e) { return e.val_loss; }), mode: "lines+markers", name: "Val Loss", line: { color: "#f59e0b" } },
           ], Object.assign({}, darkLayout, {
             title: { text: "Training Curves", font: { size: 12 } },
@@ -1450,7 +1490,7 @@
       var Plotly = (typeof window !== "undefined" && window.Plotly) ? window.Plotly : null;
       if (!Plotly || !_lossChartDiv || !epochs.length) return;
       var ep = epochs.map(function (e) { return e.epoch; });
-      var loss = epochs.map(function (e) { return e.loss; });
+      var loss = epochs.map(function (e) { return _epochTrainLoss(e); });
       var valLoss = epochs.map(function (e) { return e.val_loss; });
       Plotly.newPlot(_lossChartDiv, [
         { x: ep, y: loss, mode: "lines", name: "Train Loss", line: { color: "#22d3ee" } },
