@@ -14,7 +14,7 @@ No hardcoded GAN logic in the engine. The graph defines the full adversarial arc
 | **DCGAN** | ![DCGAN Client](images/dcgan_client.png) | ![DCGAN Server](images/dcgan_server.png) |
 | **WGAN** | ![WGAN Client](images/wgan_client.png) | ![WGAN Server](images/wgan_server.png) |
 
-All three architectures generate recognizable T-shirt images from random noise, trained on Fashion-MNIST class 0 (T-shirt/top, 6000 images). Pre-trained weights are included for all three models, so generation works immediately without retraining.
+Pretrained weights are included for all three models so generation works immediately without retraining. Quality varies: **MLP-GAN currently produces the cleanest T-shirt-like silhouettes**; the shipped DCGAN and WGAN pretrained weights converge to noisier samples and need additional training (or hyperparameter tuning) before they match the MLP-GAN output. The point of shipping all three is the *architectural comparison* through the same visual graph contract — convergence quality is a separate axis tracked as a follow-up.
 
 The demo intentionally includes two kinds of trainer cards:
 - `MLP-GAN (pre-trained)`, `DCGAN (pre-trained)`, `MLP-WGAN (pre-trained)` — already have weights and are ready for Generation immediately

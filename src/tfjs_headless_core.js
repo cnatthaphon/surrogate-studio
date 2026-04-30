@@ -308,6 +308,7 @@ function buildModelFromDrawflowGraph(rawGraph, datasetMeta, schemaId) {
     : tf.input({ shape: [datasetMeta.featureSize] });
 
   class ReparameterizeLayer extends tf.layers.Layer {
+    constructor(config) { super(config || {}); }
     computeOutputShape(inputShape) {
       return Array.isArray(inputShape) ? inputShape[0] : inputShape;
     }
@@ -316,14 +317,17 @@ function buildModelFromDrawflowGraph(rawGraph, datasetMeta, schemaId) {
         const arr = Array.isArray(inputs) ? inputs : [inputs];
         const mu = arr[0];
         const logvar = tf.clipByValue(arr[1], -10, 10);
-        const eps = tf.randomNormal(tf.shape(mu), 0, 1, mu.dtype);
+        const eps = tf.randomNormal(mu.shape, 0, 1, mu.dtype);
         const std = tf.exp(tf.mul(tf.scalar(0.5), logvar));
         return tf.add(mu, tf.mul(std, eps));
       });
     }
-    getClassName() {
-      return "ReparameterizeLayer";
-    }
+    getClassName() { return "ReparameterizeLayer"; }
+    static get className() { return "ReparameterizeLayer"; }
+  }
+  if (tf && tf.serialization && typeof tf.serialization.registerClass === "function") {
+    try { tf.serialization.registerClass(ReparameterizeLayer); }
+    catch (_regErr) { /* already registered by another build path */ }
   }
 
   function requiredNonNegativeNumber(data, key, nodeName, nodeId) {

@@ -112,12 +112,12 @@
   }
 
   // ═══════════════════════════════════════════
-  // Model 2: DCGAN (Radford 2015)
+  // Model 2: DCGAN (Radford et al. 2016, ICLR)
   // ═══════════════════════════════════════════
   function _dcGan() {
     _nid = 0; var d = {};
 
-    // Conv Generator (Radford 2015) — affine -> BatchNorm -> ReLU
+    // Conv Generator (Radford et al. 2016) — affine -> BatchNorm -> ReLU
     var z =    N(d, "sample_z",          { dim: 128, distribution: "normal" },    80, 60);
     var gd =   N(d, "dense",             _dcWeightCfg("generator", "G_dense", { units: 6272 }), 200, 60);
     var gbn1 = N(d, "batchnorm",         _dcBatchNormCfg("generator", "G_bn1"), 300, 60);
@@ -137,7 +137,7 @@
     C(d, gOut, cat, "output_1", "input_1");
     C(d, img, cat, "output_1", "input_2");
 
-    // Conv Discriminator (Radford 2015) — LeakyReLU(0.2) + BatchNorm
+    // Conv Discriminator (Radford et al. 2016) — LeakyReLU(0.2) + BatchNorm
     var dr =   N(d, "reshape",           { targetShape: "28,28,1" },             660, 200);
     var dc1 =  N(d, "conv2d",            _dcWeightCfg("discriminator", "D_conv1", { filters: 64, kernelSize: 4, strides: 2, padding: "same" }), 820, 200);
     var dlr1 = N(d, "leaky_relu",        { alpha: 0.2 },                         880, 200);
@@ -221,7 +221,7 @@
     },
     models: [
       { id: "m-mlp-gan",  name: "1. MLP-GAN (Goodfellow 2014)", schemaId: sid, graph: _mlpGan(), createdAt: Date.now() },
-      { id: "m-dcgan",    name: "2. DCGAN (Radford 2015)",       schemaId: sid, graph: _dcGan(),  createdAt: Date.now() },
+      { id: "m-dcgan",    name: "2. DCGAN (Radford et al. 2016)",       schemaId: sid, graph: _dcGan(),  createdAt: Date.now() },
       { id: "m-mlp-wgan", name: "3. MLP-WGAN (Arjovsky 2017)",   schemaId: sid, graph: _mlpWgan(), createdAt: Date.now() },
     ],
     trainers: [

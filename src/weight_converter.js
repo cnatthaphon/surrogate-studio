@@ -156,6 +156,51 @@
       values = converted.values || values;
     }
 
+    // Drop legacy reparam_noise_* specs from artifacts trained before the VAE
+    // reparameterization fix. Those weights came from a zero-init Dense layer
+    // that no longer exists in the new ReparameterizeLayer (which has no
+    // trainable params). Without this filter, the named-match path fails for
+    // those specs and the loader falls back to positional matching, which
+    // silently misaligns every downstream decoder weight.
+    var _legacyDropped = 0;
+    if (specs.length) {
+      var filteredSpecs = [];
+      var filteredValuesArr = null;
+      var srcOffset = 0;
+      var dstOffset = 0;
+      var totalNeeded = 0;
+      for (var si = 0; si < specs.length; si++) {
+        var sp = specs[si];
+        var nm = String(sp && sp.name || "");
+        var sz = (Array.isArray(sp.shape) ? sp.shape : []).reduce(function (a, b) { return a * b; }, 1);
+        if (nm.indexOf("reparam_noise_") >= 0 || nm.indexOf("reparam_add_") >= 0) {
+          _legacyDropped++;
+          srcOffset += sz;
+          continue;
+        }
+        totalNeeded += sz;
+        filteredSpecs.push(sp);
+      }
+      if (_legacyDropped > 0) {
+        filteredValuesArr = new Float32Array(totalNeeded);
+        srcOffset = 0;
+        for (var si2 = 0; si2 < specs.length; si2++) {
+          var sp2 = specs[si2];
+          var nm2 = String(sp2 && sp2.name || "");
+          var sz2 = (Array.isArray(sp2.shape) ? sp2.shape : []).reduce(function (a, b) { return a * b; }, 1);
+          if (nm2.indexOf("reparam_noise_") >= 0 || nm2.indexOf("reparam_add_") >= 0) {
+            srcOffset += sz2;
+            continue;
+          }
+          filteredValuesArr.set(values.subarray(srcOffset, srcOffset + sz2), dstOffset);
+          srcOffset += sz2;
+          dstOffset += sz2;
+        }
+        specs = filteredSpecs;
+        values = filteredValuesArr;
+      }
+    }
+
     var modelWeights = model.weights || [];
     var current = model.getWeights();
     var matched = 0;

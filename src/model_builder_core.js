@@ -645,6 +645,11 @@
     // Sampling at every forward pass (training AND inference) is required so the
     // decoder learns to be robust to a region around each encoded mu, which is
     // what makes the latent space smooth and useful for generation.
+    //
+    // The class is registered with tf.serialization so tf.loadLayersModel()
+    // (used by training_worker.js when restoring a serialized model) can
+    // deserialize it. registerClass is idempotent via try/catch — multiple
+    // call sites all register the same className safely.
     var _reparamCount = 0;
     class ReparameterizeLayer extends tf.layers.Layer {
       constructor(config) { super(config || {}); }
@@ -662,6 +667,11 @@
         });
       }
       getClassName() { return "ReparameterizeLayer"; }
+      static get className() { return "ReparameterizeLayer"; }
+    }
+    if (tf && tf.serialization && typeof tf.serialization.registerClass === "function") {
+      try { tf.serialization.registerClass(ReparameterizeLayer); }
+      catch (_regErr) { /* already registered by another build path */ }
     }
 
     // Determine output units per head. Priority (contract-driven):
