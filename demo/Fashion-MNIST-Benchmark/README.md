@@ -3,9 +3,9 @@
 ![Demo Workflow](images/demo_workflow.gif)
 
 
-**A visual survey of three decades of neural network research, trained and evaluated on the same dataset in one browser page.**
+**A visual survey of seven architectures spanning three decades of neural network research, trained and evaluated on the same dataset in one browser page.**
 
-7 architectures spanning from 1986 to 2020, each built entirely from the visual graph editor — no code, no hardcodes. Every model trains on both TF.js (browser) and PyTorch (server), with identical results.
+The 7 architectures span 1986 to 2020, each built entirely from the visual graph editor — no code, no hardcodes. Every model trains on both TF.js (browser) and PyTorch (server), with identical results. The goal is platform-level reproducibility across architectures, not per-architecture SOTA.
 
 ## Models
 

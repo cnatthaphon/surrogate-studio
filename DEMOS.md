@@ -326,7 +326,7 @@ demo/<paper>/
 | LeCun, Bottou, Bengio, Haffner — "Gradient-Based Learning Applied to Document Recognition" | 1998 | Benchmark |
 | Hinton & Salakhutdinov — "Reducing the Dimensionality of Data with Neural Networks" | 2006 | Benchmark |
 | Masci et al. — "Stacked Convolutional Auto-Encoders" | 2011 | Benchmark |
-| Kingma & Welling — "Auto-Encoding Variational Bayes" | 2013 | Benchmark, Oscillator |
+| Kingma & Welling — "Auto-Encoding Variational Bayes" | 2014 | Benchmark, Oscillator |
 | Goodfellow et al. — "Generative Adversarial Nets" | 2014 | GAN |
 | Ronneberger et al. — "U-Net: Convolutional Networks for Biomedical Image Segmentation" | 2015 | UNet, Cell Nuclei, Segmentation |
 | Radford, Metz, Chintala — "Unsupervised Representation Learning with DCGANs" | 2015 | GAN |
@@ -355,3 +355,12 @@ demo/<paper>/
 6. Capture screenshots: `node scripts/capture_demo_assets.js demo/<name> 5`
 
 No core files need to change. All demos are plugins.
+
+## Known Limitations & Future Extensions
+
+These are deliberate scope decisions, not undiscovered bugs. They're documented here so contributors and reviewers can find them without reading the code.
+
+- **No input-level data augmentation.** The graph supports layer-level dropout but not random flip/crop/rotate/jitter on inputs. The demos ship with pretrained weights at the accuracies the architecture supports without augmentation; this is a portfolio piece focused on platform architecture, not per-paper SOTA. The cleanest extension point is the dataset-module layer (`src/dataset_modules/*.js` preprocessing hook) — same place `image_source_block` already normalizes pixel values. Adding it as a graph node would couple training-time data behavior to architecture, which the contract avoids.
+- **Image-shape inference fallback.** `getSchemaImageSourceDefs` in `src/app.js` falls back to a 28×28 / 784-feature shape when an image schema doesn't declare `metadata.featureNodes.imageSource`. Today every shipped image schema declares it, so the fallback is unreached, but the cleaner contract would be to require the declaration or derive from the dataset's declared shape and refuse to guess.
+- **Notebook export feature-dimension lookup.** The exported notebook reconstructs feature-block dimensions in `_feature_dim()` (in `src/notebook_bundle_core.js`) by string-matching block names like `time_sec_block` / `params_block` / `hist_block`. The contract-clean version is to embed each block's actual feature dimension into the notebook's config object at export time so the cell never has to look up by name.
+- **Generation modes not at full parity.** DDPM and Langevin generation are browser-only (`generate_subprocess.py` implements `random` and `reconstruct`). This is acceptable specialization — those modes are exploratory/interactive and the pretrained demos don't depend on the server path for them.
