@@ -1221,7 +1221,25 @@
       mountEl.appendChild(el("pre", { style: "font-size:10px;color:#94a3b8;background:#171d30;padding:8px;border-radius:4px;" }, text));
     }
 
-    function mount() { _renderLeftPanel(); _renderMainPanel(); _renderRightPanel(); _startRefreshWatcher(); }
+    function mount() {
+      // If no generation session is active yet, auto-select one so the visitor lands on a
+      // populated card instead of an empty "Select or create" placeholder. Prefer a session
+      // whose linked trainer is pretrained (status:"done") so the runs panel & weights are real.
+      if (!_activeGenId && store) {
+        var allGens = _listGens();
+        if (allGens.length) {
+          var preferredGen = null;
+          for (var i = 0; i < allGens.length; i++) {
+            var g = allGens[i];
+            if (!g || !g.trainerId) continue;
+            var t = store.getTrainerCard(g.trainerId);
+            if (t && t.status === "done") { preferredGen = g; break; }
+          }
+          _activeGenId = (preferredGen || allGens[0]).id;
+        }
+      }
+      _renderLeftPanel(); _renderMainPanel(); _renderRightPanel(); _startRefreshWatcher();
+    }
     function unmount() { _mountId++; _stopRefreshWatcher(); layout.leftEl.innerHTML = ""; layout.mainEl.innerHTML = ""; layout.rightEl.innerHTML = ""; }
     function refresh() { _renderLeftPanel(); _renderMainPanel(); _renderRightPanel(); }
 

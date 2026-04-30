@@ -235,7 +235,15 @@
       var preTrainers = typeof store.listTrainerCards === "function" ? store.listTrainerCards({}) : [];
       if (preDatasets.length && !stateApi.getActiveDataset()) stateApi.setActiveDataset(preDatasets[0].id);
       if (preModels.length && !stateApi.getActiveModel()) stateApi.setActiveModel(preModels[0].id);
-      if (preTrainers.length && !stateApi.getActiveTrainer()) stateApi.setActiveTrainer(preTrainers[0].id);
+      if (preTrainers.length && !stateApi.getActiveTrainer()) {
+        // Prefer a pretrained (status:"done") trainer over a draft so visitors land on a card
+        // that already has weights, metrics, and loss curves visible — not an empty "waiting..." card.
+        var preferredTrainer = null;
+        for (var i = 0; i < preTrainers.length; i++) {
+          if (preTrainers[i] && preTrainers[i].status === "done") { preferredTrainer = preTrainers[i]; break; }
+        }
+        stateApi.setActiveTrainer((preferredTrainer || preTrainers[0]).id);
+      }
     }
 
     // show default tab
