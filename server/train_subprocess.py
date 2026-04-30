@@ -18,6 +18,7 @@ import os
 import math
 import signal
 import traceback
+
 import numpy as np
 from checkpoint_format import normalize_artifacts, extract_pytorch_state
 from runtime_weight_loader import load_weights_into_model
@@ -313,6 +314,11 @@ def main():
             head_losses.append({"fn": nn.L1Loss(), "weight": hw, "phase": hp, "cls": False})
         elif htype == "classification":
             head_losses.append({"fn": nn.CrossEntropyLoss(), "weight": hw, "phase": hp, "cls": True})
+        elif htype == "latent_kl":
+            # Closed-form Gaussian KL: -0.5 * sum(1 + logvar - mu^2 - exp(logvar))
+            # head_pred is concat(mu, logvar) along the feature dim; target is unused.
+            head_losses.append({"fn": None, "weight": hw, "phase": hp, "cls": False,
+                                "kl_loss": True, "beta": float(hc.get("beta", 1e-3))})
         else:
             head_losses.append({"fn": nn.MSELoss(), "weight": hw, "phase": hp, "cls": False})
 
@@ -393,6 +399,16 @@ def main():
         for i, hl in enumerate(head_losses):
             if hl.get("skip"):
                 continue  # loss=none, passthrough
+            if hl.get("kl_loss"):
+                # Closed-form Gaussian KL on concat(mu, logvar). No target needed.
+                head_pred_kl = preds[i] if i < len(preds) else preds[-1]
+                half = head_pred_kl.shape[-1] // 2
+                mu = head_pred_kl[..., :half]
+                logvar = torch.clamp(head_pred_kl[..., half:half * 2], -10.0, 10.0)
+                kl_term = (1.0 + logvar) - (mu * mu + torch.exp(logvar))
+                kl = -0.5 * kl_term.sum(dim=-1).mean()
+                total = total + hl["weight"] * hl["beta"] * kl
+                continue
             # with schedule: all losses active (weight freeze handles updates)
             # without schedule: filter by phase name
             if not _use_schedule and hl["phase"] != active_phase and hl["phase"] != "" and active_phase != "":
@@ -763,6 +779,14 @@ def main():
     # --- Compute final metrics (val + test) ---
     model.eval()
     mae = 0.0; mse = 0.0
+    # Reconstruction-style heads compare to xb, not yb — y_val for a classification
+    # dataset hosting a VAE is the 10-dim labels, which won't broadcast against the
+    # 784-dim reconstruction.
+    _is_recon_head = any(
+        str(hc.get("headType", "")).lower() in ("reconstruction", "autoencoder", "denoiser")
+        or str(hc.get("target", hc.get("targetType", ""))).lower() in ("pixel_values", "input")
+        for hc in (head_configs or [])
+    )
     with torch.no_grad():
         if x_val.size > 0:
             x_val_t = torch.tensor(x_val).to(device)
@@ -773,6 +797,9 @@ def main():
                 true_labels = y_val.flatten().astype(int)
                 mae = float(np.mean(np.abs(pred_labels - true_labels)))
                 mse = float(np.mean((pred_labels - true_labels) ** 2))
+            elif _is_recon_head and pred_val.shape == x_val.shape:
+                mae = float(np.mean(np.abs(pred_val - x_val)))
+                mse = float(np.mean((pred_val - x_val) ** 2))
             else:
                 mae = float(np.mean(np.abs(pred_val - y_val)))
                 mse = float(np.mean((pred_val - y_val) ** 2))
@@ -792,7 +819,10 @@ def main():
                 raw = model(chunk)
                 pred_chunks.append((raw[0] if isinstance(raw, list) else raw).cpu().numpy())
             pred_test = np.concatenate(pred_chunks, axis=0)
-            t_flat = y_test.flatten()
+            # Reconstruction heads compare to x_test (not y_test, which is 10-dim
+            # labels for classification datasets hosting a VAE).
+            _truth_test = x_test if (_is_recon_head and pred_test.shape == x_test.shape) else y_test
+            t_flat = _truth_test.flatten()
             p_flat = pred_test.flatten()
             test_metrics["testMae"] = float(np.mean(np.abs(p_flat - t_flat)))
             test_metrics["testMse"] = float(np.mean((p_flat - t_flat) ** 2))
@@ -1076,6 +1106,19 @@ def build_model_from_graph(graph, feature_size, target_size, num_classes=0):
                     # VAE reparameterization (Kingma & Welling 2014). Sampling is
                     # done in forward; no learnable parameters here.
                     dim_map[nid] = in_dim
+                    # Track this KL group so forward() can emit concat(mu, logvar)
+                    # as an additional output for the closed-form KL loss head.
+                    rp_parents = edges_in.get(nid, [])
+                    rp_parents = sorted(rp_parents, key=lambda p: p["to_port"])
+                    if len(rp_parents) >= 2:
+                        if not hasattr(self, "_kl_groups"):
+                            self._kl_groups = []
+                        self._kl_groups.append({
+                            "group": str(c.get("group", "default")),
+                            "mu_id": rp_parents[0]["from"],
+                            "logvar_id": rp_parents[1]["from"],
+                            "beta": float(c.get("beta", 1e-3)),
+                        })
                 elif t in ("lstm", "gru", "rnn"):
                     units = int(c.get("units", 32))
                     use_bias = _cfg_bool(c.get("useBias", True), True)
@@ -1308,6 +1351,10 @@ def build_model_from_graph(graph, feature_size, target_size, num_classes=0):
                         odim = out_in
                     elif htype == "classification" and num_classes > 0 and target_key in ("label", "logits"):
                         odim = num_classes
+                    elif htype in ("reconstruction", "autoencoder", "denoiser") or target_key in ("pixel_values", "input"):
+                        # Autoencoder-style heads reconstruct the full input shape,
+                        # not target_size (which for classification datasets is num_classes).
+                        odim = feature_size
                     else:
                         odim = target_size
                     # skip linear projection if input dim already matches output dim
@@ -1653,10 +1700,18 @@ def build_model_from_graph(graph, feature_size, target_size, num_classes=0):
 
             # return outputs
             if self.output_ids:
-                if len(self.output_ids) == 1:
-                    return tensors[self.output_ids[0]]
-                # multi-output: return list of all outputs
-                return [tensors[oid] for oid in self.output_ids]
+                main_outs = [tensors[oid] for oid in self.output_ids]
+                # VAE: append concat(mu, logvar) for each KL group so the
+                # latent_kl head loss can compute closed-form KL on it.
+                kl_groups = getattr(self, "_kl_groups", []) or []
+                for g in kl_groups:
+                    mu_t = tensors.get(g["mu_id"])
+                    lv_t = tensors.get(g["logvar_id"])
+                    if mu_t is not None and lv_t is not None:
+                        main_outs.append(torch.cat([mu_t, lv_t], dim=-1))
+                if len(main_outs) == 1:
+                    return main_outs[0]
+                return main_outs
             return x
 
     return _GraphModel()
