@@ -329,7 +329,7 @@ demo/<paper>/
 | Kingma & Welling — "Auto-Encoding Variational Bayes" | 2014 | Benchmark, Oscillator |
 | Goodfellow et al. — "Generative Adversarial Nets" | 2014 | GAN |
 | Ronneberger et al. — "U-Net: Convolutional Networks for Biomedical Image Segmentation" | 2015 | UNet, Cell Nuclei, Segmentation |
-| Radford, Metz, Chintala — "Unsupervised Representation Learning with DCGANs" | 2015 | GAN |
+| Radford, Metz, Chintala — "Unsupervised Representation Learning with DCGANs" | 2016 | GAN |
 | Redmon et al. — "You Only Look Once" | 2016 | Detection |
 | Arjovsky, Chintala, Bottou — "Wasserstein GAN" | 2017 | GAN |
 | Vaswani et al. — "Attention Is All You Need" | 2017 | Text Transformer |

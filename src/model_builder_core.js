@@ -638,26 +638,31 @@
     var _phaseFlagInput = null;
     var _phaseSwitchConfigs = [];
 
-    // VAE reparameterization — uses tf.layers.add as the merge layer
-    // instead of a custom Layer (which has broken init in TF.js 4.x browser).
-    // Approach: z = mu + dense(logvar) where the dense learns sqrt(exp(logvar/2))
-    // The KL loss on the separate mu/logvar heads enforces proper VAE behavior.
+    // VAE reparameterization (Kingma & Welling 2014):
+    //   eps ~ N(0, I)
+    //   z = mu + exp(0.5 * logvar) * eps
+    // logvar is clipped to [-10, 10] for numerical stability before std = exp(0.5*logvar).
+    // Sampling at every forward pass (training AND inference) is required so the
+    // decoder learns to be robust to a region around each encoded mu, which is
+    // what makes the latent space smooth and useful for generation.
     var _reparamCount = 0;
-    var ReparameterizeLayer = (function () {
-      function RL() {}
-      RL.apply = function (muTensor, logvarTensor, nodeId) {
-        _reparamCount++;
-        var nid = nodeId || _reparamCount;
-        var latentDim = muTensor.shape[muTensor.shape.length - 1];
-        var noiseProj = tf.layers.dense({
-          units: latentDim, activation: "linear",
-          name: "reparam_noise_" + nid,
-          kernelInitializer: "zeros", biasInitializer: "zeros",
-        }).apply(logvarTensor);
-        return tf.layers.add({ name: "reparam_add_" + nid }).apply([muTensor, noiseProj]);
-      };
-      return RL;
-    })();
+    class ReparameterizeLayer extends tf.layers.Layer {
+      constructor(config) { super(config || {}); }
+      computeOutputShape(inputShape) {
+        return Array.isArray(inputShape) ? inputShape[0] : inputShape;
+      }
+      call(inputs) {
+        return tf.tidy(function () {
+          var arr = Array.isArray(inputs) ? inputs : [inputs];
+          var mu = arr[0];
+          var logvar = tf.clipByValue(arr[1], -10, 10);
+          var eps = tf.randomNormal(mu.shape, 0, 1, mu.dtype);
+          var std = tf.exp(tf.mul(tf.scalar(0.5), logvar));
+          return tf.add(mu, tf.mul(std, eps));
+        });
+      }
+      getClassName() { return "ReparameterizeLayer"; }
+    }
 
     // Determine output units per head. Priority (contract-driven):
     // 1. Explicit units/unitsHint on the output node
@@ -1133,7 +1138,8 @@
         var out;
         if (node.name === "reparam_layer") {
           if (incomingTensors.length !== 2) throw new Error("Reparam node requires exactly 2 inputs.");
-          out = ReparameterizeLayer.apply(incomingTensors[0], incomingTensors[1], id);
+          _reparamCount++;
+          out = new ReparameterizeLayer({ name: "reparam_" + (id || _reparamCount) }).apply([incomingTensors[0], incomingTensors[1]]);
           var rd = node.data || {};
           var g = String(rd.group || "default").trim();
           var beta = Math.max(0, Number(rd.beta || 1e-3));

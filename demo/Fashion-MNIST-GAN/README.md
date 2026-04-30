@@ -45,7 +45,7 @@ Labels:
 - LR = 0.0005, Adam, batch size 128
 - Pre-trained weights included (1000 epochs on T-shirt class)
 
-### 2. DCGAN (Radford 2015)
+### 2. DCGAN (Radford et al. 2016)
 
 ```
 Generator:
