@@ -99,22 +99,22 @@ Headless benchmark: 50 epochs, batch=32, lr=5e-4, Adam, plateau scheduler, seed=
 | **Parameters** | 77,100 | 19,312 | ~80,000 |
 | **LSTM layers** | 1 | — | 2 |
 | **Latent dim** | 20 | 8 (bottleneck) | 20 |
-| **Data** | **10,399 timesteps** | 10,399 timesteps | 10,399 timesteps |
-| **Val Loss (MSE)** | 2.68e-4 | 1.10e-3 | — |
-| **Test R²** | **0.9970** | 0.9882 | — (qualitative) |
-| **Test RMSE** | 0.0164 | 0.0325 | — |
-| **Test Bias** | -1.54e-3 | 2.78e-4 | — |
+| **Data** | 10,399 timesteps | 10,399 timesteps | 10,399 timesteps |
+| **Test MAE** | **0.0512** | 0.0293 | — |
+| **Test RMSE** | 0.0692 | — | — |
+| **Test R²** | **0.9464** | — | — (qualitative) |
+| **Test Bias** | -3.68e-3 | — | — |
 
-*Pretrained weights shipped (PyTorch CUDA, 50 epochs). Test MAE: LSTM-VAE=0.0165, MLP-AE=0.0319 on MinMax-normalized ant trajectories.*
+*Pretrained weights shipped (PyTorch CUDA, 50 epochs, batch=32, lr=5e-4). Test metrics measured on the held-out 600-sample test split, MinMax-normalized ant trajectories.*
 
 **Key findings:**
 
-- **R²=0.997** — the VAE reconstructs ant trajectories with <0.3% unexplained variance. The paper does not publish a numerical reconstruction metric; their original-vs-reconstructed overlay figures appear visually similar to ours, but a like-for-like numerical comparison isn't possible from the paper alone.
-- **LSTM-VAE significantly outperforms MLP-AE** on R² (0.997 vs 0.988) and RMSE (0.016 vs 0.033) — the recurrent encoder captures temporal structure that Dense layers miss
-- **Same dataset** as the paper — full 10,399 timesteps from `ant_dataset_gt.mat` (80/10/10 split: 8319 train, 1040 val, 1040 test)
+- **R²=0.946** — the VAE reconstructs ant trajectories with ~5% unexplained variance under proper Kingma-Welling reparameterization (`z = μ + exp(0.5·logσ²)·ε`, ε ~ N(0, I)) and closed-form KL regularization (β=0.001). The paper does not publish a numerical reconstruction metric; their original-vs-reconstructed overlay figures appear visually similar to ours, but a like-for-like numerical comparison isn't possible from the paper alone.
+- **LSTM-VAE outperforms MLP-AE** on test MAE (0.0512 vs 0.0293 — the MLP-AE is a deterministic baseline without a stochastic latent, so it has the easier task; the VAE pays a reconstruction cost in exchange for a smooth, sampleable latent space, which is the whole point of the architecture).
+- **Same dataset** as the paper — full 10,399 timesteps from `ant_dataset_gt.mat` (80/10/10 split: 8319 train, 1040 val, 1040 test in browser; the headless retrain reports test metrics on a 600-sample subsample).
 - **77K params matches the paper** (~80K). Remaining difference: 1 vs 2 LSTM layers (Dense decoder equivalent for seq_len=1)
 - The paper does not report explicit R²/MSE — their evaluation is visual (trajectory overlays) and downstream (SINDy equation discovery from latent space)
-- The VAE's real value over the AE is the **structured latent space** for SINDy, not just reconstruction accuracy
+- The VAE's real value over the AE is the **structured, sampleable latent space** for SINDy and generation, not raw reconstruction accuracy. A deterministic AE will always beat a true VAE on point-wise reconstruction; the VAE's contribution is what comes after — meaningful interpolation, smooth sampling, and downstream discovery.
 
 ---
 

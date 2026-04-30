@@ -32,8 +32,11 @@ The 7 architectures span 1986 to 2020, each built entirely from the visual graph
 |---|---|---|---|
 | Dense AE | ~0.05 | ~0.08 | ~0.93 |
 | Conv AE | **~0.04** | **~0.07** | **~0.95** |
-| VAE | ~0.06 | ~0.09 | ~0.91 |
+| VAE | 0.0517 | 0.0745 | 0.959 |
+| VAE+Classifier | 0.0515 | 0.0736 | 0.960 |
 | Denoising AE | ~0.06 | ~0.10 | ~0.91 |
+
+VAE and VAE+Classifier numbers are measured on the 600-sample test split from the shipped pretrained weights (PyTorch CUDA, 20 epochs); other rows are approximate from the original prototyping run.
 
 ### Generation Methods
 | Method | Model | Description |

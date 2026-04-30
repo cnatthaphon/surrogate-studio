@@ -12,11 +12,13 @@ Trained on 300 trajectories (37K training samples), 20 epochs, PyTorch CUDA:
 |-------|:------:|:--------:|:---------:|:-------:|
 | Direct-MLP | 4,962 | 0.0282 | 0.1044 | 0.963 |
 | AR-GRU | 22,882 | 0.0277 | 0.0998 | 0.966 |
-| VAE (8-dim latent) | 2,362 | 0.0278 | 0.1234 | 0.949 |
-| **VAE+Classifier** | 8,605 | **0.0251** | — | **0.970** |
+| VAE (8-dim latent)\* | 2,362 | 0.0278 | 0.1234 | 0.949 |
+| **VAE+Classifier**\* | 8,605 | **0.0251** | — | **0.970** |
 | Denoising AE | 7,138 | 0.0420 | 0.1286 | 0.944 |
 
-The VAE+Classifier achieves the best R² by combining reconstruction with scenario classification — the shared encoder learns physics-aware features. The AR-GRU is a close second, exploiting temporal ordering through its recurrent state.
+\* VAE and VAE+Classifier weights ship from before the VAE reparameterization fix in PR #55, so the latent layer is effectively deterministic (`z = μ`) and the metrics above describe an autoencoder, not a true Kingma-Welling VAE. Retraining with proper `z = μ + exp(0.5·logσ²)·ε` sampling and closed-form KL is blocked by a separate pre-existing JS-heap OOM in the Oscillator dataset module — tracked as a follow-up. Reconstruction will degrade slightly (deterministic AEs always beat true VAEs on reconstruction), generation/interpolation should improve.
+
+The AR-GRU exploits temporal ordering through its recurrent state, which is why it leads the non-VAE rows on R². The VAE+Classifier number is currently flattering for the same broken-reparameterization reason as the plain VAE; expect both to land slightly lower after retraining with real sampling.
 
 ### Why This Matters for Surrogate Modeling
 

@@ -139,12 +139,12 @@ Reproduces the LSTM-VAE from Jadhav & Barati Farimani (2022) for ant trajectory 
 |:---:|:---:|
 | ![Training](demo/LSTM-VAE-for-dominant-motion-extraction/images/training.gif) | ![Generation](demo/LSTM-VAE-for-dominant-motion-extraction/images/generation.gif) |
 
-| Model | Params | Test MAE | Test MSE |
-|-------|:------:|:-------:|:---------:|
-| LSTM-VAE | 77,100 | **0.0165** | 4.48e-4 |
-| MLP-AE (baseline) | 19,312 | 0.0319 | 1.74e-3 |
+| Model | Params | Test MAE | Test RMSE | Test R² |
+|-------|:------:|:-------:|:---------:|:-------:|
+| LSTM-VAE | 77,100 | **0.0512** | 0.0692 | **0.946** |
+| MLP-AE (baseline) | 19,312 | 0.0293 | — | — |
 
-*Pretrained weights shipped (PyTorch CUDA, 50 epochs). MAE on MinMax-normalized [0,1] ant trajectories.*
+*Pretrained weights shipped (PyTorch CUDA, 50 epochs). Metrics measured on the held-out test split, MinMax-normalized [0,1] ant trajectories. The LSTM-VAE uses proper Kingma-Welling reparameterization with closed-form KL (β=0.001); the MLP-AE is a deterministic baseline without a stochastic latent — which is why it has the lower MAE on the easier, deterministic-reconstruction task.*
 
 > Jadhav & Barati Farimani, *"LSTM-VAE for dominant motion extraction"*, 2022. [arXiv:2104.12722](https://arxiv.org/abs/2104.12722)
 
@@ -160,9 +160,11 @@ Reproduces the LSTM-VAE from Jadhav & Barati Farimani (2022) for ant trajectory 
 |-------|:------:|:--------:|:-------:|
 | Direct-MLP | 4,962 | 0.0282 | 0.963 |
 | AR-GRU | 22,882 | 0.0277 | 0.966 |
-| VAE (8-dim latent) | 2,362 | 0.0278 | 0.949 |
-| **VAE+Classifier** | 8,605 | **0.0251** | **0.970** |
+| VAE (8-dim latent)\* | 2,362 | 0.0278 | 0.949 |
+| **VAE+Classifier**\* | 8,605 | **0.0251** | **0.970** |
 | Denoising AE | 7,138 | 0.0420 | 0.944 |
+
+\* The VAE rows ship from before the reparameterization fix in PR #55, so they describe a deterministic autoencoder rather than a true Kingma-Welling VAE. Retraining is blocked by a separate pre-existing JS-heap OOM in the Oscillator dataset module — see [demo/Oscillator-Surrogate/README.md](demo/Oscillator-Surrogate/README.md) for context.
 
 ---
 
