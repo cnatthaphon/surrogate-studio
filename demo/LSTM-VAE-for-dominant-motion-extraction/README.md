@@ -1,8 +1,8 @@
 # LSTM-VAE for Dominant Motion Extraction
 
-**A browser-based reproduction of the LSTM Variational Autoencoder for multi-particle trajectory reconstruction, built on [Surrogate Studio](../../).**
+**A multi-runtime reproduction of the LSTM Variational Autoencoder for multi-particle trajectory reconstruction, built on [Surrogate Studio](../../).**
 
-This demo reproduces the core LSTM-VAE architecture from Jadhav & Barati Farimani (2022) and provides interactive training, visualization, and generation — entirely in the browser using TF.js, with optional PyTorch server backend.
+This demo reproduces the core LSTM-VAE architecture from Jadhav & Barati Farimani (2022) and provides interactive training, visualization, and generation — in the browser using TF.js, or on the PyTorch server backend (CUDA-enabled), from the same visual graph.
 
 ### Demo Workflow
 
@@ -109,7 +109,7 @@ Headless benchmark: 50 epochs, batch=32, lr=5e-4, Adam, plateau scheduler, seed=
 
 **Key findings:**
 
-- **R²=0.997** — the VAE reconstructs ant trajectories with <0.3% unexplained variance, consistent with the paper's qualitative figures showing near-perfect original-vs-reconstructed overlap
+- **R²=0.997** — the VAE reconstructs ant trajectories with <0.3% unexplained variance. The paper does not publish a numerical reconstruction metric; their original-vs-reconstructed overlay figures appear visually similar to ours, but a like-for-like numerical comparison isn't possible from the paper alone.
 - **LSTM-VAE significantly outperforms MLP-AE** on R² (0.997 vs 0.988) and RMSE (0.016 vs 0.033) — the recurrent encoder captures temporal structure that Dense layers miss
 - **Same dataset** as the paper — full 10,399 timesteps from `ant_dataset_gt.mat` (80/10/10 split: 8319 train, 1040 val, 1040 test)
 - **77K params matches the paper** (~80K). Remaining difference: 1 vs 2 LSTM layers (Dense decoder equivalent for seq_len=1)
