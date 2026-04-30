@@ -120,6 +120,12 @@ function waitForJob(jobId) {
       method: "GET",
       headers: { "Accept": "text/event-stream" },
     };
+    // Accumulate per-epoch log entries from the SSE stream so the exported
+    // pretrained file gets a real loss curve. Without this, the script just
+    // printed each epoch to console and the file's `epochs` array stayed
+    // empty — which is why DCGAN/WGAN/nucleus_unet pretrained shipped with
+    // no per-epoch history.
+    var epochsCollected = [];
     var req = http.request(opts, function (res) {
       var buf = "";
       var currentEvent = "";
@@ -136,10 +142,23 @@ function waitForJob(jobId) {
               if (currentEvent === "epoch" || data.kind === "epoch") {
                 var p = data.payload || data;
                 var ep = p.epoch || data.epoch;
+                epochsCollected.push({
+                  epoch: Number(ep) || epochsCollected.length + 1,
+                  loss: (p.loss != null) ? Number(p.loss) : null,
+                  val_loss: (p.val_loss != null) ? Number(p.val_loss) : null,
+                  current_lr: (p.current_lr != null) ? Number(p.current_lr) : null,
+                  improved: !!p.improved,
+                  phaseLosses: p.phaseLosses || p.phase_losses || null,
+                });
                 if (ep && (ep % 5 === 0 || ep === 1)) {
                   console.log("    epoch " + ep + " loss=" + (p.loss != null ? Number(p.loss).toFixed(4) : "?") + " val=" + (p.val_loss != null ? Number(p.val_loss).toFixed(4) : "?"));
                 }
               } else if (currentEvent === "complete" || data.kind === "complete") {
+                // Attach the streamed epoch log to the result so exportPretrained
+                // can write it into the pretrained file's `epochs` field.
+                if (data && typeof data === "object") {
+                  data.epochsStreamed = epochsCollected;
+                }
                 resolve(data);
               } else if (currentEvent === "error" || data.kind === "error") {
                 reject(new Error(data.message || "Server training failed"));
@@ -151,7 +170,7 @@ function waitForJob(jobId) {
           }
         });
       });
-      res.on("end", function () { resolve(null); });
+      res.on("end", function () { resolve({ epochsStreamed: epochsCollected }); });
     });
     req.on("error", reject);
     req.end();
@@ -245,7 +264,11 @@ function exportPretrained(trainerName, config, result, outputPath) {
     metrics: metrics,
     backend: "cuda",
     weightSpecs: weightSpecs,
-    epochs: result.epochs || [],
+    // Prefer the per-epoch log streamed via SSE (most reliable). Fall back
+    // to result.epochs (some server paths attach it to the complete event).
+    epochs: (Array.isArray(result.epochsStreamed) && result.epochsStreamed.length)
+      ? result.epochsStreamed
+      : (result.epochs || []),
   };
 
   var metaJson = JSON.stringify(meta);
@@ -360,7 +383,13 @@ async function trainOneModel(modelDef, dataset, trainerDef) {
   }
 
   artifacts.metrics = result.metrics || sseResult || { mae: result.mae, mse: result.mse, bestEpoch: result.bestEpoch, bestValLoss: result.bestValLoss };
-  console.log("  Training complete. Weights:", artifacts.weightSpecs.length, "arrays (" + wv.length + " values), MAE:", (artifacts.metrics || {}).mae || "?");
+  // The SSE stream collected per-epoch entries while training was running.
+  // /api/train/:id/result returns weights but not the per-epoch log, so we
+  // attach the SSE-collected epochs to the artifact for exportPretrained.
+  if (sseResult && Array.isArray(sseResult.epochsStreamed) && sseResult.epochsStreamed.length) {
+    artifacts.epochsStreamed = sseResult.epochsStreamed;
+  }
+  console.log("  Training complete. Weights:", artifacts.weightSpecs.length, "arrays (" + wv.length + " values), MAE:", (artifacts.metrics || {}).mae || "?", "epochs:", (artifacts.epochsStreamed || []).length);
   return artifacts;
 }
 
