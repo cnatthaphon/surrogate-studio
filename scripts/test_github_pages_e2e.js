@@ -86,7 +86,11 @@ var DEMOS = [
     tabs: ["playground", "dataset", "model", "trainer", "generation", "evaluation"] },
   { name: "Fashion-MNIST Benchmark", path: "/demo/Fashion-MNIST-Benchmark/",
     presetKey: "FASHION_MNIST_BENCHMARK_PRESET",
-    minModels: 7, minTrainers: 7, minGenerations: 6, minEvaluations: 2,
+    // Was 6 generations when VAE Random Sampling and Langevin Denoising were
+    // shipped. Both demoted (the underlying models — non-Kingma-Welling VAE,
+    // single-noise-scale denoiser — can't generate cleanly). Down to 4:
+    // AE Reconstruct, Conv-AE Reconstruct, VAE Reconstruct, Classifier-Guided.
+    minModels: 7, minTrainers: 7, minGenerations: 4, minEvaluations: 2,
     tabs: ["dataset", "model", "trainer", "generation", "evaluation"] },
   { name: "Fashion-MNIST GAN", path: "/demo/Fashion-MNIST-GAN/",
     presetKey: "FASHION_MNIST_GAN_PRESET",

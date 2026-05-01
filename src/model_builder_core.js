@@ -1304,7 +1304,20 @@
       // Build decoder: new input [dim] → trace from reparam output to model outputs
       var zInput = tf.input({ shape: [dim], name: "z_input" });
 
-      // Simple approach: build a sequential decoder from the layers after reparam
+      // Determine the reconstruction output dim so we can stop at the right place.
+      // For branched models (VAE+Cls: reparam→recon AND encoder→classifier), the
+      // sequential apply below would otherwise chain the classifier branch onto
+      // the recon output and end up returning a 10-class tensor as the "decoder
+      // output", which then breaks classifier-guided generation downstream.
+      var reconDim = 0;
+      var os = fullModel.outputShape;
+      if (Array.isArray(os) && os.length) {
+        // multi-output models return an array of shapes; reconstruction is conventionally first
+        var firstOut = Array.isArray(os[0]) ? os[0] : os;
+        reconDim = firstOut[firstOut.length - 1] || 0;
+      }
+
+      // Sequential apply: walk layers after reparam, stop at reconstruction output.
       var reparamIdx = fullModel.layers.indexOf(reparamLayer);
       var x = zInput;
       for (var k = reparamIdx + 1; k < fullModel.layers.length; k++) {
@@ -1316,6 +1329,12 @@
         } catch (e) {
           // skip layers that can't be applied (shape mismatch from encoder path)
           continue;
+        }
+        // Stop once we reach the reconstruction dim — any layers after this in
+        // the topological order belong to a separate branch (e.g. classifier head).
+        if (reconDim > 0 && x && x.shape) {
+          var lastDim = x.shape[x.shape.length - 1];
+          if (lastDim === reconDim) break;
         }
       }
 

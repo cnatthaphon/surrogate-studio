@@ -1,5 +1,5 @@
 // Surrogate Studio - concatenated bundle
-// Generated: 2026-04-30T19:45:38Z
+// Generated: 2026-05-01T11:56:38Z
 // Source files: 58
 
 
@@ -22011,7 +22011,20 @@
       // Build decoder: new input [dim] → trace from reparam output to model outputs
       var zInput = tf.input({ shape: [dim], name: "z_input" });
 
-      // Simple approach: build a sequential decoder from the layers after reparam
+      // Determine the reconstruction output dim so we can stop at the right place.
+      // For branched models (VAE+Cls: reparam→recon AND encoder→classifier), the
+      // sequential apply below would otherwise chain the classifier branch onto
+      // the recon output and end up returning a 10-class tensor as the "decoder
+      // output", which then breaks classifier-guided generation downstream.
+      var reconDim = 0;
+      var os = fullModel.outputShape;
+      if (Array.isArray(os) && os.length) {
+        // multi-output models return an array of shapes; reconstruction is conventionally first
+        var firstOut = Array.isArray(os[0]) ? os[0] : os;
+        reconDim = firstOut[firstOut.length - 1] || 0;
+      }
+
+      // Sequential apply: walk layers after reparam, stop at reconstruction output.
       var reparamIdx = fullModel.layers.indexOf(reparamLayer);
       var x = zInput;
       for (var k = reparamIdx + 1; k < fullModel.layers.length; k++) {
@@ -22023,6 +22036,12 @@
         } catch (e) {
           // skip layers that can't be applied (shape mismatch from encoder path)
           continue;
+        }
+        // Stop once we reach the reconstruction dim — any layers after this in
+        // the topological order belong to a separate branch (e.g. classifier head).
+        if (reconDim > 0 && x && x.shape) {
+          var lastDim = x.shape[x.shape.length - 1];
+          if (lastDim === reconDim) break;
         }
       }
 
@@ -23893,7 +23912,13 @@
       if (!cfg.classifierModel) return Promise.reject(new Error("classifier_guided requires classifierModel"));
       var targetClass = cfg.targetClass || 0;
       var guidanceWeight = cfg.guidanceWeight || 1.0;
-      cfg.objective = objectives.classifierGuidance(cfg.classifierModel, targetClass, guidanceWeight);
+      cfg.objective = objectives.classifierGuidance(
+        cfg.classifierModel,
+        targetClass,
+        guidanceWeight,
+        cfg.outputIndex,                   // decoder's reconstruction output (usually 0)
+        cfg.classifierOutputIndex          // classifier's class-probs output (1 for VAE+Cls)
+      );
       cfg.method = "optimize";
       return _generateOptimize(tf, cfg, numSamples, latentDim, steps, lr, temperature, onStep);
     }
@@ -24287,15 +24312,19 @@
     // classifierModel: trained classifier that maps input → class probabilities
     // targetClass: integer class index to maximize
     // weight: how much to weight guidance vs reconstruction
-    classifierGuidance: function (classifierModel, targetClass, weight, outputIndex) {
+    classifierGuidance: function (classifierModel, targetClass, weight, outputIndex, classifierOutputIndex) {
       var cls = targetClass || 0;
       var w = weight || 1.0;
-      var oi = outputIndex || 0;
+      var decoderOi = outputIndex || 0;
+      // Index of the classification head when classifierModel is a multi-output
+      // graph (e.g. VAE+Classifier with [recon, classProbs]). Defaults to 0 for
+      // models whose only output is class probabilities.
+      var classOi = classifierOutputIndex != null ? classifierOutputIndex : 0;
       return function (tf, z, decoderModel) {
         var generated = decoderModel.predict(z);
-        var genOut = pickOutput(generated, oi);
-        var classProbs = classifierModel.predict(genOut);
-        var probs = pickOutput(classProbs, 0);
+        var genOut = pickOutput(generated, decoderOi);
+        var classOutputs = classifierModel.predict(genOut);
+        var probs = pickOutput(classOutputs, classOi);
         // maximize log P(targetClass) → minimize -log P(targetClass)
         var targetProb = probs.gather([cls], 1).mean();
         return targetProb.log().neg().mul(w);
@@ -31454,6 +31483,20 @@
           // the full model itself serves as classifier if it has classification outputs
           // the generation engine will use the model to compute class probabilities
           genConfig.classifierModel = built.model;
+          // For multi-output graphs (VAE+Cls: [recon, classProbs]), tell the
+          // engine which output is the classifier head — otherwise it defaults
+          // to index 0 (the reconstruction tensor) and the gather() over class
+          // dimension fails or returns garbage.
+          var classifierIdx = 0;
+          if (built.headConfigs && built.headConfigs.length > 1) {
+            for (var hi = 0; hi < built.headConfigs.length; hi++) {
+              var hc = built.headConfigs[hi];
+              if (hc && String(hc.headType || "").toLowerCase() === "classification") {
+                classifierIdx = hi; break;
+              }
+            }
+          }
+          genConfig.classifierOutputIndex = classifierIdx;
         }
 
         // helper: resolve split data from source registry or legacy records

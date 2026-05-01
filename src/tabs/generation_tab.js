@@ -1023,6 +1023,20 @@
           // the full model itself serves as classifier if it has classification outputs
           // the generation engine will use the model to compute class probabilities
           genConfig.classifierModel = built.model;
+          // For multi-output graphs (VAE+Cls: [recon, classProbs]), tell the
+          // engine which output is the classifier head — otherwise it defaults
+          // to index 0 (the reconstruction tensor) and the gather() over class
+          // dimension fails or returns garbage.
+          var classifierIdx = 0;
+          if (built.headConfigs && built.headConfigs.length > 1) {
+            for (var hi = 0; hi < built.headConfigs.length; hi++) {
+              var hc = built.headConfigs[hi];
+              if (hc && String(hc.headType || "").toLowerCase() === "classification") {
+                classifierIdx = hi; break;
+              }
+            }
+          }
+          genConfig.classifierOutputIndex = classifierIdx;
         }
 
         // helper: resolve split data from source registry or legacy records
