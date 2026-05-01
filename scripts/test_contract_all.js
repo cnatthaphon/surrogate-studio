@@ -37,6 +37,7 @@ const baseSuite = [
   "test_contract_headless_api_flow.js",
   "test_contract_headless_memory_store_flow.js",
   "test_contract_segmentation_recipe.js",
+  "test_extract_decoder.js",
 ];
 
 function runOne(scriptName) {

@@ -178,7 +178,13 @@
       if (!cfg.classifierModel) return Promise.reject(new Error("classifier_guided requires classifierModel"));
       var targetClass = cfg.targetClass || 0;
       var guidanceWeight = cfg.guidanceWeight || 1.0;
-      cfg.objective = objectives.classifierGuidance(cfg.classifierModel, targetClass, guidanceWeight);
+      cfg.objective = objectives.classifierGuidance(
+        cfg.classifierModel,
+        targetClass,
+        guidanceWeight,
+        cfg.outputIndex,                   // decoder's reconstruction output (usually 0)
+        cfg.classifierOutputIndex          // classifier's class-probs output (1 for VAE+Cls)
+      );
       cfg.method = "optimize";
       return _generateOptimize(tf, cfg, numSamples, latentDim, steps, lr, temperature, onStep);
     }
@@ -572,15 +578,19 @@
     // classifierModel: trained classifier that maps input → class probabilities
     // targetClass: integer class index to maximize
     // weight: how much to weight guidance vs reconstruction
-    classifierGuidance: function (classifierModel, targetClass, weight, outputIndex) {
+    classifierGuidance: function (classifierModel, targetClass, weight, outputIndex, classifierOutputIndex) {
       var cls = targetClass || 0;
       var w = weight || 1.0;
-      var oi = outputIndex || 0;
+      var decoderOi = outputIndex || 0;
+      // Index of the classification head when classifierModel is a multi-output
+      // graph (e.g. VAE+Classifier with [recon, classProbs]). Defaults to 0 for
+      // models whose only output is class probabilities.
+      var classOi = classifierOutputIndex != null ? classifierOutputIndex : 0;
       return function (tf, z, decoderModel) {
         var generated = decoderModel.predict(z);
-        var genOut = pickOutput(generated, oi);
-        var classProbs = classifierModel.predict(genOut);
-        var probs = pickOutput(classProbs, 0);
+        var genOut = pickOutput(generated, decoderOi);
+        var classOutputs = classifierModel.predict(genOut);
+        var probs = pickOutput(classOutputs, classOi);
         // maximize log P(targetClass) → minimize -log P(targetClass)
         var targetProb = probs.gather([cls], 1).mean();
         return targetProb.log().neg().mul(w);

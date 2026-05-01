@@ -974,7 +974,20 @@
 
         if (genMeta.info.hasLatentDecoder && method !== "inverse" && method !== "reconstruct") {
           try {
-            var decoder = modelBuilder.extractDecoder(tf, built.model, latentDim);
+            // For branched multi-head models (e.g. VAE+Cls has [recon, classProbs]),
+            // tell extractDecoder which output to terminate at. extractDecoder will
+            // backtrack from that tensor to the reparam layer along graph edges
+            // rather than guessing from layer-list order.
+            var reconOi = 0;
+            if (built.headConfigs && built.headConfigs.length > 1) {
+              for (var roi = 0; roi < built.headConfigs.length; roi++) {
+                var rh = built.headConfigs[roi];
+                if (rh && String(rh.headType || "").toLowerCase() === "reconstruction") {
+                  reconOi = roi; break;
+                }
+              }
+            }
+            var decoder = modelBuilder.extractDecoder(tf, built.model, latentDim, reconOi);
             if (decoder && decoder.model) { genModel = decoder.model; genLatentDim = decoder.latentDim || latentDim; outputIndex = 0; }
           } catch (_) { genLatentDim = latentDim; }
         }
@@ -1023,6 +1036,20 @@
           // the full model itself serves as classifier if it has classification outputs
           // the generation engine will use the model to compute class probabilities
           genConfig.classifierModel = built.model;
+          // For multi-output graphs (VAE+Cls: [recon, classProbs]), tell the
+          // engine which output is the classifier head — otherwise it defaults
+          // to index 0 (the reconstruction tensor) and the gather() over class
+          // dimension fails or returns garbage.
+          var classifierIdx = 0;
+          if (built.headConfigs && built.headConfigs.length > 1) {
+            for (var hi = 0; hi < built.headConfigs.length; hi++) {
+              var hc = built.headConfigs[hi];
+              if (hc && String(hc.headType || "").toLowerCase() === "classification") {
+                classifierIdx = hi; break;
+              }
+            }
+          }
+          genConfig.classifierOutputIndex = classifierIdx;
         }
 
         // helper: resolve split data from source registry or legacy records
