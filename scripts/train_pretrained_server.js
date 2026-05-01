@@ -397,7 +397,26 @@ async function trainOneModel(modelDef, dataset, trainerDef) {
     );
   }
 
-  artifacts.metrics = result.metrics || sseResult || { mae: result.mae, mse: result.mse, bestEpoch: result.bestEpoch, bestValLoss: result.bestValLoss };
+  // Build a scalar-only metrics summary. The result endpoint sometimes omits
+  // result.metrics — when that happens the previous code fell through to
+  // sseResult, which carries the full epochs[] array, doubling the artifact
+  // size and polluting the metrics contract. Pull only summary scalars.
+  function _scalarMetrics(src) {
+    if (!src || typeof src !== "object") return {};
+    var out = {};
+    var scalarKeys = ["mae", "mse", "bestEpoch", "bestValLoss", "finalLr",
+      "stoppedEarly", "stoppedByUser", "headCount", "backend", "paramCount",
+      "resolvedBackend", "hasArtifacts"];
+    scalarKeys.forEach(function (k) {
+      if (src[k] != null && typeof src[k] !== "object") out[k] = src[k];
+    });
+    return out;
+  }
+  artifacts.metrics = Object.assign(
+    _scalarMetrics(sseResult),
+    _scalarMetrics(result),
+    _scalarMetrics(result.metrics)
+  );
   artifacts.epochs = (sseResult && sseResult.epochs) || result.epochs || [];
   console.log("  Training complete. Weights:", artifacts.weightSpecs.length, "arrays (" + wv.length + " values), epochs captured:", artifacts.epochs.length, ", MAE:", (artifacts.metrics || {}).mae || "?");
   return artifacts;
@@ -426,18 +445,43 @@ async function main() {
 
       var trainerName = modelDef.name + " (pre-trained)";
       var tc = trainer.trainCfg || trainer.config || {};
-      // Look up the preset's pretrained trainer (carries _pretrainedVar). The demo's
-      // index.html includes a fixed filename and the loader expects a fixed window.<VAR>,
-      // so derive both from _pretrainedVar instead of slugifying the model name.
+      // Look up the preset's pretrained trainer entry — its _pretrainedVar is
+      // the global the loader reads, and the demo's index.html includes a fixed
+      // filename for that global. Filenames are inconsistent across demos
+      // (m1_mlp_baseline vs MLP_BASELINE_PRE_TRAINED_PRETRAINED, etc.), so
+      // slugifying the var name doesn't always match — instead, find the
+      // existing demo file that already declares `window.<VAR>` and overwrite
+      // that path. Falls back to slug only when no existing file matches
+      // (which is appropriate for genuinely new cards).
       var pretrainedTrainer = trainers.find(function (t) {
         return t.modelId === modelDef.id && t._pretrainedVar;
       });
       var varName, outPath;
       if (pretrainedTrainer && pretrainedTrainer._pretrainedVar) {
         varName = pretrainedTrainer._pretrainedVar;
-        // DCGAN_PRETRAINED_BIN_B64 -> dcgan_pretrained.js
-        var fnameBase = varName.toLowerCase().replace(/_bin_b64$/, "");
-        outPath = path.join(demoDir, fnameBase + ".js");
+        var existing = null;
+        try {
+          var candidates = fs.readdirSync(demoDir)
+            .filter(function (f) { return f.endsWith("_pretrained.js"); });
+          var needle = "window." + varName + " ";
+          for (var ci = 0; ci < candidates.length; ci++) {
+            var p = path.join(demoDir, candidates[ci]);
+            var head = fs.readFileSync(p, "utf8").slice(0, 1024);
+            if (head.indexOf(needle) >= 0) { existing = p; break; }
+          }
+        } catch (_) {}
+        if (existing) {
+          outPath = existing;
+        } else {
+          // No existing file — derive default. The slug heuristic is imperfect
+          // for trainer names containing "(pre-trained)" but it's a reasonable
+          // first guess; the resulting filename can be checked in via PR.
+          var fnameBase = varName.toLowerCase().replace(/_bin_b64$/, "");
+          outPath = path.join(demoDir, fnameBase + ".js");
+          console.log("  WARNING: no existing pretrained file declares window." +
+            varName + " — writing to " + path.basename(outPath) +
+            ". Verify the demo's index.html <script src=...> matches.");
+        }
       } else {
         varName = slugify(trainerName).toUpperCase() + "_PRETRAINED_BIN_B64";
         outPath = path.join(demoDir, slugify(modelDef.name) + "_pretrained.js");
