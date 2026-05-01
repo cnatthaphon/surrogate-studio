@@ -67,6 +67,28 @@ Trained on Fashion-MNIST, 200 epochs, PyTorch CUDA:
 
 Skip connections give 3.5x lower reconstruction error.
 
+## Why the UNet Reconstructions Look Identical to Inputs
+
+Reconstruction MAE of 0.0076 means the output is essentially pixel-perfect. That's the point of skip connections — they pass spatial detail directly from encoder to decoder so the bottleneck doesn't have to "remember" pixel positions. The decoder doesn't need to compress and decompress an image; it can route low-level features through skips and let the bottleneck handle abstraction. Net result: a near-identity function on the input distribution.
+
+The Conv AE comparison shows what happens **without** that shortcut: information bottlenecks through `[7×7×32]` and reconstruction is visibly blurrier (sneakers smooth out, edges soften). Same training, 12× fewer parameters, no skips — just a narrower information channel.
+
+## Reconstruction vs Generation, and the Latent-Space Tradeoff
+
+This demo is a **reconstruction** baseline, not a generative model. Both UNet and Conv AE map *real input → reconstructed output*. They cannot generate new shirts from random noise — feeding random latent values to either decoder produces garbage. To actually sample new images you need a **VAE** (with KL regularization on the latent) or a **GAN** (adversarial generator), both shown in other demos.
+
+Why? It's the classic autoencoder tradeoff:
+
+| Bottleneck size | Reconstruction quality | Latent space usefulness |
+|---|---|---|
+| Small zdim (forced compression) | Blurry — info has been thrown away | Meaningful — encoder must keep abstract features (shape, class), nearby points decode to similar concepts |
+| Large zdim (no compression pressure) | Sharp — encoder can copy pixel info through latent | Useless — latent becomes a lookup table, interpolation between two points produces ghost-overlay artifacts, not "in-between" images |
+| Skip connections (UNet) | Near-perfect | None — bottleneck is bypassed entirely, no useful latent encoded |
+
+Compression is what *forces* an encoder to learn abstraction — without that pressure, the network just memorizes. UNet's skip connections remove the pressure on purpose, which is why it's a great reconstruction model but a bad generative one.
+
+The fix is **VAEs** — they keep zdim large enough for sharp reconstruction but add a KL divergence penalty that forces the latent distribution to look like a standard Gaussian. That regularizer keeps the latent space meaningful (samplable, interpolable) even when the network has plenty of reconstruction capacity. See the Fashion-MNIST-Benchmark demo for the VAE side-by-side comparison.
+
 ## How to Use
 
 1. **Dataset** tab — click Generate Dataset to fetch Fashion-MNIST from CDN
