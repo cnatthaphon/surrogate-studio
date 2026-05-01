@@ -1,5 +1,5 @@
 // Surrogate Studio - concatenated bundle
-// Generated: 2026-05-01T12:30:18Z
+// Generated: 2026-05-01T16:21:03Z
 // Source files: 58
 
 
@@ -21967,19 +21967,54 @@
       if (!tf || !fullModel) throw new Error("extractDecoder: tf and fullModel required");
       var dim = latentDim || 16;
 
-      // Find reparam layer by class name or layer name
+      // Find the latent (z) output layer. The reparam block is implemented as
+      // two TF.js layers internally:
+      //   reparam_noise_<id>  — Dense(units=latent, init=0) applied to logvar
+      //   reparam_add_<id>    — Add layer combining mu + noiseProj → z
+      // The "z" tensor that feeds the decoder is reparam_add_*'s output, NOT
+      // reparam_noise_*. Picking reparam_noise here causes the backward trace
+      // from the recon output to never reach the chosen layer (recon depends
+      // on reparam_add, not reparam_noise), so the path-collection step
+      // falls back to wrong layers.
+      // Match priority:
+      //   1. exact prefix "reparam_add" (the canonical latent output)
+      //   2. layer class name containing "reparam" (custom subclass case)
+      //   3. any layer whose name contains "reparam" but NOT "reparam_noise"
       var reparamLayer = null;
+      function _checkReparamCandidate(layer) {
+        if (reparamLayer) return;
+        var outShape = layer.outputShape;
+        if (Array.isArray(outShape) && outShape.length >= 2) {
+          dim = outShape[outShape.length - 1] || dim;
+        }
+        reparamLayer = layer;
+      }
       for (var i = 0; i < fullModel.layers.length; i++) {
         var layer = fullModel.layers[i];
         var lname = String(layer.name || "").toLowerCase();
-        var lclass = String(layer.getClassName ? layer.getClassName() : "").toLowerCase();
-        if (lname.indexOf("reparam") >= 0 || lclass.indexOf("reparam") >= 0) {
-          reparamLayer = layer;
-          var outShape = layer.outputShape;
-          if (Array.isArray(outShape) && outShape.length >= 2) {
-            dim = outShape[outShape.length - 1] || dim;
-          }
+        if (lname.indexOf("reparam_add") === 0 || lname.indexOf("reparam_add_") >= 0) {
+          _checkReparamCandidate(layer);
           break;
+        }
+      }
+      if (!reparamLayer) {
+        for (var i2 = 0; i2 < fullModel.layers.length; i2++) {
+          var layer2 = fullModel.layers[i2];
+          var lclass = String(layer2.getClassName ? layer2.getClassName() : "").toLowerCase();
+          if (lclass.indexOf("reparam") >= 0) {
+            _checkReparamCandidate(layer2);
+            break;
+          }
+        }
+      }
+      if (!reparamLayer) {
+        for (var i3 = 0; i3 < fullModel.layers.length; i3++) {
+          var layer3 = fullModel.layers[i3];
+          var lname3 = String(layer3.name || "").toLowerCase();
+          if (lname3.indexOf("reparam") >= 0 && lname3.indexOf("reparam_noise") < 0) {
+            _checkReparamCandidate(layer3);
+            break;
+          }
         }
       }
 
@@ -22026,6 +22061,7 @@
       var pathLayers = [];
       var cursor = targetTensor;
       var seen = new Set();
+      var reachedReparam = false;
       var hops = 0;
       while (cursor && hops < 256) {
         var src = cursor.sourceLayer;
@@ -22033,6 +22069,7 @@
         seen.add(src);
         if (src === reparamLayer) {
           pathLayers.reverse();
+          reachedReparam = true;
           break;
         }
         pathLayers.push(src);
@@ -22051,12 +22088,23 @@
         cursor = nextTensor;
         hops++;
       }
-      if (!pathLayers.length) {
-        // Backtrack failed — couldn't trace a path from target output to
-        // reparam (graph might not have the expected linear topology, or the
-        // tensor's sourceLayer chain isn't accessible). Fall back to the old
-        // sequential walk so we degrade rather than error.
-        pathLayers = fullModel.layers.slice(fullModel.layers.indexOf(reparamLayer) + 1);
+      if (!reachedReparam) {
+        // Backward trace from the chosen output tensor never hit the
+        // designated latent layer. Failing here is the right thing — the
+        // alternatives (silently emit a [latent_dim] tensor, or chain
+        // unrelated layers) produce decoders that crash downstream with
+        // confusing shape mismatches in the browser. Common cause: this
+        // function picked the wrong layer as the latent (e.g. reparam_noise
+        // instead of reparam_add) so the recon path was never going to
+        // intersect it.
+        throw new Error(
+          "extractDecoder: backward trace from output[" + oi + "] " +
+          "(shape " + JSON.stringify(targetTensor.shape) + ") did not reach " +
+          "the latent layer '" + (reparamLayer.name || "<unnamed>") + "'. " +
+          "The latent layer is likely a sibling of the recon path rather " +
+          "than its origin — verify the reparam matcher picked the correct " +
+          "layer (e.g. reparam_add_* should be preferred over reparam_noise_*)."
+        );
       }
 
       // Build decoder by applying the path layers to a fresh latent input.
