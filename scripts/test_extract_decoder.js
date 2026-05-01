@@ -88,7 +88,23 @@ function main() {
   console.log("  outputDim:", decDefault.outputDim, "(expected 784)");
   assert.strictEqual(decDefault.outputDim, 784, "Default should target reconstruction (output 0)");
 
-  // Test 4: extractDecoder must FAIL LOUD if backward trace cannot reach the
+  // Test 4: deep decoder paths must not be rejected by an arbitrary hop cap.
+  var deepInput = tf.input({ shape: [784], name: "deep_img" });
+  var deepEnc = tf.layers.dense({ units: 16, name: "deep_enc" }).apply(deepInput);
+  var deepNoise = tf.layers.dense({ units: 16, name: "deep_reparam_noise_1" }).apply(deepEnc);
+  var deepLatent = tf.layers.add({ name: "deep_reparam_add_1" }).apply([deepEnc, deepNoise]);
+  var deepX = deepLatent;
+  for (var di = 0; di < 270; di++) {
+    deepX = tf.layers.dense({ units: 16, activation: "relu", name: "deep_dec_" + di }).apply(deepX);
+  }
+  var deepOut = tf.layers.dense({ units: 784, name: "deep_out" }).apply(deepX);
+  var deepModel = tf.model({ inputs: deepInput, outputs: [deepOut], name: "deep_decoder_model" });
+  var deepDec = ModelBuilder.extractDecoder(tf, deepModel, 16, 0);
+  console.log("\nDeep decoder path (>256 layers):");
+  console.log("  outputDim:", deepDec.outputDim, "(expected 784)");
+  assert.strictEqual(deepDec.outputDim, 784, "Deep decoder path should not fail due to a hop cap");
+
+  // Test 5: extractDecoder must FAIL LOUD if backward trace cannot reach the
   // chosen latent layer. Build a model where the recon path doesn't pass
   // through any reparam-named layer at all — the function should throw
   // rather than silently emit a [latent_dim] tensor that would crash the

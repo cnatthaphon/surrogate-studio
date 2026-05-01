@@ -1,5 +1,5 @@
 // Surrogate Studio - concatenated bundle
-// Generated: 2026-05-01T16:21:03Z
+// Generated: 2026-05-01T18:21:30Z
 // Source files: 58
 
 
@@ -22063,7 +22063,7 @@
       var seen = new Set();
       var reachedReparam = false;
       var hops = 0;
-      while (cursor && hops < 256) {
+      while (cursor) {
         var src = cursor.sourceLayer;
         if (!src || seen.has(src)) break;
         seen.add(src);
@@ -22101,6 +22101,7 @@
           "extractDecoder: backward trace from output[" + oi + "] " +
           "(shape " + JSON.stringify(targetTensor.shape) + ") did not reach " +
           "the latent layer '" + (reparamLayer.name || "<unnamed>") + "'. " +
+          "Trace length: " + hops + ". " +
           "The latent layer is likely a sibling of the recon path rather " +
           "than its origin — verify the reparam matcher picked the correct " +
           "layer (e.g. reparam_add_* should be preferred over reparam_noise_*)."
