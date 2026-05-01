@@ -90,11 +90,7 @@ var DEMOS = [
     tabs: ["dataset", "model", "trainer", "generation", "evaluation"] },
   { name: "Fashion-MNIST GAN", path: "/demo/Fashion-MNIST-GAN/",
     presetKey: "FASHION_MNIST_GAN_PRESET",
-    // Was 6 trainers / 6 generations when MLP-WGAN had a pre-trained card.
-    // WGAN pretrained was demoted (volatile under clipWeights=0.1, no seed
-    // control on server) — only the draft "MLP-WGAN Trainer" + draft
-    // "MLP-WGAN Generate" remain. So 5 trainers / 5 generations now.
-    minModels: 3, minTrainers: 5, minGenerations: 5, minEvaluations: 1,
+    minModels: 3, minTrainers: 6, minGenerations: 6, minEvaluations: 1,
     tabs: ["dataset", "model", "trainer", "generation", "evaluation"], expectPretrained: true },
   { name: "Fashion-MNIST Diffusion", path: "/demo/Fashion-MNIST-Diffusion/",
     presetKey: "FASHION_MNIST_DIFFUSION_PRESET",

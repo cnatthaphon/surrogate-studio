@@ -267,13 +267,14 @@
                     { unit: "batch", batches: 1, trainableTags: { discriminator: false, generator: true } }
                   ], rotateSchedule: true },
         metrics: { bestEpoch: 3, paramCount: 1099525 } },
-      // MLP-WGAN pretrained intentionally NOT shipped: WGAN with the loose
-      // clipWeights=0.1 used here is volatile and lands in different basins
-      // each run (no seed control on the server side). A pretrained file
-      // exists in the repo for reproducibility, but the trainer card is
-      // hidden so visitors aren't shown a noisy "pre-trained" output. Users
-      // who want to compare WGAN can train from scratch via the draft
-      // "MLP-WGAN Trainer" card above (1000 epochs on CUDA ~10 min).
+      { id: "t-mlp-wgan-trained", name: "MLP-WGAN (pre-trained)", schemaId: sid, datasetId: DS, modelId: "m-mlp-wgan", status: "done",
+        _pretrainedVar: "MLP_WGAN_PRETRAINED_BIN_B64",
+        config: { epochs: 1000, batchSize: 128, learningRate: 0.00005, optimizerType: "rmsprop", useServer: true,
+                  earlyStoppingPatience: 0, lrSchedulerType: "none", weightSelection: "last",
+                  trainingSchedule: [
+                    { unit: "batch", batches: 5, trainableTags: { discriminator: true, generator: false }, clipWeights: 0.1 },
+                    { unit: "batch", batches: 1, trainableTags: { discriminator: false, generator: true } }
+                  ], rotateSchedule: true } },
     ],
     generations: [
       { id: "g-mlp-gen",         name: "MLP-GAN Generate",              schemaId: sid, trainerId: "t-mlp-gan",         family: "gan", config: { method: "random", numSamples: 16, temperature: 1.0, seed: 42 }, status: "draft", runs: [], createdAt: Date.now() },
@@ -281,7 +282,7 @@
       { id: "g-mlp-wgan-gen",    name: "MLP-WGAN Generate",             schemaId: sid, trainerId: "t-mlp-wgan",        family: "gan", config: { method: "random", numSamples: 16, temperature: 1.0, seed: 42 }, status: "draft", runs: [], createdAt: Date.now() },
       { id: "g-mlp-gen-trained", name: "MLP-GAN Generate (pre-trained)", schemaId: sid, trainerId: "t-mlp-gan-trained", family: "gan", config: { method: "random", numSamples: 16, temperature: 1.0, seed: 42 }, status: "draft", runs: [], createdAt: Date.now() },
       { id: "g-dcgan-gen-trained", name: "DCGAN Generate (pre-trained)", schemaId: sid, trainerId: "t-dcgan-trained",   family: "gan", config: { method: "random", numSamples: 16, temperature: 1.0, seed: 42 }, status: "draft", runs: [], createdAt: Date.now() },
-      // No "MLP-WGAN (pre-trained)" generation — see comment above the trainers list.
+      { id: "g-mlp-wgan-gen-trained", name: "MLP-WGAN Generate (pre-trained)", schemaId: sid, trainerId: "t-mlp-wgan-trained", family: "gan", config: { method: "random", numSamples: 16, temperature: 1.0, seed: 42 }, status: "draft", runs: [], createdAt: Date.now() },
     ],
     evaluations: [
       {
@@ -289,7 +290,7 @@
         name: "Generative Quality (pre-trained)",
         schemaId: sid,
         datasetId: DS,
-        trainerIds: ["t-mlp-gan-trained", "t-dcgan-trained"],
+        trainerIds: ["t-mlp-gan-trained", "t-dcgan-trained", "t-mlp-wgan-trained"],
         evaluatorIds: ["mmd_rbf", "mean_gap", "std_gap", "nn_precision", "nn_coverage", "diversity_gap", "diversity"],
         runMode: "generate",
         weightSelection: "last",
