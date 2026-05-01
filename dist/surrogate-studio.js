@@ -1,5 +1,5 @@
 // Surrogate Studio - concatenated bundle
-// Generated: 2026-05-01T18:21:30Z
+// Generated: 2026-05-01T19:04:55Z
 // Source files: 58
 
 
@@ -21345,23 +21345,84 @@
     var _phaseFlagInput = null;
     var _phaseSwitchConfigs = [];
 
-    // VAE reparameterization — uses tf.layers.add as the merge layer
-    // instead of a custom Layer (which has broken init in TF.js 4.x browser).
-    // Approach: z = mu + dense(logvar) where the dense learns sqrt(exp(logvar/2))
-    // The KL loss on the separate mu/logvar heads enforces proper VAE behavior.
+    // VAE reparameterization — proper Kingma-Welling sampling:
+    //   z = mu + exp(0.5 * logvar) * epsilon  where epsilon ~ N(0, 1)
+    //
+    // Previous version used `z = mu + Linear_init=0(logvar)` which compiles in
+    // every TF.js version but is NOT reparameterization — there's no random
+    // sampling, the "noise projection" is a learnable dense layer initialized
+    // to zero. Without true stochasticity at training time the decoder only
+    // ever sees encoder-mu values, so generating from a random N(0,1) latent
+    // (VAE Random Sampling) outputs noise. This was the root cause of
+    // demoting VAE Random Sampling and Classifier-Guided.
+    //
+    // Implementation: a custom Layer subclass with random sampling in call().
+    // Registered with tf.serialization.registerClass() so saved models can
+    // round-trip through tf.loadLayersModel without "Unknown layer" errors.
     var _reparamCount = 0;
     var ReparameterizeLayer = (function () {
-      function RL() {}
+      if (!tf || typeof tf.layers !== "object" || typeof tf.layers.Layer !== "function") {
+        // tf.layers.Layer not available — return a fallback that throws a
+        // clear error if anyone tries to use it. The previous Linear-init=0
+        // workaround is intentionally NOT preserved here because it produces
+        // a silently-wrong VAE, which is worse than failing loud.
+        function RLStub() {}
+        RLStub.apply = function () {
+          throw new Error("Reparameterize layer requires tf.layers.Layer (TF.js >= 4.x)");
+        };
+        return RLStub;
+      }
+      class RL extends tf.layers.Layer {
+        constructor(config) {
+          super(config || {});
+        }
+        computeOutputShape(inputShape) {
+          // mu and logvar have the same shape; output matches that shape.
+          return Array.isArray(inputShape) && Array.isArray(inputShape[0]) ? inputShape[0] : inputShape;
+        }
+        call(inputs, kwargs) {
+          // Training: z = mu + exp(0.5*logvar) * eps (stochastic — needed for VAE).
+          // Inference: z = mu (deterministic — keeps Reconstruct outputs clean
+          // rather than injecting noise into every demo render). Random Sampling
+          // bypasses this layer entirely (extractDecoder feeds fresh random z
+          // into the decoder), so this only affects the encode→reparam→decode
+          // path in Reconstruct mode.
+          var isTraining = kwargs && kwargs.training === true;
+          return tf.tidy(function () {
+            var arr = Array.isArray(inputs) ? inputs : [inputs];
+            var mu = arr[0];
+            if (!isTraining) return tf.add(mu, tf.zerosLike(mu));
+            var logvar = tf.clipByValue(arr[1], -10, 10);
+            var eps = tf.randomNormal(tf.shape(mu), 0, 1, mu.dtype);
+            var std = tf.exp(tf.mul(tf.scalar(0.5), logvar));
+            return tf.add(mu, tf.mul(std, eps));
+          });
+        }
+        getClassName() {
+          return "ReparameterizeLayer";
+        }
+      }
+      // Make the layer picklable so saved checkpoints reload correctly. Guard
+      // against double-registration (this module may be imported many times in
+      // tests / repeated app inits).
+      try {
+        if (tf.serialization && typeof tf.serialization.registerClass === "function") {
+          // registerClass is idempotent enough that re-registering with the
+          // same name typically warns rather than throws, but wrap in try
+          // to be safe across TF.js versions.
+          tf.serialization.registerClass(RL);
+        }
+      } catch (_) {}
+      // Static helper that wires the symbolic mu/logvar tensors through the
+      // layer with deterministic naming for downstream extractDecoder lookup
+      // (`reparam_<nid>`). The trailing `_add_<nid>` alias keeps the trace
+      // backwards-compatible with the previous topology where the latent
+      // output was named `reparam_add_*`.
       RL.apply = function (muTensor, logvarTensor, nodeId) {
         _reparamCount++;
         var nid = nodeId || _reparamCount;
-        var latentDim = muTensor.shape[muTensor.shape.length - 1];
-        var noiseProj = tf.layers.dense({
-          units: latentDim, activation: "linear",
-          name: "reparam_noise_" + nid,
-          kernelInitializer: "zeros", biasInitializer: "zeros",
-        }).apply(logvarTensor);
-        return tf.layers.add({ name: "reparam_add_" + nid }).apply([muTensor, noiseProj]);
+        var layer = new RL({ name: "reparam_add_" + nid });
+        return layer.apply([muTensor, logvarTensor]);
       };
       return RL;
     })();
