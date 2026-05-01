@@ -140,6 +140,10 @@
       classNames: ["T-shirt/top", "Trouser", "Pullover", "Dress", "Coat", "Sandal", "Shirt", "Sneaker", "Bag", "Ankle boot"],
       splitConfig: { mode: "stratified_label", train: 0.8, val: 0.1, test: 0.1 },
       seed: 42,
+      // Explicit dataset size — matches the pretrained training run, so the
+      // dataset card a visitor sees on demo load is exactly what the pretrained
+      // weights were trained against (rather than the silent 1400-sample default).
+      config: { totalCount: 8000, useFullSource: true },
     },
     models: [
       { id: "unet_model", name: "UNet (skip connections)", schemaId: sid, graph: buildUNet(), createdAt: Date.now() },
@@ -178,11 +182,13 @@
     generations: [
       {
         id: "unet_recon", name: "UNet Reconstruction", schemaId: sid,
-        trainerId: "unet_pretrained", method: "reconstruct", status: "draft", runs: [],
+        trainerId: "unet_pretrained", family: "supervised",
+        config: { method: "reconstruct", numSamples: 16 }, status: "draft", runs: [],
       },
       {
         id: "conv_ae_recon", name: "Conv AE Reconstruction", schemaId: sid,
-        trainerId: "conv_ae_pretrained", method: "reconstruct", status: "draft", runs: [],
+        trainerId: "conv_ae_pretrained", family: "supervised",
+        config: { method: "reconstruct", numSamples: 16 }, status: "draft", runs: [],
       },
     ],
     evaluations: [

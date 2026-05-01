@@ -123,6 +123,7 @@ function waitForJob(jobId) {
     var req = http.request(opts, function (res) {
       var buf = "";
       var currentEvent = "";
+      var epochsLog = [];
       res.on("data", function (chunk) {
         buf += chunk.toString();
         var lines = buf.split("\n");
@@ -135,11 +136,13 @@ function waitForJob(jobId) {
               var data = JSON.parse(line.slice(6));
               if (currentEvent === "epoch" || data.kind === "epoch") {
                 var p = data.payload || data;
+                epochsLog.push(p);
                 var ep = p.epoch || data.epoch;
                 if (ep && (ep % 5 === 0 || ep === 1)) {
                   console.log("    epoch " + ep + " loss=" + (p.loss != null ? Number(p.loss).toFixed(4) : "?") + " val=" + (p.val_loss != null ? Number(p.val_loss).toFixed(4) : "?"));
                 }
               } else if (currentEvent === "complete" || data.kind === "complete") {
+                data.epochs = epochsLog;
                 resolve(data);
               } else if (currentEvent === "error" || data.kind === "error") {
                 reject(new Error(data.message || "Server training failed"));
@@ -163,11 +166,30 @@ async function buildDataset() {
   if (!modList || !modList.length) throw new Error("No module for schema: " + schemaId);
   var mod = dm.getModule(modList[0].id);
   var pds = preset.dataset || (preset.datasets && preset.datasets[0]) || {};
-  var cfg = { seed: pds.seed || 42, schemaId: schemaId, moduleId: mod.id, sourceMode: "synthetic" };
+  var cfg = { seed: pds.seed || 42, schemaId: schemaId, moduleId: mod.id };
   if (pds.config) Object.assign(cfg, pds.config);
-  // Cap dataset size for server training (JSON payload limit)
-  var maxSamples = Number(process.env.MAX_SAMPLES || 6000);
-  cfg.totalCount = Math.min(maxSamples, pds.totalCount || pds.sourceTotalExamples || maxSamples);
+  // If the preset asks for the real source (Fashion-MNIST etc.), the dataset
+  // module loads IDX files from data/. Only fall back to synthetic when the
+  // preset explicitly opts in — otherwise the script silently trains on random
+  // pixels instead of real samples (showed up as checkerboard/noise generation
+  // for GAN demos despite healthy-looking BCE loss).
+  var presetSays = String(pds.config && pds.config.sourceMode || "").trim().toLowerCase();
+  var useFullSource = !!(pds.config && pds.config.useFullSource);
+  if (!cfg.sourceMode) {
+    cfg.sourceMode = presetSays || (useFullSource ? "" : "synthetic");
+  }
+  // Cap dataset size for server training (JSON payload limit ~200MB).
+  // MAX_SAMPLES, if set, is the authoritative upper bound — and it overrides the
+  // preset's totalCount (otherwise GAN demos with classFilter that yield ~600
+  // samples/epoch starve adversarial schedules of batches: WGAN's 5 D + 1 G
+  // schedule needs ≥6 batches/epoch for the generator to ever update).
+  var envMax = Number(process.env.MAX_SAMPLES || 0);
+  if (envMax > 0) {
+    cfg.totalCount = envMax;
+  } else {
+    var defaultMax = 6000;
+    cfg.totalCount = Math.min(defaultMax, pds.totalCount || pds.sourceTotalExamples || defaultMax);
+  }
   var result = await mod.build(cfg);
   if (!result) throw new Error("build returned null");
 
@@ -219,7 +241,7 @@ async function buildDataset() {
   throw new Error("Unsupported build result format");
 }
 
-function exportPretrained(trainerName, config, result, outputPath) {
+function exportPretrained(trainerName, config, result, outputPath, varNameOverride) {
   var weightSpecs = result.weightSpecs || [];
   // Normalize: server may return weightData (flat array) or weightValues
   var weightValues = result.weightValues || [];
@@ -255,7 +277,9 @@ function exportPretrained(trainerName, config, result, outputPath) {
   lenBuf.writeUInt32LE(metaBytes.length, 0);
   var fullBuf = Buffer.concat([lenBuf, metaBytes, weightBuf]);
   var b64 = fullBuf.toString("base64");
-  var varName = slugify(trainerName).toUpperCase() + "_PRETRAINED_BIN_B64";
+  // Prefer the preset's _pretrainedVar (matches what the demo's index.html / preset.js expect).
+  // Fall back to deriving from trainerName only when no override is provided.
+  var varName = varNameOverride || (slugify(trainerName).toUpperCase() + "_PRETRAINED_BIN_B64");
   var js = "// Pre-trained " + trainerName + " (PyTorch CUDA)\nwindow." + varName + " = \"" + b64 + "\";\n";
   fs.writeFileSync(outputPath, js);
   console.log("  Exported:", outputPath, "(" + (fullBuf.length / 1024).toFixed(0) + " KB,", weightSpecs.length, "weight arrays)");
@@ -284,8 +308,13 @@ async function trainOneModel(modelDef, dataset, trainerDef) {
     if (buildInfo.model) try { buildInfo.model.dispose(); } catch (_) {}
   } catch (e) { console.warn("  Could not extract headConfigs from graph:", e.message); }
 
-  // Build payload for server
-  var payload = {
+  // Build payload for server.
+  // Spread the entire trainer config first so the server receives every field the user
+  // declared in preset.js (trainingSchedule, rotateSchedule, optimizerBeta1/Beta2,
+  // weightSelection, clipWeights, etc.). This keeps the script contract-driven — the UI
+  // sends the same full config to /api/train, and the script must match that envelope or
+  // adversarial trainers (which need phase scheduling) will diverge.
+  var payload = Object.assign({}, tc || {}, {
     runId: "pretrain-" + slugify(modelDef.name) + "-" + Date.now().toString(36),
     graph: graph,
     schemaId: schemaId,
@@ -305,14 +334,23 @@ async function trainOneModel(modelDef, dataset, trainerDef) {
       numClasses: dataset.numClasses || dataset.classCount || 10,
       targetMode: dataset.targetMode || defaultTarget,
     },
-    epochs: tc.epochs || 30,
+    // Defaults for fields the trainer config didn't specify.
+    // EPOCHS env var, if set, overrides the preset (lets pretrained generators
+    // be trained beyond their preset's epoch count for visual smoothness — DCGAN
+    // BCE plateaus around 200 but conv-transpose checkerboard takes longer to fade).
+    epochs: Number(process.env.EPOCHS) > 0 ? Number(process.env.EPOCHS) : (tc.epochs || 30),
     batchSize: tc.batchSize || 32,
     learningRate: tc.learningRate || 0.001,
     optimizerType: tc.optimizerType || tc.optimizer || "adam",
     lrSchedulerType: tc.lrSchedulerType || "plateau",
-    earlyStoppingPatience: tc.earlyStoppingPatience || 10,
-    restoreBestWeights: true,
-  };
+    earlyStoppingPatience: tc.earlyStoppingPatience != null ? tc.earlyStoppingPatience : 10,
+  });
+  // Do NOT force restoreBestWeights — the server's _resolve_restore_best_weights
+  // honors weightSelection ("last" → use final epoch). Forcing true here reverts
+  // the model to bestEpoch (often epoch 3 of a GAN, when D had crushed G), so
+  // the exported weights are essentially untrained → noise/checkerboard generation.
+  // If the trainer config says restoreBestWeights, it'll already be in tc via the
+  // Object.assign spread above; otherwise let the server resolve from weightSelection.
 
   console.log("  Sending to server (", dataset.xTrain.length, "train samples, features:", featureSize, ")...");
   var startRes = await httpRequest("POST", "/api/train", payload);
@@ -359,8 +397,28 @@ async function trainOneModel(modelDef, dataset, trainerDef) {
     );
   }
 
-  artifacts.metrics = result.metrics || sseResult || { mae: result.mae, mse: result.mse, bestEpoch: result.bestEpoch, bestValLoss: result.bestValLoss };
-  console.log("  Training complete. Weights:", artifacts.weightSpecs.length, "arrays (" + wv.length + " values), MAE:", (artifacts.metrics || {}).mae || "?");
+  // Build a scalar-only metrics summary. The result endpoint sometimes omits
+  // result.metrics — when that happens the previous code fell through to
+  // sseResult, which carries the full epochs[] array, doubling the artifact
+  // size and polluting the metrics contract. Pull only summary scalars.
+  function _scalarMetrics(src) {
+    if (!src || typeof src !== "object") return {};
+    var out = {};
+    var scalarKeys = ["mae", "mse", "bestEpoch", "bestValLoss", "finalLr",
+      "stoppedEarly", "stoppedByUser", "headCount", "backend", "paramCount",
+      "resolvedBackend", "hasArtifacts"];
+    scalarKeys.forEach(function (k) {
+      if (src[k] != null && typeof src[k] !== "object") out[k] = src[k];
+    });
+    return out;
+  }
+  artifacts.metrics = Object.assign(
+    _scalarMetrics(sseResult),
+    _scalarMetrics(result),
+    _scalarMetrics(result.metrics)
+  );
+  artifacts.epochs = (sseResult && sseResult.epochs) || result.epochs || [];
+  console.log("  Training complete. Weights:", artifacts.weightSpecs.length, "arrays (" + wv.length + " values), epochs captured:", artifacts.epochs.length, ", MAE:", (artifacts.metrics || {}).mae || "?");
   return artifacts;
 }
 
@@ -386,10 +444,49 @@ async function main() {
       if (!result) continue;
 
       var trainerName = modelDef.name + " (pre-trained)";
-      var slug = slugify(modelDef.name);
-      var outPath = path.join(demoDir, slug + "_pretrained.js");
       var tc = trainer.trainCfg || trainer.config || {};
-      exportPretrained(trainerName, tc, result, outPath);
+      // Look up the preset's pretrained trainer entry — its _pretrainedVar is
+      // the global the loader reads, and the demo's index.html includes a fixed
+      // filename for that global. Filenames are inconsistent across demos
+      // (m1_mlp_baseline vs MLP_BASELINE_PRE_TRAINED_PRETRAINED, etc.), so
+      // slugifying the var name doesn't always match — instead, find the
+      // existing demo file that already declares `window.<VAR>` and overwrite
+      // that path. Falls back to slug only when no existing file matches
+      // (which is appropriate for genuinely new cards).
+      var pretrainedTrainer = trainers.find(function (t) {
+        return t.modelId === modelDef.id && t._pretrainedVar;
+      });
+      var varName, outPath;
+      if (pretrainedTrainer && pretrainedTrainer._pretrainedVar) {
+        varName = pretrainedTrainer._pretrainedVar;
+        var existing = null;
+        try {
+          var candidates = fs.readdirSync(demoDir)
+            .filter(function (f) { return f.endsWith("_pretrained.js"); });
+          var needle = "window." + varName + " ";
+          for (var ci = 0; ci < candidates.length; ci++) {
+            var p = path.join(demoDir, candidates[ci]);
+            var head = fs.readFileSync(p, "utf8").slice(0, 1024);
+            if (head.indexOf(needle) >= 0) { existing = p; break; }
+          }
+        } catch (_) {}
+        if (existing) {
+          outPath = existing;
+        } else {
+          // No existing file — derive default. The slug heuristic is imperfect
+          // for trainer names containing "(pre-trained)" but it's a reasonable
+          // first guess; the resulting filename can be checked in via PR.
+          var fnameBase = varName.toLowerCase().replace(/_bin_b64$/, "");
+          outPath = path.join(demoDir, fnameBase + ".js");
+          console.log("  WARNING: no existing pretrained file declares window." +
+            varName + " — writing to " + path.basename(outPath) +
+            ". Verify the demo's index.html <script src=...> matches.");
+        }
+      } else {
+        varName = slugify(trainerName).toUpperCase() + "_PRETRAINED_BIN_B64";
+        outPath = path.join(demoDir, slugify(modelDef.name) + "_pretrained.js");
+      }
+      exportPretrained(trainerName, tc, result, outPath, varName);
     } catch (err) {
       console.log("  FAIL:", err.message);
     }

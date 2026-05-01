@@ -1,5 +1,5 @@
 // Surrogate Studio - concatenated bundle
-// Generated: 2026-04-29T17:59:21Z
+// Generated: 2026-04-30T19:45:38Z
 // Source files: 58
 
 
@@ -31652,7 +31652,25 @@
       mountEl.appendChild(el("pre", { style: "font-size:10px;color:#94a3b8;background:#171d30;padding:8px;border-radius:4px;" }, text));
     }
 
-    function mount() { _renderLeftPanel(); _renderMainPanel(); _renderRightPanel(); _startRefreshWatcher(); }
+    function mount() {
+      // If no generation session is active yet, auto-select one so the visitor lands on a
+      // populated card instead of an empty "Select or create" placeholder. Prefer a session
+      // whose linked trainer is pretrained (status:"done") so the runs panel & weights are real.
+      if (!_activeGenId && store) {
+        var allGens = _listGens();
+        if (allGens.length) {
+          var preferredGen = null;
+          for (var i = 0; i < allGens.length; i++) {
+            var g = allGens[i];
+            if (!g || !g.trainerId) continue;
+            var t = store.getTrainerCard(g.trainerId);
+            if (t && t.status === "done") { preferredGen = g; break; }
+          }
+          _activeGenId = (preferredGen || allGens[0]).id;
+        }
+      }
+      _renderLeftPanel(); _renderMainPanel(); _renderRightPanel(); _startRefreshWatcher();
+    }
     function unmount() { _mountId++; _stopRefreshWatcher(); layout.leftEl.innerHTML = ""; layout.mainEl.innerHTML = ""; layout.rightEl.innerHTML = ""; }
     function refresh() { _renderLeftPanel(); _renderMainPanel(); _renderRightPanel(); }
 
@@ -33535,7 +33553,15 @@
       var preTrainers = typeof store.listTrainerCards === "function" ? store.listTrainerCards({}) : [];
       if (preDatasets.length && !stateApi.getActiveDataset()) stateApi.setActiveDataset(preDatasets[0].id);
       if (preModels.length && !stateApi.getActiveModel()) stateApi.setActiveModel(preModels[0].id);
-      if (preTrainers.length && !stateApi.getActiveTrainer()) stateApi.setActiveTrainer(preTrainers[0].id);
+      if (preTrainers.length && !stateApi.getActiveTrainer()) {
+        // Prefer a pretrained (status:"done") trainer over a draft so visitors land on a card
+        // that already has weights, metrics, and loss curves visible — not an empty "waiting..." card.
+        var preferredTrainer = null;
+        for (var i = 0; i < preTrainers.length; i++) {
+          if (preTrainers[i] && preTrainers[i].status === "done") { preferredTrainer = preTrainers[i]; break; }
+        }
+        stateApi.setActiveTrainer((preferredTrainer || preTrainers[0]).id);
+      }
     }
 
     // show default tab

@@ -14,11 +14,15 @@ No hardcoded GAN logic in the engine. The graph defines the full adversarial arc
 | **DCGAN** | ![DCGAN Client](images/dcgan_client.png) | ![DCGAN Server](images/dcgan_server.png) |
 | **WGAN** | ![WGAN Client](images/wgan_client.png) | ![WGAN Server](images/wgan_server.png) |
 
-All three architectures generate recognizable T-shirt images from random noise, trained on Fashion-MNIST class 0 (T-shirt/top, 6000 images). Pre-trained weights are included for all three models, so generation works immediately without retraining.
+Three architectures (MLP-GAN, DCGAN, MLP-WGAN) generate Fashion-MNIST T-shirts from random noise, trained on class 0 (T-shirt/top, 6000 images). MLP-GAN and DCGAN ship as pre-trained cards so generation works immediately. MLP-WGAN is included as a draft trainer only — see "Why MLP-WGAN has no pre-trained card" below.
 
 The demo intentionally includes two kinds of trainer cards:
-- `MLP-GAN (pre-trained)`, `DCGAN (pre-trained)`, `MLP-WGAN (pre-trained)` — already have weights and are ready for Generation immediately
+- `MLP-GAN (pre-trained)`, `DCGAN (pre-trained)` — already have weights and are ready for Generation immediately
 - `MLP-GAN Trainer`, `DCGAN Trainer`, `MLP-WGAN Trainer` — blank draft trainers for training from scratch on client or server
+
+### Why MLP-WGAN has no pre-trained card
+
+WGAN with the loose `clipWeights: 0.1` (configured to match the Arjovsky 2017 baseline at this dataset size) is volatile — without seed control on the server side, each training run lands in a different basin. Some converge to clean shirt-like outputs, others to noisy textures. Rather than ship a marginal pre-trained file that lands somewhere on that spectrum each time the script runs, the WGAN demo is left as a "train from scratch" exercise. Use the `MLP-WGAN Trainer` card with the configured 1000-epoch / 5+1 D/G schedule on CUDA (~10 min) to compare against the pre-trained MLP-GAN and DCGAN.
 
 ## Presets
 
@@ -116,7 +120,7 @@ Labels:
 
 1. Open `index.html` in a browser (Chrome/Edge recommended)
 2. Generate Fashion-MNIST dataset (T-shirt class, 6000 images)
-3. **Immediate generation**: In the Generation tab, select `MLP-GAN Generate (pre-trained)`, `DCGAN Generate (pre-trained)`, or `MLP-WGAN Generate (pre-trained)` and click `Generate`
+3. **Immediate generation**: In the Generation tab, select `MLP-GAN Generate (pre-trained)` or `DCGAN Generate (pre-trained)` and click `Generate`. (MLP-WGAN has no pre-trained card — see note above.)
 4. **Train from scratch**: In the Trainer tab, select `MLP-GAN Trainer`, `DCGAN Trainer`, or `MLP-WGAN Trainer` and click `Start Training`
 5. **Use your own weights**: After training finishes, or after a graceful `Stop` saves weights, go back to the matching non-pretrained generation card and generate from that trainer
 6. **Run benchmark evaluation**: In the Evaluation tab, use `Generative Quality (pre-trained)` to compare pre-trained GAN checkpoints against the best available dataset reference split (`test`, then `val`, then `train`) with standard set metrics such as `MMD`, `NN precision/coverage`, and diversity gaps

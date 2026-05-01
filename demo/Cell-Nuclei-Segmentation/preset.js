@@ -97,15 +97,19 @@
     return graph(d);
   }
 
-  // MLP baseline — no spatial awareness
+  // MLP baseline — no spatial awareness. With only 256 hidden units the model
+  // collapsed to "predict 0 everywhere" on imbalanced segmentation (5% positive).
+  // Wider hidden + second layer breaks that trivial minimum so the baseline
+  // shows meaningful (but still inferior to UNet) IoU/Dice on nucleus pixels.
   function buildMlpSeg() {
     _nid = 100;
     var d = {};
     var imgSrc = N(d, "image_source", { sourceKey: "pixel_values", featureSize: IMAGE_SIZE, imageShape: [32,32,1] }, 50, 300);
-    var d1     = N(d, "dense",        { units: 256, activation: "relu" },     250, 300);
-    var d2     = N(d, "dense",        { units: IMAGE_SIZE, activation: "sigmoid" }, 450, 300);
-    var out    = N(d, "output",       { target: "mask", targetType: "mask", loss: "bce", matchWeight: 1, headType: "segmentation" }, 650, 300);
-    C(d, imgSrc, d1); C(d, d1, d2); C(d, d2, out);
+    var d1     = N(d, "dense",        { units: 512, activation: "relu" },     250, 300);
+    var d2     = N(d, "dense",        { units: 512, activation: "relu" },     400, 300);
+    var d3     = N(d, "dense",        { units: IMAGE_SIZE, activation: "sigmoid" }, 550, 300);
+    var out    = N(d, "output",       { target: "mask", targetType: "mask", loss: "bce", matchWeight: 1, headType: "segmentation" }, 700, 300);
+    C(d, imgSrc, d1); C(d, d1, d2); C(d, d2, d3); C(d, d3, out);
     return graph(d);
   }
 
