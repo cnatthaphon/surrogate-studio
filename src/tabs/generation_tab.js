@@ -974,7 +974,20 @@
 
         if (genMeta.info.hasLatentDecoder && method !== "inverse" && method !== "reconstruct") {
           try {
-            var decoder = modelBuilder.extractDecoder(tf, built.model, latentDim);
+            // For branched multi-head models (e.g. VAE+Cls has [recon, classProbs]),
+            // tell extractDecoder which output to terminate at. extractDecoder will
+            // backtrack from that tensor to the reparam layer along graph edges
+            // rather than guessing from layer-list order.
+            var reconOi = 0;
+            if (built.headConfigs && built.headConfigs.length > 1) {
+              for (var roi = 0; roi < built.headConfigs.length; roi++) {
+                var rh = built.headConfigs[roi];
+                if (rh && String(rh.headType || "").toLowerCase() === "reconstruction") {
+                  reconOi = roi; break;
+                }
+              }
+            }
+            var decoder = modelBuilder.extractDecoder(tf, built.model, latentDim, reconOi);
             if (decoder && decoder.model) { genModel = decoder.model; genLatentDim = decoder.latentDim || latentDim; outputIndex = 0; }
           } catch (_) { genLatentDim = latentDim; }
         }

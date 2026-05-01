@@ -1,5 +1,5 @@
 // Surrogate Studio - concatenated bundle
-// Generated: 2026-05-01T11:56:38Z
+// Generated: 2026-05-01T12:30:18Z
 // Source files: 58
 
 
@@ -21963,21 +21963,18 @@
      * Strategy: find the reparameterize layer in the model, get its output tensor,
      * trace all layers downstream to the outputs, and create a new model.
      */
-    function extractDecoder(tf, fullModel, latentDim) {
+    function extractDecoder(tf, fullModel, latentDim, targetOutputIndex) {
       if (!tf || !fullModel) throw new Error("extractDecoder: tf and fullModel required");
       var dim = latentDim || 16;
 
       // Find reparam layer by class name or layer name
       var reparamLayer = null;
-      var reparamOutput = null;
       for (var i = 0; i < fullModel.layers.length; i++) {
         var layer = fullModel.layers[i];
         var lname = String(layer.name || "").toLowerCase();
         var lclass = String(layer.getClassName ? layer.getClassName() : "").toLowerCase();
         if (lname.indexOf("reparam") >= 0 || lclass.indexOf("reparam") >= 0) {
           reparamLayer = layer;
-          reparamOutput = layer.output;
-          // get latent dim from layer output shape
           var outShape = layer.outputShape;
           if (Array.isArray(outShape) && outShape.length >= 2) {
             dim = outShape[outShape.length - 1] || dim;
@@ -22001,58 +21998,87 @@
         }
         if (bottleneckLayer) {
           reparamLayer = bottleneckLayer;
-          reparamOutput = bottleneckLayer.output;
           dim = minUnits;
         }
       }
 
       if (!reparamLayer) throw new Error("extractDecoder: no reparameterize or bottleneck layer found");
 
-      // Build decoder: new input [dim] → trace from reparam output to model outputs
-      var zInput = tf.input({ shape: [dim], name: "z_input" });
-
-      // Determine the reconstruction output dim so we can stop at the right place.
-      // For branched models (VAE+Cls: reparam→recon AND encoder→classifier), the
-      // sequential apply below would otherwise chain the classifier branch onto
-      // the recon output and end up returning a 10-class tensor as the "decoder
-      // output", which then breaks classifier-guided generation downstream.
-      var reconDim = 0;
-      var os = fullModel.outputShape;
-      if (Array.isArray(os) && os.length) {
-        // multi-output models return an array of shapes; reconstruction is conventionally first
-        var firstOut = Array.isArray(os[0]) ? os[0] : os;
-        reconDim = firstOut[firstOut.length - 1] || 0;
+      // Pick which model output the decoder should terminate at. For branched
+      // multi-head models (VAE+Cls: [recon, classProbs]), the caller passes the
+      // index of the reconstruction head — otherwise we default to output 0.
+      var modelOutputs = (fullModel.outputs && fullModel.outputs.length) ? fullModel.outputs : null;
+      var oi = (typeof targetOutputIndex === "number" && targetOutputIndex >= 0) ? targetOutputIndex : 0;
+      var targetTensor = modelOutputs ? (modelOutputs[oi] || modelOutputs[0]) : null;
+      if (!targetTensor) {
+        throw new Error("extractDecoder: model has no output tensor at index " + oi);
       }
 
-      // Sequential apply: walk layers after reparam, stop at reconstruction output.
-      var reparamIdx = fullModel.layers.indexOf(reparamLayer);
+      // Walk the GRAPH backward from the chosen output tensor to the reparam
+      // layer, recording layers in reverse topological order. A purely
+      // sequential apply over fullModel.layers (the previous implementation)
+      // would chain layers from a parallel branch (e.g. classifier head) onto
+      // the reconstruction path because it ignored graph structure entirely.
+      // Here we follow each layer's first inbound tensor — the recon path
+      // between reparam and the recon output is linear, so a single-input
+      // backtrack is sufficient. (Multi-input layers like Concat would need a
+      // BFS variant; none exist on the recon path in the demos that ship.)
+      var pathLayers = [];
+      var cursor = targetTensor;
+      var seen = new Set();
+      var hops = 0;
+      while (cursor && hops < 256) {
+        var src = cursor.sourceLayer;
+        if (!src || seen.has(src)) break;
+        seen.add(src);
+        if (src === reparamLayer) {
+          pathLayers.reverse();
+          break;
+        }
+        pathLayers.push(src);
+        // Get this layer's input tensor via inboundNodes — DO NOT use
+        // src.input, which throws "ill-defined" once a layer has been applied
+        // more than once (e.g. when extractDecoder is called twice on the same
+        // model for repeat builds). The first inboundNode is the original
+        // construction call; that's the edge we want to follow.
+        var nextTensor = null;
+        if (src.inboundNodes && src.inboundNodes.length) {
+          var ibn = src.inboundNodes[0];
+          if (ibn && ibn.inputTensors && ibn.inputTensors.length) {
+            nextTensor = ibn.inputTensors[0];
+          }
+        }
+        cursor = nextTensor;
+        hops++;
+      }
+      if (!pathLayers.length) {
+        // Backtrack failed — couldn't trace a path from target output to
+        // reparam (graph might not have the expected linear topology, or the
+        // tensor's sourceLayer chain isn't accessible). Fall back to the old
+        // sequential walk so we degrade rather than error.
+        pathLayers = fullModel.layers.slice(fullModel.layers.indexOf(reparamLayer) + 1);
+      }
+
+      // Build decoder by applying the path layers to a fresh latent input.
+      var zInput = tf.input({ shape: [dim], name: "z_input" });
       var x = zInput;
-      for (var k = reparamIdx + 1; k < fullModel.layers.length; k++) {
-        var dl = fullModel.layers[k];
-        // skip input/merge layers that expect multiple inputs
+      for (var k = 0; k < pathLayers.length; k++) {
+        var dl = pathLayers[k];
+        // skip multi-input merge layers (none on a typical recon path; this
+        // is just a guard for the fallback walk above)
         if (dl.inboundNodes && dl.inboundNodes.length && dl.inboundNodes[0].inputTensors && dl.inboundNodes[0].inputTensors.length > 1) continue;
         try {
           x = dl.apply(x);
         } catch (e) {
-          // skip layers that can't be applied (shape mismatch from encoder path)
           continue;
-        }
-        // Stop once we reach the reconstruction dim — any layers after this in
-        // the topological order belong to a separate branch (e.g. classifier head).
-        if (reconDim > 0 && x && x.shape) {
-          var lastDim = x.shape[x.shape.length - 1];
-          if (lastDim === reconDim) break;
         }
       }
 
       var decoderModel = tf.model({ inputs: zInput, outputs: x, name: "decoder" });
-
-      // get output dim
       var outputShape = decoderModel.outputShape;
       var outputDim = Array.isArray(outputShape) ? outputShape[outputShape.length - 1] : 0;
-
-    return { model: decoderModel, latentDim: dim, outputDim: outputDim };
-  }
+      return { model: decoderModel, latentDim: dim, outputDim: outputDim };
+    }
 
   // --- public API ---
 
@@ -31434,7 +31460,20 @@
 
         if (genMeta.info.hasLatentDecoder && method !== "inverse" && method !== "reconstruct") {
           try {
-            var decoder = modelBuilder.extractDecoder(tf, built.model, latentDim);
+            // For branched multi-head models (e.g. VAE+Cls has [recon, classProbs]),
+            // tell extractDecoder which output to terminate at. extractDecoder will
+            // backtrack from that tensor to the reparam layer along graph edges
+            // rather than guessing from layer-list order.
+            var reconOi = 0;
+            if (built.headConfigs && built.headConfigs.length > 1) {
+              for (var roi = 0; roi < built.headConfigs.length; roi++) {
+                var rh = built.headConfigs[roi];
+                if (rh && String(rh.headType || "").toLowerCase() === "reconstruction") {
+                  reconOi = roi; break;
+                }
+              }
+            }
+            var decoder = modelBuilder.extractDecoder(tf, built.model, latentDim, reconOi);
             if (decoder && decoder.model) { genModel = decoder.model; genLatentDim = decoder.latentDim || latentDim; outputIndex = 0; }
           } catch (_) { genLatentDim = latentDim; }
         }
