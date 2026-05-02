@@ -79,6 +79,15 @@ def _cfg_bool(v, fallback=True):
         return True
     return bool(fallback)
 
+def _normalize_rng_seed(v, fallback=42):
+    try:
+        seed = int(v)
+    except (TypeError, ValueError, OverflowError):
+        seed = int(fallback)
+    # NumPy requires [0, 2**32 - 1]. Use the same normalized value for
+    # Python and Torch so one config seed drives all runtimes consistently.
+    return seed % (2 ** 32)
+
 def _resolve_optimizer_config(config):
     opt = config.get("optimizer", {})
     if isinstance(opt, str):
@@ -146,10 +155,7 @@ def main():
     # time and pretrained weights can't be regenerated reproducibly. Reads
     # config.seed (matching the dataset preset's seed convention) and falls
     # back to 42 when unspecified.
-    try:
-        _train_seed = int(config.get("seed", 42))
-    except (TypeError, ValueError):
-        _train_seed = 42
+    _train_seed = _normalize_rng_seed(config.get("seed", 42), 42)
     import random as _py_random
     _py_random.seed(_train_seed)
     np.random.seed(_train_seed)
@@ -618,8 +624,8 @@ def main():
                     model._class_labels = lb
                 opt_all.zero_grad()
                 # Reset VAE KL accumulator before forward; reparam nodes add to
-                # it during forward (only when self.training=True). Non-VAE
-                # graphs leave it at 0.
+                # it during forward for training and validation objective
+                # evaluation. Non-VAE graphs leave it at 0.
                 model._kl_total = torch.tensor(0.0, device=device)
                 pred = model(xb)
                 loss = compute_loss(pred, xb, yb, "", lb=lb) + model._kl_total
@@ -753,6 +759,7 @@ def main():
         if not stopped_by_user and x_val.size > 0:
             model._phase_name = ""
             model.eval()
+            model._accumulate_kl = True
             val_loss = 0.0
             n_val = 0
             with torch.no_grad():
@@ -761,10 +768,12 @@ def main():
                     lb = _batchv[2].to(device) if len(_batchv) > 2 else None
                     if lb is not None:
                         model._class_labels = lb
+                    model._kl_total = torch.tensor(0.0, device=device)
                     pred = model(xb)
-                    loss = compute_loss(pred, xb, yb, "", lb=lb)
+                    loss = compute_loss(pred, xb, yb, "", lb=lb) + model._kl_total
                     val_loss += loss.item()
                     n_val += 1
+            model._accumulate_kl = False
             val_loss /= max(n_val, 1)
 
         # use val_loss if available, else train loss for early stopping
@@ -1092,11 +1101,13 @@ def build_model_from_graph(graph, feature_size, target_size, num_classes=0):
             self.output_ids = []
             self._edges_in = edges_in
             # VAE KL accumulator. The reparam node (Kingma-Welling sampling)
-            # accumulates the KL-divergence-to-N(0,1) term here during forward
-            # when self.training=True. The training loop resets this to 0
-            # before each batch and adds it to the loss after compute_loss.
+            # accumulates the KL-divergence-to-N(0,1) term here during training
+            # and validation-objective forward passes. The training loop resets
+            # this to 0 before each batch and adds it to the loss after
+            # compute_loss.
             # Stays 0 for non-VAE graphs.
             self._kl_total = torch.tensor(0.0)
+            self._accumulate_kl = False
 
             dim_map = {}
 
@@ -1558,8 +1569,16 @@ def build_model_from_graph(graph, feature_size, target_size, num_classes=0):
                     # clip logvar so exp(0.5*logvar) stays numerically stable
                     logvar_clipped = torch.clamp(logvar_tensor, min=-10.0, max=10.0)
                     std = torch.exp(0.5 * logvar_clipped)
+                    should_accumulate_kl = self.training or bool(getattr(self, "_accumulate_kl", False))
                     if self.training:
                         eps = torch.randn_like(mu_tensor)
+                    else:
+                        # Deterministic at inference/validation — encoder sees
+                        # mu, decoder sees mu. Validation can still accumulate
+                        # KL via _accumulate_kl so checkpoint selection uses the
+                        # same objective as training without injecting noise.
+                        eps = torch.zeros_like(mu_tensor)
+                    if should_accumulate_kl:
                         # Accumulate KL divergence to standard normal prior:
                         #   KL(q(z|x) || N(0,1)) = -0.5 * sum(1 + logvar - mu^2 - exp(logvar))
                         # Without this regularizer, logvar collapses to a very
@@ -1580,11 +1599,6 @@ def build_model_from_graph(graph, feature_size, target_size, num_classes=0):
                         # _kl_total is reset to 0 at the start of each forward
                         # call by the training loop (see compute_loss caller).
                         self._kl_total = self._kl_total + kl_term
-                    else:
-                        # Deterministic at inference — encoder sees mu, decoder
-                        # sees mu (matches what TF.js does in eval mode if the
-                        # model is loaded for reconstruction-only).
-                        eps = torch.zeros_like(mu_tensor)
                     tensors[nid] = mu_tensor + std * eps
                 elif t in ("lstm", "gru", "rnn"):
                     rnn = getattr(self, f"rnn_{nid}")
