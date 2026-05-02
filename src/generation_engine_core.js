@@ -340,6 +340,40 @@
         numSamples: numSamples,
         latentDim: latentDim,
       };
+
+      // Closed-loop classifier verification: when classifier-guided was used,
+      // run the classifier on the FINAL generated samples and emit per-sample
+      // predicted class + top probability. The UI displays these next to each
+      // thumbnail so users can verify the optimization actually steered toward
+      // the requested target class (rather than just trusting the loss curve).
+      if (cfg.classifierModel && cfg.targetClass != null) {
+        try {
+          var clsOi = cfg.classifierOutputIndex != null ? cfg.classifierOutputIndex : 0;
+          var clsOut = cfg.classifierModel.predict(pickOutput(output, cfg.outputIndex));
+          var probsT = pickOutput(clsOut, clsOi);
+          var probsArr = probsT.arraySync();
+          var perSample = probsArr.map(function (row) {
+            var topIdx = 0; var topVal = row[0];
+            for (var ci = 1; ci < row.length; ci++) {
+              if (row[ci] > topVal) { topVal = row[ci]; topIdx = ci; }
+            }
+            return {
+              predictedClass: topIdx,
+              predictedProbability: Number(topVal),
+              targetProbability: Number(row[Number(cfg.targetClass)] || 0),
+            };
+          });
+          result.targetClass = Number(cfg.targetClass);
+          result.classifierPredictions = perSample;
+          result.classifierAccuracy = perSample.filter(function (p) {
+            return p.predictedClass === Number(cfg.targetClass);
+          }).length / Math.max(1, perSample.length);
+          if (Array.isArray(clsOut)) clsOut.forEach(function (t) { t.dispose(); }); else clsOut.dispose();
+        } catch (_) {
+          // verification is informational; never let it block generation
+        }
+      }
+
       z.dispose();
       optimizer.dispose();
       if (Array.isArray(output)) output.forEach(function (t) { t.dispose(); }); else output.dispose();
