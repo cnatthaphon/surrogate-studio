@@ -38,6 +38,7 @@ const baseSuite = [
   "test_contract_headless_memory_store_flow.js",
   "test_contract_segmentation_recipe.js",
   "test_extract_decoder.js",
+  "test_branched_weight_loader.js",
 ];
 
 function runOne(scriptName) {

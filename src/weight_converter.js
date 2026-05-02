@@ -102,23 +102,50 @@
     return true;
   }
 
+  // Canonicalize a weight name to its browser-side equivalent. Returns a
+  // single string for layers whose name maps unambiguously, or an Array of
+  // candidates when the browser may use multiple naming conventions for the
+  // same logical layer (notably output heads — see _aliasesFor below).
+  // Callers should treat the result as "any of these matches".
   function canonicalizeWeightName(rawName) {
-    var name = _stripSuffix(rawName);
-    if (!name) return "";
-    if (name.indexOf("tfjs_") === 0) name = name.slice(5);
-    if (name.indexOf("/") >= 0) return _stripSuffix(name);
+    var aliases = _aliasesFor(rawName);
+    return aliases.length === 1 ? aliases[0] : aliases;
+  }
 
-    var m = name.match(/^(dense|conv1d|conv2d|convt2d|embed|out)_(\d+)\.(weight|bias)$/);
-    if (m) return "n" + m[2] + "/" + (m[3] === "weight" ? "kernel" : "bias");
+  function _aliasesFor(rawName) {
+    var name = _stripSuffix(rawName);
+    if (!name) return [""];
+    if (name.indexOf("tfjs_") === 0) name = name.slice(5);
+    if (name.indexOf("/") >= 0) return [_stripSuffix(name)];
+
+    // Server exports output-layer weights as `out_<id>.weight|bias`. The
+    // browser-side model_builder gives the same logical layer either
+    // `n<id>/kernel|bias` (when the output is a passthrough Dense built like
+    // the encoder denses) OR `head_<id>/kernel|bias` (when the output is
+    // built as a discriminator/classifier head). Without including BOTH
+    // candidates, classifier-output weights fail the name match — load
+    // falls through to positional, and on branched VAE+Classifier graphs
+    // positional order doesn't line up with the browser's topological order
+    // (classifier weights end up assigned to recon-path layers, classifier
+    // output becomes constant, gradient through the latent is zero, and
+    // classifier-guided generation can't steer at all).
+    var m = name.match(/^out_(\d+)\.(weight|bias)$/);
+    if (m) {
+      var tail = m[2] === "weight" ? "kernel" : "bias";
+      return ["head_" + m[1] + "/" + tail, "n" + m[1] + "/" + tail];
+    }
+
+    m = name.match(/^(dense|conv1d|conv2d|convt2d|embed)_(\d+)\.(weight|bias)$/);
+    if (m) return ["n" + m[2] + "/" + (m[3] === "weight" ? "kernel" : "bias")];
 
     m = name.match(/^pe_proj_(\d+)\.(weight|bias)$/);
-    if (m) return "n" + m[1] + "_proj/" + (m[2] === "weight" ? "kernel" : "bias");
+    if (m) return ["n" + m[1] + "_proj/" + (m[2] === "weight" ? "kernel" : "bias")];
 
     m = name.match(/^tb_(ln1|ln2)_(\d+)\.(weight|bias)$/);
-    if (m) return "n" + m[2] + "_" + m[1] + "/" + (m[3] === "weight" ? "gamma" : "beta");
+    if (m) return ["n" + m[2] + "_" + m[1] + "/" + (m[3] === "weight" ? "gamma" : "beta")];
 
     m = name.match(/^tb_(q|k|v|attn_proj|ffn1|ffn2)_(\d+)\.(weight|bias)$/);
-    if (m) return "n" + m[2] + "_" + m[1] + "/" + (m[3] === "weight" ? "kernel" : "bias");
+    if (m) return ["n" + m[2] + "_" + m[1] + "/" + (m[3] === "weight" ? "kernel" : "bias")];
 
     m = name.match(/^(bn|ln)_(\d+)\.(weight|bias|running_mean|running_var)$/);
     if (m) {
@@ -128,13 +155,13 @@
         running_mean: "moving_mean",
         running_var: "moving_variance",
       };
-      return "n" + m[2] + "/" + tailMap[m[3]];
+      return ["n" + m[2] + "/" + tailMap[m[3]]];
     }
 
     m = name.match(/^(rnn|gru|lstm)_(\d+)\.(kernel|recurrent_kernel|bias)$/);
-    if (m) return "n" + m[2] + "/" + m[3];
+    if (m) return ["n" + m[2] + "/" + m[3]];
 
-    return name;
+    return [name];
   }
 
   function extractWeightValues(artifacts) {
@@ -167,10 +194,14 @@
     specs.forEach(function (sp, idx) {
       var shape = Array.isArray(sp.shape) ? sp.shape.slice() : [];
       var size = shape.reduce(function (a, b) { return a * b; }, 1);
-      var key = canonicalizeWeightName(sp.name || "");
-      if (key) {
+      // canonicalizeWeightName returns either a string or an array of candidate
+      // browser-side names. Register the spec under every alias so the lookup
+      // below can match whichever convention the browser model used.
+      var keys = _aliasesFor(sp.name || "").filter(Boolean);
+      if (keys.length) {
         namedSpecs++;
-        savedMap[key] = { offset: offset, size: size, shape: shape, rawName: sp.name || "", index: idx };
+        var entry = { offset: offset, size: size, shape: shape, rawName: sp.name || "", index: idx, primaryKey: keys[0] };
+        keys.forEach(function (k) { if (k && !savedMap[k]) savedMap[k] = entry; });
       }
       offset += size;
     });
@@ -178,15 +209,26 @@
     if (namedSpecs > 0 && modelWeights.length) {
       for (var i = 0; i < modelWeights.length; i++) {
         var mw = modelWeights[i];
-        var key = canonicalizeWeightName(mw.name);
-        var saved = savedMap[key];
+        var mwAliases = _aliasesFor(mw.name).filter(Boolean);
+        var saved = null;
+        var matchedKey = null;
+        for (var ai = 0; ai < mwAliases.length; ai++) {
+          if (savedMap[mwAliases[ai]]) {
+            saved = savedMap[mwAliases[ai]];
+            matchedKey = mwAliases[ai];
+            break;
+          }
+        }
         if (!saved) continue;
         var expectedSize = mw.shape.reduce(function (a, b) { return a * b; }, 1);
         if (saved.size !== expectedSize) continue;
         if (saved.shape.length && !_sameShape(saved.shape, mw.shape)) continue;
         current[i] = tf.tensor(values.subarray(saved.offset, saved.offset + saved.size), mw.shape);
         matched++;
-        matchedSpecKeys[key] = true;
+        // Track the spec's PRIMARY key (the spec was registered under all its
+        // aliases, but for the "all named specs matched" check we want one
+        // entry per unique spec, not per alias).
+        matchedSpecKeys[saved.primaryKey || matchedKey] = true;
       }
       var matchedNamedSpecs = Object.keys(matchedSpecKeys).length;
       if (matchedNamedSpecs === namedSpecs && matched > 0) {
