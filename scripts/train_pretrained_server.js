@@ -314,11 +314,19 @@ async function trainOneModel(modelDef, dataset, trainerDef) {
   // weightSelection, clipWeights, etc.). This keeps the script contract-driven — the UI
   // sends the same full config to /api/train, and the script must match that envelope or
   // adversarial trainers (which need phase scheduling) will diverge.
+  // SEED env var, if set, overrides the trainer's seed for reproducible
+  // retrains (lets us hunt WGAN basins by trying multiple seeds). Otherwise
+  // honors tc.seed, then preset.dataset.seed, then 42.
+  var envSeed = Number(process.env.SEED);
+  var resolvedSeed = Number.isFinite(envSeed) && envSeed >= 0
+    ? envSeed
+    : (tc && tc.seed != null ? Number(tc.seed) : (preset && preset.dataset && preset.dataset.seed != null ? Number(preset.dataset.seed) : 42));
   var payload = Object.assign({}, tc || {}, {
     runId: "pretrain-" + slugify(modelDef.name) + "-" + Date.now().toString(36),
     graph: graph,
     schemaId: schemaId,
     headConfigs: graphHeadConfigs,
+    seed: resolvedSeed,
     dataset: {
       xTrain: dataset.xTrain,
       yTrain: dataset.yTrain,

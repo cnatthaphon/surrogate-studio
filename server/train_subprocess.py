@@ -79,6 +79,15 @@ def _cfg_bool(v, fallback=True):
         return True
     return bool(fallback)
 
+def _normalize_rng_seed(v, fallback=42):
+    try:
+        seed = int(v)
+    except (TypeError, ValueError, OverflowError):
+        seed = int(fallback)
+    # NumPy requires [0, 2**32 - 1]. Use the same normalized value for
+    # Python and Torch so one config seed drives all runtimes consistently.
+    return seed % (2 ** 32)
+
 def _resolve_optimizer_config(config):
     opt = config.get("optimizer", {})
     if isinstance(opt, str):
@@ -140,6 +149,21 @@ def main():
     status(f"PyTorch {torch.__version__} on {device}")
     signal.signal(signal.SIGTERM, _request_stop)
     signal.signal(signal.SIGINT, _request_stop)
+
+    # Seed every RNG that affects training (Python random, numpy, torch CPU,
+    # torch CUDA). Without this, GAN-style runs land in different basins each
+    # time and pretrained weights can't be regenerated reproducibly. Reads
+    # config.seed (matching the dataset preset's seed convention) and falls
+    # back to 42 when unspecified.
+    _train_seed = _normalize_rng_seed(config.get("seed", 42), 42)
+    import random as _py_random
+    _py_random.seed(_train_seed)
+    np.random.seed(_train_seed)
+    torch.manual_seed(_train_seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed(_train_seed)
+        torch.cuda.manual_seed_all(_train_seed)
+    status(f"Seeded training RNGs with seed={_train_seed}")
 
     # --- Extract data ---
     status("Loading dataset into memory...")
@@ -299,6 +323,18 @@ def main():
         hl = str(hc.get("loss", "mse")).lower()
         hw = float(hc.get("matchWeight", 1.0))
         hp = str(hc.get("phase", "")).strip()
+        # latent_kl heads are auto-injected by model_builder_core.js for the
+        # browser path (mu+logvar concat tensor with MSE-against-zero as KL
+        # surrogate). On the server side, the PyTorch model only emits real
+        # output_layer outputs — latent_kl is computed directly inside the
+        # reparam node forward (see Kingma-Welling block above) and added to
+        # `model._kl_total`. Including a latent_kl head here would dereference
+        # a non-existent prediction (preds[i] falls back to preds[0] = recon)
+        # and run MSE against the wrong target tensor → confusing shape
+        # mismatches. Skip it explicitly.
+        if htype == "latent_kl":
+            head_losses.append({"fn": None, "weight": 0, "phase": hp, "cls": False, "skip": True})
+            continue
         # explicit loss field takes priority
         if hl == "none":
             head_losses.append({"fn": None, "weight": 0, "phase": hp, "cls": False, "skip": True})
@@ -397,8 +433,15 @@ def main():
             # without schedule: filter by phase name
             if not _use_schedule and hl["phase"] != active_phase and hl["phase"] != "" and active_phase != "":
                 continue
-            # get this head's prediction (by index, or first if single-output)
-            head_pred = preds[i] if i < len(preds) else preds[0]
+            # head_configs may include phantom heads (e.g. latent_kl auto-injected
+            # by model_builder_core.js for the browser path) that don't correspond
+            # to a real model output on the PyTorch side. Skip those — the falsy-
+            # fallback `preds[0]` would otherwise reuse the recon tensor and
+            # MSE-it against the wrong target shape.
+            if i >= len(preds):
+                continue
+            # get this head's prediction (by index)
+            head_pred = preds[i]
             # determine target for this head
             if hl.get("binary_target"):
                 # Segmentation/mask heads: use real yb targets
@@ -580,8 +623,12 @@ def main():
                 if lb is not None:
                     model._class_labels = lb
                 opt_all.zero_grad()
+                # Reset VAE KL accumulator before forward; reparam nodes add to
+                # it during forward for training and validation objective
+                # evaluation. Non-VAE graphs leave it at 0.
+                model._kl_total = torch.tensor(0.0, device=device)
                 pred = model(xb)
-                loss = compute_loss(pred, xb, yb, "", lb=lb)
+                loss = compute_loss(pred, xb, yb, "", lb=lb) + model._kl_total
                 loss.backward()
                 if grad_clip > 0:
                     torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
@@ -625,8 +672,9 @@ def main():
                         if lb is not None:
                             model._class_labels = lb
                         step_opt.zero_grad()
+                        model._kl_total = torch.tensor(0.0, device=device)
                         pred = model(xb)
-                        loss = compute_loss(pred, xb, yb, phase_name, lb=lb)
+                        loss = compute_loss(pred, xb, yb, phase_name, lb=lb) + model._kl_total
                         if loss.requires_grad:
                             loss.backward()
                             if grad_clip > 0:
@@ -675,8 +723,9 @@ def main():
                             if lb is not None:
                                 model._class_labels = lb
                             step_opt.zero_grad()
+                            model._kl_total = torch.tensor(0.0, device=device)
                             pred = model(xb)
-                            loss = compute_loss(pred, xb, yb, phase_name, lb=lb)
+                            loss = compute_loss(pred, xb, yb, phase_name, lb=lb) + model._kl_total
                             if loss.requires_grad:
                                 loss.backward()
                                 if grad_clip > 0:
@@ -710,6 +759,7 @@ def main():
         if not stopped_by_user and x_val.size > 0:
             model._phase_name = ""
             model.eval()
+            model._accumulate_kl = True
             val_loss = 0.0
             n_val = 0
             with torch.no_grad():
@@ -718,10 +768,12 @@ def main():
                     lb = _batchv[2].to(device) if len(_batchv) > 2 else None
                     if lb is not None:
                         model._class_labels = lb
+                    model._kl_total = torch.tensor(0.0, device=device)
                     pred = model(xb)
-                    loss = compute_loss(pred, xb, yb, "", lb=lb)
+                    loss = compute_loss(pred, xb, yb, "", lb=lb) + model._kl_total
                     val_loss += loss.item()
                     n_val += 1
+            model._accumulate_kl = False
             val_loss /= max(n_val, 1)
 
         # use val_loss if available, else train loss for early stopping
@@ -763,6 +815,13 @@ def main():
     # --- Compute final metrics (val + test) ---
     model.eval()
     mae = 0.0; mse = 0.0
+    # Determine if any output head is reconstruction-style (used for val + test
+    # metric truth selection — see test-block below for the same pattern).
+    _is_recon_head = any(
+        str((hc or {}).get("headType", "")).lower() in ("reconstruction", "autoencoder", "denoiser")
+        for hc in (head_configs or [])
+    )
+
     with torch.no_grad():
         if x_val.size > 0:
             x_val_t = torch.tensor(x_val).to(device)
@@ -774,8 +833,10 @@ def main():
                 mae = float(np.mean(np.abs(pred_labels - true_labels)))
                 mse = float(np.mean((pred_labels - true_labels) ** 2))
             else:
-                mae = float(np.mean(np.abs(pred_val - y_val)))
-                mse = float(np.mean((pred_val - y_val) ** 2))
+                # Reconstruction heads compare prediction against input (x), not labels (y)
+                _truth_val = x_val if (_is_recon_head and pred_val.shape == x_val.shape) else y_val
+                mae = float(np.mean(np.abs(pred_val - _truth_val)))
+                mse = float(np.mean((pred_val - _truth_val) ** 2))
 
         # Test metrics (if test data provided)
         x_test_raw = ds.get("xTest", [])
@@ -792,7 +853,11 @@ def main():
                 raw = model(chunk)
                 pred_chunks.append((raw[0] if isinstance(raw, list) else raw).cpu().numpy())
             pred_test = np.concatenate(pred_chunks, axis=0)
-            t_flat = y_test.flatten()
+            # Reconstruction heads compare prediction against input (x), not
+            # labels (y) — same logic as the val block above. _is_recon_head is
+            # computed once above this `with torch.no_grad()`.
+            truth_for_metrics = x_test if (_is_recon_head and pred_test.shape == x_test.shape) else y_test
+            t_flat = truth_for_metrics.flatten()
             p_flat = pred_test.flatten()
             test_metrics["testMae"] = float(np.mean(np.abs(p_flat - t_flat)))
             test_metrics["testMse"] = float(np.mean((p_flat - t_flat) ** 2))
@@ -1035,6 +1100,14 @@ def build_model_from_graph(graph, feature_size, target_size, num_classes=0):
             self.input_id = None
             self.output_ids = []
             self._edges_in = edges_in
+            # VAE KL accumulator. The reparam node (Kingma-Welling sampling)
+            # accumulates the KL-divergence-to-N(0,1) term here during training
+            # and validation-objective forward passes. The training loop resets
+            # this to 0 before each batch and adds it to the loss after
+            # compute_loss.
+            # Stays 0 for non-VAE graphs.
+            self._kl_total = torch.tensor(0.0)
+            self._accumulate_kl = False
 
             dim_map = {}
 
@@ -1073,12 +1146,15 @@ def build_model_from_graph(graph, feature_size, target_size, num_classes=0):
                     setattr(self, f"dense_{nid}", latent_mod)
                     dim_map[nid] = units
                 elif t == "reparam":
-                    # TF.js: dense(logvar → noise, init=zeros) + add(mu, noise)
-                    # Match: zero-initialized Linear applied to logvar input
-                    layer = nn.Linear(in_dim, in_dim)
-                    nn.init.zeros_(layer.weight)
-                    nn.init.zeros_(layer.bias)
-                    setattr(self, f"reparam_noise_{nid}", layer)
+                    # Proper Kingma-Welling reparameterization:
+                    #   z = mu + exp(0.5 * logvar) * epsilon  where epsilon ~ N(0, 1)
+                    # Previous version used a zero-init Linear projection of logvar
+                    # which is NOT reparameterization (no random sampling, no
+                    # stochasticity) — the encoder was always deterministic so
+                    # the decoder couldn't generalize to random N(0,1) latents.
+                    # The new TF.js side uses a custom ReparameterizeLayer; the
+                    # PyTorch side does the same operation directly in forward
+                    # without learnable parameters. No nn.Module to register.
                     dim_map[nid] = in_dim
                 elif t in ("lstm", "gru", "rnn"):
                     units = int(c.get("units", 32))
@@ -1312,6 +1388,15 @@ def build_model_from_graph(graph, feature_size, target_size, num_classes=0):
                         odim = out_in
                     elif htype == "classification" and num_classes > 0 and target_key in ("label", "logits"):
                         odim = num_classes
+                    elif htype in ("reconstruction", "autoencoder", "denoiser") or target_key == "pixel_values":
+                        # Reconstruction heads output an image-shaped tensor matching
+                        # the input feature dim, not the label dim. Without this
+                        # branch the fallback `odim = target_size` would shrink the
+                        # output to label dim (10 for Fashion-MNIST classification
+                        # datasets), and any upstream Dense(units=784, sigmoid)
+                        # would be replaced by a Linear(784→10) projection on the
+                        # PyTorch side — making MSE-against-image impossible.
+                        odim = out_in if isinstance(out_in, int) and out_in > 0 else feature_size
                     else:
                         odim = target_size
                     # skip linear projection if input dim already matches output dim
@@ -1477,12 +1562,44 @@ def build_model_from_graph(graph, feature_size, target_size, num_classes=0):
                         out = act(out)
                     tensors[nid] = out
                 elif t == "reparam":
-                    # TF.js: noise = dense(logvar), output = mu + noise
+                    # Kingma-Welling: z = mu + exp(0.5 * logvar) * epsilon
                     # input_1 = mu (first parent), input_2 = logvar (second parent)
                     mu_tensor = inp  # first parent
                     logvar_tensor = tensors[parents_sorted[1]["from"]] if len(parents_sorted) > 1 else inp
-                    noise = getattr(self, f"reparam_noise_{nid}")(logvar_tensor)
-                    tensors[nid] = mu_tensor + noise
+                    # clip logvar so exp(0.5*logvar) stays numerically stable
+                    logvar_clipped = torch.clamp(logvar_tensor, min=-10.0, max=10.0)
+                    std = torch.exp(0.5 * logvar_clipped)
+                    should_accumulate_kl = self.training or bool(getattr(self, "_accumulate_kl", False))
+                    if self.training:
+                        eps = torch.randn_like(mu_tensor)
+                    else:
+                        # Deterministic at inference/validation — encoder sees
+                        # mu, decoder sees mu. Validation can still accumulate
+                        # KL via _accumulate_kl so checkpoint selection uses the
+                        # same objective as training without injecting noise.
+                        eps = torch.zeros_like(mu_tensor)
+                    if should_accumulate_kl:
+                        # Accumulate KL divergence to standard normal prior:
+                        #   KL(q(z|x) || N(0,1)) = -0.5 * sum(1 + logvar - mu^2 - exp(logvar))
+                        # Without this regularizer, logvar collapses to a very
+                        # negative value (deterministic encoder) and the
+                        # decoder doesn't generalize to random N(0,1) latents,
+                        # which is exactly what makes "VAE Random Sampling"
+                        # produce noise. beta is read from the reparam node
+                        # config (preset.js sets beta: 0.001 by default).
+                        try:
+                            beta = float(self.node_configs[nid].get("beta", 0.001))
+                        except (TypeError, ValueError):
+                            beta = 0.001
+                        kl_per_sample = -0.5 * torch.sum(
+                            1.0 + logvar_clipped - mu_tensor.pow(2) - logvar_clipped.exp(),
+                            dim=tuple(range(1, mu_tensor.dim()))
+                        )
+                        kl_term = beta * kl_per_sample.mean()
+                        # _kl_total is reset to 0 at the start of each forward
+                        # call by the training loop (see compute_loss caller).
+                        self._kl_total = self._kl_total + kl_term
+                    tensors[nid] = mu_tensor + std * eps
                 elif t in ("lstm", "gru", "rnn"):
                     rnn = getattr(self, f"rnn_{nid}")
                     h = inp

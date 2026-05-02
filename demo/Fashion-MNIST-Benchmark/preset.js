@@ -83,7 +83,13 @@
     var a = N(d, "image_source", { sourceKey: "pixel_values", featureSize: 784, imageShape: [28,28,1] }, 60, 100);
     var b = N(d, "input", { mode: "flat" }, 200, 100);
     var c = N(d, "dense", { units: 256, activation: "relu" }, 340, 100);
-    var e = N(d, "dense", { units: 64, activation: "relu" }, 480, 100);
+    // Bottleneck 128 (was 64). At 64 the reconstructed images were too blurred
+    // to recognize the garment class — the demo's educational point about
+    // bottleneck-induced blur was getting lost in unreadable output. 128 still
+    // forces meaningful compression (input 784 → ~6× shrink) but reconstructed
+    // shirts/sneakers are now visually recognizable, while still showing the
+    // softening that contrasts with UNet's near-identity reconstruction.
+    var e = N(d, "dense", { units: 128, activation: "relu" }, 480, 100);
     var f = N(d, "dense", { units: 256, activation: "relu" }, 620, 100);
     var g = N(d, "dense", { units: 784, activation: "sigmoid" }, 760, 100);
     var h = N(d, "output", { target: "pixel_values", targetType: "pixel_values", loss: "mse", headType: "reconstruction" }, 920, 100);
@@ -101,7 +107,9 @@
     var c = N(d, "conv2d", { filters: 32, kernelSize: 3, strides: 2, padding: "same", activation: "relu" }, 300, 80);
     var e = N(d, "conv2d", { filters: 64, kernelSize: 3, strides: 2, padding: "same", activation: "relu" }, 420, 80);
     var f = N(d, "flatten", {}, 540, 80);
-    var g = N(d, "dense", { units: 32, activation: "relu" }, 660, 80);
+    // Bottleneck 64 (was 32). Same rationale as _ae() — 32-dim was too tight
+    // for visually recognizable Fashion-MNIST reconstruction.
+    var g = N(d, "dense", { units: 64, activation: "relu" }, 660, 80);
     var h = N(d, "dense", { units: 3136, activation: "relu" }, 780, 80);
     var i = N(d, "reshape", { targetShape: "7,7,64" }, 900, 80);
     var j = N(d, "conv2d_transpose", { filters: 32, kernelSize: 3, strides: 2, padding: "same", activation: "relu" }, 1020, 80);
@@ -215,12 +223,7 @@
     generations: [
       { id: "g-ae-recon",  name: "AE Reconstruct",       schemaId: sid, trainerId: "t-ae-pre",       family: "supervised", config: { method: "reconstruct", numSamples: 16 }, status: "draft", runs: [], createdAt: Date.now() },
       { id: "g-convae-r",  name: "Conv-AE Reconstruct",  schemaId: sid, trainerId: "t-conv-ae-pre",  family: "supervised", config: { method: "reconstruct", numSamples: 16 }, status: "draft", runs: [], createdAt: Date.now() },
-      // VAE Random Sampling intentionally omitted: the current ReparameterizeLayer
-      // implements z = mu + Linear_init=0(logvar) instead of proper Kingma-Welling
-      // sampling z = mu + exp(0.5*logvar)*epsilon. Without true stochasticity in
-      // training, the decoder is only valid at encoder mu values, not random
-      // N(0,1) samples — random sampling would output noise. Reconstruct still
-      // works because that path feeds encoder-mu, which is in the trained distribution.
+      { id: "g-vae-rand",  name: "VAE Random Sampling",  schemaId: sid, trainerId: "t-vae-pre",      family: "vae",        config: { method: "random", numSamples: 16, temperature: 1.0, seed: 42 }, status: "draft", runs: [], createdAt: Date.now() },
       { id: "g-vae-recon", name: "VAE Reconstruct",      schemaId: sid, trainerId: "t-vae-pre",      family: "vae",        config: { method: "reconstruct", numSamples: 16 }, status: "draft", runs: [], createdAt: Date.now() },
       { id: "g-cls-guide", name: "Classifier-Guided",    schemaId: sid, trainerId: "t-vae-cls-pre",  family: "vae",        config: { method: "classifier_guided", numSamples: 16, steps: 100, lr: 0.01, targetClass: 7, guidanceWeight: 2.0, seed: 42 }, status: "draft", runs: [], createdAt: Date.now() },
       // Langevin sampling intentionally omitted: m7 denoiser is a single-noise-

@@ -175,6 +175,16 @@ var modelConfigs = [
   { model: preset.models[4], trainer: preset.trainers[4], varName: "OSC_DENOISER_PRETRAINED_BIN_B64", file: "denoiser_pretrained.js" },
 ];
 
+// Allow `node scripts/train_oscillator_pretrained.js <index>` to retrain just
+// one model. Useful when the proper Kingma-Welling reparam landed and only
+// the VAE/VAE+Cls files need to be regenerated, not the MLP/GRU/Denoiser
+// pretrained which were already healthy.
+var _onlyIdx = process.argv[2] !== undefined ? Number(process.argv[2]) : -1;
+if (Number.isInteger(_onlyIdx) && _onlyIdx >= 0 && _onlyIdx < modelConfigs.length) {
+  modelConfigs = [modelConfigs[_onlyIdx]];
+  console.log("Running only model[" + _onlyIdx + "]: " + modelConfigs[0].model.name);
+}
+
 var midx = 0;
 function nextModel() {
   if (midx >= modelConfigs.length) {

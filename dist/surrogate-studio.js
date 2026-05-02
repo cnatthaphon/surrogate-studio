@@ -1,5 +1,5 @@
 // Surrogate Studio - concatenated bundle
-// Generated: 2026-05-01T18:21:30Z
+// Generated: 2026-05-02T05:07:27Z
 // Source files: 58
 
 
@@ -21345,23 +21345,94 @@
     var _phaseFlagInput = null;
     var _phaseSwitchConfigs = [];
 
-    // VAE reparameterization — uses tf.layers.add as the merge layer
-    // instead of a custom Layer (which has broken init in TF.js 4.x browser).
-    // Approach: z = mu + dense(logvar) where the dense learns sqrt(exp(logvar/2))
-    // The KL loss on the separate mu/logvar heads enforces proper VAE behavior.
+    // VAE reparameterization — proper Kingma-Welling sampling:
+    //   z = mu + exp(0.5 * logvar) * epsilon  where epsilon ~ N(0, 1)
+    //
+    // Previous version used `z = mu + Linear_init=0(logvar)` which compiles in
+    // every TF.js version but is NOT reparameterization — there's no random
+    // sampling, the "noise projection" is a learnable dense layer initialized
+    // to zero. Without true stochasticity at training time the decoder only
+    // ever sees encoder-mu values, so generating from a random N(0,1) latent
+    // (VAE Random Sampling) outputs noise. This was the root cause of
+    // demoting VAE Random Sampling and Classifier-Guided.
+    //
+    // Implementation: a custom Layer subclass with random sampling in call().
+    // Registered with tf.serialization.registerClass() so saved models can
+    // round-trip through tf.loadLayersModel without "Unknown layer" errors.
     var _reparamCount = 0;
     var ReparameterizeLayer = (function () {
-      function RL() {}
+      if (!tf || typeof tf.layers !== "object" || typeof tf.layers.Layer !== "function") {
+        // tf.layers.Layer not available — return a fallback that throws a
+        // clear error if anyone tries to use it. The previous Linear-init=0
+        // workaround is intentionally NOT preserved here because it produces
+        // a silently-wrong VAE, which is worse than failing loud.
+        function RLStub() {}
+        RLStub.apply = function () {
+          throw new Error("Reparameterize layer requires tf.layers.Layer (TF.js >= 4.x)");
+        };
+        return RLStub;
+      }
+      class RL extends tf.layers.Layer {
+        constructor(config) {
+          super(config || {});
+        }
+        computeOutputShape(inputShape) {
+          // mu and logvar have the same shape; output matches that shape.
+          return Array.isArray(inputShape) && Array.isArray(inputShape[0]) ? inputShape[0] : inputShape;
+        }
+        call(inputs, kwargs) {
+          // Training: z = mu + exp(0.5*logvar) * eps (stochastic — needed for VAE).
+          // Inference: z = mu (deterministic — keeps Reconstruct outputs clean
+          // rather than injecting noise into every demo render). Random Sampling
+          // bypasses this layer entirely (extractDecoder feeds fresh random z
+          // into the decoder), so this only affects the encode→reparam→decode
+          // path in Reconstruct mode.
+          var isTraining = kwargs && kwargs.training === true;
+          return tf.tidy(function () {
+            var arr = Array.isArray(inputs) ? inputs : [inputs];
+            var mu = arr[0];
+            if (!isTraining) return tf.add(mu, tf.zerosLike(mu));
+            var logvar = tf.clipByValue(arr[1], -10, 10);
+            // Use mu.shape (a regular number[] from the resolved tensor at
+            // forward time), NOT tf.shape(mu). The tf.shape free function isn't
+            // exposed in every TF.js build, and tf.randomNormal expects an
+            // Array<number>, not a 1-D tensor of shape values. With tf.shape
+            // we'd silently fail under model.fit() runtime even when graph
+            // construction passes.
+            var eps = tf.randomNormal(mu.shape, 0, 1, mu.dtype);
+            var std = tf.exp(tf.mul(tf.scalar(0.5), logvar));
+            return tf.add(mu, tf.mul(std, eps));
+          });
+        }
+      }
+      // Static className is what tf.serialization.registerClass actually reads
+      // to populate its classNameMap. Without it, registerClass silently
+      // succeeds but the layer is NOT findable by name on tf.loadLayersModel
+      // (saved checkpoints fail with "Unknown layer: ReparameterizeLayer").
+      // Codex caught this — the previous version only exposed getClassName()
+      // (an instance method) which isn't read by the registry.
+      RL.className = "ReparameterizeLayer";
+      if (tf.serialization && typeof tf.serialization.registerClass === "function") {
+        try {
+          tf.serialization.registerClass(RL);
+        } catch (e) {
+          // Surface registration failures rather than silently swallowing them
+          // (the previous version had a catch-all that hid this exact bug).
+          if (typeof console !== "undefined" && console.warn) {
+            console.warn("ReparameterizeLayer registerClass failed:", e && e.message || e);
+          }
+        }
+      }
+      // Static helper that wires the symbolic mu/logvar tensors through the
+      // layer with deterministic naming for downstream extractDecoder lookup
+      // (`reparam_<nid>`). The trailing `_add_<nid>` alias keeps the trace
+      // backwards-compatible with the previous topology where the latent
+      // output was named `reparam_add_*`.
       RL.apply = function (muTensor, logvarTensor, nodeId) {
         _reparamCount++;
         var nid = nodeId || _reparamCount;
-        var latentDim = muTensor.shape[muTensor.shape.length - 1];
-        var noiseProj = tf.layers.dense({
-          units: latentDim, activation: "linear",
-          name: "reparam_noise_" + nid,
-          kernelInitializer: "zeros", biasInitializer: "zeros",
-        }).apply(logvarTensor);
-        return tf.layers.add({ name: "reparam_add_" + nid }).apply([muTensor, noiseProj]);
+        var layer = new RL({ name: "reparam_add_" + nid });
+        return layer.apply([muTensor, logvarTensor]);
       };
       return RL;
     })();
@@ -24765,23 +24836,50 @@
     return true;
   }
 
+  // Canonicalize a weight name to its browser-side equivalent. Returns a
+  // single string for layers whose name maps unambiguously, or an Array of
+  // candidates when the browser may use multiple naming conventions for the
+  // same logical layer (notably output heads — see _aliasesFor below).
+  // Callers should treat the result as "any of these matches".
   function canonicalizeWeightName(rawName) {
-    var name = _stripSuffix(rawName);
-    if (!name) return "";
-    if (name.indexOf("tfjs_") === 0) name = name.slice(5);
-    if (name.indexOf("/") >= 0) return _stripSuffix(name);
+    var aliases = _aliasesFor(rawName);
+    return aliases.length === 1 ? aliases[0] : aliases;
+  }
 
-    var m = name.match(/^(dense|conv1d|conv2d|convt2d|embed|out)_(\d+)\.(weight|bias)$/);
-    if (m) return "n" + m[2] + "/" + (m[3] === "weight" ? "kernel" : "bias");
+  function _aliasesFor(rawName) {
+    var name = _stripSuffix(rawName);
+    if (!name) return [""];
+    if (name.indexOf("tfjs_") === 0) name = name.slice(5);
+    if (name.indexOf("/") >= 0) return [_stripSuffix(name)];
+
+    // Server exports output-layer weights as `out_<id>.weight|bias`. The
+    // browser-side model_builder gives the same logical layer either
+    // `n<id>/kernel|bias` (when the output is a passthrough Dense built like
+    // the encoder denses) OR `head_<id>/kernel|bias` (when the output is
+    // built as a discriminator/classifier head). Without including BOTH
+    // candidates, classifier-output weights fail the name match — load
+    // falls through to positional, and on branched VAE+Classifier graphs
+    // positional order doesn't line up with the browser's topological order
+    // (classifier weights end up assigned to recon-path layers, classifier
+    // output becomes constant, gradient through the latent is zero, and
+    // classifier-guided generation can't steer at all).
+    var m = name.match(/^out_(\d+)\.(weight|bias)$/);
+    if (m) {
+      var tail = m[2] === "weight" ? "kernel" : "bias";
+      return ["head_" + m[1] + "/" + tail, "n" + m[1] + "/" + tail];
+    }
+
+    m = name.match(/^(dense|conv1d|conv2d|convt2d|embed)_(\d+)\.(weight|bias)$/);
+    if (m) return ["n" + m[2] + "/" + (m[3] === "weight" ? "kernel" : "bias")];
 
     m = name.match(/^pe_proj_(\d+)\.(weight|bias)$/);
-    if (m) return "n" + m[1] + "_proj/" + (m[2] === "weight" ? "kernel" : "bias");
+    if (m) return ["n" + m[1] + "_proj/" + (m[2] === "weight" ? "kernel" : "bias")];
 
     m = name.match(/^tb_(ln1|ln2)_(\d+)\.(weight|bias)$/);
-    if (m) return "n" + m[2] + "_" + m[1] + "/" + (m[3] === "weight" ? "gamma" : "beta");
+    if (m) return ["n" + m[2] + "_" + m[1] + "/" + (m[3] === "weight" ? "gamma" : "beta")];
 
     m = name.match(/^tb_(q|k|v|attn_proj|ffn1|ffn2)_(\d+)\.(weight|bias)$/);
-    if (m) return "n" + m[2] + "_" + m[1] + "/" + (m[3] === "weight" ? "kernel" : "bias");
+    if (m) return ["n" + m[2] + "_" + m[1] + "/" + (m[3] === "weight" ? "kernel" : "bias")];
 
     m = name.match(/^(bn|ln)_(\d+)\.(weight|bias|running_mean|running_var)$/);
     if (m) {
@@ -24791,13 +24889,13 @@
         running_mean: "moving_mean",
         running_var: "moving_variance",
       };
-      return "n" + m[2] + "/" + tailMap[m[3]];
+      return ["n" + m[2] + "/" + tailMap[m[3]]];
     }
 
     m = name.match(/^(rnn|gru|lstm)_(\d+)\.(kernel|recurrent_kernel|bias)$/);
-    if (m) return "n" + m[2] + "/" + m[3];
+    if (m) return ["n" + m[2] + "/" + m[3]];
 
-    return name;
+    return [name];
   }
 
   function extractWeightValues(artifacts) {
@@ -24830,10 +24928,14 @@
     specs.forEach(function (sp, idx) {
       var shape = Array.isArray(sp.shape) ? sp.shape.slice() : [];
       var size = shape.reduce(function (a, b) { return a * b; }, 1);
-      var key = canonicalizeWeightName(sp.name || "");
-      if (key) {
+      // canonicalizeWeightName returns either a string or an array of candidate
+      // browser-side names. Register the spec under every alias so the lookup
+      // below can match whichever convention the browser model used.
+      var keys = _aliasesFor(sp.name || "").filter(Boolean);
+      if (keys.length) {
         namedSpecs++;
-        savedMap[key] = { offset: offset, size: size, shape: shape, rawName: sp.name || "", index: idx };
+        var entry = { offset: offset, size: size, shape: shape, rawName: sp.name || "", index: idx, primaryKey: keys[0] };
+        keys.forEach(function (k) { if (k && !savedMap[k]) savedMap[k] = entry; });
       }
       offset += size;
     });
@@ -24841,15 +24943,26 @@
     if (namedSpecs > 0 && modelWeights.length) {
       for (var i = 0; i < modelWeights.length; i++) {
         var mw = modelWeights[i];
-        var key = canonicalizeWeightName(mw.name);
-        var saved = savedMap[key];
+        var mwAliases = _aliasesFor(mw.name).filter(Boolean);
+        var saved = null;
+        var matchedKey = null;
+        for (var ai = 0; ai < mwAliases.length; ai++) {
+          if (savedMap[mwAliases[ai]]) {
+            saved = savedMap[mwAliases[ai]];
+            matchedKey = mwAliases[ai];
+            break;
+          }
+        }
         if (!saved) continue;
         var expectedSize = mw.shape.reduce(function (a, b) { return a * b; }, 1);
         if (saved.size !== expectedSize) continue;
         if (saved.shape.length && !_sameShape(saved.shape, mw.shape)) continue;
         current[i] = tf.tensor(values.subarray(saved.offset, saved.offset + saved.size), mw.shape);
         matched++;
-        matchedSpecKeys[key] = true;
+        // Track the spec's PRIMARY key (the spec was registered under all its
+        // aliases, but for the "all named specs matched" check we want one
+        // entry per unique spec, not per alias).
+        matchedSpecKeys[saved.primaryKey || matchedKey] = true;
       }
       var matchedNamedSpecs = Object.keys(matchedSpecKeys).length;
       if (matchedNamedSpecs === namedSpecs && matched > 0) {
