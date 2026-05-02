@@ -53,7 +53,7 @@ function buildVaeClsLikeModel() {
   return tf.model({ inputs: imgIn, outputs: [dec2, cls2], name: "vae_cls" });
 }
 
-function main() {
+async function main() {
   console.log("--- extractDecoder branched-graph regression test ---\n");
 
   var model = buildVaeClsLikeModel();
@@ -133,7 +133,70 @@ function main() {
   assert.ok(threw, "extractDecoder must throw when backward trace cannot reach the latent layer");
   assert.ok(/did not reach|latent/.test(threwMsg), "error message should explain the missed-reparam case");
 
+  // Test 5: TF.js client-side VAE training smoke test.
+  // Codex caught a regression where the reparameterize layer used tf.shape
+  // (which doesn't exist in some TF.js builds) and registered without a
+  // static className (so the registry didn't actually pick it up). Both
+  // surface only when you actually call model.fit() — graph construction
+  // passes either way. This test runs a 1-step fit on a tiny VAE-shaped
+  // model that goes through ReparameterizeLayer.apply() in train mode.
+  console.log("\nClient-side VAE fit() smoke test:");
+  var fitImg = tf.input({ shape: [16], name: "fit_img" });
+  var fitMu = tf.layers.dense({ units: 4, name: "fit_mu" }).apply(fitImg);
+  var fitLv = tf.layers.dense({ units: 4, name: "fit_lv" }).apply(fitImg);
+  // Use the actual ReparameterizeLayer from model_builder_core (not a stub).
+  // We grab it indirectly by running buildModelFromGraph above — that ensures
+  // the layer class is constructed and registered by the same code path the
+  // browser exercises.
+  var fitGraph = {
+    drawflow: { Home: { data: {
+      "1": { name: "input_layer", data: { mode: "flat" }, inputs: {}, outputs: { output_1: { connections: [{ node: "2", input: "input_1" }] } } },
+      "2": { name: "dense_layer", data: { units: 4, activation: "relu" }, inputs: { input_1: { connections: [{ node: "1", output: "output_1" }] } }, outputs: { output_1: { connections: [{ node: "3", input: "input_1" }, { node: "4", input: "input_1" }] } } },
+      "3": { name: "latent_mu_layer", data: { units: 4, group: "z" }, inputs: { input_1: { connections: [{ node: "2", output: "output_1" }] } }, outputs: { output_1: { connections: [{ node: "5", input: "input_1" }] } } },
+      "4": { name: "latent_logvar_layer", data: { units: 4, group: "z" }, inputs: { input_1: { connections: [{ node: "2", output: "output_1" }] } }, outputs: { output_1: { connections: [{ node: "5", input: "input_2" }] } } },
+      "5": { name: "reparam_layer", data: { units: 4, group: "z", beta: 0.001 }, inputs: { input_1: { connections: [{ node: "3", output: "output_1" }] }, input_2: { connections: [{ node: "4", output: "output_1" }] } }, outputs: { output_1: { connections: [{ node: "6", input: "input_1" }] } } },
+      "6": { name: "dense_layer", data: { units: 16, activation: "sigmoid" }, inputs: { input_1: { connections: [{ node: "5", output: "output_1" }] } }, outputs: { output_1: { connections: [{ node: "7", input: "input_1" }] } } },
+      "7": { name: "output_layer", data: { target: "x", targetType: "x", loss: "mse", headType: "reconstruction", units: 16 }, inputs: { input_1: { connections: [{ node: "6", output: "output_1" }] } }, outputs: {} },
+    } } }
+  };
+  var built = ModelBuilder.buildModelFromGraph(tf, fitGraph, {
+    mode: "direct", featureSize: 16, windowSize: 1, seqFeatureSize: 16,
+    allowedOutputKeys: [{ key: "x", featureSize: 16 }], defaultTarget: "x", numClasses: 0,
+  });
+  console.log("  built model outputs:", built.model.outputs.length);
+  built.model.compile({ optimizer: "adam", loss: "meanSquaredError" });
+  var X = tf.randomNormal([8, 16]);
+  // built.model has TWO outputs: recon (target=x) and latent_kl (target=zeros).
+  // Auto-injected by buildModelFromGraph for VAE-style graphs — we have to
+  // feed both for fit() to dispatch.
+  var Y_recon = X;
+  var Y_kl = tf.zeros([8, 8]);  // latent_kl tensor is concat(mu, logvar) = 4 + 4 dims
+  var fitErr = null;
+  try {
+    var hist = await built.model.fit(X, [Y_recon, Y_kl], { epochs: 1, batchSize: 4, verbose: 0 });
+    console.log("  fit() ran. loss after 1 epoch:", hist.history.loss[0].toFixed(6));
+  } catch (e) {
+    fitErr = e;
+    console.log("  fit() threw:", String(e && e.message || e).slice(0, 150));
+  }
+  X.dispose(); Y_kl.dispose();
+  assert.strictEqual(fitErr, null, "TF.js VAE client-side fit() must not throw (was: tf.shape is not a function)");
+
+  // Test 6: ReparameterizeLayer is actually registered for serialization.
+  // Codex pointed out the previous registration call hid failures — verify
+  // the layer is in the className map.
+  console.log("\nReparameterizeLayer serialization registration:");
+  var classMap = tf.serialization && tf.serialization.SerializationMap
+    && tf.serialization.SerializationMap.getMap()
+    && tf.serialization.SerializationMap.getMap().classNameMap;
+  var registered = !!(classMap && classMap.ReparameterizeLayer);
+  console.log("  registered:", registered);
+  assert.ok(registered, "ReparameterizeLayer must be registered with tf.serialization (saved checkpoints fail to load otherwise)");
+
   console.log("\nPASS extractDecoder branched-graph test\n");
 }
 
-main();
+main().catch(function (e) {
+  console.error("Test failed:", e && e.message || e);
+  process.exit(1);
+});

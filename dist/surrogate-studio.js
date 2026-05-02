@@ -1,5 +1,5 @@
 // Surrogate Studio - concatenated bundle
-// Generated: 2026-05-01T19:04:55Z
+// Generated: 2026-05-02T04:25:03Z
 // Source files: 58
 
 
@@ -21393,26 +21393,36 @@
             var mu = arr[0];
             if (!isTraining) return tf.add(mu, tf.zerosLike(mu));
             var logvar = tf.clipByValue(arr[1], -10, 10);
-            var eps = tf.randomNormal(tf.shape(mu), 0, 1, mu.dtype);
+            // Use mu.shape (a regular number[] from the resolved tensor at
+            // forward time), NOT tf.shape(mu). The tf.shape free function isn't
+            // exposed in every TF.js build, and tf.randomNormal expects an
+            // Array<number>, not a 1-D tensor of shape values. With tf.shape
+            // we'd silently fail under model.fit() runtime even when graph
+            // construction passes.
+            var eps = tf.randomNormal(mu.shape, 0, 1, mu.dtype);
             var std = tf.exp(tf.mul(tf.scalar(0.5), logvar));
             return tf.add(mu, tf.mul(std, eps));
           });
         }
-        getClassName() {
-          return "ReparameterizeLayer";
+      }
+      // Static className is what tf.serialization.registerClass actually reads
+      // to populate its classNameMap. Without it, registerClass silently
+      // succeeds but the layer is NOT findable by name on tf.loadLayersModel
+      // (saved checkpoints fail with "Unknown layer: ReparameterizeLayer").
+      // Codex caught this — the previous version only exposed getClassName()
+      // (an instance method) which isn't read by the registry.
+      RL.className = "ReparameterizeLayer";
+      if (tf.serialization && typeof tf.serialization.registerClass === "function") {
+        try {
+          tf.serialization.registerClass(RL);
+        } catch (e) {
+          // Surface registration failures rather than silently swallowing them
+          // (the previous version had a catch-all that hid this exact bug).
+          if (typeof console !== "undefined" && console.warn) {
+            console.warn("ReparameterizeLayer registerClass failed:", e && e.message || e);
+          }
         }
       }
-      // Make the layer picklable so saved checkpoints reload correctly. Guard
-      // against double-registration (this module may be imported many times in
-      // tests / repeated app inits).
-      try {
-        if (tf.serialization && typeof tf.serialization.registerClass === "function") {
-          // registerClass is idempotent enough that re-registering with the
-          // same name typically warns rather than throws, but wrap in try
-          // to be safe across TF.js versions.
-          tf.serialization.registerClass(RL);
-        }
-      } catch (_) {}
       // Static helper that wires the symbolic mu/logvar tensors through the
       // layer with deterministic naming for downstream extractDecoder lookup
       // (`reparam_<nid>`). The trailing `_add_<nid>` alias keeps the trace
