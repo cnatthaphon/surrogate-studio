@@ -1339,6 +1339,7 @@
           seed: seed,
           targetClass: Number(gCfg.targetClass || 0),
           guidanceWeight: Number(gCfg.guidanceWeight || 1.0),
+          priorWeight: gCfg.priorWeight != null ? Number(gCfg.priorWeight) : 0.5,
           sampleNodeId: String(trainerOverride.sampleNodeId || ""),
           outputNodeId: String(trainerOverride.outputNodeId || ""),
         };
@@ -1369,6 +1370,19 @@
           cfg.classifierModel = built.model;
           cfg.targetClass = Number(gCfg.targetClass || 0);
           cfg.guidanceWeight = Number(gCfg.guidanceWeight || 1.0);
+          cfg.priorWeight = gCfg.priorWeight != null ? Number(gCfg.priorWeight) : 0.5;
+          // Locate the classifier head in headConfigs so the engine reads the
+          // right output index (mirrors generation_tab.js — required for
+          // multi-output VAE+Cls so the classifier-guidance objective gathers
+          // the actual class-prob tensor, not the recon).
+          if (built.headConfigs && built.headConfigs.length > 1) {
+            for (var _hi = 0; _hi < built.headConfigs.length; _hi++) {
+              var _hc = built.headConfigs[_hi];
+              if (_hc && String(_hc.headType || "").toLowerCase() === "classification") {
+                cfg.classifierOutputIndex = _hi; break;
+              }
+            }
+          }
         }
         if (method === "reconstruct") {
           cfg.fullModel = built.model;

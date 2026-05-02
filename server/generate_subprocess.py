@@ -217,6 +217,11 @@ def main():
         # optimize z so decoded output is classified as target class
         target_class = int(config.get("targetClass", 0))
         guidance_weight = float(config.get("guidanceWeight", 1.0))
+        # Prior weight on ||z||² — anchors the latent near N(0,1) so the
+        # decoder produces in-distribution samples instead of adversarial
+        # textures that fool the classifier. Mirrors the TF.js side
+        # (objectives.classifierGuidance in generation_engine_core.js).
+        prior_weight = float(config.get("priorWeight", 0.5))
         steps = int(config.get("steps", 100))
         lr_cg = float(config.get("lr", 0.01))
         decoder, actual_dim = _extract_decoder(model, latent_dim)
@@ -236,6 +241,8 @@ def main():
                 # maximize probability of target class
                 log_prob = torch.log(cls_out[:, target_class].clamp(min=1e-8))
                 loss = -log_prob.mean() * guidance_weight
+                if prior_weight > 0:
+                    loss = loss + prior_weight * z.pow(2).mean()
             loss.backward()
             opt.step()
             loss_history.append({"step": step, "loss": float(loss.item())})

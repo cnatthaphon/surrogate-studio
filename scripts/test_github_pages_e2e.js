@@ -96,11 +96,13 @@ var DEMOS = [
     tabs: ["dataset", "model", "trainer", "generation", "evaluation"] },
   { name: "Fashion-MNIST GAN", path: "/demo/Fashion-MNIST-GAN/",
     presetKey: "FASHION_MNIST_GAN_PRESET",
-    // Was 6 trainers / 6 generations when MLP-WGAN had a pre-trained card.
-    // WGAN pretrained was demoted (volatile under clipWeights=0.1, no seed
-    // control on server) — only the draft "MLP-WGAN Trainer" + draft
-    // "MLP-WGAN Generate" remain. So 5 trainers / 5 generations now.
-    minModels: 3, minTrainers: 5, minGenerations: 5, minEvaluations: 1,
+    // MLP-WGAN was demoted in PR #58 then restored in PR #62 with
+    // Arjovsky-faithful config (clipWeights=0.01, 2000 epochs). Anchor
+    // the count AND the exact pretrained-trainer IDs so a future demotion
+    // can't silently slip past CI without updating this test.
+    minModels: 3, minTrainers: 6, minGenerations: 6, minEvaluations: 1,
+    expectTrainerIds: ["t-mlp-gan-trained", "t-dcgan-trained", "t-mlp-wgan-trained"],
+    expectGenerationIds: ["g-mlp-gen-trained", "g-dcgan-gen-trained", "g-mlp-wgan-gen-trained"],
     tabs: ["dataset", "model", "trainer", "generation", "evaluation"], expectPretrained: true },
   { name: "Fashion-MNIST Diffusion", path: "/demo/Fashion-MNIST-Diffusion/",
     presetKey: "FASHION_MNIST_DIFFUSION_PRESET",
@@ -185,9 +187,18 @@ async function testDemo(browser, demo) {
   if (demo.presetKey) {
     var preset = await page.evaluate(function (key) {
       var p = window[key]; if (!p) return null;
-      return { datasetId: p.dataset ? p.dataset.id : null, models: p.models ? p.models.length : 0,
-        trainers: p.trainers ? p.trainers.length : 0, generations: p.generations ? p.generations.length : 0,
-        evaluations: p.evaluations ? p.evaluations.length : 0 };
+      return {
+        datasetId: p.dataset ? p.dataset.id : null,
+        models: p.models ? p.models.length : 0,
+        trainers: p.trainers ? p.trainers.length : 0,
+        generations: p.generations ? p.generations.length : 0,
+        evaluations: p.evaluations ? p.evaluations.length : 0,
+        // Pull IDs so the harness can verify exact-IDs on demos that pin
+        // (e.g. Fashion-MNIST GAN's t-mlp-wgan-trained must not silently
+        // disappear again — it was demoted in PR #58 and restored in PR #62).
+        trainerIds: p.trainers ? p.trainers.map(function (t) { return t && t.id; }) : [],
+        generationIds: p.generations ? p.generations.map(function (g) { return g && g.id; }) : [],
+      };
     }, demo.presetKey);
     ok(!!preset, "Preset loaded: " + demo.presetKey);
     if (preset) {
@@ -196,6 +207,16 @@ async function testDemo(browser, demo) {
       if (demo.minTrainers) ok(preset.trainers >= demo.minTrainers, "Trainers >= " + demo.minTrainers + " (got " + preset.trainers + ")");
       if (demo.minGenerations != null) ok(preset.generations >= demo.minGenerations, "Generations >= " + demo.minGenerations + " (got " + preset.generations + ")");
       if (demo.minEvaluations) ok(preset.evaluations >= demo.minEvaluations, "Evaluations >= " + demo.minEvaluations + " (got " + preset.evaluations + ")");
+      if (Array.isArray(demo.expectTrainerIds)) {
+        demo.expectTrainerIds.forEach(function (tid) {
+          ok(preset.trainerIds.indexOf(tid) >= 0, "Trainer present: " + tid);
+        });
+      }
+      if (Array.isArray(demo.expectGenerationIds)) {
+        demo.expectGenerationIds.forEach(function (gid) {
+          ok(preset.generationIds.indexOf(gid) >= 0, "Generation present: " + gid);
+        });
+      }
     }
     if (demo.expectPretrained) {
       var ptOk = await page.evaluate(function (key) {
