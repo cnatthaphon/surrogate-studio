@@ -171,11 +171,16 @@
     _nid = 0; var d = {};
     var a = N(d, "image_source", { sourceKey: "pixel_values", featureSize: 784, imageShape: [28,28,1] }, 60, 100);
     var b = N(d, "noise_injection", { scale: 0.3, schedule: "constant" }, 230, 100);
+    // Symmetric encoder/decoder: 784 → 512 → 256 → 512 → 784. Output sigmoid
+    // bounds reconstruction to [0,1]; previously used `linear` which let pixels
+    // drift outside the data range and broke Langevin sampling (the model output
+    // collapsed to ~0 for out-of-distribution Langevin init noise).
     var c = N(d, "dense", { units: 512, activation: "relu" }, 400, 100);
     var e = N(d, "dense", { units: 256, activation: "relu" }, 570, 100);
-    var f = N(d, "dense", { units: 784, activation: "linear" }, 740, 100);
-    var g = N(d, "output", { target: "pixel_values", targetType: "pixel_values", loss: "mse", headType: "reconstruction" }, 910, 100);
-    C(d,a,b); C(d,b,c); C(d,c,e); C(d,e,f); C(d,f,g);
+    var dec = N(d, "dense", { units: 512, activation: "relu" }, 740, 100);
+    var f = N(d, "dense", { units: 784, activation: "sigmoid" }, 910, 100);
+    var g = N(d, "output", { target: "pixel_values", targetType: "pixel_values", loss: "mse", headType: "reconstruction" }, 1080, 100);
+    C(d,a,b); C(d,b,c); C(d,c,e); C(d,e,dec); C(d,dec,f); C(d,f,g);
     return graph(d);
   }
 
@@ -209,7 +214,7 @@
       { id: "t-conv-ae",  name: "Conv-AE Trainer",     schemaId: sid, datasetId: DS_ID, modelId: "m-conv-ae",  status: "draft", config: { epochs: 40, batchSize: 128, learningRate: 0.001, optimizerType: "adam", useServer: true } },
       { id: "t-vae",      name: "VAE Trainer",         schemaId: sid, datasetId: DS_ID, modelId: "m-vae",      status: "draft", config: { epochs: 20, batchSize: 128, learningRate: 0.0005, optimizerType: "adam", useServer: true } },
       { id: "t-vae-cls",  name: "VAE+Cls Trainer",     schemaId: sid, datasetId: DS_ID, modelId: "m-vae-cls",  status: "draft", config: { epochs: 20, batchSize: 128, learningRate: 0.0005, optimizerType: "adam", useServer: true } },
-      { id: "t-denoiser", name: "Denoiser Trainer",    schemaId: sid, datasetId: DS_ID, modelId: "m-denoiser", status: "draft", config: { epochs: 20, batchSize: 128, learningRate: 0.001, optimizerType: "adam", useServer: true } },
+      { id: "t-denoiser", name: "Denoiser Trainer",    schemaId: sid, datasetId: DS_ID, modelId: "m-denoiser", status: "draft", config: { epochs: 40, batchSize: 128, learningRate: 0.001, optimizerType: "adam", useServer: true } },
       // Pre-trained (TF.js CPU, 20 epochs)
       { id: "t-mlp-pre",      name: "MLP (pre-trained)",      schemaId: sid, datasetId: DS_ID, modelId: "m-mlp",      status: "done", _pretrainedVar: "M1_MLP_BASELINE_PRE_TRAINED_PRETRAINED_BIN_B64", config: { epochs: 20, batchSize: 128, learningRate: 0.001, optimizerType: "adam" } },
       { id: "t-cnn-pre",      name: "CNN (pre-trained)",      schemaId: sid, datasetId: DS_ID, modelId: "m-cnn",      status: "done", _pretrainedVar: "M2_CNN_LENET_5_PRE_TRAINED_PRETRAINED_BIN_B64", config: { epochs: 20, batchSize: 128, learningRate: 0.001, optimizerType: "adam" } },
@@ -217,7 +222,7 @@
       { id: "t-conv-ae-pre",  name: "Conv-AE (pre-trained)",  schemaId: sid, datasetId: DS_ID, modelId: "m-conv-ae",  status: "done", _pretrainedVar: "M4_CONV_AUTOENCODER_PRE_TRAINED_PRETRAINED_BIN_B64", config: { epochs: 40, batchSize: 128, learningRate: 0.001, optimizerType: "adam" } },
       { id: "t-vae-pre",      name: "VAE (pre-trained)",      schemaId: sid, datasetId: DS_ID, modelId: "m-vae",      status: "done", _pretrainedVar: "M5_VAE_PRE_TRAINED_PRETRAINED_BIN_B64", config: { epochs: 20, batchSize: 128, learningRate: 0.0005, optimizerType: "adam" } },
       { id: "t-vae-cls-pre",  name: "VAE+Cls (pre-trained)",  schemaId: sid, datasetId: DS_ID, modelId: "m-vae-cls",  status: "done", _pretrainedVar: "M6_VAE_CLASSIFIER_PRE_TRAINED_PRETRAINED_BIN_B64", config: { epochs: 20, batchSize: 128, learningRate: 0.0005, optimizerType: "adam" } },
-      { id: "t-denoiser-pre", name: "Denoiser (pre-trained)", schemaId: sid, datasetId: DS_ID, modelId: "m-denoiser", status: "done", _pretrainedVar: "M7_DENOISING_AE_PRE_TRAINED_PRETRAINED_BIN_B64", config: { epochs: 20, batchSize: 128, learningRate: 0.001, optimizerType: "adam" } },
+      { id: "t-denoiser-pre", name: "Denoiser (pre-trained)", schemaId: sid, datasetId: DS_ID, modelId: "m-denoiser", status: "done", _pretrainedVar: "M7_DENOISING_AE_PRE_TRAINED_PRETRAINED_BIN_B64", config: { epochs: 40, batchSize: 128, learningRate: 0.001, optimizerType: "adam" } },
     ],
 
     generations: [
