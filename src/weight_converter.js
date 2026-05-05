@@ -370,6 +370,13 @@
       }
       if (shape.length === 4 && (name.indexOf("conv") >= 0 || name.indexOf("pe_proj_") === 0)) {
         // Conv2D: [O, I, H, W] → [H, W, I, O]
+        // (Same formula works for Conv2DTranspose by symmetry: PyTorch's
+        // ConvTranspose2d weights are [I, O, H, W] and TF.js's
+        // tf.conv2dTranspose kernel is [H, W, outDepth=O, inDepth=I] —
+        // re-labeling shape[0]/shape[1] flips both source and destination,
+        // so the same memory permutation applies. Verified against
+        // tfjs-core's conv2dTranspose docs: filter layout
+        // [filterH, filterW, outDepth, inDepth].)
         var O2 = shape[0], I2 = shape[1], H2 = shape[2], W2 = shape[3];
         var conv2 = new Float32Array(size);
         for (var o2 = 0; o2 < O2; o2++) for (var i2 = 0; i2 < I2; i2++) for (var h2 = 0; h2 < H2; h2++) for (var w2 = 0; w2 < W2; w2++) {

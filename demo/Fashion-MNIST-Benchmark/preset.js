@@ -226,15 +226,20 @@
       { id: "g-vae-rand",  name: "VAE Random Sampling",  schemaId: sid, trainerId: "t-vae-pre",      family: "vae",        config: { method: "random", numSamples: 16, temperature: 1.0, seed: 42 }, status: "draft", runs: [], createdAt: Date.now() },
       { id: "g-vae-recon", name: "VAE Reconstruct",      schemaId: sid, trainerId: "t-vae-pre",      family: "vae",        config: { method: "reconstruct", numSamples: 16 }, status: "draft", runs: [], createdAt: Date.now() },
       { id: "g-cls-guide", name: "Classifier-Guided",    schemaId: sid, trainerId: "t-vae-cls-pre",  family: "vae",        config: { method: "classifier_guided", numSamples: 16, steps: 100, lr: 0.005, targetClass: 7, guidanceWeight: 1.5, priorWeight: 0.5, seed: 42 }, status: "draft", runs: [], createdAt: Date.now() },
-      // Langevin sampling intentionally omitted: m7 denoiser is a single-noise-
-      // scale denoising autoencoder (noise_injection scale=0.3), not a
-      // score-based model trained across multiple noise levels. Langevin
-      // dynamics needs the latter (NCSN/score-SDE style). With this denoiser,
-      // x ~ N(0,1) is far out of training distribution, and the network
-      // collapses outputs to ~0 → all-black samples. Reconstruct still works
-      // because that path feeds real images. See Fashion-MNIST-Diffusion demo
-      // for proper score-based generation (NCSN, score-SDE) which DO support
-      // Langevin sampling.
+      // Denoiser Reconstruct — clean baseline showing the m7 denoiser actually
+      // works at the noise level it was trained at (σ=0.3). Feeds real images
+      // through encoder→decoder, computes per-sample MSE.
+      { id: "g-denoiser-recon", name: "Denoiser Reconstruct", schemaId: sid, trainerId: "t-denoiser-pre", family: "diffusion", config: { method: "reconstruct", numSamples: 16 }, status: "draft", runs: [], createdAt: Date.now() },
+      // Langevin sampling — restored at user request. The m7 denoiser is a
+      // single-noise-scale model (σ=0.3), NOT a score-based model trained
+      // across multiple noise levels. Langevin needs the latter for proper
+      // generation from x ~ N(0,1). With this denoiser, samples will collapse
+      // toward ~0 (all-black-ish) — that's the educational point: this entry
+      // exists so users can SEE the failure mode. Compare against the
+      // Fashion-MNIST-Diffusion demo's NCSN/score-SDE checkpoints which DO
+      // support proper Langevin sampling. README's "Why Langevin Dynamics is
+      // disabled" section explains the theory.
+      { id: "g-denoiser-langevin", name: "Denoiser Langevin (educational)", schemaId: sid, trainerId: "t-denoiser-pre", family: "diffusion", config: { method: "langevin", numSamples: 16, steps: 100, stepSize: 0.01, noiseScale: 0.3, seed: 42 }, status: "draft", runs: [], createdAt: Date.now() },
     ],
 
     evaluations: [
