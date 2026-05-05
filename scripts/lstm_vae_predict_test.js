@@ -7,23 +7,30 @@ global.OSCDatasetModules = { registerModule: function () {} };
 var tf = require("@tensorflow/tfjs");
 require("@tensorflow/tfjs-backend-cpu");
 
-require("/mnt/f/Data/Projects/Portfolio/surrogate-studio/src/schema_registry.js");
-require("/mnt/f/Data/Projects/Portfolio/surrogate-studio/src/schema_definitions_builtin.js");
-var MBC = require("/mnt/f/Data/Projects/Portfolio/surrogate-studio/src/model_builder_core.js");
-var WC = require("/mnt/f/Data/Projects/Portfolio/surrogate-studio/src/weight_converter.js");
+var path = require("path");
+// Repo root resolved relative to this script so it works on any machine,
+// not just the original WSL checkout. Codex flagged the prior hardcoded
+// /mnt/f/... path as unportable.
+var REPO_ROOT = path.resolve(__dirname, "..");
+
+require(path.join(REPO_ROOT, "src/schema_registry.js"));
+require(path.join(REPO_ROOT, "src/schema_definitions_builtin.js"));
+var MBC = require(path.join(REPO_ROOT, "src/model_builder_core.js"));
+var WC = require(path.join(REPO_ROOT, "src/weight_converter.js"));
 
 var fs = require("fs");
 var vm = require("vm");
 
 // Load preset
-vm.runInThisContext(fs.readFileSync("/mnt/f/Data/Projects/Portfolio/surrogate-studio/demo/LSTM-VAE-for-dominant-motion-extraction/ant_data.js", "utf8"));
-var presetSrc = fs.readFileSync("/mnt/f/Data/Projects/Portfolio/surrogate-studio/demo/LSTM-VAE-for-dominant-motion-extraction/preset.js", "utf8");
+var demoDir = path.join(REPO_ROOT, "demo/LSTM-VAE-for-dominant-motion-extraction");
+vm.runInThisContext(fs.readFileSync(path.join(demoDir, "ant_data.js"), "utf8"));
+var presetSrc = fs.readFileSync(path.join(demoDir, "preset.js"), "utf8");
 vm.runInThisContext(presetSrc);
 var preset = global.LSTM_VAE_DEMO_PRESET;
 var lstmVaeModel = preset.models.find(function (m) { return m.id === "demo-lstm-vae"; });
 
 // Load pretrained artifact
-var artSrc = fs.readFileSync("/mnt/f/Data/Projects/Portfolio/surrogate-studio/demo/LSTM-VAE-for-dominant-motion-extraction/lstm_vae_paper_pretrained.js", "utf8");
+var artSrc = fs.readFileSync(path.join(demoDir, "lstm_vae_paper_pretrained.js"), "utf8");
 var match = artSrc.match(/=\s*"([A-Za-z0-9+/=]+)"/);
 var b = Buffer.from(match[1], "base64");
 var hdrLen = b.readUInt32LE(0);

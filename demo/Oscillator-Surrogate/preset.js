@@ -139,6 +139,12 @@
         targetMode: "xv",
         windowSize: 20,
         predictionMode: "autoregressive",
+        // 3 scenarios so VAE+Classifier's head dim (3) matches the dataset
+        // labels at training time. Without this, the dataset module defaults
+        // to scenario_type-only and reports numClasses=1, which builds a
+        // 1-unit classifier head that can't carry the 3-class artifact —
+        // the loader silently falls back to positional copy.
+        includedScenarios: ["spring", "pendulum", "bouncing"],
         // Must match the feature contract the pretrained artifacts were
         // exported under (see scripts/train_oscillator_pretrained.js).
         // featureConfig drives the per-step feature pipeline: x history,
