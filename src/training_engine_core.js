@@ -154,6 +154,22 @@
     return tf.tensor2d(rows, [rows.length, Math.max(1, cols)]);
   }
 
+  // One-hot encode scalar class indices to [n, nClasses] rows. Datasets that
+  // emit scalar labels (e.g. oscillator_dataset_core, text_classification)
+  // expect the trainer to expand to one-hot for classification heads.
+  // training_worker.js already does this; mirroring it here keeps the two
+  // training entry points in sync. Without this, tensor2d(scalars, [n, k])
+  // fails with "should have N*k values but has N".
+  function oneHotRows(rows, nClasses) {
+    return rows.map(function (r) {
+      var raw = Array.isArray(r) ? r[0] : r;
+      var idx = Math.max(0, Math.min(nClasses - 1, Math.round(Number(raw) || 0)));
+      var oh = new Array(nClasses);
+      for (var i = 0; i < nClasses; i++) oh[i] = (i === idx) ? 1 : 0;
+      return oh;
+    });
+  }
+
   function makeSinusoidalTimeEmbedding(tf, tTensor, dim) {
     var d = Math.max(1, Number(dim) || 1);
     if (d === 1) return tTensor;
@@ -340,6 +356,15 @@
       if (ht === "classification") cols = Math.max(1, Number(dataset.numClasses || inferredCols));
       else if (ht === "latent_kl") cols = Math.max(2, Number(head.units || 2));
       else cols = Math.max(1, inferredCols);
+      // Classification rows that arrive as scalars need to be one-hot
+      // expanded BEFORE rowsToTensor — otherwise tensor2d(scalars, [n, k])
+      // fails because the underlying buffer has only n values for an
+      // [n, k] target. Mirrors training_worker.js's behavior.
+      if (ht === "classification" && cols > 1 && inferredCols < cols) {
+        trainRows = oneHotRows(trainRows, cols);
+        valRows = oneHotRows(valRows, cols);
+        if (testRows) testRows = oneHotRows(testRows, cols);
+      }
       yTrainTensors.push(rowsToTensor(tf, trainRows, cols));
       yValTensors.push(rowsToTensor(tf, valRows, cols));
       if (testRows) yTestTensors.push(rowsToTensor(tf, testRows, cols));
