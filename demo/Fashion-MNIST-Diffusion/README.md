@@ -13,11 +13,27 @@ Pre-trained weights are included for all four diffusion models, so you can gener
 Trained on Fashion-MNIST T-shirt class (6K images), PyTorch CUDA:
 
 | Model | Params | Val Loss | Generation |
-|-------|:------:|:--------:|:----------:|
+|---|---|---|---|
 | MLP Denoiser (baseline) | ~810K | ~0.008 | Single-pass reconstruction |
 | MLP DDPM (Ho 2020) | ~930K | ~0.007 | DDPM 50-step reverse process |
 | NCSN (Song & Ermon 2019) | ~1.3M | ~0.007 | Langevin dynamics |
 | Score SDE (Song et al. 2021) | ~1.3M | ~0.007 | DDPM or Langevin |
+
+### Generation Quality (in-app evaluation)
+
+Run via the Evaluation tab using the `Generation Quality` recipe — samples 75 generations per model and compares against the held-out reference set with set-level distribution metrics.
+
+![Generation quality comparison](images/04_test.png)
+
+| Model | MMD ↓ | Mean Gap ↓ | NN Coverage ↑ | NN Precision ↑ | Diversity Gap ↓ |
+|---|---|---|---|---|---|
+| **MLP DDPM** | **0.072** | 0.228 | **0.525** | 0.090 | 0.533 |
+| NCSN | 0.092 | 0.186 | 0.333 | **0.102** | **0.288** |
+| Score SDE | 0.081 | **0.085** | 0.340 | 0.103 | 0.540 |
+
+**No single model wins every metric** — that's the honest, real-world picture. MLP DDPM has the best distribution matching (lowest MMD) and highest coverage. Score SDE has the lowest mean gap, meaning its sample mean lands closest to the reference distribution. NCSN trades coverage for diversity, producing samples that fall closer to real images on average.
+
+The educational point is structural: three different sampling philosophies (forward-noise→reverse, score-matching+Langevin, unified SDE) all produce reasonable generations on this small T-shirt dataset, and the platform's evaluation pipeline scores them under the same protocol so the comparison is meaningful.
 
 ### Comparison with Original Papers
 

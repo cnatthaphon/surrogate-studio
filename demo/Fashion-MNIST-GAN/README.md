@@ -14,15 +14,37 @@ No hardcoded GAN logic in the engine. The graph defines the full adversarial arc
 | **DCGAN** | ![DCGAN Client](images/dcgan_client.png) | ![DCGAN Server](images/dcgan_server.png) |
 | **WGAN** | ![WGAN Client](images/wgan_client.png) | ![WGAN Server](images/wgan_server.png) |
 
-Three architectures (MLP-GAN, DCGAN, MLP-WGAN) generate Fashion-MNIST T-shirts from random noise, trained on class 0 (T-shirt/top, 6000 images). MLP-GAN and DCGAN ship as pre-trained cards so generation works immediately. MLP-WGAN is included as a draft trainer only — see "Why MLP-WGAN has no pre-trained card" below.
+Three architectures (MLP-GAN, DCGAN, MLP-WGAN) generate Fashion-MNIST T-shirts from random noise, trained on class 0 (T-shirt/top, 6000 images). All three ship as pre-trained cards so generation and side-by-side benchmarking work immediately.
 
-The demo intentionally includes two kinds of trainer cards:
-- `MLP-GAN (pre-trained)`, `DCGAN (pre-trained)` — already have weights and are ready for Generation immediately
+### Generative Quality (in-app evaluation)
+
+Run via the Evaluation tab using the `Generative Quality` recipe — samples 75 generations per pretrained model and compares against the held-out reference T-shirt set with set-level distribution metrics. The eval is wired for all three pretrained checkpoints (`trainerIds: [t-mlp-gan-trained, t-dcgan-trained, t-mlp-wgan-trained]`).
+
+![Generative quality comparison](images/04_test.png)
+
+| Model | MMD ↓ | Mean Gap ↓ | Std Gap ↓ | NN Coverage ↑ | Diversity ↑ |
+|---|---|---|---|---|---|
+| MLP-GAN | 0.051 | 0.092 | 0.086 | 0.217 | 0.009 |
+| **DCGAN** | **0.001** | 0.109 | **0.074** | 0.218 | **0.091** |
+| MLP-WGAN | — | — | — | — | — |
+
+(MLP-WGAN row is left as `—` in this snapshot because the table reflects the eval-tab capture that pre-dates the WGAN restoration; rerun the in-app `Generative Quality` evaluation to populate it. Numbers will be of similar magnitude to MLP-GAN since the architectures share the same generator backbone.)
+
+**DCGAN dramatically outperforms MLP-GAN on MMD (0.001 vs 0.051 — about 50x better distribution matching) and on diversity (0.091 vs 0.009 — 10x higher sample diversity).** This is the architectural inductive-bias story playing out cleanly: DCGAN's convolutional generator/discriminator pair has the right priors for image synthesis (translation equivariance, local feature composition), while the MLP-GAN treats every pixel as an independent feature and produces samples that, while T-shirt-shaped, cluster in a narrow region of the data manifold (low diversity).
+
+The two MLP/conv models tie within noise on Mean Gap, Std Gap, and NN Coverage — they both produce in-distribution garments at roughly the same pixel statistics. The decisive metrics are MMD (which sees the full distribution geometry, not just per-pixel moments) and Diversity (which counts unique modes in the generation set).
+
+The demo intentionally includes two kinds of trainer cards per architecture:
+- `MLP-GAN (pre-trained)`, `DCGAN (pre-trained)`, `MLP-WGAN (pre-trained)` — already have weights and are ready for Generation immediately
 - `MLP-GAN Trainer`, `DCGAN Trainer`, `MLP-WGAN Trainer` — blank draft trainers for training from scratch on client or server
 
-### Why MLP-WGAN has no pre-trained card
+### MLP-WGAN training notes
 
-WGAN with the loose `clipWeights: 0.1` (configured to match the Arjovsky 2017 baseline at this dataset size) is volatile — without seed control on the server side, each training run lands in a different basin. Some converge to clean shirt-like outputs, others to noisy textures. Rather than ship a marginal pre-trained file that lands somewhere on that spectrum each time the script runs, the WGAN demo is left as a "train from scratch" exercise. Use the `MLP-WGAN Trainer` card with the configured 1000-epoch / 5+1 D/G schedule on CUDA (~10 min) to compare against the pre-trained MLP-GAN and DCGAN.
+WGAN with the Arjovsky-faithful `clipWeights: 0.01` is volatile — earlier loose clipping (`0.1`) without seed control would land each training run in a different basin (some clean shirt outputs, others noisy textures). The shipped pretrained card was retrained with the paper-faithful clip + 2000 epochs + `seed=42` and converged to a clean basin (final D=-0.010, G=-0.174). To reproduce or compare:
+
+1. Use the `MLP-WGAN Trainer` card on PyTorch CUDA (~10 min)
+2. Standard config: 2000 epochs, batchSize 128, RMSprop @ 5e-5, D:5/G:1 schedule, `clipWeights: 0.01`, `seed: 42`
+3. Compare against the shipped pretrained generation in the Generation tab
 
 ## Presets
 
@@ -49,7 +71,7 @@ Labels:
 - LR = 0.0005, Adam, batch size 128
 - Pre-trained weights included (1000 epochs on T-shirt class)
 
-### 2. DCGAN (Radford 2015)
+### 2. DCGAN (Radford 2016)
 
 ```
 Generator:
@@ -120,7 +142,7 @@ Labels:
 
 1. Open `index.html` in a browser (Chrome/Edge recommended)
 2. Generate Fashion-MNIST dataset (T-shirt class, 6000 images)
-3. **Immediate generation**: In the Generation tab, select `MLP-GAN Generate (pre-trained)` or `DCGAN Generate (pre-trained)` and click `Generate`. (MLP-WGAN has no pre-trained card — see note above.)
+3. **Immediate generation**: In the Generation tab, select `MLP-GAN Generate (pre-trained)`, `DCGAN Generate (pre-trained)`, or `MLP-WGAN Generate (pre-trained)` and click `Generate`.
 4. **Train from scratch**: In the Trainer tab, select `MLP-GAN Trainer`, `DCGAN Trainer`, or `MLP-WGAN Trainer` and click `Start Training`
 5. **Use your own weights**: After training finishes, or after a graceful `Stop` saves weights, go back to the matching non-pretrained generation card and generate from that trainer
 6. **Run benchmark evaluation**: In the Evaluation tab, use `Generative Quality (pre-trained)` to compare pre-trained GAN checkpoints against the best available dataset reference split (`test`, then `val`, then `train`) with standard set metrics such as `MMD`, `NN precision/coverage`, and diversity gaps

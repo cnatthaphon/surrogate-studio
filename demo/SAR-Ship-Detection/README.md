@@ -40,6 +40,25 @@ ImageSource → Reshape(64,64,1)
 ImageSource → Dense(256) → Dense(64) → Output(bbox)
 ```
 
+## Results & Interpretation
+
+Both models trained 50 epochs on PyTorch CUDA, predicting normalized [x, y, w, h] bounding boxes. Evaluated on the held-out 45-patch test split via the in-app `bbox_mae` / `bbox_rmse` / `bbox_bias` recipe.
+
+![Evaluation results](images/04_test.png)
+
+| Model | Params | BBox MAE | BBox RMSE | BBox Bias |
+|---|---|---|---|---|
+| **CNN Ship Detector** | 35K | **0.2962** | **0.3274** | -0.2939 |
+| MLP Baseline | 1.07M | 0.3059 | 0.3366 | -0.1816 |
+
+**The honest result: both models are barely better than a center-of-image guess, and the CNN/MLP gap is small (~3% relative).** This is what makes SAR ship detection genuinely hard — and it's the lesson the demo was redesigned around.
+
+The training-time val MAE was much lower (~0.013) because the val split shares image statistics with training. The test split exposes the real generalization: HRSID patches are downsampled to 64×64 and contain wide variation in ship size, sea-state clutter, and contrast. With only 210 training patches, neither architecture has enough data to learn a sharp localization prior, and both regress toward predicting bounding boxes near the image centroid.
+
+**The bias values reveal the failure mode.** CNN bias is -0.29, MLP bias is -0.18 — both models systematically under-predict box coordinates (predicting boxes too far up-and-left). The CNN over-fits this bias more strongly because its convolutional features pick up dataset-wide patterns (most ships in the train split happen to land in similar regions of the patch).
+
+**Why ship the demo anyway?** Because the platform claim isn't "we win SAR detection." It's "the same platform handles real radar imagery with the standard detection recipe and produces honest test-time numbers" — including the negative result that 210 patches isn't enough data to beat baseline. To turn this into a real detector you'd need 3K+ patches with augmentation; the contract-driven evaluation pipeline doesn't change.
+
 ## How to Use
 
 1. **Dataset** tab — click Generate Dataset (instant, embedded SAR data)

@@ -38,6 +38,26 @@ Input(12 tokens) → Dense(64,relu) → Dense(32,relu) → Dropout(0.2)
   → Output(classification)
 ```
 
+## Results & Interpretation
+
+All three models trained 30 epochs on PyTorch CUDA on the same 12-token synthetic sentiment dataset. Evaluated on a 150-sample test split via the `accuracy` / `macro_f1` recipe.
+
+![Evaluation results](images/04_test.png)
+
+| Model | Params | Accuracy | Macro F1 |
+|---|---|---|---|
+| **Transformer Classifier** | ~24K | **1.0000** | **1.0000** |
+| **LSTM Classifier** | ~10K | **1.0000** | **1.0000** |
+| MLP Baseline | ~6K | 0.9067 | 0.9056 |
+
+**Transformer and LSTM both hit 100%; MLP plateaus at ~91%.** This is the honest result on synthetic sentiment data and it tells the educational story directly:
+
+1. **Order matters → MLP loses.** Sentiment depends on which words appear and in this synthetic dataset sometimes on local word combinations. The MLP receives token IDs as a flat 12-dim vector with no embedding lookup — it can't learn that `token=42` means the same thing whether it's at position 1 or position 7. The 9-point gap is the cost of throwing away sequence information.
+
+2. **Transformer ≡ LSTM on this dataset.** Both architectures give the model a way to look across the sequence. Self-attention does it in parallel, LSTM does it sequentially. On synthetic 3-8 word sentences with single-keyword sentiment cues, both architectures find the cue cleanly and saturate at perfect accuracy. Transformers pull ahead on real text where context windows and long-range dependencies matter — that gap doesn't show up here because the dataset doesn't require it.
+
+The point of this demo is **NLP works in the same platform as vision and trajectory tasks** — same graph editor, same training engine, same evaluation contract. The number ratio (Transformer/LSTM tied at the ceiling, MLP lagging by ~9 points) is exactly what you'd predict from architectural priors, which is itself the validation that the platform isn't doing anything weird to NLP.
+
 ## How to Use
 
 1. **Dataset** tab — click Generate Dataset (instant, synthetic)

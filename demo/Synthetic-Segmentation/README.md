@@ -42,6 +42,23 @@ ImageSource → Dense(256,relu) → Dense(1024,sigmoid) → Output(mask, BCE)
 | **Dice Score** | F1 at pixel level: 2×intersection / (pred_sum + truth_sum) |
 | **Pixel Accuracy** | Fraction of correctly classified pixels |
 
+## Results & Interpretation
+
+Both models trained 30 epochs on PyTorch CUDA. Evaluated on the held-out 75-image test split via the in-app `mask_iou` / `dice` / `pixel_accuracy` recipe.
+
+![Evaluation results](images/04_test.png)
+
+| Model | Mask IoU | Dice Score | Pixel Accuracy |
+|---|---|---|---|
+| **Seg-UNet** | **0.9253** | **0.9606** | **0.9669** |
+| MLP Baseline | 0.6987 | 0.8143 | 0.9380 |
+
+**The story: UNet beats MLP by 22 IoU points and 15 Dice points** while pixel accuracy only gaps by ~3 points. That gap-shape is the diagnostic — pixel accuracy looks deceptively close because most pixels are background, and predicting "background everywhere" already scores high. IoU and Dice are the metrics that actually expose segmentation quality, and the UNet wins decisively because skip connections preserve boundary detail through the bottleneck.
+
+The MLP can roughly localize each shape (its 0.81 Dice means it gets the right *region*) but smears the boundaries (the 22-point IoU gap means the mask shape is wrong). The UNet recovers both region and boundary because convolutions encode spatial locality and the skip connections route high-resolution feature maps directly to the decoder.
+
+This is why segmentation is always reported as IoU/Dice rather than raw accuracy: the trivial "all zero" baseline scores ~85% pixel accuracy on sparse masks but ~0 IoU.
+
 ## How to Use
 
 1. **Dataset** tab — click Generate Dataset (instant, synthetic)

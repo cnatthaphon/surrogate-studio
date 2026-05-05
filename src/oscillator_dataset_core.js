@@ -544,6 +544,28 @@
 
     var splitCfg = normalizeSplitConfig(normalizedCfg.splitConfig || { mode: "stratified_scenario", train: 0.70, val: 0.15, test: 0.15 });
     var splitMap = buildTrajectorySplitMap(trajectories, splitCfg, normalizedCfg.seed);
+
+    // Build the scenario→class-index map upfront so per-sample labels can
+    // be emitted alongside x/y. Without this, a classifier head wired to
+    // a VAE+Classifier graph receives the regression target ([x,v] rows)
+    // as its label input and trips a shape mismatch in the trainer
+    // (e.g. "tensor should have 180 values but has 360" — 90 samples ×
+    // 2 dim regression target read as 90 × 4-dim one-hot labels).
+    var scenarioOrderEarly = (normalizedCfg.includedScenarios && normalizedCfg.includedScenarios.length)
+      ? normalizedCfg.includedScenarios.slice()
+      : Array.from(new Set(trajectories.map(function (tr) {
+        return String((tr.params && tr.params.scenario) || normalizedCfg.scenarioType || "spring");
+      })));
+    var scenarioIndex = {};
+    scenarioOrderEarly.forEach(function (s, i) { scenarioIndex[String(s).toLowerCase()] = i; });
+
+    // Per-split scalar label arrays (one entry per emitted sample, NOT one
+    // per trajectory — autoregressive mode emits multiple samples per
+    // trajectory).
+    var trainLabels = [];
+    var valLabels = [];
+    var testLabels = [];
+
     trajectories.forEach(function (tr, n) {
       var sim = { t: tr.t, x: tr.x, v: tr.v };
       var p = tr.params || {};
@@ -567,19 +589,29 @@
       var flatBucket;
       var seqBucket;
       var yBucket;
+      var labelBucket;
       if (bucketName === "train") {
         flatBucket = trainFlat;
         seqBucket = trainSeq;
         yBucket = trainY;
+        labelBucket = trainLabels;
       } else if (bucketName === "val") {
         flatBucket = valFlat;
         seqBucket = valSeq;
         yBucket = valY;
+        labelBucket = valLabels;
       } else {
         flatBucket = testFlat;
         seqBucket = testSeq;
         yBucket = testY;
+        labelBucket = testLabels;
       }
+
+      // Resolve this trajectory's scenario index once. If the scenario isn't
+      // in the included set (e.g. user filtered scenarios after data was
+      // generated), fall back to 0 — class 0 is always present by construction.
+      var scenarioKey = String(params.scenario || "").toLowerCase();
+      var scenarioIdx = (scenarioIndex[scenarioKey] != null) ? scenarioIndex[scenarioKey] : 0;
 
       if (mode === "direct") {
         for (var i = 0; i < sim.x.length; i += 1) {
@@ -587,6 +619,7 @@
           if (targetMode === "xv") yBucket.push([sim.x[i], sim.v[i]]);
           else if (targetMode === "v") yBucket.push([sim.v[i]]);
           else yBucket.push([sim.x[i]]);
+          labelBucket.push(scenarioIdx);
         }
       } else {
         for (var j = normalizedCfg.windowSize; j < sim.x.length; j += 1) {
@@ -597,15 +630,12 @@
           if (targetMode === "xv") yBucket.push([sim.x[j], sim.v[j]]);
           else if (targetMode === "v") yBucket.push([sim.v[j]]);
           else yBucket.push([sim.x[j]]);
+          labelBucket.push(scenarioIdx);
         }
       }
     });
 
-    var includedOut = (normalizedCfg.includedScenarios && normalizedCfg.includedScenarios.length)
-      ? normalizedCfg.includedScenarios.slice()
-      : Array.from(new Set(trajectories.map(function (tr) {
-        return String((tr.params && tr.params.scenario) || normalizedCfg.scenarioType || "spring");
-      })));
+    var includedOut = scenarioOrderEarly;
 
     return {
       xTrain: trainFlat,
@@ -617,8 +647,21 @@
       yTrain: trainY,
       yVal: valY,
       yTest: testY,
+      // Per-sample scalar scenario labels — required by the
+      // VAE+Classifier head and any other downstream classifier on the
+      // same dataset. Trainer/eval consumes these via dataset.labelsTrain
+      // and one-hot-encodes as needed.
+      labelsTrain: trainLabels,
+      labelsVal: valLabels,
+      labelsTest: testLabels,
       featureSize: mode === "direct" ? inferDirectFeatureSize(featureSpec) : featSizes.flatFeatureSize,
       seqFeatureSize: mode === "direct" ? inferDirectFeatureSize(featureSpec) : featSizes.seqFeatureSize,
+      // Number of scenario classes — used by classifier heads (e.g. VAE+Classifier).
+      // The set of scenarios is enumerated in includedOut; usually 3 (spring,
+      // pendulum, bouncing) but narrows if the user filters to fewer.
+      classCount: includedOut.length || 3,
+      numClasses: includedOut.length || 3,
+      classNames: includedOut.slice(),
       windowSize: normalizedCfg.windowSize,
       dt: normalizedCfg.dt,
       durationSec: normalizedCfg.durationSec,

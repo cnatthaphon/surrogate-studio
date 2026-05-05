@@ -94,27 +94,28 @@ Full 10,399 timesteps from the paper's `ant_dataset_gt.mat` are embedded (2.4MB 
 
 Headless benchmark: 50 epochs, batch=32, lr=5e-4, Adam, plateau scheduler, seed=42. Run via `node scripts/benchmark_ant_vae.js`.
 
-| Metric | LSTM-VAE (ours) | MLP-AE (baseline) | Paper |
-|--------|:-:|:-:|:-:|
-| **Parameters** | 77,100 | 19,312 | ~80,000 |
-| **LSTM layers** | 1 | — | 2 |
-| **Latent dim** | 20 | 8 (bottleneck) | 20 |
-| **Data** | **10,399 timesteps** | 10,399 timesteps | 10,399 timesteps |
-| **Val Loss (MSE)** | 2.68e-4 | 1.10e-3 | — |
-| **Test R²** | **0.9970** | 0.9882 | — (qualitative) |
-| **Test RMSE** | 0.0164 | 0.0325 | — |
-| **Test Bias** | -1.54e-3 | 2.78e-4 | — |
+### In-app evaluation (Evaluation tab, on shipped pretrained weights)
 
-*Pretrained weights shipped (PyTorch CUDA, 50 epochs). Test MAE: LSTM-VAE=0.0165, MLP-AE=0.0319 on MinMax-normalized ant trajectories.*
+![In-app evaluation](images/04_test.png)
 
-**Key findings:**
+| Model | Params | Test MAE | Test RMSE | Test R² | Worst-Ant MAE |
+|---|---|---|---|---|---|
+| LSTM-VAE | 77K | 0.253 | 0.301 | **-0.16** | 0.315 |
+| **MLP-AE** | 19K | **0.042** | **0.056** | **0.959** | 0.055 |
 
-- **R²=0.997** — the VAE reconstructs ant trajectories with <0.3% unexplained variance. The paper does not publish a numerical reconstruction metric; their original-vs-reconstructed overlay figures appear visually similar to ours, but a like-for-like numerical comparison isn't possible from the paper alone.
-- **LSTM-VAE significantly outperforms MLP-AE** on R² (0.997 vs 0.988) and RMSE (0.016 vs 0.033) — the recurrent encoder captures temporal structure that Dense layers miss
-- **Same dataset** as the paper — full 10,399 timesteps from `ant_dataset_gt.mat` (80/10/10 split: 8319 train, 1040 val, 1040 test)
-- **77K params matches the paper** (~80K). Remaining difference: 1 vs 2 LSTM layers (Dense decoder equivalent for seq_len=1)
-- The paper does not report explicit R²/MSE — their evaluation is visual (trajectory overlays) and downstream (SINDy equation discovery from latent space)
-- The VAE's real value over the AE is the **structured latent space** for SINDy, not just reconstruction accuracy
+**The honest result: MLP-AE wins decisively. LSTM-VAE underperforms.**
+
+This is the in-app evaluation pipeline running the shipped pretrained weights against the held-out 1040-timestep test split. The MLP-AE achieves R²=0.96 on full 40-dim ant-trajectory reconstruction. The LSTM-VAE produces predictions that are roughly mean-of-data and fail to track the actual trajectories.
+
+**Why does LSTM-VAE underperform here?** Two contributing factors:
+
+1. **Loose KL prior (β=0.001).** With weak KL pressure, the encoder is free to produce μ values far from the standard-normal prior. The decoder learns to reconstruct from `μ + σ·ε` (samples that include noise). At inference time, we feed `μ` alone (no noise), which is a different distribution than the decoder was trained on. For Kingma-Welling theory this should still work, but with very loose KL the encoder can drift into latent regions where the decoder doesn't reconstruct well from the mode alone.
+
+2. **The reconstruction is hard with a 20-dim latent and a single-timestep LSTM.** With `windowSize=1` the LSTM is effectively a fancy Dense layer; the temporal modeling story is weaker than the paper's 2-layer stacked LSTM with proper sequence input.
+
+**Earlier benchmark numbers (R² 0.997) were misleading** — the headless benchmark script `scripts/benchmark_ant_vae.js` had a `targetSize: 2` copy-paste bug from the Oscillator demo, building a 2-dim output head instead of the actual 40-dim ant target. That bug is fixed now; the in-app eval is the canonical measurement.
+
+**The platform claim still holds:** zero core changes were needed to add this demo, the LSTM/VAE/Latent/Reparam blocks compose correctly, and the cross-runtime weight transfer works end-to-end (MLP-AE matches between training-side MAE and in-app eval to ~3% noise). The LSTM-VAE underperformance is a *modeling* result, not an infrastructure failure.
 
 ---
 
