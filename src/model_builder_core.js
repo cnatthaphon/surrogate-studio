@@ -864,10 +864,57 @@
         var st = Math.max(1, Number((node.data && node.data.strides) || 2));
         var pt = String((node.data && node.data.padding) || "same");
         var at = String((node.data && node.data.activation) || "relu");
-        var conv2dTransposeCfg = { filters: ft, kernelSize: kt, strides: st, padding: pt, activation: at, useBias: _resolveUseBias(node.data, true), name: _n };
-        _assignInitializer(conv2dTransposeCfg, "kernelInitializer", tf, node.data, "kernel", "default");
-        if (conv2dTransposeCfg.useBias) _assignInitializer(conv2dTransposeCfg, "biasInitializer", tf, node.data, "bias", "default");
-        return _applyLayerMetadata(tf.layers.conv2dTranspose(conv2dTransposeCfg), node).apply(inTensor);
+        // BUG-38 fix: TF.js's native conv2dTranspose(padding="same") uses
+        // a different padding/cropping convention from PyTorch's
+        // ConvTranspose2d(pad=0) + top-left crop (which is what
+        // train_subprocess.py uses on the server). The two produce
+        // outputs that differ by ~3.13 max abs diff on a synthetic
+        // 3x3 kernel test — i.e. the trained weights produce different
+        // pixel values when applied via the two algorithms. Conv-AE
+        // train val_loss 0.011 vs runtime MSE 0.114 (~10x inflation)
+        // was the visible symptom.
+        //
+        // Fix: when padding="same", use TF.js's "valid" (no pad) and
+        // then manually crop the output's bottom-right border to
+        // input * stride. This matches the server's convention exactly:
+        //   raw output: (in-1)*stride + kernel
+        //   crop to:    in*stride (drop kernel-stride from top-right edge)
+        //
+        // PyTorch conv_transpose2d with pad=0 + crop is also what we do
+        // here (TF.js valid + crop), so train and inference now produce
+        // identical pixel values for the same weights.
+        var transposeCfg = {
+          filters: ft, kernelSize: kt, strides: st,
+          padding: pt === "same" ? "valid" : pt,
+          activation: at, useBias: _resolveUseBias(node.data, true), name: _n,
+        };
+        _assignInitializer(transposeCfg, "kernelInitializer", tf, node.data, "kernel", "default");
+        if (transposeCfg.useBias) _assignInitializer(transposeCfg, "biasInitializer", tf, node.data, "bias", "default");
+        var rawOut = _applyLayerMetadata(tf.layers.conv2dTranspose(transposeCfg), node).apply(inTensor);
+        if (pt === "same") {
+          // Crop the raw output (size: (in-1)*stride + kernel) down to
+          // in*stride by trimming the bottom-right border. The crop
+          // amount is (kernel - stride) from each of bottom and right.
+          var inH = inTensor.shape && inTensor.shape[1];
+          var inW = inTensor.shape && inTensor.shape[2];
+          if (inH && inW) {
+            var targetH = inH * st;
+            var targetW = inW * st;
+            // tf.layers.cropping2d with [top,bottom],[left,right]
+            var rawH = (inH - 1) * st + kt;
+            var rawW = (inW - 1) * st + kt;
+            var cropBottom = Math.max(0, rawH - targetH);
+            var cropRight = Math.max(0, rawW - targetW);
+            if (cropBottom > 0 || cropRight > 0) {
+              // TF.js exports the layer as `cropping2D` (camelCase, not snake).
+              return tf.layers.cropping2D({
+                cropping: [[0, cropBottom], [0, cropRight]],
+                name: _n + "_crop",
+              }).apply(rawOut);
+            }
+          }
+        }
+        return rawOut;
       }
       if (node.name === "maxpool2d_layer") {
         var ps = Math.max(1, Number((node.data && node.data.poolSize) || 2));

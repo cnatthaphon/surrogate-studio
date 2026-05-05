@@ -1327,6 +1327,9 @@ def build_model_from_graph(graph, feature_size, target_size, num_classes=0):
                     use_bias = _cfg_bool(c.get("useBias", True), True)
                     # Match TF.js conv2dTranspose "same" by running the full transposed conv
                     # and cropping the extra bottom/right border down to input * stride.
+                    # See BUG-38 analysis in src/model_builder_core.js — the TF.js side
+                    # also uses pad=valid + top-left crop (not native "same") so train
+                    # and inference now follow the same convention end-to-end.
                     pad = 0
                     out_pad = 0
                     in_ch = in_dim[-1] if isinstance(in_dim, list) else 1
