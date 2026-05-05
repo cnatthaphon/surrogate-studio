@@ -438,26 +438,14 @@ def _build_decoder_from_graph(model, graph_data, default_latent_dim):
     def _is_recon_output(nid):
         if _node_name(nid) != "output":
             return False
+        # Reconstruction = "produces a target the decoder is meant to fit"
+        # = "not a classifier head AND not a latent KL aux output."
         d = _node_data(nid)
-        # Filter on three independent classification signals because legacy
-        # graphs (and graphs round-tripped from older preset files) may have
-        # any one of headType / loss / target / targetType missing or
-        # spelled differently. Codex review caught this: filtering on
-        # headType alone could let a classifier head with loss=ce but no
-        # explicit headType slip through and become the "decoder output."
+        if _is_classification_node_data(d):
+            return False
         head = str(d.get("headType", "") or "").strip().lower()
-        if head in ("classification", "latent_kl"):
+        if head == "latent_kl":
             return False
-        loss = str(d.get("loss", "") or "").strip().lower().replace("_", "").replace("-", "")
-        if loss in (
-            "ce", "crossentropy", "categoricalcrossentropy",
-            "sparsecategoricalcrossentropy", "binarycrossentropy",
-        ):
-            return False
-        for target_field in ("target", "targetType"):
-            tgt = str(d.get(target_field, "") or "").strip().lower()
-            if tgt in ("label", "labels", "logits", "class", "classes", "target_class", "scenario"):
-                return False
         return True
 
     # Find reparam node (preferred: explicit reparam_layer; fallback: node
@@ -613,6 +601,42 @@ def _build_decoder_from_graph(model, graph_data, default_latent_dim):
     return Decoder(decoder_layers).to(device), latent_dim_actual
 
 
+def _is_classification_node_data(node_data):
+    """Single source of truth for "is this output node a classification head?"
+    Used by both _is_recon_output (to exclude classifiers from decoder
+    extraction) and _find_classifier_output_index (to pick the classifier
+    for guided-generation scoring).
+
+    Codex round-3 caught these two functions drifting: the recon filter was
+    triple-source (headType / loss / target) but the classifier resolver
+    only checked headType + a few loss spellings, so a graph declaring only
+    target="label" returned None and classifier_guided silently fell back
+    to variance guidance. Both call sites now share this helper, so any
+    future addition (e.g. new loss alias) automatically propagates.
+
+    Three independent positive signals — any one true → classification:
+      * headType == "classification"
+      * normalized loss ∈ a known cross-entropy spelling
+      * target/targetType ∈ a known label-like spelling
+    """
+    if not isinstance(node_data, dict):
+        return False
+    head = str(node_data.get("headType", "") or "").strip().lower()
+    if head == "classification":
+        return True
+    loss = str(node_data.get("loss", "") or "").strip().lower().replace("_", "").replace("-", "")
+    if loss in (
+        "ce", "crossentropy", "categoricalcrossentropy",
+        "sparsecategoricalcrossentropy", "binarycrossentropy",
+    ):
+        return True
+    for target_field in ("target", "targetType"):
+        tgt = str(node_data.get(target_field, "") or "").strip().lower()
+        if tgt in ("label", "labels", "logits", "class", "classes", "target_class", "scenario"):
+            return True
+    return False
+
+
 def _find_classifier_output_index(model, graph):
     """Return the index in model.output_ids that corresponds to the
     classification head, or None if no classifier output exists.
@@ -620,7 +644,8 @@ def _find_classifier_output_index(model, graph):
     Used by classifier_guided generation: after decoding z, run the full
     model to get all heads, then pick the classifier head explicitly via
     this index. Mirrors the JS-side classifierOutputIndex resolution in
-    src/tabs/generation_tab.js."""
+    src/tabs/generation_tab.js. Uses the same _is_classification_node_data
+    triple-filter as decoder extraction so the two stay consistent."""
     output_ids = [str(x) for x in getattr(model, "output_ids", []) or []]
     if not output_ids:
         return None
@@ -628,10 +653,7 @@ def _find_classifier_output_index(model, graph):
     for nid in output_ids:
         nd = (graph_data or {}).get(nid, {}) or {}
         d = nd.get("data", {}) or {}
-        if str(d.get("headType", "") or "").lower() == "classification":
-            return output_ids.index(nid)
-        loss = str(d.get("loss", "") or "").lower()
-        if loss in ("ce", "categoricalcrossentropy", "crossentropy", "categorical_crossentropy"):
+        if _is_classification_node_data(d):
             return output_ids.index(nid)
     return None
 

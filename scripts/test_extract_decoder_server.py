@@ -164,11 +164,86 @@ def test_find_classifier_output_index():
     print("PASS test_find_classifier_output_index")
 
 
+def test_find_classifier_output_index_target_only():
+    """Codex round-3: classifier resolver was missing the target-based
+    detection that the recon filter already had. A graph that declares
+    only target='label' (no headType, no loss) must still be picked up
+    as the classifier head — otherwise classifier_guided silently falls
+    back to variance-only guidance and the user thinks it's working."""
+    nodes = {
+        "1": _make_node("output_layer", {"target": "pixel_values"}, {}),
+        # Classifier head: ONLY target=label declared
+        "2": _make_node("output_layer", {"target": "label"}, {}),
+    }
+    model = _FakeModel()
+    model.output_ids = ["1", "2"]
+    idx = _find_classifier_output_index(model, _wrap_graph(nodes))
+    assert idx == 1, (
+        f"classifier head with only target=label must be detected; got {idx}. "
+        "If this is None, server classifier_guided will silently fall back "
+        "to variance guidance instead of using the classifier."
+    )
+    print("PASS test_find_classifier_output_index_target_only")
+
+
+def test_find_classifier_output_index_loss_only():
+    """Same shape as above but classifier declares only loss=ce."""
+    nodes = {
+        "1": _make_node("output_layer", {"target": "pixel_values"}, {}),
+        "2": _make_node("output_layer", {"loss": "ce"}, {}),
+    }
+    model = _FakeModel()
+    model.output_ids = ["1", "2"]
+    idx = _find_classifier_output_index(model, _wrap_graph(nodes))
+    assert idx == 1, f"classifier head with only loss=ce must be detected; got {idx}"
+    print("PASS test_find_classifier_output_index_loss_only")
+
+
+def test_recon_and_classifier_helpers_share_source():
+    """Regression guard: confirm the recon filter and classifier resolver
+    use the SAME node-data classifier check. If a future change adds an
+    alias to one but not the other, they'll drift again — exactly what
+    Codex round-3 caught. Verify symmetry on every classifier-spelling
+    variant we promise to support."""
+    spellings = [
+        {"headType": "classification"},
+        {"loss": "ce"},
+        {"loss": "crossentropy"},
+        {"loss": "categoricalCrossentropy"},
+        {"loss": "categorical_crossentropy"},
+        {"loss": "sparse_categorical_crossentropy"},
+        {"loss": "binary_crossentropy"},
+        {"target": "label"},
+        {"target": "labels"},
+        {"target": "logits"},
+        {"target": "class"},
+        {"targetType": "label"},
+        {"targetType": "scenario"},
+    ]
+    for d in spellings:
+        from generate_subprocess import _is_classification_node_data
+        assert _is_classification_node_data(d), f"should detect classifier from {d}"
+        # And confirm find_classifier_output_index agrees by building a
+        # 1-recon-1-classifier graph using this spelling.
+        nodes = {
+            "1": _make_node("output_layer", {"target": "pixel_values", "loss": "mse"}, {}),
+            "2": _make_node("output_layer", d, {}),
+        }
+        model = _FakeModel()
+        model.output_ids = ["1", "2"]
+        idx = _find_classifier_output_index(model, _wrap_graph(nodes))
+        assert idx == 1, f"resolver missed spelling {d}"
+    print("PASS test_recon_and_classifier_helpers_share_source")
+
+
 def main():
     test_recon_filter_rejects_classification_by_loss()
     test_recon_filter_rejects_classification_by_target()
     test_topo_order_not_numeric_id()
     test_find_classifier_output_index()
+    test_find_classifier_output_index_target_only()
+    test_find_classifier_output_index_loss_only()
+    test_recon_and_classifier_helpers_share_source()
     print("\nAll extractor tests passed.")
 
 
