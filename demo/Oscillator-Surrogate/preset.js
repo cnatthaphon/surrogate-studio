@@ -133,7 +133,26 @@
       name: "Oscillator Trajectories",
       schemaId: "oscillator",
       status: "draft",
-      config: { seed: 42, splitMode: "random", trainFrac: 0.8, valFrac: 0.1, testFrac: 0.1, targetMode: "xv" },
+      config: {
+        seed: 42,
+        splitMode: "random", trainFrac: 0.8, valFrac: 0.1, testFrac: 0.1,
+        targetMode: "xv",
+        windowSize: 20,
+        predictionMode: "autoregressive",
+        // Must match the feature contract the pretrained artifacts were
+        // exported under (see scripts/train_oscillator_pretrained.js).
+        // featureConfig drives the per-step feature pipeline: x history,
+        // v history, and the static physics params concatenated. The
+        // paramMask narrows params to {m, c, k} so featureSize is exactly
+        // 20 + 20 + 3 = 43 — the input dim every pretrained Dense_2 expects.
+        featureConfig: { useX: true, useV: true, useParams: true },
+        featureSpec: {
+          useX: true, useV: true, useParams: true,
+          useTimeSec: false, useTimeNorm: false, useScenario: false,
+          useSinNorm: false, useCosNorm: false, useNoiseSchedule: false,
+          paramMask: { m: true, c: true, k: true, e: false, x0: false, v0: false, gm: false, gk: false, gc: false },
+        },
+      },
       data: null,
       createdAt: Date.now(),
     },

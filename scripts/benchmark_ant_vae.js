@@ -93,8 +93,12 @@ async function trainModel(tf, ds, graphSpec, name, cfg) {
     // Build model from graph spec
     const built = ModelBuilder.buildModelFromGraph(tf, graphSpec, {
       mode: "direct", featureSize: ds.featureSize, windowSize: 1, seqFeatureSize: ds.featureSize,
-      targetSize: 2,
-      allowedOutputKeys: [{ key: "xv", headType: "regression", featureSize: 2 }],
+      // Ant trajectory: 40-dim flat reconstruction (20 ants × 2 coords).
+      // Earlier code copy-pasted targetSize:2 from the Oscillator demo — that
+      // built head_8 with output dim 2 instead of 40, producing meaningless
+      // metrics. Read targetSize from the dataset (= featureSize for autoencoders).
+      targetSize: ds.featureSize,
+      allowedOutputKeys: [{ key: "xv", headType: "regression", featureSize: ds.featureSize }],
       defaultTarget: "xv", numClasses: 0,
     });
 

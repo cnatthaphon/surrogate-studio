@@ -6,26 +6,34 @@
 
 ## Results
 
-Trained on 300 trajectories (37K training samples), 20 epochs, PyTorch CUDA:
+Trained 30 epochs on PyTorch CUDA, 300 trajectories. Evaluated on the held-out 1170-sample test split via the in-app `mae` / `rmse` / `bias` / `r2` recipe (per-feature R², averaged across the 2-dim xv target).
+
+![Evaluation results](images/04_test.png)
 
 | Model | Params | Test MAE | Test RMSE | Test R² |
-|-------|:------:|:--------:|:---------:|:-------:|
-| Direct-MLP | 4,962 | 0.0282 | 0.1044 | 0.963 |
-| AR-GRU | 22,882 | 0.0277 | 0.0998 | 0.966 |
-| VAE (8-dim latent) | 2,362 | 0.0278 | 0.1234 | 0.949 |
-| **VAE+Classifier** | 8,605 | **0.0251** | — | **0.970** |
-| Denoising AE | 7,138 | 0.0420 | 0.1286 | 0.944 |
+|---|---|---|---|---|
+| **Direct-MLP** | 4.9K | **0.0962** | 0.1936 | 0.880 |
+| AR-GRU | 22.9K | 0.2840 | 0.4454 | 0.626 |
+| **VAE** (8-dim latent) | 2.4K | 0.1156 | 0.2387 | **0.884** |
+| VAE+Classifier | 8.6K | 0.1020 | 0.2064 | 0.844 |
+| Denoising AE | 7.1K | 0.1671 | 0.2646 | 0.743 |
 
-The VAE+Classifier achieves the best R² by combining reconstruction with scenario classification — the shared encoder learns physics-aware features. The AR-GRU is a close second, exploiting temporal ordering through its recurrent state.
+**Direct-MLP and VAE tie at the top (R² ≈ 0.88), AR-GRU and Denoiser lag.** The numbers are tighter than what you'd see on harder dynamics, and the *ordering* is the educational point:
+
+- **Direct-MLP wins on parameter efficiency.** With only 4.9K params it matches a 4× larger architecture. The 20-step x/v history + (m, c, k) params is enough for the network to learn one-step-ahead dynamics directly.
+- **VAE matches Direct-MLP** despite a stochastic 8-dim latent and 2.4K params. The bottleneck doesn't hurt because the underlying dynamics are low-dimensional (3 ODE parameters generate the trajectory family).
+- **AR-GRU underperforms here** (R² 0.63). Its recurrent state has to bootstrap from the initial window without parameter conditioning being as direct, so the first few prediction steps inject error that cascades. With longer warm-up windows or curriculum training, the gap closes.
+- **VAE+Classifier** loses ~4 R² points vs plain VAE — the multi-task loss steals capacity from reconstruction. The trade gives you scenario classification + classifier-guided generation in exchange.
+- **Denoising AE** trails at R² 0.74 — single-noise-level reconstruction is a less precise one-step predictor than direct regression.
 
 ### Why This Matters for Surrogate Modeling
 
 Traditional physics simulation (RK4) is exact but slow for parameter sweeps. A trained surrogate predicts trajectories in milliseconds:
 
 | Aspect | RK4 Simulation | Trained Surrogate |
-|--------|---------------|-------------------|
+|---|---|---|
 | Speed | ~1ms per trajectory | ~0.01ms per trajectory |
-| Accuracy | Exact (to numerical precision) | R² = 0.966 (AR-GRU) |
+| Accuracy | Exact (to numerical precision) | R² ≈ 0.88 (best models) |
 | Use case | Reference data generation | Real-time parameter exploration, optimization |
 
 Surrogate models enable interactive "what-if" analysis: drag a slider to change damping coefficient, instantly see the predicted trajectory — without re-running the ODE solver.

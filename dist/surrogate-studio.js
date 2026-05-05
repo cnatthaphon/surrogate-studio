@@ -1,5 +1,5 @@
 // Surrogate Studio - concatenated bundle
-// Generated: 2026-05-02T10:49:49Z
+// Generated: 2026-05-05T09:14:56Z
 // Source files: 58
 
 
@@ -5252,6 +5252,11 @@
       yTest: testY,
       featureSize: mode === "direct" ? inferDirectFeatureSize(featureSpec) : featSizes.flatFeatureSize,
       seqFeatureSize: mode === "direct" ? inferDirectFeatureSize(featureSpec) : featSizes.seqFeatureSize,
+      // Number of scenario classes — used by classifier heads (e.g. VAE+Classifier).
+      // The set of scenarios is enumerated in includedOut; usually 3 (spring,
+      // pendulum, bouncing) but narrows if the user filters to fewer.
+      classCount: includedOut.length || 3,
+      numClasses: includedOut.length || 3,
       windowSize: normalizedCfg.windowSize,
       dt: normalizedCfg.dt,
       durationSec: normalizedCfg.durationSec,

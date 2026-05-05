@@ -37,6 +37,24 @@ ImageSource → Reshape(32,32,1)
 
 Two output heads from the same backbone: bbox regression predicts [x, y, w, h] coordinates, classification predicts shape class (square / wide box / tall box).
 
+## Results & Interpretation
+
+The Single-Box Detector trained 18 epochs on PyTorch CUDA (early-stopped at epoch 7) with multi-head loss: bbox MSE + classification cross-entropy. Evaluated on the test split via the in-app `bbox_mae` / `class_accuracy` / `iou_mean` recipe.
+
+![Evaluation results](images/04_test.png)
+
+| Metric | Value | What it means |
+|---|---|---|
+| **BBox MAE** | **0.0464** | Mean absolute error on normalized 0-1 box coords (~1.5 pixels on 32×32) |
+| **Class Accuracy** | 0.6741 | Right shape category (square / wide / tall) on ~67% of test samples |
+| **IoU Mean** | **0.5871** | Mean intersection-over-union of predicted vs. true box |
+
+**Two distinct stories in one model.** The bbox regression is excellent (MAE = 1.5 pixels, IoU 0.59) — the model finds *where* the shape is with high accuracy. The classification accuracy of 0.67 is much weaker, because the three shape classes are deliberately ambiguous: a wide-box and a square become indistinguishable when the aspect ratio is near 1:1, and the class-label head receives the same backbone features regardless of geometry.
+
+**The educational point is the multi-head pattern itself.** One shared CNN backbone splits into a bbox regression head and a class-label head. Both heads train jointly with weighted losses through the standard graph editor — no detection-specific code paths in the training engine. The same model could be re-targeted to different detection schemas (different class counts, additional heads for confidence/keypoints) by editing the graph, not the engine. That's the platform claim this demo is here to make.
+
+**To improve class accuracy** you'd either separate the class-head representation (deeper class branch) or sharpen the dataset (less ambiguous class boundaries). The point of the synthetic data is to keep the demo small enough to train in seconds, not to win a detection benchmark.
+
 ## How to Use
 
 1. **Dataset** tab — click Generate Dataset (instant, synthetic)

@@ -12,7 +12,7 @@ The 7 architectures span 1986 to 2020, each built entirely from the visual graph
 | # | Architecture | Params | Task | Paper |
 |---|---|---|---|---|
 | 1 | **MLP Baseline** | ~236K | Classification | Rumelhart et al. 1986 |
-| 2 | **CNN (LeNet-5)** | ~860K | Classification | LeCun et al. 1998 |
+| 2 | **CNN (LeNet-style)** | ~860K | Classification | LeCun et al. 1998 |
 | 3 | **Dense Autoencoder** | ~450K | Reconstruction | Hinton & Salakhutdinov 2006 |
 | 4 | **Conv Autoencoder** | ~85K | Reconstruction | Masci et al. 2011 |
 | 5 | **VAE** | ~414K | Reconstruction + Generation | Kingma & Welling 2014 |
@@ -82,11 +82,11 @@ ImageSource(784) → Input → Dense(256, relu) → Dense(128, relu) → Output(
 ```
 The foundational architecture. Still competitive on simple tasks.
 
-### 2. CNN / LeNet-5 (LeCun 1998)
+### 2. CNN / LeNet-style (LeCun 1998, with modern dropout)
 ```
 ImageSource → Reshape(28,28,1) → Conv2D(32,5×5) → MaxPool(2) → Conv2D(64,5×5) → MaxPool(2) → Flatten → Dense(256) → Dropout(0.3) → Output(label, CE)
 ```
-Spatial feature extraction gives ~3% accuracy improvement over MLP.
+Spatial feature extraction gives ~3% accuracy improvement over MLP. Note: the original LeNet-5 (1998) did not use dropout — that's a modern regularizer added here for stable training. Architecture follows the LeNet conv-pool-conv-pool-dense skeleton, not a strict reproduction.
 
 ### 3. Dense Autoencoder (Hinton 2006)
 ```

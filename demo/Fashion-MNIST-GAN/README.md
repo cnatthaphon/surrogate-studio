@@ -16,6 +16,21 @@ No hardcoded GAN logic in the engine. The graph defines the full adversarial arc
 
 Three architectures (MLP-GAN, DCGAN, MLP-WGAN) generate Fashion-MNIST T-shirts from random noise, trained on class 0 (T-shirt/top, 6000 images). MLP-GAN and DCGAN ship as pre-trained cards so generation works immediately. MLP-WGAN is included as a draft trainer only — see "Why MLP-WGAN has no pre-trained card" below.
 
+### Generative Quality (in-app evaluation)
+
+Run via the Evaluation tab using the `Generative Quality` recipe — samples 75 generations per pretrained model and compares against the held-out reference T-shirt set with set-level distribution metrics.
+
+![Generative quality comparison](images/04_test.png)
+
+| Model | MMD ↓ | Mean Gap ↓ | Std Gap ↓ | NN Coverage ↑ | Diversity ↑ |
+|---|---|---|---|---|---|
+| MLP-GAN | 0.051 | 0.092 | 0.086 | 0.217 | 0.009 |
+| **DCGAN** | **0.001** | 0.109 | **0.074** | 0.218 | **0.091** |
+
+**DCGAN dramatically outperforms MLP-GAN on MMD (0.001 vs 0.051 — about 50x better distribution matching) and on diversity (0.091 vs 0.009 — 10x higher sample diversity).** This is the architectural inductive-bias story playing out cleanly: DCGAN's convolutional generator/discriminator pair has the right priors for image synthesis (translation equivariance, local feature composition), while the MLP-GAN treats every pixel as an independent feature and produces samples that, while T-shirt-shaped, cluster in a narrow region of the data manifold (low diversity).
+
+The two models tie within noise on Mean Gap, Std Gap, and NN Coverage — they both produce in-distribution garments at roughly the same pixel statistics. The decisive metrics are MMD (which sees the full distribution geometry, not just per-pixel moments) and Diversity (which counts unique modes in the generation set).
+
 The demo intentionally includes two kinds of trainer cards:
 - `MLP-GAN (pre-trained)`, `DCGAN (pre-trained)` — already have weights and are ready for Generation immediately
 - `MLP-GAN Trainer`, `DCGAN Trainer`, `MLP-WGAN Trainer` — blank draft trainers for training from scratch on client or server
@@ -49,7 +64,7 @@ Labels:
 - LR = 0.0005, Adam, batch size 128
 - Pre-trained weights included (1000 epochs on T-shirt class)
 
-### 2. DCGAN (Radford 2015)
+### 2. DCGAN (Radford 2016)
 
 ```
 Generator:
