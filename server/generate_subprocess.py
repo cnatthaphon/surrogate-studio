@@ -601,39 +601,84 @@ def _build_decoder_from_graph(model, graph_data, default_latent_dim):
     return Decoder(decoder_layers).to(device), latent_dim_actual
 
 
+_RECON_HEAD_TYPES = ("reconstruction", "autoencoder", "denoiser", "segmentation_mask", "segmentation")
+_RECON_TARGETS = (
+    "pixel_values", "pixels", "image", "images",
+    "mask", "masks", "segmentation_mask", "seg_mask", "binary_mask",
+    "reconstruction", "recon", "xv",
+)
+_LABEL_TARGETS = ("label", "labels", "logits", "class", "classes", "target_class", "scenario")
+_CE_LOSSES = (
+    "ce", "crossentropy", "categoricalcrossentropy",
+    "sparsecategoricalcrossentropy", "binarycrossentropy",
+)
+
+
+def _is_reconstruction_node_data(node_data):
+    """Positive recon-head signals. BCE-loss image VAEs and segmentation
+    UNets are valid reconstruction heads — explicit recon signals must
+    override classifier-side detection so they aren't false-positived."""
+    if not isinstance(node_data, dict):
+        return False
+    head = str(node_data.get("headType", "") or "").strip().lower()
+    if head in _RECON_HEAD_TYPES:
+        return True
+    for target_field in ("target", "targetType"):
+        tgt = str(node_data.get(target_field, "") or "").strip().lower()
+        if tgt in _RECON_TARGETS:
+            return True
+    return False
+
+
 def _is_classification_node_data(node_data):
     """Single source of truth for "is this output node a classification head?"
     Used by both _is_recon_output (to exclude classifiers from decoder
     extraction) and _find_classifier_output_index (to pick the classifier
     for guided-generation scoring).
 
-    Codex round-3 caught these two functions drifting: the recon filter was
-    triple-source (headType / loss / target) but the classifier resolver
-    only checked headType + a few loss spellings, so a graph declaring only
-    target="label" returned None and classifier_guided silently fell back
-    to variance guidance. Both call sites now share this helper, so any
-    future addition (e.g. new loss alias) automatically propagates.
+    Codex review history embedded in this function:
 
-    Three independent positive signals — any one true → classification:
-      * headType == "classification"
-      * normalized loss ∈ a known cross-entropy spelling
-      * target/targetType ∈ a known label-like spelling
+      Round-1: only checked headType — missed graphs with loss=ce / no
+        headType. Fixed by also checking loss aliases.
+      Round-3: the two helpers drifted (filter checked target, resolver
+        didn't). Fixed by extracting this shared helper.
+      Round-4: BCE was treated as classification by itself, but BCE is
+        ALSO the standard loss for image VAEs (sigmoid pixel outputs)
+        and binary segmentation masks. Such heads were being routed
+        away from decoder extraction. Fixed: when an explicit recon
+        signal (headType ∈ {reconstruction, autoencoder, denoiser,
+        segmentation, segmentation_mask} OR target ∈ {pixel_values,
+        mask, segmentation_mask, reconstruction, ...}) is present, the
+        node is NOT classification — even if loss=BCE.
+
+    Decision order:
+      1. Explicit classification signals (headType=classification OR
+         label-like target) → True. These are unambiguous.
+      2. Explicit reconstruction signals → False, even with CE/BCE loss.
+         Required for BCE-loss image VAEs and seg-mask UNets.
+      3. CE-family loss WITHOUT recon signal → True. Catches legacy
+         classifier graphs that omit headType/target.
+      4. Otherwise → False.
     """
     if not isinstance(node_data, dict):
         return False
+
     head = str(node_data.get("headType", "") or "").strip().lower()
+    # (1) unambiguous classification headType
     if head == "classification":
         return True
-    loss = str(node_data.get("loss", "") or "").strip().lower().replace("_", "").replace("-", "")
-    if loss in (
-        "ce", "crossentropy", "categoricalcrossentropy",
-        "sparsecategoricalcrossentropy", "binarycrossentropy",
-    ):
-        return True
+    # (1b) label-like target → unambiguous classification
     for target_field in ("target", "targetType"):
         tgt = str(node_data.get(target_field, "") or "").strip().lower()
-        if tgt in ("label", "labels", "logits", "class", "classes", "target_class", "scenario"):
+        if tgt in _LABEL_TARGETS:
             return True
+    # (2) explicit recon signal overrides loss-based classifier detection.
+    if _is_reconstruction_node_data(node_data):
+        return False
+    # (3) CE-family loss without an explicit recon signal → classifier.
+    loss = str(node_data.get("loss", "") or "").strip().lower().replace("_", "").replace("-", "")
+    if loss in _CE_LOSSES:
+        return True
     return False
 
 

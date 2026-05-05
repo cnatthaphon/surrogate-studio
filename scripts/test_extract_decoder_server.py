@@ -199,6 +199,61 @@ def test_find_classifier_output_index_loss_only():
     print("PASS test_find_classifier_output_index_loss_only")
 
 
+def test_bce_reconstruction_not_classified():
+    """Codex round-4: BCE was a classifier signal by itself, but BCE is the
+    standard loss for image VAEs (sigmoid pixel outputs in [0,1]) and binary
+    segmentation masks. An explicit recon signal must override BCE-based
+    classifier detection.
+
+    Six positive cases (all should be NOT classification, decoder extraction
+    should succeed):
+      - target=pixel_values + loss=binary_crossentropy (image VAE)
+      - target=pixel_values + loss=BCE (alt spelling)
+      - target=mask + loss=binary_crossentropy (binary segmentation)
+      - target=segmentation_mask + loss=binary_crossentropy (UNet)
+      - headType=reconstruction + loss=binary_crossentropy
+      - headType=segmentation + loss=binary_crossentropy
+    """
+    from generate_subprocess import _is_classification_node_data, _is_reconstruction_node_data
+    cases = [
+        {"target": "pixel_values", "loss": "binary_crossentropy"},
+        {"target": "pixel_values", "loss": "bce"},
+        {"target": "mask", "loss": "binary_crossentropy"},
+        {"target": "segmentation_mask", "loss": "binary_crossentropy"},
+        {"headType": "reconstruction", "loss": "binary_crossentropy"},
+        {"headType": "segmentation", "loss": "binary_crossentropy"},
+    ]
+    for d in cases:
+        assert not _is_classification_node_data(d), (
+            f"BCE recon head must NOT be classified: {d}. Round-4 bug: "
+            "BCE alone was treated as classifier, breaking image VAEs and "
+            "BCE-segmentation UNets — decoder extraction returned None."
+        )
+        assert _is_reconstruction_node_data(d), f"recon helper should accept {d}"
+
+    # And confirm full decoder extraction works on a BCE-VAE graph end-to-end.
+    nodes = {
+        "1": _make_node("input_layer", {}, {"output_1": ["2"]}),
+        "2": _make_node("dense_layer", {"units": 256}, {"output_1": ["3"]}),
+        "3": _make_node("reparam_layer", {}, {"output_1": ["4"]}),
+        "4": _make_node("dense_layer", {"units": 256}, {"output_1": ["5"]}),
+        # The smoking-gun: pixel_values target + BCE loss
+        "5": _make_node("output_layer",
+                        {"target": "pixel_values", "loss": "binary_crossentropy"},
+                        {}),
+    }
+    model = _FakeModel()
+    setattr(model, "dense_4", _LabeledLinear(16, 256, "dec1"))
+    decoder, latent = _build_decoder_from_graph(model, nodes, 16)
+    assert decoder is not None, (
+        "Decoder extraction must succeed for BCE-loss image VAEs. "
+        "If this is None, classifier_guided generation cannot run on "
+        "any image VAE that uses sigmoid + BCE pixel reconstruction."
+    )
+    assert latent == 16
+    print("PASS test_bce_reconstruction_not_classified")
+
+
 def test_recon_and_classifier_helpers_share_source():
     """Regression guard: confirm the recon filter and classifier resolver
     use the SAME node-data classifier check. If a future change adds an
@@ -243,6 +298,7 @@ def main():
     test_find_classifier_output_index()
     test_find_classifier_output_index_target_only()
     test_find_classifier_output_index_loss_only()
+    test_bce_reconstruction_not_classified()
     test_recon_and_classifier_helpers_share_source()
     print("\nAll extractor tests passed.")
 
