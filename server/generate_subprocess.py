@@ -195,7 +195,7 @@ def main():
             }}))
         else:
             # Extract decoder: find reparam layer, build decoder from there
-            decoder, actual_latent_dim = _extract_decoder(model, latent_dim)
+            decoder, actual_latent_dim = _extract_decoder(model, latent_dim, graph=graph)
             if decoder is None:
                 z = torch.randn(num_samples, feature_size, device=device) * temperature
                 with torch.no_grad():
@@ -224,22 +224,43 @@ def main():
         prior_weight = float(config.get("priorWeight", 0.5))
         steps = int(config.get("steps", 100))
         lr_cg = float(config.get("lr", 0.01))
-        decoder, actual_dim = _extract_decoder(model, latent_dim)
+        # Graph-driven decoder extraction: walks the graph from the reparam
+        # node forward to the reconstruction output, ignoring the classifier
+        # branch. Without this, branched models (VAE+Classifier) collected
+        # classifier-head Dense layers into the decoder Sequential and
+        # produced shape mismatches at dec(z).
+        decoder, actual_dim = _extract_decoder(model, latent_dim, graph=graph)
         dec = decoder if decoder else model
+        # Identify which output head is the classifier so we can score the
+        # generated samples against P(target_class) instead of guessing the
+        # head index. Falls back to head 0 only when no classification head
+        # exists (in which case classifier-guidance is a no-op anyway).
+        cls_idx = _find_classifier_output_index(model, graph)
         z = torch.randn(num_samples, actual_dim, device=device, requires_grad=True)
         opt = torch.optim.Adam([z], lr=lr_cg)
         loss_history = []
         for step in range(steps):
             opt.zero_grad()
             generated = dec(z)
-            # use full model as classifier
-            cls_out = model(generated)
-            if cls_out.shape[-1] <= 1:
-                # model doesn't have classification output — use reconstruction loss
+            # Run the full model to get all output heads; pick the
+            # classification head explicitly.
+            full_out = model(generated)
+            cls_out = _pick_output(full_out, cls_idx if cls_idx is not None else 0)
+            if cls_idx is None or (hasattr(cls_out, "shape") and cls_out.shape[-1] <= 1):
+                # No classifier head — use reconstruction variance as a
+                # weak surrogate signal so generation still produces something.
                 loss = generated.var() * guidance_weight
             else:
                 # maximize probability of target class
-                log_prob = torch.log(cls_out[:, target_class].clamp(min=1e-8))
+                # Apply softmax in case the head outputs raw logits (PyTorch
+                # CE expects logits but here we already have post-softmax in
+                # most demos; clamp guards either way).
+                if cls_out.dim() > 1 and cls_out.shape[-1] > 1:
+                    probs = torch.softmax(cls_out, dim=-1)
+                else:
+                    probs = cls_out
+                target_idx = max(0, min(target_class, probs.shape[-1] - 1))
+                log_prob = torch.log(probs[:, target_idx].clamp(min=1e-8))
                 loss = -log_prob.mean() * guidance_weight
                 if prior_weight > 0:
                     loss = loss + prior_weight * z.pow(2).mean()
@@ -255,7 +276,7 @@ def main():
     elif method == "optimize":
         # optimize z to minimize reconstruction toward target
         originals = np.array(config.get("originals", []), dtype=np.float32)
-        decoder, actual_dim = _extract_decoder(model, latent_dim)
+        decoder, actual_dim = _extract_decoder(model, latent_dim, graph=graph)
         dec = decoder if decoder else model
         z = torch.randn(num_samples, actual_dim, device=device, requires_grad=True)
         opt = torch.optim.Adam([z], lr=float(config.get("lr", 0.01)))
@@ -358,72 +379,270 @@ def main():
         sys.exit(1)
 
 
-def _extract_decoder(model, default_latent_dim):
-    """Try to extract decoder layers after the reparam/bottleneck point."""
+def _extract_decoder(model, default_latent_dim, graph=None):
+    """Graph-driven decoder extraction: trace the path from the reparam node
+    forward to the *reconstruction* output head, collect only nodes on that
+    path, and rebuild a Sequential from the corresponding torch modules.
+
+    Mirrors src/model_builder_core.js:extractDecoder. Critical for branched
+    architectures (VAE+Classifier) where the classifier head shares the
+    encoder and would otherwise be incorrectly included by a naive
+    "all-layers-after-reparam" sweep — producing shape mismatches like
+    `mat1 and mat2 shapes cannot be multiplied (2x16 and 784x256)` because
+    the classifier's first dense layer (16→256) ends up after the decoder's
+    Dense(784) output in module-registration order.
+
+    Returns (decoder_module, latent_dim). If the graph is missing or the
+    trace fails, falls back to the legacy "after-reparam" heuristic so
+    pure-sequential VAEs still work.
+    """
     try:
-        named = list(model.named_modules())
-        reparam_idx = -1
-        reparam_out_dim = default_latent_dim
-
-        # find reparam or bottleneck
-        for idx, (name, mod) in enumerate(named):
-            if "reparam" in name.lower():
-                reparam_idx = idx
-                # try to get output dim from the noise projection layer
-                if hasattr(mod, "weight"):
-                    reparam_out_dim = mod.out_features if hasattr(mod, "out_features") else default_latent_dim
-                break
-
-        if reparam_idx < 0:
-            # find bottleneck: smallest linear layer
-            min_dim = float("inf")
-            for idx, (name, mod) in enumerate(named):
-                if hasattr(mod, "out_features") and mod.out_features < min_dim:
-                    min_dim = mod.out_features
-                    reparam_idx = idx
-                    reparam_out_dim = min_dim
-
-        if reparam_idx < 0:
-            return None, default_latent_dim
-
-        # Build sequential decoder from layers after reparam
-        import torch.nn as nn
-        decoder_layers = []
-        found_start = False
-        for idx, (name, mod) in enumerate(named):
-            if idx <= reparam_idx:
-                continue
-            if not found_start:
-                found_start = True
-            if isinstance(mod, (nn.Linear, nn.LSTM, nn.GRU, nn.RNN, nn.ReLU, nn.Tanh, nn.Sigmoid,
-                                nn.BatchNorm1d, nn.LayerNorm, nn.Dropout)):
-                decoder_layers.append(mod)
-
-        if not decoder_layers:
-            return None, default_latent_dim
-
-        class Decoder(nn.Module):
-            def __init__(self, layers):
-                super().__init__()
-                self.layers = nn.ModuleList(layers)
-
-            def forward(self, z):
-                x = z
-                for layer in self.layers:
-                    if isinstance(layer, (nn.LSTM, nn.GRU, nn.RNN)):
-                        if x.dim() == 2:
-                            x = x.unsqueeze(1)
-                        x, _ = layer(x)
-                        if x.dim() == 3:
-                            x = x[:, -1, :]
-                    else:
-                        x = layer(x)
-                return x
-
-        return Decoder(decoder_layers).to(next(model.parameters()).device), reparam_out_dim
-
+        graph_data = _extract_graph_data(graph) if graph else {}
+        if graph_data:
+            decoder_seq, latent_d = _build_decoder_from_graph(model, graph_data, default_latent_dim)
+            if decoder_seq is not None:
+                return decoder_seq, latent_d
+        return _extract_decoder_legacy(model, default_latent_dim)
     except Exception:
+        try:
+            return _extract_decoder_legacy(model, default_latent_dim)
+        except Exception:
+            return None, default_latent_dim
+
+
+def _build_decoder_from_graph(model, graph_data, default_latent_dim):
+    """Trace reparam → reconstruction-output path and assemble decoder."""
+    import torch.nn as nn
+
+    if not isinstance(graph_data, dict) or not graph_data:
         return None, default_latent_dim
+
+    nodes = {str(k): v for k, v in graph_data.items() if isinstance(v, dict)}
+    if not nodes:
+        return None, default_latent_dim
+
+    def _node_name(nid):
+        return str(nodes.get(nid, {}).get("name", "") or "").replace("_layer", "")
+
+    def _node_data(nid):
+        return nodes.get(nid, {}).get("data", {}) or {}
+
+    def _outgoing(nid):
+        outs = (nodes.get(nid, {}).get("outputs", {}) or {})
+        edges = []
+        for port_name, port in outs.items():
+            for c in (port or {}).get("connections", []) or []:
+                edges.append(str(c.get("node", "") or ""))
+        return [e for e in edges if e]
+
+    def _is_recon_output(nid):
+        if _node_name(nid) != "output":
+            return False
+        d = _node_data(nid)
+        head = str(d.get("headType", "") or "").lower()
+        if head in ("classification", "latent_kl"):
+            return False
+        # Reconstruction targets are anything that's not a class label.
+        return True
+
+    # Find reparam node (preferred: explicit reparam_layer; fallback: node
+    # whose name contains "reparam" — the JS side names internal layers
+    # `reparam_add_<id>` and `reparam_noise_<id>` so we accept both).
+    reparam_id = None
+    for nid in nodes:
+        name = _node_name(nid)
+        if name == "reparam" or "reparam" in name:
+            reparam_id = nid
+            break
+    if reparam_id is None:
+        return None, default_latent_dim
+
+    # Find the reconstruction output reachable from reparam (ignore
+    # classification heads). BFS forward.
+    recon_output_id = None
+    seen = set()
+    queue = [reparam_id]
+    while queue:
+        cur = queue.pop(0)
+        if cur in seen:
+            continue
+        seen.add(cur)
+        if cur != reparam_id and _is_recon_output(cur):
+            recon_output_id = cur
+            break
+        for nxt in _outgoing(cur):
+            if nxt not in seen:
+                queue.append(nxt)
+    if recon_output_id is None:
+        return None, default_latent_dim
+
+    # Collect ordered node IDs on the path from reparam to recon_output via
+    # forward BFS, restricting to nodes that lead to recon_output. Two-pass:
+    # (1) reachable forward from reparam, (2) reachable backward from
+    # recon_output. Intersection is the decoder path.
+    forward_reach = set()
+    queue = [reparam_id]
+    while queue:
+        cur = queue.pop(0)
+        if cur in forward_reach:
+            continue
+        forward_reach.add(cur)
+        for nxt in _outgoing(cur):
+            queue.append(nxt)
+
+    # Build reverse adjacency for backward reach.
+    reverse_adj = {}
+    for nid in nodes:
+        for nxt in _outgoing(nid):
+            reverse_adj.setdefault(nxt, []).append(nid)
+
+    backward_reach = set()
+    queue = [recon_output_id]
+    while queue:
+        cur = queue.pop(0)
+        if cur in backward_reach:
+            continue
+        backward_reach.add(cur)
+        for prev in reverse_adj.get(cur, []):
+            queue.append(prev)
+
+    on_path = forward_reach & backward_reach
+    on_path.discard(reparam_id)  # reparam itself is not part of the decoder
+    on_path.discard(recon_output_id)  # output_layer adds no new params
+
+    # Topo-sort the path nodes (numeric ID order is good enough for
+    # well-formed demo graphs; matches how train_subprocess registers them).
+    def _node_sort_key(nid):
+        try:
+            return int(nid)
+        except Exception:
+            return 10**9
+    ordered = sorted(on_path, key=_node_sort_key)
+
+    # Map each node to its registered torch module. Naming follows
+    # train_subprocess.py: dense_<id>, rnn_<id>, drop_<id>, bn_<id>, ln_<id>,
+    # relu_<id>, lrelu_<id>, etc. Unknown node types are skipped (they may
+    # be metadata-only, e.g., reshape/feature blocks that don't add params).
+    decoder_layers = []
+    layer_prefixes = ["dense", "rnn", "drop", "bn", "ln", "relu", "lrelu", "act"]
+    for nid in ordered:
+        for prefix in layer_prefixes:
+            attr = f"{prefix}_{nid}"
+            if hasattr(model, attr):
+                decoder_layers.append(getattr(model, attr))
+
+    if not decoder_layers:
+        return None, default_latent_dim
+
+    # Determine the actual latent dim from the FIRST decoder linear layer's
+    # in_features, falling back to default if unavailable.
+    latent_dim_actual = default_latent_dim
+    for layer in decoder_layers:
+        if isinstance(layer, nn.Linear):
+            latent_dim_actual = layer.in_features
+            break
+
+    class Decoder(nn.Module):
+        def __init__(self, layers):
+            super().__init__()
+            self.layers = nn.ModuleList(layers)
+
+        def forward(self, z):
+            x = z
+            for layer in self.layers:
+                if isinstance(layer, (nn.LSTM, nn.GRU, nn.RNN)):
+                    if x.dim() == 2:
+                        x = x.unsqueeze(1)
+                    x, _ = layer(x)
+                    if x.dim() == 3:
+                        x = x[:, -1, :]
+                else:
+                    x = layer(x)
+            return x
+
+    device = next(model.parameters()).device
+    return Decoder(decoder_layers).to(device), latent_dim_actual
+
+
+def _find_classifier_output_index(model, graph):
+    """Return the index in model.output_ids that corresponds to the
+    classification head, or None if no classifier output exists.
+
+    Used by classifier_guided generation: after decoding z, run the full
+    model to get all heads, then pick the classifier head explicitly via
+    this index. Mirrors the JS-side classifierOutputIndex resolution in
+    src/tabs/generation_tab.js."""
+    output_ids = [str(x) for x in getattr(model, "output_ids", []) or []]
+    if not output_ids:
+        return None
+    graph_data = _extract_graph_data(graph) if graph else {}
+    for nid in output_ids:
+        nd = (graph_data or {}).get(nid, {}) or {}
+        d = nd.get("data", {}) or {}
+        if str(d.get("headType", "") or "").lower() == "classification":
+            return output_ids.index(nid)
+        loss = str(d.get("loss", "") or "").lower()
+        if loss in ("ce", "categoricalcrossentropy", "crossentropy", "categorical_crossentropy"):
+            return output_ids.index(nid)
+    return None
+
+
+def _extract_decoder_legacy(model, default_latent_dim):
+    """Legacy "all-layers-after-reparam" extraction. Kept as fallback for
+    pure-sequential VAEs where the graph isn't passed in."""
+    import torch.nn as nn
+    named = list(model.named_modules())
+    reparam_idx = -1
+    reparam_out_dim = default_latent_dim
+
+    for idx, (name, mod) in enumerate(named):
+        if "reparam" in name.lower():
+            reparam_idx = idx
+            if hasattr(mod, "weight"):
+                reparam_out_dim = mod.out_features if hasattr(mod, "out_features") else default_latent_dim
+            break
+
+    if reparam_idx < 0:
+        min_dim = float("inf")
+        for idx, (name, mod) in enumerate(named):
+            if hasattr(mod, "out_features") and mod.out_features < min_dim:
+                min_dim = mod.out_features
+                reparam_idx = idx
+                reparam_out_dim = min_dim
+
+    if reparam_idx < 0:
+        return None, default_latent_dim
+
+    decoder_layers = []
+    for idx, (name, mod) in enumerate(named):
+        if idx <= reparam_idx:
+            continue
+        if isinstance(mod, (nn.Linear, nn.LSTM, nn.GRU, nn.RNN, nn.ReLU, nn.Tanh, nn.Sigmoid,
+                            nn.BatchNorm1d, nn.LayerNorm, nn.Dropout)):
+            decoder_layers.append(mod)
+
+    if not decoder_layers:
+        return None, default_latent_dim
+
+    class Decoder(nn.Module):
+        def __init__(self, layers):
+            super().__init__()
+            self.layers = nn.ModuleList(layers)
+
+        def forward(self, z):
+            x = z
+            for layer in self.layers:
+                if isinstance(layer, (nn.LSTM, nn.GRU, nn.RNN)):
+                    if x.dim() == 2:
+                        x = x.unsqueeze(1)
+                    x, _ = layer(x)
+                    if x.dim() == 3:
+                        x = x[:, -1, :]
+                else:
+                    x = layer(x)
+            return x
+
+    return Decoder(decoder_layers).to(next(model.parameters()).device), reparam_out_dim
 
 
 if __name__ == "__main__":

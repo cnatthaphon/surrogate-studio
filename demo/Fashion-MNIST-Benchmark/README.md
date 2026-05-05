@@ -5,7 +5,7 @@
 
 **A visual survey of seven architectures spanning three decades of neural network research, trained and evaluated on the same dataset in one browser page.**
 
-The 7 architectures span 1986 to 2020, each built entirely from the visual graph editor — no code, no hardcodes. Every model trains on both TF.js (browser) and PyTorch (server), with identical results. The goal is platform-level reproducibility across architectures, not per-architecture SOTA.
+The 7 architectures span 1986 to 2020, each built entirely from the visual graph editor — no code, no hardcodes. Every model trains on both TF.js (browser) and PyTorch (server) from the same graph; the two runtimes use the same loss, optimizer, and seed and produce comparable but not bit-for-bit identical weights (different floating-point summation orders, RNG streams, and library kernels — typical cross-runtime variance is well under 1% on test metrics). The goal is platform-level reproducibility across architectures, not per-architecture SOTA.
 
 ## Models
 
@@ -37,7 +37,7 @@ Trained 20 epochs on real Fashion-MNIST (PyTorch CUDA, seed=42), evaluated on va
 | Dense AE | **0.012** | 128-dim | Sharp recognizable garments | Lossy compression at 6× shrink, decoder reconstructs from a meaningful latent |
 | Conv AE | **0.011** | 64-dim flat | Sharp, slightly smoother edges than dense | Spatial inductive bias from conv kernels lets a smaller bottleneck (64 vs 128) reach the same MSE |
 | VAE | 0.022 | 16-dim + KL | Slightly blurrier than AE | The KL term forces the latent to look like N(0,1); ~2× higher MSE is the cost of sampling from random z later |
-| Denoising AE | 0.051 | None (no compression) | Sharper than VAE; trained to invert noise | Diffusion-style x0 prediction at fixed noise scale 0.3; not score-based, can't do free Langevin sampling |
+| Denoising AE | 0.051 | 256-dim (no KL constraint) | Sharper than VAE; trained to invert noise | Diffusion-style x0 prediction at fixed noise scale 0.3; not score-based, can't do free Langevin sampling |
 
 Reading guide:
 - **AE vs Conv-AE same MSE, different params**: spatial structure pays for itself
