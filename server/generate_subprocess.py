@@ -439,10 +439,25 @@ def _build_decoder_from_graph(model, graph_data, default_latent_dim):
         if _node_name(nid) != "output":
             return False
         d = _node_data(nid)
-        head = str(d.get("headType", "") or "").lower()
+        # Filter on three independent classification signals because legacy
+        # graphs (and graphs round-tripped from older preset files) may have
+        # any one of headType / loss / target / targetType missing or
+        # spelled differently. Codex review caught this: filtering on
+        # headType alone could let a classifier head with loss=ce but no
+        # explicit headType slip through and become the "decoder output."
+        head = str(d.get("headType", "") or "").strip().lower()
         if head in ("classification", "latent_kl"):
             return False
-        # Reconstruction targets are anything that's not a class label.
+        loss = str(d.get("loss", "") or "").strip().lower().replace("_", "").replace("-", "")
+        if loss in (
+            "ce", "crossentropy", "categoricalcrossentropy",
+            "sparsecategoricalcrossentropy", "binarycrossentropy",
+        ):
+            return False
+        for target_field in ("target", "targetType"):
+            tgt = str(d.get(target_field, "") or "").strip().lower()
+            if tgt in ("label", "labels", "logits", "class", "classes", "target_class", "scenario"):
+                return False
         return True
 
     # Find reparam node (preferred: explicit reparam_layer; fallback: node
@@ -510,14 +525,48 @@ def _build_decoder_from_graph(model, graph_data, default_latent_dim):
     on_path.discard(reparam_id)  # reparam itself is not part of the decoder
     on_path.discard(recon_output_id)  # output_layer adds no new params
 
-    # Topo-sort the path nodes (numeric ID order is good enough for
-    # well-formed demo graphs; matches how train_subprocess registers them).
-    def _node_sort_key(nid):
+    # Topo-sort the path nodes by graph dependency order, NOT numeric ID.
+    # Codex caught this: numeric ID is creation order, which only happens
+    # to coincide with dependency order for the demo presets we ship; a
+    # user-built graph that creates nodes out of dependency order would
+    # break the decoder Sequential's input/output dim chain.
+    # Standard Kahn's algorithm restricted to the on_path subgraph.
+    indegree_path = {nid: 0 for nid in on_path}
+    for nid in on_path:
+        for nxt in _outgoing(nid):
+            if nxt in indegree_path:
+                indegree_path[nxt] += 1
+    # Stable tie-break by numeric ID so the order is deterministic across
+    # equivalent topo sorts.
+    def _stable_key(nid):
         try:
             return int(nid)
         except Exception:
             return 10**9
-    ordered = sorted(on_path, key=_node_sort_key)
+    ready = sorted([nid for nid, d in indegree_path.items() if d == 0], key=_stable_key)
+    ordered = []
+    while ready:
+        cur = ready.pop(0)
+        ordered.append(cur)
+        for nxt in _outgoing(cur):
+            if nxt in indegree_path:
+                indegree_path[nxt] -= 1
+                if indegree_path[nxt] == 0:
+                    # Insertion-sort into ready by stable key.
+                    nxt_key = _stable_key(nxt)
+                    inserted = False
+                    for i, existing in enumerate(ready):
+                        if _stable_key(existing) > nxt_key:
+                            ready.insert(i, nxt)
+                            inserted = True
+                            break
+                    if not inserted:
+                        ready.append(nxt)
+    if len(ordered) != len(on_path):
+        # Cycle detected — fall back to numeric ID order so we still produce
+        # something rather than crashing. (Should never happen on a valid
+        # graph; cycle would have been caught at training time too.)
+        ordered = sorted(on_path, key=_stable_key)
 
     # Map each node to its registered torch module. Naming follows
     # train_subprocess.py: dense_<id>, rnn_<id>, drop_<id>, bn_<id>, ln_<id>,
