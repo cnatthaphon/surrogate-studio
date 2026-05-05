@@ -335,6 +335,46 @@
           card.appendChild(el("div", { style: "font-size:11px;color:#4ade80;margin-top:4px;" }, "Avg MSE: " + result.avgMse.toExponential(4)));
         }
 
+        // Closed-loop verification banner for classifier-guided runs: shows the
+        // requested target class, what fraction of samples the classifier
+        // actually predicts as that class, and the mean target-class probability
+        // across the batch. Lets a viewer confirm the optimization steered to
+        // the right class — not just that "something" came out.
+        if (result.classifierPredictions && result.classifierPredictions.length) {
+          var _ds = trainer && trainer.datasetId ? store.getDataset(trainer.datasetId) : null;
+          var _dsCfg = (_ds && _ds.config) || {};       // user-facing dataset card config (where classFilter lives)
+          var _dsd = (_ds && _ds.data) || {};           // materialized dataset (has classNames once built)
+          var _classNames = Array.isArray(_dsd.classNames) ? _dsd.classNames :
+            (Array.isArray(_dsd.classes) ? _dsd.classes :
+             (Array.isArray(_dsCfg.classNames) ? _dsCfg.classNames : null));
+          // classFilter lives on the dataset CARD's config, not on the
+          // materialized data.config — Codex caught this. With classFilter=[0]
+          // (Fashion-MNIST T-shirts only) the classifier head's compact index 0
+          // maps to original class 0, not whatever the materialized data
+          // happens to label first.
+          var _classFilter = Array.isArray(_dsCfg.classFilter) ? _dsCfg.classFilter : null;
+          function _classLabel(idx) {
+            // If the dataset has classFilter (e.g. [0,1,7]), the classifier head's
+            // output index N maps to original class classFilter[N].
+            var orig = _classFilter && _classFilter[idx] != null ? _classFilter[idx] : idx;
+            if (_classNames && _classNames[orig] != null) return String(orig) + ": " + _classNames[orig];
+            return String(orig);
+          }
+          var meanTargetProb = result.classifierPredictions.reduce(function (s, p) {
+            return s + (p.targetProbability || 0);
+          }, 0) / result.classifierPredictions.length;
+          var hitFrac = (result.classifierAccuracy != null ? result.classifierAccuracy : 0);
+          var hitColor = hitFrac >= 0.75 ? "#4ade80" : hitFrac >= 0.4 ? "#fbbf24" : "#f43f5e";
+          card.appendChild(el("div",
+            { style: "font-size:11px;color:" + hitColor + ";margin-top:4px;" },
+            "Target: " + _classLabel(Number(result.targetClass)) +
+            " | Classifier hit: " + (hitFrac * 100).toFixed(0) + "% (" +
+            Math.round(hitFrac * result.classifierPredictions.length) + "/" +
+            result.classifierPredictions.length + ")" +
+            " | Mean P(target): " + meanTargetProb.toFixed(3)
+          ));
+        }
+
         // sample visualization with toggle: Images / Stats chart
         if (result.samples && result.samples.length) {
           var sampleDim = result.samples[0] ? result.samples[0].length : 0;
@@ -662,6 +702,11 @@
       }
       if (currentMethod === "classifier_guided") {
         fields.push({ key: "guidanceWeight", label: "Guidance weight", value: g.config.guidanceWeight || 1.0, min: 0.01, max: 10, step: 0.1 });
+        // Prior weight: penalty on ||z||² to keep latent inside the trained
+        // distribution. Default 0.5 — see classifierGuidance() in
+        // generation_engine_core.js. Surface as a tunable so users can dial
+        // up adversarial freedom (low) vs sample fidelity (high).
+        fields.push({ key: "priorWeight", label: "Prior weight (||z||²)", value: g.config.priorWeight != null ? Number(g.config.priorWeight) : 0.5, min: 0, max: 5, step: 0.1 });
       }
       fields.forEach(function (f) {
         var row = el("div", { className: "osc-form-row" });
@@ -843,6 +888,7 @@
             seed: (config.seed || 42) + (Date.now() % 100000),
             targetClass: config.targetClass != null ? Number(config.targetClass) : -1,
             guidanceWeight: Number(config.guidanceWeight || 1.0),
+            priorWeight: config.priorWeight != null ? Number(config.priorWeight) : 0.5,
             sampleNodeId: config.sampleNodeId || "",
             outputNodeId: config.outputNodeId || "",
             originals: method === "reconstruct" ? sTestX.slice(0, config.numSamples || 16) : undefined,
@@ -1033,6 +1079,10 @@
           genConfig.steps = genConfig.steps || 100;
           genConfig.targetClass = Number(config.targetClass || 0);
           genConfig.guidanceWeight = Number(config.guidanceWeight || 1.0);
+          // Pass priorWeight (||z||² penalty) through to the engine. Default
+          // 0.5 anchors z near the trained latent prior; users can tune via
+          // the Generation panel's "Prior weight" input.
+          genConfig.priorWeight = config.priorWeight != null ? Number(config.priorWeight) : 0.5;
           // the full model itself serves as classifier if it has classification outputs
           // the generation engine will use the model to compute class probabilities
           genConfig.classifierModel = built.model;

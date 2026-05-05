@@ -225,7 +225,7 @@
       { id: "g-convae-r",  name: "Conv-AE Reconstruct",  schemaId: sid, trainerId: "t-conv-ae-pre",  family: "supervised", config: { method: "reconstruct", numSamples: 16 }, status: "draft", runs: [], createdAt: Date.now() },
       { id: "g-vae-rand",  name: "VAE Random Sampling",  schemaId: sid, trainerId: "t-vae-pre",      family: "vae",        config: { method: "random", numSamples: 16, temperature: 1.0, seed: 42 }, status: "draft", runs: [], createdAt: Date.now() },
       { id: "g-vae-recon", name: "VAE Reconstruct",      schemaId: sid, trainerId: "t-vae-pre",      family: "vae",        config: { method: "reconstruct", numSamples: 16 }, status: "draft", runs: [], createdAt: Date.now() },
-      { id: "g-cls-guide", name: "Classifier-Guided",    schemaId: sid, trainerId: "t-vae-cls-pre",  family: "vae",        config: { method: "classifier_guided", numSamples: 16, steps: 100, lr: 0.01, targetClass: 7, guidanceWeight: 2.0, seed: 42 }, status: "draft", runs: [], createdAt: Date.now() },
+      { id: "g-cls-guide", name: "Classifier-Guided",    schemaId: sid, trainerId: "t-vae-cls-pre",  family: "vae",        config: { method: "classifier_guided", numSamples: 16, steps: 100, lr: 0.005, targetClass: 7, guidanceWeight: 1.5, priorWeight: 0.5, seed: 42 }, status: "draft", runs: [], createdAt: Date.now() },
       // Langevin sampling intentionally omitted: m7 denoiser is a single-noise-
       // scale denoising autoencoder (noise_injection scale=0.3), not a
       // score-based model trained across multiple noise levels. Langevin

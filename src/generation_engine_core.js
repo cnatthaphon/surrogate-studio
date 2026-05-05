@@ -178,12 +178,20 @@
       if (!cfg.classifierModel) return Promise.reject(new Error("classifier_guided requires classifierModel"));
       var targetClass = cfg.targetClass || 0;
       var guidanceWeight = cfg.guidanceWeight || 1.0;
+      // Prior weight: penalty for ||z||² to keep optimization in the trained
+      // latent distribution. Without it, gradient ascent on log P(target_class)
+      // drifts z into adversarial regions where the classifier triggers but
+      // the decoder produces texture noise (NOT the target garment shape).
+      // Default 0.5 — strong enough to anchor near the prior, weak enough that
+      // class probability still improves.
+      var priorWeight = cfg.priorWeight != null ? Number(cfg.priorWeight) : 0.5;
       cfg.objective = objectives.classifierGuidance(
         cfg.classifierModel,
         targetClass,
         guidanceWeight,
         cfg.outputIndex,                   // decoder's reconstruction output (usually 0)
-        cfg.classifierOutputIndex          // classifier's class-probs output (1 for VAE+Cls)
+        cfg.classifierOutputIndex,         // classifier's class-probs output (1 for VAE+Cls)
+        priorWeight
       );
       cfg.method = "optimize";
       return _generateOptimize(tf, cfg, numSamples, latentDim, steps, lr, temperature, onStep);
@@ -332,6 +340,40 @@
         numSamples: numSamples,
         latentDim: latentDim,
       };
+
+      // Closed-loop classifier verification: when classifier-guided was used,
+      // run the classifier on the FINAL generated samples and emit per-sample
+      // predicted class + top probability. The UI displays these next to each
+      // thumbnail so users can verify the optimization actually steered toward
+      // the requested target class (rather than just trusting the loss curve).
+      if (cfg.classifierModel && cfg.targetClass != null) {
+        try {
+          var clsOi = cfg.classifierOutputIndex != null ? cfg.classifierOutputIndex : 0;
+          var clsOut = cfg.classifierModel.predict(pickOutput(output, cfg.outputIndex));
+          var probsT = pickOutput(clsOut, clsOi);
+          var probsArr = probsT.arraySync();
+          var perSample = probsArr.map(function (row) {
+            var topIdx = 0; var topVal = row[0];
+            for (var ci = 1; ci < row.length; ci++) {
+              if (row[ci] > topVal) { topVal = row[ci]; topIdx = ci; }
+            }
+            return {
+              predictedClass: topIdx,
+              predictedProbability: Number(topVal),
+              targetProbability: Number(row[Number(cfg.targetClass)] || 0),
+            };
+          });
+          result.targetClass = Number(cfg.targetClass);
+          result.classifierPredictions = perSample;
+          result.classifierAccuracy = perSample.filter(function (p) {
+            return p.predictedClass === Number(cfg.targetClass);
+          }).length / Math.max(1, perSample.length);
+          if (Array.isArray(clsOut)) clsOut.forEach(function (t) { t.dispose(); }); else clsOut.dispose();
+        } catch (_) {
+          // verification is informational; never let it block generation
+        }
+      }
+
       z.dispose();
       optimizer.dispose();
       if (Array.isArray(output)) output.forEach(function (t) { t.dispose(); }); else output.dispose();
@@ -578,7 +620,7 @@
     // classifierModel: trained classifier that maps input → class probabilities
     // targetClass: integer class index to maximize
     // weight: how much to weight guidance vs reconstruction
-    classifierGuidance: function (classifierModel, targetClass, weight, outputIndex, classifierOutputIndex) {
+    classifierGuidance: function (classifierModel, targetClass, weight, outputIndex, classifierOutputIndex, priorWeight) {
       var cls = targetClass || 0;
       var w = weight || 1.0;
       var decoderOi = outputIndex || 0;
@@ -586,6 +628,12 @@
       // graph (e.g. VAE+Classifier with [recon, classProbs]). Defaults to 0 for
       // models whose only output is class probabilities.
       var classOi = classifierOutputIndex != null ? classifierOutputIndex : 0;
+      // Penalty on ||z||² (Gaussian prior with variance 1). Without it, gradient
+      // ascent on log P(target_class) drives z into adversarial regions where
+      // the classifier triggers but the decoder hasn't been trained — output
+      // becomes noise that happens to fool the classifier rather than the
+      // target garment. Default 0.5 keeps z near the trained latent prior.
+      var pw = priorWeight != null ? priorWeight : 0.5;
       return function (tf, z, decoderModel) {
         var generated = decoderModel.predict(z);
         var genOut = pickOutput(generated, decoderOi);
@@ -593,7 +641,12 @@
         var probs = pickOutput(classOutputs, classOi);
         // maximize log P(targetClass) → minimize -log P(targetClass)
         var targetProb = probs.gather([cls], 1).mean();
-        return targetProb.log().neg().mul(w);
+        var classObj = targetProb.log().neg().mul(w);
+        if (pw > 0) {
+          var priorPenalty = z.square().mean().mul(pw);
+          return classObj.add(priorPenalty);
+        }
+        return classObj;
       };
     },
 
