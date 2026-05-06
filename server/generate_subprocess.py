@@ -304,20 +304,53 @@ def main():
         }}))
 
     elif method == "langevin":
-        # Annealed iterative denoising: denoise + re-noise with decreasing noise
+        # Two algorithms gated by config["init"]:
+        #   "noise" (default): legacy. x ~ N(0, T). Each step: x = model(x) + noise.
+        #     Works for time-conditional / multi-σ score networks.
+        #   "uniform": walk-jump (Saremi & Hyvärinen 2019). x ~ U(0,1). Each step:
+        #     x_noisy = x + N(0, walkNoise * t_norm); x = model(x_noisy). Required
+        #     for single-noise-scale denoisers because they cannot refine OOD
+        #     inputs — the input must stay inside the {x_clean + N(0, σ_train)}
+        #     manifold or all samples collapse to the model's "default OOD
+        #     response" attractor.
         steps = int(config.get("steps", 50))
         epsilon = float(config.get("lr", 0.3))
-        x = torch.randn(num_samples, feature_size, device=device) * temperature
+        init_mode = str(config.get("init", "noise")).lower()
+        walk_noise = float(config.get("walkNoise", 0.0))
+        clean_fraction = float(config.get("cleanFraction", 0.2))
+        gen = torch.Generator(device=device).manual_seed(seed)
+        if init_mode == "uniform":
+            x = torch.rand(num_samples, feature_size, device=device, generator=gen)
+        else:
+            x = torch.randn(num_samples, feature_size, device=device, generator=gen) * temperature
         loss_history = []
         with torch.no_grad():
             for step in range(steps):
                 t_norm = (steps - 1 - step) / max(1, steps - 1)
-                x0_pred = _pick_output(_forward_with_time(model, x, t_norm, num_samples, graph_data, device, output_index), output_index)
+
+                # Walk-jump σ schedule:
+                #   t_norm > cleanFraction → constant σ = walkNoise (mixing)
+                #   t_norm ≤ cleanFraction → linear decay to 0 (settling)
+                # Constant σ during the walk phase lets the Markov chain mix
+                # toward the data distribution; linear decay only at the end
+                # gives the model room to denoise to a clean final sample.
+                x_perturbed = x
+                if walk_noise > 0:
+                    if 0 < clean_fraction < 1:
+                        sigma_t = walk_noise if t_norm > clean_fraction else walk_noise * (t_norm / clean_fraction)
+                    else:
+                        sigma_t = walk_noise * t_norm
+                    if sigma_t > 0:
+                        x_perturbed = x + torch.randn(x.shape, device=device, generator=gen) * sigma_t
+
+                x0_pred = _pick_output(_forward_with_time(model, x_perturbed, t_norm, num_samples, graph_data, device, output_index), output_index)
                 mse = float(((x0_pred - x) ** 2).mean().item())
                 loss_history.append({"step": step, "loss": mse})
+
+                # Output-space Langevin noise (typically 0 for walk-jump).
                 noise_level = max(0, (1 - (step + 1) / steps)) * epsilon
                 if noise_level > 0:
-                    x = x0_pred + torch.randn_like(x) * noise_level
+                    x = x0_pred + torch.randn(x.shape, device=device, generator=gen) * noise_level
                 else:
                     x = x0_pred
         samples = x.cpu().numpy()

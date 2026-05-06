@@ -171,11 +171,16 @@
     _nid = 0; var d = {};
     var a = N(d, "image_source", { sourceKey: "pixel_values", featureSize: 784, imageShape: [28,28,1] }, 60, 100);
     var b = N(d, "noise_injection", { scale: 0.3, schedule: "constant" }, 230, 100);
+    // Symmetric encoder/decoder: 784 → 512 → 256 → 512 → 784. Output sigmoid
+    // bounds reconstruction to [0,1]; previously used `linear` which let pixels
+    // drift outside the data range and broke Langevin sampling (the model output
+    // collapsed to ~0 for out-of-distribution Langevin init noise).
     var c = N(d, "dense", { units: 512, activation: "relu" }, 400, 100);
     var e = N(d, "dense", { units: 256, activation: "relu" }, 570, 100);
-    var f = N(d, "dense", { units: 784, activation: "linear" }, 740, 100);
-    var g = N(d, "output", { target: "pixel_values", targetType: "pixel_values", loss: "mse", headType: "reconstruction" }, 910, 100);
-    C(d,a,b); C(d,b,c); C(d,c,e); C(d,e,f); C(d,f,g);
+    var dec = N(d, "dense", { units: 512, activation: "relu" }, 740, 100);
+    var f = N(d, "dense", { units: 784, activation: "sigmoid" }, 910, 100);
+    var g = N(d, "output", { target: "pixel_values", targetType: "pixel_values", loss: "mse", headType: "reconstruction" }, 1080, 100);
+    C(d,a,b); C(d,b,c); C(d,c,e); C(d,e,dec); C(d,dec,f); C(d,f,g);
     return graph(d);
   }
 
@@ -206,18 +211,18 @@
       { id: "t-mlp",      name: "MLP Trainer",        schemaId: sid, datasetId: DS_ID, modelId: "m-mlp",      status: "draft", config: { epochs: 20, batchSize: 128, learningRate: 0.001, optimizerType: "adam", useServer: true } },
       { id: "t-cnn",      name: "CNN Trainer",         schemaId: sid, datasetId: DS_ID, modelId: "m-cnn",      status: "draft", config: { epochs: 20, batchSize: 128, learningRate: 0.001, optimizerType: "adam", useServer: true } },
       { id: "t-ae",       name: "AE Trainer",          schemaId: sid, datasetId: DS_ID, modelId: "m-ae",       status: "draft", config: { epochs: 20, batchSize: 128, learningRate: 0.001, optimizerType: "adam", useServer: true } },
-      { id: "t-conv-ae",  name: "Conv-AE Trainer",     schemaId: sid, datasetId: DS_ID, modelId: "m-conv-ae",  status: "draft", config: { epochs: 20, batchSize: 128, learningRate: 0.001, optimizerType: "adam", useServer: true } },
+      { id: "t-conv-ae",  name: "Conv-AE Trainer",     schemaId: sid, datasetId: DS_ID, modelId: "m-conv-ae",  status: "draft", config: { epochs: 40, batchSize: 128, learningRate: 0.001, optimizerType: "adam", useServer: true } },
       { id: "t-vae",      name: "VAE Trainer",         schemaId: sid, datasetId: DS_ID, modelId: "m-vae",      status: "draft", config: { epochs: 20, batchSize: 128, learningRate: 0.0005, optimizerType: "adam", useServer: true } },
       { id: "t-vae-cls",  name: "VAE+Cls Trainer",     schemaId: sid, datasetId: DS_ID, modelId: "m-vae-cls",  status: "draft", config: { epochs: 20, batchSize: 128, learningRate: 0.0005, optimizerType: "adam", useServer: true } },
-      { id: "t-denoiser", name: "Denoiser Trainer",    schemaId: sid, datasetId: DS_ID, modelId: "m-denoiser", status: "draft", config: { epochs: 20, batchSize: 128, learningRate: 0.001, optimizerType: "adam", useServer: true } },
+      { id: "t-denoiser", name: "Denoiser Trainer",    schemaId: sid, datasetId: DS_ID, modelId: "m-denoiser", status: "draft", config: { epochs: 40, batchSize: 128, learningRate: 0.001, optimizerType: "adam", useServer: true } },
       // Pre-trained (TF.js CPU, 20 epochs)
       { id: "t-mlp-pre",      name: "MLP (pre-trained)",      schemaId: sid, datasetId: DS_ID, modelId: "m-mlp",      status: "done", _pretrainedVar: "M1_MLP_BASELINE_PRE_TRAINED_PRETRAINED_BIN_B64", config: { epochs: 20, batchSize: 128, learningRate: 0.001, optimizerType: "adam" } },
       { id: "t-cnn-pre",      name: "CNN (pre-trained)",      schemaId: sid, datasetId: DS_ID, modelId: "m-cnn",      status: "done", _pretrainedVar: "M2_CNN_LENET_5_PRE_TRAINED_PRETRAINED_BIN_B64", config: { epochs: 20, batchSize: 128, learningRate: 0.001, optimizerType: "adam" } },
       { id: "t-ae-pre",       name: "AE (pre-trained)",       schemaId: sid, datasetId: DS_ID, modelId: "m-ae",       status: "done", _pretrainedVar: "M3_DENSE_AUTOENCODER_PRE_TRAINED_PRETRAINED_BIN_B64", config: { epochs: 20, batchSize: 128, learningRate: 0.001, optimizerType: "adam" } },
-      { id: "t-conv-ae-pre",  name: "Conv-AE (pre-trained)",  schemaId: sid, datasetId: DS_ID, modelId: "m-conv-ae",  status: "done", _pretrainedVar: "M4_CONV_AUTOENCODER_PRE_TRAINED_PRETRAINED_BIN_B64", config: { epochs: 20, batchSize: 128, learningRate: 0.001, optimizerType: "adam" } },
+      { id: "t-conv-ae-pre",  name: "Conv-AE (pre-trained)",  schemaId: sid, datasetId: DS_ID, modelId: "m-conv-ae",  status: "done", _pretrainedVar: "M4_CONV_AUTOENCODER_PRE_TRAINED_PRETRAINED_BIN_B64", config: { epochs: 40, batchSize: 128, learningRate: 0.001, optimizerType: "adam" } },
       { id: "t-vae-pre",      name: "VAE (pre-trained)",      schemaId: sid, datasetId: DS_ID, modelId: "m-vae",      status: "done", _pretrainedVar: "M5_VAE_PRE_TRAINED_PRETRAINED_BIN_B64", config: { epochs: 20, batchSize: 128, learningRate: 0.0005, optimizerType: "adam" } },
       { id: "t-vae-cls-pre",  name: "VAE+Cls (pre-trained)",  schemaId: sid, datasetId: DS_ID, modelId: "m-vae-cls",  status: "done", _pretrainedVar: "M6_VAE_CLASSIFIER_PRE_TRAINED_PRETRAINED_BIN_B64", config: { epochs: 20, batchSize: 128, learningRate: 0.0005, optimizerType: "adam" } },
-      { id: "t-denoiser-pre", name: "Denoiser (pre-trained)", schemaId: sid, datasetId: DS_ID, modelId: "m-denoiser", status: "done", _pretrainedVar: "M7_DENOISING_AE_PRE_TRAINED_PRETRAINED_BIN_B64", config: { epochs: 20, batchSize: 128, learningRate: 0.001, optimizerType: "adam" } },
+      { id: "t-denoiser-pre", name: "Denoiser (pre-trained)", schemaId: sid, datasetId: DS_ID, modelId: "m-denoiser", status: "done", _pretrainedVar: "M7_DENOISING_AE_PRE_TRAINED_PRETRAINED_BIN_B64", config: { epochs: 40, batchSize: 128, learningRate: 0.001, optimizerType: "adam" } },
     ],
 
     generations: [
@@ -226,15 +231,19 @@
       { id: "g-vae-rand",  name: "VAE Random Sampling",  schemaId: sid, trainerId: "t-vae-pre",      family: "vae",        config: { method: "random", numSamples: 16, temperature: 1.0, seed: 42 }, status: "draft", runs: [], createdAt: Date.now() },
       { id: "g-vae-recon", name: "VAE Reconstruct",      schemaId: sid, trainerId: "t-vae-pre",      family: "vae",        config: { method: "reconstruct", numSamples: 16 }, status: "draft", runs: [], createdAt: Date.now() },
       { id: "g-cls-guide", name: "Classifier-Guided",    schemaId: sid, trainerId: "t-vae-cls-pre",  family: "vae",        config: { method: "classifier_guided", numSamples: 16, steps: 100, lr: 0.005, targetClass: 7, guidanceWeight: 1.5, priorWeight: 0.5, seed: 42 }, status: "draft", runs: [], createdAt: Date.now() },
-      // Langevin sampling intentionally omitted: m7 denoiser is a single-noise-
-      // scale denoising autoencoder (noise_injection scale=0.3), not a
-      // score-based model trained across multiple noise levels. Langevin
-      // dynamics needs the latter (NCSN/score-SDE style). With this denoiser,
-      // x ~ N(0,1) is far out of training distribution, and the network
-      // collapses outputs to ~0 → all-black samples. Reconstruct still works
-      // because that path feeds real images. See Fashion-MNIST-Diffusion demo
-      // for proper score-based generation (NCSN, score-SDE) which DO support
-      // Langevin sampling.
+      // Denoiser Reconstruct — clean baseline showing the m7 denoiser actually
+      // works at the noise level it was trained at (σ=0.3). Feeds real images
+      // through encoder→decoder, computes per-sample MSE.
+      { id: "g-denoiser-recon", name: "Denoiser Reconstruct", schemaId: sid, trainerId: "t-denoiser-pre", family: "diffusion", config: { method: "reconstruct", numSamples: 16 }, status: "draft", runs: [], createdAt: Date.now() },
+      // Walk-jump sampling for the single-noise-scale denoiser (Saremi &
+      // Hyvärinen 2019). Naive Langevin from x ~ N(0,1) collapses to a single
+      // attractor because the model never saw OOD inputs during training.
+      // Walk-jump fixes this by:
+      //   init: "uniform"   — start in [0,1], inside the data range
+      //   walkNoise: 0.3    — perturb with the same σ used at training before
+      //                       each model call, so the input stays inside the
+      //                       trained {x_clean + N(0, σ_train)} manifold
+      { id: "g-denoiser-langevin", name: "Denoiser Langevin (walk-jump)", schemaId: sid, trainerId: "t-denoiser-pre", family: "diffusion", config: { method: "langevin", numSamples: 16, steps: 200, lr: 0.0, init: "uniform", walkNoise: 0.3, cleanFraction: 0.1, seed: 42 }, status: "draft", runs: [], createdAt: Date.now() },
     ],
 
     evaluations: [

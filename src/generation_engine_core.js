@@ -248,6 +248,24 @@
   }
 
   // === LANGEVIN: x_{t+1} = x_t + ε/2 * score(x_t) + √ε * noise ===
+  //
+  // Two algorithms gated by cfg.init:
+  //
+  //   "noise" (default — back-compat for time-conditional / DDPM-style denoisers):
+  //     x_0 ~ N(0, temperature)
+  //     x_{t+1} = model(x_t) + decreasing_noise
+  //     Works when the model expects a noisy x at any noise level (e.g. timestep-
+  //     conditioned diffusion models, or score networks trained at multiple σ's).
+  //
+  //   "uniform" (walk-jump for single-noise-scale denoisers, Saremi & Hyvärinen 2019):
+  //     x_0 ~ U(0, 1)                      ← inside the data range
+  //     for each step:
+  //       x_noisy = x + N(0, walkNoise)    ← perturb at training σ
+  //       x = model(x_noisy)               ← denoise
+  //     A single-noise denoiser cannot refine arbitrary OOD inputs, so the
+  //     iteration must keep x inside the trained [data + N(0, σ_train)] manifold
+  //     by re-noising at the training scale before each model call. Without this,
+  //     all samples collapse to the model's "default OOD response" attractor.
   function _generateLangevin(tf, cfg, numSamples, dim, steps, lr, temperature, onStep) {
     return new Promise(function (resolve) {
       var scoreModel = cfg.scoreModel || cfg.model;
@@ -256,14 +274,43 @@
       var epsilon = lr;
       var lossHistory = [];
 
-      // Annealed iterative denoising: start from noise, repeatedly denoise + re-noise
-      // with decreasing noise level. Works for x0-prediction denoisers (sigmoid output).
-      var x = tf.randomNormal([numSamples, dim], 0, temperature, "float32", _seedAt(cfg.seed, 0));
+      var initMode = String(cfg.init || "noise").toLowerCase();
+      var walkNoise = Number(cfg.walkNoise || 0);
+      // cleanFraction: fraction of the schedule (from the end) that drops walk
+      // noise to 0 so the chain can settle. Constant σ during the "walk" phase
+      // lets the Markov chain mix toward the data distribution; linearly
+      // decaying σ to 0 from the start (the original schedule) anneals too
+      // aggressively and traps samples at degenerate local attractors.
+      var cleanFraction = cfg.cleanFraction != null ? Number(cfg.cleanFraction) : 0.2;
+      var x;
+      if (initMode === "uniform") {
+        x = tf.randomUniform([numSamples, dim], 0, 1, "float32", _seedAt(cfg.seed, 0));
+      } else {
+        x = tf.randomNormal([numSamples, dim], 0, temperature, "float32", _seedAt(cfg.seed, 0));
+      }
 
       for (var step = 0; step < steps; step++) {
         var tNorm = (steps - 1 - step) / Math.max(1, steps - 1); // 1 → 0 (high noise → clean)
         var tTensor = tf.fill([numSamples, 1], tNorm);
-        var predPack = _predictWithTimeCondition(tf, scoreModel, x, tTensor, cfg);
+
+        // Walk-jump σ schedule:
+        //   t_norm > cleanFraction → constant σ = walkNoise (mixing phase)
+        //   t_norm ≤ cleanFraction → linear decay to 0 (settling phase)
+        var inputNoise = null, xPerturbed = x;
+        if (walkNoise > 0) {
+          var sigmaT;
+          if (cleanFraction > 0 && cleanFraction < 1) {
+            sigmaT = tNorm > cleanFraction ? walkNoise : walkNoise * (tNorm / cleanFraction);
+          } else {
+            sigmaT = walkNoise * tNorm; // legacy linear
+          }
+          if (sigmaT > 0) {
+            inputNoise = tf.randomNormal(x.shape, 0, sigmaT, "float32", _seedAt(cfg.seed, (step + 1) * 1000));
+            xPerturbed = x.add(inputNoise);
+          }
+        }
+
+        var predPack = _predictWithTimeCondition(tf, scoreModel, xPerturbed, tTensor, cfg);
         var x0Pred = pickOutput(predPack.output, cfg.outputIndex);
 
         // Compute MSE between current x and predicted clean image (for monitoring)
@@ -271,7 +318,8 @@
         lossHistory.push({ step: step, loss: mse });
         if (onStep) onStep(step, mse);
 
-        // Mix: move toward predicted clean image, add decreasing noise
+        // Output-space noise (the original Langevin term). For walk-jump this is
+        // typically 0 since the input perturbation already provides exploration.
         var noiseLevel = Math.max(0, (1 - (step + 1) / steps)) * epsilon;
         var noise = noiseLevel > 0
           ? tf.randomNormal(x.shape, 0, noiseLevel, "float32", _seedAt(cfg.seed, step + 1))
@@ -279,6 +327,8 @@
         var xNext = noise ? x0Pred.add(noise) : x0Pred;
 
         tTensor.dispose();
+        if (inputNoise) inputNoise.dispose();
+        if (xPerturbed !== x) xPerturbed.dispose();
         predPack.dispose();
         if (Array.isArray(predPack.output)) predPack.output.forEach(function (t) { t.dispose(); }); else if (predPack.output !== x0Pred) predPack.output.dispose();
         x.dispose();

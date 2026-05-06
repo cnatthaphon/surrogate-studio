@@ -893,6 +893,11 @@
             outputNodeId: config.outputNodeId || "",
             originals: method === "reconstruct" ? sTestX.slice(0, config.numSamples || 16) : undefined,
           };
+          // Forward Langevin algorithm knobs (walk-jump, etc.) when present so
+          // the server runs the same algorithm as the client.
+          if (config.init != null) serverConfig.init = config.init;
+          if (config.walkNoise != null) serverConfig.walkNoise = config.walkNoise;
+          if (config.cleanFraction != null) serverConfig.cleanFraction = config.cleanFraction;
           if (method === "inverse") {
             var sTestY = (sTestSplit && sTestSplit.y) ? sTestSplit.y : ((activeDs2.records && activeDs2.records.test && activeDs2.records.test.y) || (activeDs2.yTest || []));
             if (sTestY && sTestY.length) {
@@ -1045,6 +1050,12 @@
           outputIndex: outputIndex, sampleInputIndex: sampleInputIndex,
           onStep: function (step, loss) { if (step % 10 === 0) onStatus("Step " + step + " loss=" + (typeof loss === "number" ? loss.toExponential(3) : "?")); },
         };
+        // Forward Langevin algorithm knobs from the preset config. Without
+        // these, walk-jump options set on a generation card never reach the
+        // engine and fall back to legacy "noise" init.
+        if (config.init != null) genConfig.init = config.init;
+        if (config.walkNoise != null) genConfig.walkNoise = config.walkNoise;
+        if (config.cleanFraction != null) genConfig.cleanFraction = config.cleanFraction;
 
         // class conditioning: if model has class_embed input, provide one-hot classVector
         if (built.inputNodes && built.inputNodes.some(function (n) { return n.name === "class_embed_layer"; })) {

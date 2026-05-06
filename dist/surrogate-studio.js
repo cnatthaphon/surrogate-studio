@@ -1,5 +1,5 @@
 // Surrogate Studio - concatenated bundle
-// Generated: 2026-05-05T11:06:07Z
+// Generated: 2026-05-06T04:51:25Z
 // Source files: 58
 
 
@@ -21614,10 +21614,59 @@
         var st = Math.max(1, Number((node.data && node.data.strides) || 2));
         var pt = String((node.data && node.data.padding) || "same");
         var at = String((node.data && node.data.activation) || "relu");
-        var conv2dTransposeCfg = { filters: ft, kernelSize: kt, strides: st, padding: pt, activation: at, useBias: _resolveUseBias(node.data, true), name: _n };
-        _assignInitializer(conv2dTransposeCfg, "kernelInitializer", tf, node.data, "kernel", "default");
-        if (conv2dTransposeCfg.useBias) _assignInitializer(conv2dTransposeCfg, "biasInitializer", tf, node.data, "bias", "default");
-        return _applyLayerMetadata(tf.layers.conv2dTranspose(conv2dTransposeCfg), node).apply(inTensor);
+        // BUG-38 fix: TF.js's native conv2dTranspose(padding="same") uses
+        // a different padding/cropping convention from PyTorch's
+        // ConvTranspose2d(pad=0) + top-left crop (which is what
+        // train_subprocess.py uses on the server). The two produce
+        // outputs that differ by ~3.13 max abs diff on a synthetic
+        // 3x3 kernel test — i.e. the trained weights produce different
+        // pixel values when applied via the two algorithms. Conv-AE
+        // train val_loss 0.011 vs runtime MSE 0.114 (~10x inflation)
+        // was the visible symptom.
+        //
+        // Fix: when padding="same", use TF.js's "valid" (no pad) and
+        // then manually crop the output's bottom-right border to
+        // input * stride. This matches the server's convention exactly:
+        //   raw output: (in-1)*stride + kernel
+        //   crop to:    in*stride (drop kernel-stride from top-right edge)
+        //
+        // PyTorch conv_transpose2d with pad=0 + crop is also what we do
+        // here (TF.js valid + crop), so train and inference now produce
+        // identical pixel values for the same weights.
+        var transposeCfg = {
+          filters: ft, kernelSize: kt, strides: st,
+          padding: pt === "same" ? "valid" : pt,
+          activation: at, useBias: _resolveUseBias(node.data, true), name: _n,
+        };
+        _assignInitializer(transposeCfg, "kernelInitializer", tf, node.data, "kernel", "default");
+        if (transposeCfg.useBias) _assignInitializer(transposeCfg, "biasInitializer", tf, node.data, "bias", "default");
+        var rawOut = _applyLayerMetadata(tf.layers.conv2dTranspose(transposeCfg), node).apply(inTensor);
+        if (pt === "same") {
+          // Crop the raw output (size: (in-1)*stride + kernel) down to
+          // in*stride. Total crop = (kernel - stride). Split it as
+          // floor on top/left, ceil on bottom/right — must match the
+          // server's PyTorch crop formula (train_subprocess.py:1367)
+          // which starts the slice at (ks - st) // 2. For odd kernels
+          // with stride=2 (e.g. Conv-AE 3x3) the crop is bottom/right
+          // only; for even kernels (e.g. DCGAN 4x4) it is symmetric.
+          var inH = inTensor.shape && inTensor.shape[1];
+          var inW = inTensor.shape && inTensor.shape[2];
+          if (inH && inW) {
+            var totalCropH = Math.max(0, kt - st);
+            var totalCropW = Math.max(0, kt - st);
+            var cropTop = Math.floor(totalCropH / 2);
+            var cropBottom = totalCropH - cropTop;
+            var cropLeft = Math.floor(totalCropW / 2);
+            var cropRight = totalCropW - cropLeft;
+            if (cropTop > 0 || cropBottom > 0 || cropLeft > 0 || cropRight > 0) {
+              return tf.layers.cropping2D({
+                cropping: [[cropTop, cropBottom], [cropLeft, cropRight]],
+                name: _n + "_crop",
+              }).apply(rawOut);
+            }
+          }
+        }
+        return rawOut;
       }
       if (node.name === "maxpool2d_layer") {
         var ps = Math.max(1, Number((node.data && node.data.poolSize) || 2));
@@ -24196,6 +24245,24 @@
   }
 
   // === LANGEVIN: x_{t+1} = x_t + ε/2 * score(x_t) + √ε * noise ===
+  //
+  // Two algorithms gated by cfg.init:
+  //
+  //   "noise" (default — back-compat for time-conditional / DDPM-style denoisers):
+  //     x_0 ~ N(0, temperature)
+  //     x_{t+1} = model(x_t) + decreasing_noise
+  //     Works when the model expects a noisy x at any noise level (e.g. timestep-
+  //     conditioned diffusion models, or score networks trained at multiple σ's).
+  //
+  //   "uniform" (walk-jump for single-noise-scale denoisers, Saremi & Hyvärinen 2019):
+  //     x_0 ~ U(0, 1)                      ← inside the data range
+  //     for each step:
+  //       x_noisy = x + N(0, walkNoise)    ← perturb at training σ
+  //       x = model(x_noisy)               ← denoise
+  //     A single-noise denoiser cannot refine arbitrary OOD inputs, so the
+  //     iteration must keep x inside the trained [data + N(0, σ_train)] manifold
+  //     by re-noising at the training scale before each model call. Without this,
+  //     all samples collapse to the model's "default OOD response" attractor.
   function _generateLangevin(tf, cfg, numSamples, dim, steps, lr, temperature, onStep) {
     return new Promise(function (resolve) {
       var scoreModel = cfg.scoreModel || cfg.model;
@@ -24204,14 +24271,43 @@
       var epsilon = lr;
       var lossHistory = [];
 
-      // Annealed iterative denoising: start from noise, repeatedly denoise + re-noise
-      // with decreasing noise level. Works for x0-prediction denoisers (sigmoid output).
-      var x = tf.randomNormal([numSamples, dim], 0, temperature, "float32", _seedAt(cfg.seed, 0));
+      var initMode = String(cfg.init || "noise").toLowerCase();
+      var walkNoise = Number(cfg.walkNoise || 0);
+      // cleanFraction: fraction of the schedule (from the end) that drops walk
+      // noise to 0 so the chain can settle. Constant σ during the "walk" phase
+      // lets the Markov chain mix toward the data distribution; linearly
+      // decaying σ to 0 from the start (the original schedule) anneals too
+      // aggressively and traps samples at degenerate local attractors.
+      var cleanFraction = cfg.cleanFraction != null ? Number(cfg.cleanFraction) : 0.2;
+      var x;
+      if (initMode === "uniform") {
+        x = tf.randomUniform([numSamples, dim], 0, 1, "float32", _seedAt(cfg.seed, 0));
+      } else {
+        x = tf.randomNormal([numSamples, dim], 0, temperature, "float32", _seedAt(cfg.seed, 0));
+      }
 
       for (var step = 0; step < steps; step++) {
         var tNorm = (steps - 1 - step) / Math.max(1, steps - 1); // 1 → 0 (high noise → clean)
         var tTensor = tf.fill([numSamples, 1], tNorm);
-        var predPack = _predictWithTimeCondition(tf, scoreModel, x, tTensor, cfg);
+
+        // Walk-jump σ schedule:
+        //   t_norm > cleanFraction → constant σ = walkNoise (mixing phase)
+        //   t_norm ≤ cleanFraction → linear decay to 0 (settling phase)
+        var inputNoise = null, xPerturbed = x;
+        if (walkNoise > 0) {
+          var sigmaT;
+          if (cleanFraction > 0 && cleanFraction < 1) {
+            sigmaT = tNorm > cleanFraction ? walkNoise : walkNoise * (tNorm / cleanFraction);
+          } else {
+            sigmaT = walkNoise * tNorm; // legacy linear
+          }
+          if (sigmaT > 0) {
+            inputNoise = tf.randomNormal(x.shape, 0, sigmaT, "float32", _seedAt(cfg.seed, (step + 1) * 1000));
+            xPerturbed = x.add(inputNoise);
+          }
+        }
+
+        var predPack = _predictWithTimeCondition(tf, scoreModel, xPerturbed, tTensor, cfg);
         var x0Pred = pickOutput(predPack.output, cfg.outputIndex);
 
         // Compute MSE between current x and predicted clean image (for monitoring)
@@ -24219,7 +24315,8 @@
         lossHistory.push({ step: step, loss: mse });
         if (onStep) onStep(step, mse);
 
-        // Mix: move toward predicted clean image, add decreasing noise
+        // Output-space noise (the original Langevin term). For walk-jump this is
+        // typically 0 since the input perturbation already provides exploration.
         var noiseLevel = Math.max(0, (1 - (step + 1) / steps)) * epsilon;
         var noise = noiseLevel > 0
           ? tf.randomNormal(x.shape, 0, noiseLevel, "float32", _seedAt(cfg.seed, step + 1))
@@ -24227,6 +24324,8 @@
         var xNext = noise ? x0Pred.add(noise) : x0Pred;
 
         tTensor.dispose();
+        if (inputNoise) inputNoise.dispose();
+        if (xPerturbed !== x) xPerturbed.dispose();
         predPack.dispose();
         if (Array.isArray(predPack.output)) predPack.output.forEach(function (t) { t.dispose(); }); else if (predPack.output !== x0Pred) predPack.output.dispose();
         x.dispose();
@@ -25225,6 +25324,13 @@
       }
       if (shape.length === 4 && (name.indexOf("conv") >= 0 || name.indexOf("pe_proj_") === 0)) {
         // Conv2D: [O, I, H, W] → [H, W, I, O]
+        // (Same formula works for Conv2DTranspose by symmetry: PyTorch's
+        // ConvTranspose2d weights are [I, O, H, W] and TF.js's
+        // tf.conv2dTranspose kernel is [H, W, outDepth=O, inDepth=I] —
+        // re-labeling shape[0]/shape[1] flips both source and destination,
+        // so the same memory permutation applies. Verified against
+        // tfjs-core's conv2dTranspose docs: filter layout
+        // [filterH, filterW, outDepth, inDepth].)
         var O2 = shape[0], I2 = shape[1], H2 = shape[2], W2 = shape[3];
         var conv2 = new Float32Array(size);
         for (var o2 = 0; o2 < O2; o2++) for (var i2 = 0; i2 < I2; i2++) for (var h2 = 0; h2 < H2; h2++) for (var w2 = 0; w2 < W2; w2++) {
@@ -31662,6 +31768,11 @@
             outputNodeId: config.outputNodeId || "",
             originals: method === "reconstruct" ? sTestX.slice(0, config.numSamples || 16) : undefined,
           };
+          // Forward Langevin algorithm knobs (walk-jump, etc.) when present so
+          // the server runs the same algorithm as the client.
+          if (config.init != null) serverConfig.init = config.init;
+          if (config.walkNoise != null) serverConfig.walkNoise = config.walkNoise;
+          if (config.cleanFraction != null) serverConfig.cleanFraction = config.cleanFraction;
           if (method === "inverse") {
             var sTestY = (sTestSplit && sTestSplit.y) ? sTestSplit.y : ((activeDs2.records && activeDs2.records.test && activeDs2.records.test.y) || (activeDs2.yTest || []));
             if (sTestY && sTestY.length) {
@@ -31814,6 +31925,12 @@
           outputIndex: outputIndex, sampleInputIndex: sampleInputIndex,
           onStep: function (step, loss) { if (step % 10 === 0) onStatus("Step " + step + " loss=" + (typeof loss === "number" ? loss.toExponential(3) : "?")); },
         };
+        // Forward Langevin algorithm knobs from the preset config. Without
+        // these, walk-jump options set on a generation card never reach the
+        // engine and fall back to legacy "noise" init.
+        if (config.init != null) genConfig.init = config.init;
+        if (config.walkNoise != null) genConfig.walkNoise = config.walkNoise;
+        if (config.cleanFraction != null) genConfig.cleanFraction = config.cleanFraction;
 
         // class conditioning: if model has class_embed input, provide one-hot classVector
         if (built.inputNodes && built.inputNodes.some(function (n) { return n.name === "class_embed_layer"; })) {
