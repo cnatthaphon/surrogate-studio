@@ -119,7 +119,12 @@ def extract_pytorch_state(state_dict: Dict[str, Any]) -> tuple:
     Canonical mapping (same for server training + notebook export):
       - Dense: [out,in] → [in,out] transpose
       - Conv2D/Conv2DTranspose: NCHW → NHWC
-      - LSTM: gate reorder (i,f,g,o → i,g,f,o), merge biases, transpose kernels
+      - LSTM: merge bias_ih + bias_hh, transpose kernels. Gate ORDER is
+        identical between PyTorch and Keras/TF.js — both use i, f, g, o
+        (Keras names the third gate "c" but it is the same cell-candidate
+        gate PyTorch calls "g"). No reorder needed. Earlier code applied
+        an [i,f,g,o] → [i,g,f,o] swap that broke LSTM inference end-to-
+        end (see scripts/test_lstm_gate_parity.py).
       - BatchNorm: running stats separated and appended at end
       - Skips num_batches_tracked
 
@@ -145,15 +150,12 @@ def extract_pytorch_state(state_dict: Dict[str, Any]) -> tuple:
             w_hh = state_dict[ordered_keys[i + 1]].detach().cpu().numpy()
             b_ih = state_dict[ordered_keys[i + 2]].detach().cpu().numpy()
             b_hh = state_dict[ordered_keys[i + 3]].detach().cpu().numpy()
-            H = w_ih.shape[0] // 4
-
-            def _swap_gates(w: Any) -> Any:
-                chunks = [w[j * H:(j + 1) * H] for j in range(4)]
-                return np.concatenate([chunks[0], chunks[2], chunks[1], chunks[3]], axis=0)
-
-            kernel = _swap_gates(w_ih).T
-            recurrent = _swap_gates(w_hh).T
-            bias = _swap_gates(b_ih + b_hh)
+            # Gate order is identical between PyTorch [i,f,g,o] and Keras
+            # [i,f,c,o] — Keras's "c" is the same cell-candidate gate
+            # PyTorch calls "g". Just transpose kernels and sum biases.
+            kernel = w_ih.T
+            recurrent = w_hh.T
+            bias = b_ih + b_hh
             for arr, suffix in [(kernel, "kernel"), (recurrent, "recurrent_kernel"), (bias, "bias")]:
                 flat = arr.astype(np.float32).flatten()
                 weight_specs.append({"name": f"tfjs_{suffix}", "shape": list(arr.shape), "dtype": "float32", "offset": offset})

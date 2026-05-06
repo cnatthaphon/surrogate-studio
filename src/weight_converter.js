@@ -15,7 +15,9 @@
    *
    * PyTorch → TF.js:
    *   Dense:     transpose kernel [out, in] → [in, out]
-   *   LSTM:      swap gates [i,f,g,o] → [i,c,f,o], combine 2 biases → 1, transpose kernels
+   *   LSTM:      combine 2 biases → 1, transpose kernels. Gate order
+   *              [i,f,g,o] is the same as Keras/TF.js [i,f,c,o] — no
+   *              reorder needed. (Verified: scripts/test_lstm_gate_parity.py)
    *   GRU:       swap gates [r,z,n] → [z,r,n], combine 2 biases → 1, transpose kernels
    *   RNN:       combine 2 biases → 1, transpose kernels
    *   BatchNorm: move running_mean/var to end
@@ -53,27 +55,18 @@
     return out;
   }
 
-  // LSTM gate reorder: PyTorch [i,f,g,o] ↔ TF.js [i,c,f,o]
-  // i=input, f=forget, g=cell_candidate(c), o=output
-  function _lstmGatesPyToTf(flat4H, H) {
-    // [i,f,g,o] → [i,g,f,o] (swap blocks 1 and 2)
-    var out = new Float32Array(4 * H);
-    out.set(flat4H.slice(0, H), 0);         // i → i
-    out.set(flat4H.slice(2 * H, 3 * H), H); // g → c (position 1)
-    out.set(flat4H.slice(H, 2 * H), 2 * H); // f → f (position 2)
-    out.set(flat4H.slice(3 * H, 4 * H), 3 * H); // o → o
-    return out;
-  }
-
-  function _lstmGatesTfToPy(flat4H, H) {
-    // [i,c,f,o] → [i,f,c,o] (swap blocks 1 and 2)
-    var out = new Float32Array(4 * H);
-    out.set(flat4H.slice(0, H), 0);         // i → i
-    out.set(flat4H.slice(2 * H, 3 * H), H); // f → f (position 1)
-    out.set(flat4H.slice(H, 2 * H), 2 * H); // c → g (position 2)
-    out.set(flat4H.slice(3 * H, 4 * H), 3 * H); // o → o
-    return out;
-  }
+  // PyTorch LSTM gate order [i, f, g, o] is identical to Keras/TF.js
+  // [i, f, c, o] — Keras's "c" is the cell-candidate gate, the same gate
+  // PyTorch calls "g". No reorder needed. These functions are kept as
+  // identities for source-level documentation and so callers don't have
+  // to special-case LSTM.
+  //
+  // History: earlier code applied [i,f,g,o] → [i,g,f,o] in both
+  // directions, breaking LSTM inference end-to-end. Verified by
+  // scripts/test_lstm_gate_parity.py — without the swap the PyTorch
+  // and TF.js outputs match to ~1e-8.
+  function _lstmGatesPyToTf(flat4H /*, H */) { return flat4H; }
+  function _lstmGatesTfToPy(flat4H /*, H */) { return flat4H; }
 
   // GRU gate reorder: PyTorch [r,z,n] ↔ TF.js [z,r,n]
   function _gruGatesPyToTf(flat3H, H) {
