@@ -1,6 +1,6 @@
 # Surrogate Studio
 
-[![CI](https://github.com/cnatthaphon/surrogate-studio/actions/workflows/ci.yml/badge.svg)](https://github.com/cnatthaphon/surrogate-studio/actions/workflows/ci.yml) ![Demos](https://img.shields.io/badge/demos-16-orange) ![Models](https://img.shields.io/badge/models-45-blue) ![Tests](https://img.shields.io/badge/E2E%20checks-297%20pass-brightgreen) ![Papers](https://img.shields.io/badge/papers%20cited-18-blueviolet) [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+[![CI](https://github.com/cnatthaphon/surrogate-studio/actions/workflows/ci.yml/badge.svg)](https://github.com/cnatthaphon/surrogate-studio/actions/workflows/ci.yml) ![Demos](https://img.shields.io/badge/demos-16-orange) ![Models](https://img.shields.io/badge/models-46-blue) ![Tests](https://img.shields.io/badge/E2E%20checks-297%20pass-brightgreen) ![Papers](https://img.shields.io/badge/papers%20cited-18-blueviolet) [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
 **A visual ML platform with 16 demos across published papers and custom data — trainable in the browser with no install.**
 
@@ -72,7 +72,7 @@ Every demo runs live on [GitHub Pages](https://cnatthaphon.github.io/surrogate-s
 
 | Demo | Domain | Paper | Live |
 |------|--------|-------|:----:|
-| **Fashion-MNIST Benchmark** | Classification | Rumelhart '86 — Ho '20 (7 models) | [Open](https://cnatthaphon.github.io/surrogate-studio/demo/Fashion-MNIST-Benchmark/) |
+| **Fashion-MNIST Benchmark** | Classification | Rumelhart '86 — Song & Ermon '19 (8 models) | [Open](https://cnatthaphon.github.io/surrogate-studio/demo/Fashion-MNIST-Benchmark/) |
 | **Fashion-MNIST GAN** | Generation | Goodfellow '14, Radford '16, Arjovsky '17 | [Open](https://cnatthaphon.github.io/surrogate-studio/demo/Fashion-MNIST-GAN/) |
 | **Fashion-MNIST Diffusion** | Generation | Ho '20, Song '19, Song '21 | [Open](https://cnatthaphon.github.io/surrogate-studio/demo/Fashion-MNIST-Diffusion/) |
 | **Conditional Diffusion** | Generation | Ho '20 + Dhariwal '21 | [Open](https://cnatthaphon.github.io/surrogate-studio/demo/Fashion-MNIST-Conditional-Diffusion/) |
