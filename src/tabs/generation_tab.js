@@ -121,6 +121,42 @@
         .filter(function (t) { return t.modelId && (!schemaId || t.schemaId === schemaId); });
     }
 
+    // ─── Auto-swap a generation card's draft trainer for a trained sibling ───
+    // Many demo presets pin generation cards to the *draft* trainer (e.g. t-dcgan)
+    // alongside a "(pre-trained)" sibling for the same model (e.g. t-dcgan-trained).
+    // Visitors landing on the Generation tab without that swap see a card with
+    // no weights, no metrics, no loss curve — and have to click the sidebar to
+    // pick the pretrained variant before anything works.
+    //
+    // This helper resolves the card to a trainer with artifacts. Preference:
+    //   1. The card's own trainerId, if it already has artifacts.
+    //   2. A trainer with the same modelId that DOES have artifacts.
+    //   3. Any trainer for this schema with artifacts.
+    // Returns the resolved trainer (and persists the swap onto the card if it
+    // changed), or null when no trained option exists for this schema yet.
+    function _resolveTrainedTrainer(g) {
+      if (!g || !store) return null;
+      var weightSel = g.config && g.config.weightSelection;
+      var pinned = g.trainerId ? store.getTrainerCard(g.trainerId) : null;
+      if (pinned && _getTrainerArtifacts(pinned, weightSel)) return pinned;
+
+      var siblings = _listTrainersForSchema(g.schemaId);
+      var sameModel = pinned ? siblings.filter(function (t) {
+        return t.modelId === pinned.modelId && !!_getTrainerArtifacts(t, weightSel);
+      }) : [];
+      var fallback = sameModel.length
+        ? sameModel[0]
+        : siblings.filter(function (t) { return !!_getTrainerArtifacts(t, weightSel); })[0];
+
+      if (fallback && fallback.id !== g.trainerId) {
+        g.trainerId = fallback.id;
+        var modelRec = store.getModel(fallback.modelId);
+        if (modelRec) g.family = _resolveGenerationInfo(modelRec).family || g.family;
+        _saveGen(g);
+      }
+      return fallback || null;
+    }
+
     function _resolveGenerationInfo(modelRec) {
       if (!modelRec || !modelRec.graph || !modelBuilder) {
         return {
@@ -287,6 +323,10 @@
 
       var g = _getGen(_activeGenId);
       if (!g) { mainEl.appendChild(el("div", { className: "osc-empty" }, "Generation not found.")); return; }
+
+      // Auto-swap a draft trainer for its trained sibling so visitors landing
+      // on this card see weights/metrics immediately. See _resolveTrainedTrainer.
+      _resolveTrainedTrainer(g);
 
       // header
       var trainer = g.trainerId ? (store ? store.getTrainerCard(g.trainerId) : null) : null;
