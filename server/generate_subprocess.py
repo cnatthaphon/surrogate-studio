@@ -317,6 +317,7 @@ def main():
         epsilon = float(config.get("lr", 0.3))
         init_mode = str(config.get("init", "noise")).lower()
         walk_noise = float(config.get("walkNoise", 0.0))
+        clean_fraction = float(config.get("cleanFraction", 0.2))
         gen = torch.Generator(device=device).manual_seed(seed)
         if init_mode == "uniform":
             x = torch.rand(num_samples, feature_size, device=device, generator=gen)
@@ -327,11 +328,18 @@ def main():
             for step in range(steps):
                 t_norm = (steps - 1 - step) / max(1, steps - 1)
 
-                # Walk-jump: perturb input with training-scale noise BEFORE the
-                # model call, annealing σ from walkNoise → 0 over the schedule.
+                # Walk-jump σ schedule:
+                #   t_norm > cleanFraction → constant σ = walkNoise (mixing)
+                #   t_norm ≤ cleanFraction → linear decay to 0 (settling)
+                # Constant σ during the walk phase lets the Markov chain mix
+                # toward the data distribution; linear decay only at the end
+                # gives the model room to denoise to a clean final sample.
                 x_perturbed = x
                 if walk_noise > 0:
-                    sigma_t = walk_noise * t_norm
+                    if 0 < clean_fraction < 1:
+                        sigma_t = walk_noise if t_norm > clean_fraction else walk_noise * (t_norm / clean_fraction)
+                    else:
+                        sigma_t = walk_noise * t_norm
                     if sigma_t > 0:
                         x_perturbed = x + torch.randn(x.shape, device=device, generator=gen) * sigma_t
 

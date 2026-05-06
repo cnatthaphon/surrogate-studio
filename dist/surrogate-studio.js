@@ -1,5 +1,5 @@
 // Surrogate Studio - concatenated bundle
-// Generated: 2026-05-06T03:28:31Z
+// Generated: 2026-05-06T03:57:14Z
 // Source files: 58
 
 
@@ -24271,6 +24271,12 @@
 
       var initMode = String(cfg.init || "noise").toLowerCase();
       var walkNoise = Number(cfg.walkNoise || 0);
+      // cleanFraction: fraction of the schedule (from the end) that drops walk
+      // noise to 0 so the chain can settle. Constant σ during the "walk" phase
+      // lets the Markov chain mix toward the data distribution; linearly
+      // decaying σ to 0 from the start (the original schedule) anneals too
+      // aggressively and traps samples at degenerate local attractors.
+      var cleanFraction = cfg.cleanFraction != null ? Number(cfg.cleanFraction) : 0.2;
       var x;
       if (initMode === "uniform") {
         x = tf.randomUniform([numSamples, dim], 0, 1, "float32", _seedAt(cfg.seed, 0));
@@ -24282,12 +24288,17 @@
         var tNorm = (steps - 1 - step) / Math.max(1, steps - 1); // 1 → 0 (high noise → clean)
         var tTensor = tf.fill([numSamples, 1], tNorm);
 
-        // Walk-jump: perturb x with training-scale noise BEFORE denoising. The σ
-        // anneals from walkNoise → 0 over the schedule so early steps explore
-        // and late steps refine.
+        // Walk-jump σ schedule:
+        //   t_norm > cleanFraction → constant σ = walkNoise (mixing phase)
+        //   t_norm ≤ cleanFraction → linear decay to 0 (settling phase)
         var inputNoise = null, xPerturbed = x;
         if (walkNoise > 0) {
-          var sigmaT = walkNoise * tNorm;
+          var sigmaT;
+          if (cleanFraction > 0 && cleanFraction < 1) {
+            sigmaT = tNorm > cleanFraction ? walkNoise : walkNoise * (tNorm / cleanFraction);
+          } else {
+            sigmaT = walkNoise * tNorm; // legacy linear
+          }
           if (sigmaT > 0) {
             inputNoise = tf.randomNormal(x.shape, 0, sigmaT, "float32", _seedAt(cfg.seed, (step + 1) * 1000));
             xPerturbed = x.add(inputNoise);
@@ -31759,6 +31770,7 @@
           // the server runs the same algorithm as the client.
           if (config.init != null) serverConfig.init = config.init;
           if (config.walkNoise != null) serverConfig.walkNoise = config.walkNoise;
+          if (config.cleanFraction != null) serverConfig.cleanFraction = config.cleanFraction;
           if (method === "inverse") {
             var sTestY = (sTestSplit && sTestSplit.y) ? sTestSplit.y : ((activeDs2.records && activeDs2.records.test && activeDs2.records.test.y) || (activeDs2.yTest || []));
             if (sTestY && sTestY.length) {
@@ -31916,6 +31928,7 @@
         // engine and fall back to legacy "noise" init.
         if (config.init != null) genConfig.init = config.init;
         if (config.walkNoise != null) genConfig.walkNoise = config.walkNoise;
+        if (config.cleanFraction != null) genConfig.cleanFraction = config.cleanFraction;
 
         // class conditioning: if model has class_embed input, provide one-hot classVector
         if (built.inputNodes && built.inputNodes.some(function (n) { return n.name === "class_embed_layer"; })) {

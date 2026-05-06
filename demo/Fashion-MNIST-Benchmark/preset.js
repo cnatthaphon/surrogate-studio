@@ -243,7 +243,7 @@
       //   walkNoise: 0.3    — perturb with the same σ used at training before
       //                       each model call, so the input stays inside the
       //                       trained {x_clean + N(0, σ_train)} manifold
-      { id: "g-denoiser-langevin", name: "Denoiser Langevin (walk-jump)", schemaId: sid, trainerId: "t-denoiser-pre", family: "diffusion", config: { method: "langevin", numSamples: 16, steps: 100, lr: 0.0, init: "uniform", walkNoise: 0.3, seed: 42 }, status: "draft", runs: [], createdAt: Date.now() },
+      { id: "g-denoiser-langevin", name: "Denoiser Langevin (walk-jump)", schemaId: sid, trainerId: "t-denoiser-pre", family: "diffusion", config: { method: "langevin", numSamples: 16, steps: 200, lr: 0.0, init: "uniform", walkNoise: 0.3, cleanFraction: 0.1, seed: 42 }, status: "draft", runs: [], createdAt: Date.now() },
     ],
 
     evaluations: [
