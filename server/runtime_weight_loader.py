@@ -140,10 +140,21 @@ def load_weights_into_model(model: Any, config: Any) -> bool:
     if flat.size == 0:
         return False
 
-    if _load_named_checkpoint(model, saved_map, flat):
+    state = model.state_dict()
+
+    # LSTM/GRU/RNN weights are emitted by extract_pytorch_state as bare
+    # tensors named "tfjs_kernel"/"tfjs_recurrent_kernel"/"tfjs_bias" with
+    # no module prefix and consume 4 state_dict entries (weight_ih_l0,
+    # weight_hh_l0, bias_ih_l0, bias_hh_l0). They can only be reloaded by
+    # the positional path below, which walks specs and state_dict in the
+    # same order. The named path uses a different offset model, so a
+    # partial match there (e.g. on adjacent dense weights) would skip
+    # the recurrent block and short-circuit the whole load. When the
+    # model has any recurrent layer, force the positional path.
+    has_recurrent = any("weight_ih_l0" in k for k in state)
+    if not has_recurrent and _load_named_checkpoint(model, saved_map, flat):
         return True
 
-    state = model.state_dict()
     bn_running = [k for k in state if "running_mean" in k or "running_var" in k]
     regular = [k for k in state if "num_batches_tracked" not in k and k not in bn_running]
     keys = regular + bn_running
@@ -166,18 +177,17 @@ def load_weights_into_model(model: Any, config: Any) -> bool:
             bias_combined = flat[offset:offset + 4 * H]
             offset += 4 * H
 
-            def unswap(w, axis):
-                if axis == 1:
-                    c = [w[:, j * H:(j + 1) * H] for j in range(4)]
-                    return np.concatenate([c[0], c[2], c[1], c[3]], axis=1)
-                c = [w[j * H:(j + 1) * H] for j in range(4)]
-                return np.concatenate([c[0], c[2], c[1], c[3]], axis=0)
-
-            new_state[keys[i]] = torch.tensor(unswap(kernel_t, axis=1).T, dtype=torch.float32)
-            new_state[keys[i + 1]] = torch.tensor(unswap(rec_t, axis=1).T, dtype=torch.float32)
-            bias_unswapped = unswap(bias_combined.reshape(1, -1), axis=1).flatten()
-            new_state[keys[i + 2]] = torch.tensor(bias_unswapped / 2, dtype=torch.float32)
-            new_state[keys[i + 3]] = torch.tensor(bias_unswapped / 2, dtype=torch.float32)
+            # PyTorch [i,f,g,o] is byte-identical to Keras/TF.js [i,f,c,o]
+            # — Keras's "c" is the same cell-candidate gate PyTorch calls
+            # "g". So no gate reorder, just transpose kernels and split the
+            # combined bias evenly back into bias_ih + bias_hh. The earlier
+            # [i,f,g,o] → [i,g,f,o] unswap matched the broken extract path
+            # in checkpoint_format.py and produced corrupt LSTM state on
+            # server reload/resume. See scripts/test_lstm_gate_parity.py.
+            new_state[keys[i]] = torch.tensor(kernel_t.T, dtype=torch.float32)
+            new_state[keys[i + 1]] = torch.tensor(rec_t.T, dtype=torch.float32)
+            new_state[keys[i + 2]] = torch.tensor(bias_combined / 2, dtype=torch.float32)
+            new_state[keys[i + 3]] = torch.tensor(bias_combined / 2, dtype=torch.float32)
             i += 4
             continue
 
