@@ -45,14 +45,19 @@ function trainerHasArtifacts(t) {
 }
 
 // Mirror the runtime helper in src/tabs/generation_tab.js. Restricted to
-// SAME-modelId siblings so we never silently route the user to an unrelated
-// model that just happens to share the schema.
+// SAME-schemaId AND SAME-modelId siblings so we never silently route the
+// user to an unrelated model that just happens to share the schema, and
+// never to a trainer registered under a different schema. The runtime
+// uses _listTrainersForSchema(g.schemaId) which already applies the
+// schema filter — we mirror it here so the test can't pass on
+// cross-schema fallbacks the runtime would never reach.
 function resolveTrainedTrainer(g, allTrainers) {
   var pinned = allTrainers.find(function (t) { return t.id === g.trainerId; });
   if (trainerHasArtifacts(pinned)) return pinned;
   if (!pinned) return null;
   return allTrainers.find(function (t) {
     return t.id !== pinned.id
+      && t.schemaId === g.schemaId
       && t.modelId === pinned.modelId
       && trainerHasArtifacts(t);
   }) || null;
