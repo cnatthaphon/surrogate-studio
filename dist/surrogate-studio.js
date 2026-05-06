@@ -1,5 +1,5 @@
 // Surrogate Studio - concatenated bundle
-// Generated: 2026-05-06T03:23:28Z
+// Generated: 2026-05-06T03:28:31Z
 // Source files: 58
 
 
@@ -31755,6 +31755,10 @@
             outputNodeId: config.outputNodeId || "",
             originals: method === "reconstruct" ? sTestX.slice(0, config.numSamples || 16) : undefined,
           };
+          // Forward Langevin algorithm knobs (walk-jump, etc.) when present so
+          // the server runs the same algorithm as the client.
+          if (config.init != null) serverConfig.init = config.init;
+          if (config.walkNoise != null) serverConfig.walkNoise = config.walkNoise;
           if (method === "inverse") {
             var sTestY = (sTestSplit && sTestSplit.y) ? sTestSplit.y : ((activeDs2.records && activeDs2.records.test && activeDs2.records.test.y) || (activeDs2.yTest || []));
             if (sTestY && sTestY.length) {
