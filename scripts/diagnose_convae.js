@@ -4,7 +4,7 @@ var path = require("path");
 var fs = require("fs");
 var vm = require("vm");
 
-var REPO = "/mnt/f/Data/Projects/Portfolio/surrogate-studio";
+var REPO = path.resolve(__dirname, "..");
 global.window = global;
 global.OSCDatasetModules = { registerModule: function () {} };
 

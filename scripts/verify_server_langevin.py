@@ -8,6 +8,7 @@ samples — the same property the client-side Node test verifies.
 """
 import base64
 import json
+import os
 import re
 import struct
 import subprocess
@@ -70,8 +71,10 @@ def run_server_langevin(label: str, extra_cfg: dict) -> dict:
         json.dump(cfg, f)
         cfg_path = f.name
     try:
-        # Use the same venv the server's health check reports.
-        py = "/home/cue/venv/main/bin/python"
+        # Use the Python that has torch installed. Caller can override via
+        # SURROGATE_SERVER_PY (e.g. the server's venv). Default: sys.executable
+        # — works whenever torch is in the same env that runs this script.
+        py = os.environ.get("SURROGATE_SERVER_PY") or sys.executable
         proc = subprocess.run(
             [py, str(REPO / "server/generate_subprocess.py"), cfg_path],
             capture_output=True, text=True, timeout=300,
