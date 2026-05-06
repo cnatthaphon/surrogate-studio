@@ -290,8 +290,13 @@ async function trainOneModel(modelDef, dataset, trainerDef) {
   var graph = modelDef.graph;
   if (!graph) { console.log("  SKIP (no graph)"); return null; }
 
-  var outputKeys = sr.getOutputKeys(schemaId).map(function (k) { return (k && typeof k === "object") ? k.key : k; });
-  var defaultTarget = outputKeys[0] || "x";
+  // Keep full output-key objects (with featureSize, headType, etc.) — the
+  // browser path passes these objects to buildModelFromGraph and so should
+  // we, otherwise targetUnitsFromMode falls through to its default-1
+  // fallback for any custom target name and the model output collapses to
+  // a single scalar (BUG-41).
+  var outputKeys = sr.getOutputKeys(schemaId);
+  var defaultTarget = (outputKeys[0] && (outputKeys[0].key || outputKeys[0])) || "x";
   var featureSize = dataset.featureSize || (dataset.xTrain[0] && dataset.xTrain[0].length) || 1;
   var tc = trainerDef.trainCfg || trainerDef.config || {};
 

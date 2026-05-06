@@ -31,9 +31,17 @@
       },
     },
     model: {
+      // featureSize MUST be declared so model_builder_core's
+      // targetUnitsFromMode picks it up at priority step 2 (schema spec).
+      // Without it, the build falls through to the default-1 fallback and
+      // every output collapses to a single scalar — training silently
+      // works because TF.js MSE broadcasts [batch,40] vs [batch,1] to a
+      // degenerate scalar loss, but inference returns shape [1] per
+      // sample instead of [40]. That was the LSTM-VAE reconstruction
+      // collapse the user reported (BUG-39 follow-up).
       outputs: [
-        { key: "xv", label: "reconstruction (40-dim)" },
-        { key: "traj", label: "trajectory" },
+        { key: "xv",   label: "reconstruction (40-dim)", featureSize: 40, headType: "reconstruction" },
+        { key: "traj", label: "trajectory",              featureSize: 40, headType: "regression" },
       ],
       params: [],
       presets: [
