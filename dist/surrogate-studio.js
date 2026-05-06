@@ -1,5 +1,5 @@
 // Surrogate Studio - concatenated bundle
-// Generated: 2026-05-06T03:57:14Z
+// Generated: 2026-05-06T04:51:25Z
 // Source files: 58
 
 
@@ -21643,22 +21643,24 @@
         var rawOut = _applyLayerMetadata(tf.layers.conv2dTranspose(transposeCfg), node).apply(inTensor);
         if (pt === "same") {
           // Crop the raw output (size: (in-1)*stride + kernel) down to
-          // in*stride by trimming the bottom-right border. The crop
-          // amount is (kernel - stride) from each of bottom and right.
+          // in*stride. Total crop = (kernel - stride). Split it as
+          // floor on top/left, ceil on bottom/right — must match the
+          // server's PyTorch crop formula (train_subprocess.py:1367)
+          // which starts the slice at (ks - st) // 2. For odd kernels
+          // with stride=2 (e.g. Conv-AE 3x3) the crop is bottom/right
+          // only; for even kernels (e.g. DCGAN 4x4) it is symmetric.
           var inH = inTensor.shape && inTensor.shape[1];
           var inW = inTensor.shape && inTensor.shape[2];
           if (inH && inW) {
-            var targetH = inH * st;
-            var targetW = inW * st;
-            // tf.layers.cropping2d with [top,bottom],[left,right]
-            var rawH = (inH - 1) * st + kt;
-            var rawW = (inW - 1) * st + kt;
-            var cropBottom = Math.max(0, rawH - targetH);
-            var cropRight = Math.max(0, rawW - targetW);
-            if (cropBottom > 0 || cropRight > 0) {
-              // TF.js exports the layer as `cropping2D` (camelCase, not snake).
+            var totalCropH = Math.max(0, kt - st);
+            var totalCropW = Math.max(0, kt - st);
+            var cropTop = Math.floor(totalCropH / 2);
+            var cropBottom = totalCropH - cropTop;
+            var cropLeft = Math.floor(totalCropW / 2);
+            var cropRight = totalCropW - cropLeft;
+            if (cropTop > 0 || cropBottom > 0 || cropLeft > 0 || cropRight > 0) {
               return tf.layers.cropping2D({
-                cropping: [[0, cropBottom], [0, cropRight]],
+                cropping: [[cropTop, cropBottom], [cropLeft, cropRight]],
                 name: _n + "_crop",
               }).apply(rawOut);
             }
