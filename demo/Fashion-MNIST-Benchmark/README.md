@@ -1,11 +1,11 @@
-# Fashion-MNIST Benchmark — 7 Architectures Compared
+# Fashion-MNIST Benchmark — 8 Architectures Compared
 
 ![Demo Workflow](images/demo_workflow.gif)
 
 
-**A visual survey of seven architectures spanning three decades of neural network research, trained and evaluated on the same dataset in one browser page.**
+**A visual survey of eight architectures spanning three decades of neural network research, trained and evaluated on the same dataset in one browser page.**
 
-The 7 architectures span 1986 to 2020, each built entirely from the visual graph editor — no code, no hardcodes. Every model trains on both TF.js (browser) and PyTorch (server) from the same graph; the two runtimes use the same loss, optimizer, and seed and produce comparable but not bit-for-bit identical weights (different floating-point summation orders, RNG streams, and library kernels — typical cross-runtime variance is well under 1% on test metrics). The goal is platform-level reproducibility across architectures, not per-architecture SOTA.
+The 8 architectures span 1986 to 2019, each built entirely from the visual graph editor — no code, no hardcodes. Every model trains on both TF.js (browser) and PyTorch (server) from the same graph; the two runtimes use the same loss, optimizer, and seed and produce comparable but not bit-for-bit identical weights (different floating-point summation orders, RNG streams, and library kernels — typical cross-runtime variance is well under 1% on test metrics). The goal is platform-level reproducibility across architectures, not per-architecture SOTA.
 
 ## Models
 
@@ -18,6 +18,7 @@ The 7 architectures span 1986 to 2020, each built entirely from the visual graph
 | 5 | **VAE** | ~414K | Reconstruction + Generation | Kingma & Welling 2014 |
 | 6 | **VAE+Classifier** | ~414K | Multi-task (recon + class) | Multi-task learning |
 | 7 | **Denoising AE** | ~734K | Reconstruction + Generation | Ho et al. 2020 |
+| 8 | **NCSN (score net)** | ~1.36M | Generation via Langevin | Song & Ermon 2019 |
 
 ## Benchmarks
 
@@ -49,16 +50,17 @@ Pretrained checkpoints render generation in <1 s in the browser.
 
 | Method | Model | What it does | Expected output |
 |---|---|---|---|
-| Reconstruct | AE, Conv-AE, VAE, Denoiser | Real image → encode → decode | Original-ish garment, blur scales with bottleneck tightness |
+| Reconstruct | AE, Conv-AE, VAE, Denoiser, NCSN | Real image → encode → decode | Original-ish garment, blur scales with bottleneck tightness |
 | Random Sampling | VAE | z ~ N(0,1) → decoder | Garment-like silhouettes; works because the proper Kingma-Welling reparam + KL term during training shaped the latent to N(0,1) |
 | Classifier-Guided | VAE+Classifier | Gradient ascent on z to maximize P(target_class), with `||z||²` prior penalty | Garment leaning toward the requested class; the demo shows a "Classifier hit %" banner so you can verify the optimization actually steered to the right class |
-| Langevin Dynamics | Denoising AE | Currently disabled — see note below | — |
+| Langevin (walk-jump) | Denoising AE | Walk-jump sampling on a single-σ DAE: perturb x with N(0, σ_train) before each model call | Soft garment-like textures. Single-σ models can't do free Langevin; walk-jump keeps the chain on-manifold but quality has a ceiling |
+| Langevin (proper) | NCSN | True score-based Langevin: ∇log p_σ(x) is learned across noise scales | Diverse garment silhouettes from random noise — the σ-conditioning makes the score function valid out of distribution |
 
 **Why Random Sampling works now:** earlier the reparameterize layer was a learnable linear projection of `logvar` (no random sampling), so the encoder collapsed to deterministic and the decoder never saw random latents at training time. Fixed in PR #61: layer now does `z = mu + exp(0.5*logvar) * ε` with proper KL regularization, so feeding `z ~ N(0,1)` at inference produces in-distribution samples.
 
 **Why Classifier-Guided shows a hit-rate banner:** without closed-loop feedback, gradient ascent on `log P(target)` could land on adversarial latents that fool the classifier but don't look like the target class. The demo (a) adds a `||z||²` prior penalty to keep the optimization in the trained latent distribution, then (b) re-runs the classifier on the FINAL generated samples and shows what fraction were actually classified as the requested class. ≥75% hit (green) is the bar for "the optimization worked."
 
-**Why Langevin Dynamics is disabled here:** the m7 denoiser is trained at a single fixed noise scale (0.3). True Langevin sampling needs a *score-based* model trained across a range of noise scales (NCSN/score-SDE). Feeding `x ~ N(0,1)` is far out of this denoiser's training distribution → outputs collapse to ~0 (all-black). The Fashion-MNIST-Diffusion demo ships proper NCSN + score-SDE checkpoints if you want to compare Langevin sampling there.
+**Why two Langevin entries:** the m7 denoiser is trained at a single fixed noise scale (0.3). Naive Langevin from `x ~ N(0,1)` collapses to a single attractor because the model never saw OOD inputs. The walk-jump entry on m7 is the educational workaround — perturb x at the training σ before each step so the chain stays inside the trained manifold. The m8 NCSN entry shows the *correct* answer: train across a range of noise scales with a σ-embedding (`noise_injection schedule:"linear"` + `time_embed` + concat) so the score function is valid OOD, then run real Langevin from `x ~ N(0,1)`. Both entries use the same generation engine — the only difference is the model graph.
 
 ## Screenshots
 
@@ -69,7 +71,7 @@ Pretrained checkpoints render generation in <1 s in the browser.
 ## How to Use
 
 1. Open `index.html`, generate Fashion-MNIST dataset (~30MB download)
-2. **Trainer tab**: Train all 7 models (click each, press Start)
+2. **Trainer tab**: Train all 8 models (click each, press Start)
 3. **Evaluation tab**: Run benchmarks → see side-by-side comparison
 4. **Generation tab**: Explore generation methods per model
 5. **Model tab**: Click each model to see its architecture in the graph editor

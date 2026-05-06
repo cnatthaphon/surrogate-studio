@@ -6,7 +6,7 @@ All demos run live on [GitHub Pages](https://cnatthaphon.github.io/surrogate-stu
 
 ---
 
-## Fashion-MNIST Benchmark — 7 Architectures Compared
+## Fashion-MNIST Benchmark — 8 Architectures Compared
 
 [Live Demo](https://cnatthaphon.github.io/surrogate-studio/demo/Fashion-MNIST-Benchmark/) | [README](demo/Fashion-MNIST-Benchmark/README.md)
 
@@ -25,6 +25,7 @@ A visual survey of 35 years of neural network research, all trained and evaluate
 | 5 | VAE | ~414K | Kingma & Welling 2014 |
 | 6 | VAE+Classifier | ~414K | Multi-task learning |
 | 7 | Denoising AE | ~734K | Ho et al. 2020 |
+| 8 | NCSN (score net) | ~1.36M | Song & Ermon 2019 |
 
 ---
 
