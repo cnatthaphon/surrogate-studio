@@ -185,6 +185,39 @@
   }
 
   // ────────────────────────────────────────────────────────
+  // 8. NCSN — Noise Conditional Score Network (Song & Ermon 2019)
+  // ────────────────────────────────────────────────────────
+  // Same denoising spirit as m7, but the noise schedule sweeps σ over a
+  // range each batch and the network is conditioned on σ via a timestep
+  // embedding. That makes it a proper score function ∇_x log p_σ(x), so
+  // generation by Langevin Dynamics from random noise actually works —
+  // contrast with m7's single-σ DAE which collapses under naive Langevin
+  // and needs the walk-jump workaround. Built from existing blocks
+  // (noise_injection schedule:"linear" + time_embed + concat); no
+  // engine changes.
+  function _ncsn() {
+    _nid = 0; var d = {};
+    var a = N(d, "image_source", { sourceKey: "pixel_values", featureSize: 784, imageShape: [28,28,1] }, 60, 80);
+    var b = N(d, "noise_injection", { scale: 0.5, schedule: "linear" }, 230, 80);
+    var t = N(d, "time_embed", { dim: 64 }, 60, 220);
+    _nid++; var _cid = String(_nid);
+    d[_cid] = { id: _nid, name: "concat_block", data: {}, class: "concat_block", html: "<div><div>Concat</div></div>", typenode: false, inputs: {}, outputs: {}, pos_x: 400, pos_y: 140 };
+    var cat = _cid;
+    C(d, b, cat, "output_1", "input_1");
+    C(d, t, cat, "output_1", "input_2");
+    var d1 = N(d, "dense",       { units: 512, activation: "relu" }, 560, 140);
+    var ln1 = N(d, "layernorm",  {},                                  640, 140);
+    var d2 = N(d, "dense",       { units: 512, activation: "relu" }, 720, 140);
+    var ln2 = N(d, "layernorm",  {},                                  800, 140);
+    var d3 = N(d, "dense",       { units: 512, activation: "relu" }, 880, 140);
+    var d4 = N(d, "dense",       { units: 784, activation: "sigmoid" }, 1000, 140);
+    var out = N(d, "output",     { target: "pixel_values", targetType: "pixel_values", loss: "mse", headType: "reconstruction" }, 1160, 140);
+    C(d, cat, d1); C(d, d1, ln1); C(d, ln1, d2); C(d, d2, ln2); C(d, ln2, d3); C(d, d3, d4); C(d, d4, out);
+    C(d, a, b);
+    return graph(d);
+  }
+
+  // ────────────────────────────────────────────────────────
   // Assemble preset
   // ────────────────────────────────────────────────────────
   var DS_ID = "demo-bench-ds";
@@ -205,6 +238,7 @@
       { id: "m-vae",      name: "5. VAE",                schemaId: sid, graph: _vae(),      createdAt: Date.now() },
       { id: "m-vae-cls",  name: "6. VAE+Classifier",     schemaId: sid, graph: _vaeCls(),   createdAt: Date.now() },
       { id: "m-denoiser", name: "7. Denoising AE",       schemaId: sid, graph: _denoiser(), createdAt: Date.now() },
+      { id: "m-ncsn",     name: "8. NCSN (Score Network)", schemaId: sid, graph: _ncsn(),     createdAt: Date.now() },
     ],
 
     trainers: [
@@ -215,6 +249,7 @@
       { id: "t-vae",      name: "VAE Trainer",         schemaId: sid, datasetId: DS_ID, modelId: "m-vae",      status: "draft", config: { epochs: 20, batchSize: 128, learningRate: 0.0005, optimizerType: "adam", useServer: true } },
       { id: "t-vae-cls",  name: "VAE+Cls Trainer",     schemaId: sid, datasetId: DS_ID, modelId: "m-vae-cls",  status: "draft", config: { epochs: 20, batchSize: 128, learningRate: 0.0005, optimizerType: "adam", useServer: true } },
       { id: "t-denoiser", name: "Denoiser Trainer",    schemaId: sid, datasetId: DS_ID, modelId: "m-denoiser", status: "draft", config: { epochs: 40, batchSize: 128, learningRate: 0.001, optimizerType: "adam", useServer: true } },
+      { id: "t-ncsn",     name: "NCSN Trainer",        schemaId: sid, datasetId: DS_ID, modelId: "m-ncsn",     status: "draft", config: { epochs: 40, batchSize: 128, learningRate: 0.001, optimizerType: "adam", useServer: true, earlyStoppingPatience: 15, lrSchedulerType: "plateau", lrPatience: 5, lrFactor: 0.5 } },
       // Pre-trained (TF.js CPU, 20 epochs)
       { id: "t-mlp-pre",      name: "MLP (pre-trained)",      schemaId: sid, datasetId: DS_ID, modelId: "m-mlp",      status: "done", _pretrainedVar: "M1_MLP_BASELINE_PRE_TRAINED_PRETRAINED_BIN_B64", config: { epochs: 20, batchSize: 128, learningRate: 0.001, optimizerType: "adam" } },
       { id: "t-cnn-pre",      name: "CNN (pre-trained)",      schemaId: sid, datasetId: DS_ID, modelId: "m-cnn",      status: "done", _pretrainedVar: "M2_CNN_LENET_5_PRE_TRAINED_PRETRAINED_BIN_B64", config: { epochs: 20, batchSize: 128, learningRate: 0.001, optimizerType: "adam" } },
@@ -223,6 +258,7 @@
       { id: "t-vae-pre",      name: "VAE (pre-trained)",      schemaId: sid, datasetId: DS_ID, modelId: "m-vae",      status: "done", _pretrainedVar: "M5_VAE_PRE_TRAINED_PRETRAINED_BIN_B64", config: { epochs: 20, batchSize: 128, learningRate: 0.0005, optimizerType: "adam" } },
       { id: "t-vae-cls-pre",  name: "VAE+Cls (pre-trained)",  schemaId: sid, datasetId: DS_ID, modelId: "m-vae-cls",  status: "done", _pretrainedVar: "M6_VAE_CLASSIFIER_PRE_TRAINED_PRETRAINED_BIN_B64", config: { epochs: 20, batchSize: 128, learningRate: 0.0005, optimizerType: "adam" } },
       { id: "t-denoiser-pre", name: "Denoiser (pre-trained)", schemaId: sid, datasetId: DS_ID, modelId: "m-denoiser", status: "done", _pretrainedVar: "M7_DENOISING_AE_PRE_TRAINED_PRETRAINED_BIN_B64", config: { epochs: 40, batchSize: 128, learningRate: 0.001, optimizerType: "adam" } },
+      { id: "t-ncsn-pre",     name: "NCSN (pre-trained)",     schemaId: sid, datasetId: DS_ID, modelId: "m-ncsn",     status: "done", _pretrainedVar: "M8_NCSN_PRE_TRAINED_PRETRAINED_BIN_B64",          config: { epochs: 40, batchSize: 128, learningRate: 0.001, optimizerType: "adam", lrSchedulerType: "plateau", lrPatience: 5, lrFactor: 0.5 } },
     ],
 
     generations: [
@@ -244,6 +280,14 @@
       //                       each model call, so the input stays inside the
       //                       trained {x_clean + N(0, σ_train)} manifold
       { id: "g-denoiser-langevin", name: "Denoiser Langevin (walk-jump)", schemaId: sid, trainerId: "t-denoiser-pre", family: "diffusion", config: { method: "langevin", numSamples: 16, steps: 200, lr: 0.0, init: "uniform", walkNoise: 0.3, cleanFraction: 0.1, seed: 42 }, status: "draft", runs: [], createdAt: Date.now() },
+      // NCSN — proper σ-conditioned score network. Real Langevin Dynamics
+      // works because the model learned ∇log p_σ(x) across a range of
+      // noise scales. Compare against m7's Denoiser Langevin (walk-jump):
+      // same generation method, same MCMC framework, but here the score
+      // signal is correct so samples don't need the input-noise trick to
+      // stay on-manifold.
+      { id: "g-ncsn-recon",    name: "NCSN Reconstruct",      schemaId: sid, trainerId: "t-ncsn-pre", family: "diffusion", config: { method: "reconstruct", numSamples: 16 }, status: "draft", runs: [], createdAt: Date.now() },
+      { id: "g-ncsn-langevin", name: "NCSN Langevin",         schemaId: sid, trainerId: "t-ncsn-pre", family: "diffusion", config: { method: "langevin", numSamples: 16, steps: 100, lr: 0.01, temperature: 1.0, seed: 42 }, status: "draft", runs: [], createdAt: Date.now() },
     ],
 
     evaluations: [
