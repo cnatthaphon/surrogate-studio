@@ -859,13 +859,19 @@ def main():
             truth_for_metrics = x_test if (_is_recon_head and pred_test.shape == x_test.shape) else y_test
             t_flat = truth_for_metrics.flatten()
             p_flat = pred_test.flatten()
-            test_metrics["testMae"] = float(np.mean(np.abs(p_flat - t_flat)))
-            test_metrics["testMse"] = float(np.mean((p_flat - t_flat) ** 2))
-            test_metrics["testRmse"] = float(np.sqrt(test_metrics["testMse"]))
-            test_metrics["testBias"] = float(np.mean(p_flat - t_flat))
-            ss_tot = float(np.sum((t_flat - t_flat.mean()) ** 2))
-            ss_res = float(np.sum((t_flat - p_flat) ** 2))
-            test_metrics["testR2"] = 1 - ss_res / ss_tot if ss_tot > 0 else 0
+            # Guard: when the model has multiple output heads (e.g. classifier
+            # logits + auxiliary), pred_test.flatten() can differ in size from
+            # y_test.flatten(). Skip element-wise regression metrics in that
+            # case rather than crashing the whole retrain. testN is still
+            # populated so downstream code knows the test split was evaluated.
+            if p_flat.shape == t_flat.shape:
+                test_metrics["testMae"] = float(np.mean(np.abs(p_flat - t_flat)))
+                test_metrics["testMse"] = float(np.mean((p_flat - t_flat) ** 2))
+                test_metrics["testRmse"] = float(np.sqrt(test_metrics["testMse"]))
+                test_metrics["testBias"] = float(np.mean(p_flat - t_flat))
+                ss_tot = float(np.sum((t_flat - t_flat.mean()) ** 2))
+                ss_res = float(np.sum((t_flat - p_flat) ** 2))
+                test_metrics["testR2"] = 1 - ss_res / ss_tot if ss_tot > 0 else 0
             test_metrics["testN"] = len(x_test)
             # skip raw predictions for large outputs (client re-predicts from weights)
             # only include for small outputs (classification, small regression)
