@@ -1,5 +1,5 @@
 // Surrogate Studio - concatenated bundle
-// Generated: 2026-05-06T08:28:12Z
+// Generated: 2026-05-06T08:37:07Z
 // Source files: 58
 
 
@@ -31650,8 +31650,13 @@
 
       rightEl.appendChild(configCard);
 
-      // check if selected trainer is ready — check both weight sets
-      var isReady = !!_getTrainerArtifacts(selectedTrainer, g.config && g.config.weightSelection);
+      // Generate is enabled when EITHER the pinned trainer has artifacts OR
+      // a same-modelId sibling does — _handleGenerate will commit the swap
+      // on click. Without this, cards pinned to a draft trainer would show
+      // the "Click Generate to commit" banner above but the button would
+      // stay disabled, leaving the resolved sibling unreachable.
+      var pinnedHasArtifacts = !!_getTrainerArtifacts(selectedTrainer, g.config && g.config.weightSelection);
+      var isReady = pinnedHasArtifacts || !!_resolveTrainedTrainer(g);
 
       if (g.trainerId && !isReady) {
         var statusMsg = "Model not trained yet. Train it first in the Trainer tab.";
