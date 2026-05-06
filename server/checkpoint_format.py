@@ -125,6 +125,16 @@ def extract_pytorch_state(state_dict: Dict[str, Any]) -> tuple:
         gate PyTorch calls "g"). No reorder needed. Earlier code applied
         an [i,f,g,o] → [i,g,f,o] swap that broke LSTM inference end-to-
         end (see scripts/test_lstm_gate_parity.py).
+      - GRU: apply [r,z,n] → [z,r,h] gate swap (PyTorch and Keras differ
+        here — they really are different conventions). Emit 4 specs:
+        kernel, recurrent_kernel, bias (= b_ih + b_hh, matches Keras/TF.js
+        resetAfter=False forward), and bias_hh_residual (= b_hh alone, an
+        extra spec the client ignores but the server uses to reconstruct
+        b_ih and b_hh exactly on reload). Without the residual, splitting
+        the combined bias as (combined, 0) would corrupt PyTorch GRU's
+        n-gate which uses bias_ih and bias_hh asymmetrically:
+          n = tanh(W_in·x + b_in + r·(W_hn·h + b_hn))
+        — bit-exact server round trip needs both biases preserved.
       - BatchNorm: running stats separated and appended at end
       - Skips num_batches_tracked
 
@@ -138,31 +148,77 @@ def extract_pytorch_state(state_dict: Dict[str, Any]) -> tuple:
 
     weight_specs: List[Dict[str, Any]] = []
     weight_arrays: list = []
+    # GRU emits an extra "bias_hh_residual" spec the SERVER uses to recover
+    # b_ih and b_hh exactly; the client only needs kernel/recurrent_kernel
+    # /bias (3 specs) and reads the value blob positionally. To keep
+    # client positional reads aligned across multi-layer graphs, residual
+    # specs are deferred and appended AFTER all primary specs — the
+    # client consumes the prefix; server-side named-load picks up
+    # residuals from anywhere in the spec list.
+    residual_specs: List[Dict[str, Any]] = []
+    residual_arrays: list = []
     offset = 0
     i = 0
     while i < len(ordered_keys):
         name = ordered_keys[i]
         param = state_dict[name].detach().cpu().numpy()
 
-        # LSTM: combine weight_ih + weight_hh + bias_ih + bias_hh
+        # Recurrent layers: weight_ih_l0/weight_hh_l0/bias_ih_l0/bias_hh_l0
+        # bundle. Use the gate ratio (4*H = LSTM, 3*H = GRU, 1*H = simple
+        # RNN) to choose the right per-type extract path.
         if "weight_ih_l0" in name and i + 3 < len(ordered_keys) and "weight_hh_l0" in ordered_keys[i + 1]:
             w_ih = state_dict[ordered_keys[i]].detach().cpu().numpy()
             w_hh = state_dict[ordered_keys[i + 1]].detach().cpu().numpy()
             b_ih = state_dict[ordered_keys[i + 2]].detach().cpu().numpy()
             b_hh = state_dict[ordered_keys[i + 3]].detach().cpu().numpy()
-            # Gate order is identical between PyTorch [i,f,g,o] and Keras
-            # [i,f,c,o] — Keras's "c" is the same cell-candidate gate
-            # PyTorch calls "g". Just transpose kernels and sum biases.
-            kernel = w_ih.T
-            recurrent = w_hh.T
-            bias = b_ih + b_hh
-            for arr, suffix in [(kernel, "kernel"), (recurrent, "recurrent_kernel"), (bias, "bias")]:
-                flat = arr.astype(np.float32).flatten()
-                weight_specs.append({"name": f"tfjs_{suffix}", "shape": list(arr.shape), "dtype": "float32", "offset": offset})
-                weight_arrays.append(flat)
-                offset += flat.size * 4
-            i += 4
-            continue
+            H = w_hh.shape[1]
+            gate_ratio = w_ih.shape[0] // H if H > 0 else 0
+
+            if gate_ratio == 4:
+                # LSTM. Gate order [i,f,g,o] is identical to Keras [i,f,c,o].
+                # No reorder; transpose kernels and sum biases.
+                kernel = w_ih.T
+                recurrent = w_hh.T
+                bias = b_ih + b_hh
+                for arr, suffix in [(kernel, "kernel"), (recurrent, "recurrent_kernel"), (bias, "bias")]:
+                    flat = arr.astype(np.float32).flatten()
+                    weight_specs.append({"name": f"tfjs_{suffix}", "shape": list(arr.shape), "dtype": "float32", "offset": offset})
+                    weight_arrays.append(flat)
+                    offset += flat.size * 4
+                i += 4
+                continue
+
+            if gate_ratio == 3:
+                # GRU. PyTorch [r,z,n] vs Keras [z,r,h] — real reorder.
+                def _gru_swap(w: Any) -> Any:
+                    chunks = [w[j * H:(j + 1) * H] for j in range(3)]
+                    return np.concatenate([chunks[1], chunks[0], chunks[2]], axis=0)
+
+                kernel = _gru_swap(w_ih).T
+                recurrent = _gru_swap(w_hh).T
+                # Combined bias matches Keras GRU resetAfter=False forward.
+                bias = _gru_swap(b_ih + b_hh)
+                # Residual: b_hh alone, swapped. Server reload uses it to
+                # recover b_ih = combined - residual exactly. Client TF.js
+                # ignores this spec, so it goes into the residual bucket
+                # that's appended at the end of the value blob.
+                bias_hh_residual = _gru_swap(b_hh)
+                for arr, suffix in [(kernel, "kernel"), (recurrent, "recurrent_kernel"), (bias, "bias")]:
+                    flat = arr.astype(np.float32).flatten()
+                    weight_specs.append({"name": f"tfjs_{suffix}", "shape": list(arr.shape), "dtype": "float32", "offset": offset})
+                    weight_arrays.append(flat)
+                    offset += flat.size * 4
+                # Defer the residual spec — appended after all primary
+                # specs below. Its offset is fixed up there.
+                residual_flat = bias_hh_residual.astype(np.float32).flatten()
+                residual_specs.append({"name": "tfjs_bias_hh_residual", "shape": list(bias_hh_residual.shape), "dtype": "float32", "offset": -1})
+                residual_arrays.append(residual_flat)
+                i += 4
+                continue
+
+            # Simple RNN (gate_ratio == 1) or unrecognized: fall through
+            # to the per-weight generic 2D path so each tensor is emitted
+            # under its own name. Server reload's named-load matches.
 
         # Conv2D / Conv2DTranspose: NCHW → NHWC
         if param.ndim == 4 and ".weight" in name and any(name.startswith(p) for p in ("conv2d_", "convt2d_", "pe_proj_")):
@@ -176,6 +232,15 @@ def extract_pytorch_state(state_dict: Dict[str, Any]) -> tuple:
         weight_arrays.append(flat)
         offset += flat.size * 4
         i += 1
+
+    # Append residual specs/arrays (e.g. GRU bias_hh_residual) AFTER all
+    # primary tensors so client positional reads stay aligned. Fix up the
+    # placeholder offsets to point into the tail of the value blob.
+    for spec, flat in zip(residual_specs, residual_arrays):
+        spec["offset"] = offset
+        weight_specs.append(spec)
+        weight_arrays.append(flat)
+        offset += flat.size * 4
 
     if weight_arrays:
         weight_values = np.concatenate(weight_arrays).tolist()

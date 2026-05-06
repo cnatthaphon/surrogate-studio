@@ -142,29 +142,43 @@ def load_weights_into_model(model: Any, config: Any) -> bool:
 
     state = model.state_dict()
 
-    # LSTM weights are emitted by extract_pytorch_state as bare tensors
-    # named "tfjs_kernel"/"tfjs_recurrent_kernel"/"tfjs_bias" (no module
-    # prefix) and consume 4 state_dict entries (weight_ih_l0, weight_hh_l0,
-    # bias_ih_l0, bias_hh_l0). The named-load path uses a different offset
-    # model, so a partial match there (e.g. on adjacent dense weights)
-    # would skip the recurrent block and short-circuit the whole load.
-    # Force the positional path when LSTM is present.
+    # LSTM and GRU weights are emitted by extract_pytorch_state as bare
+    # tensors named "tfjs_kernel"/"tfjs_recurrent_kernel"/"tfjs_bias"
+    # (plus "tfjs_bias_hh_residual" for GRU) — no module prefix — and
+    # consume 4 state_dict entries (weight_ih_l0, weight_hh_l0,
+    # bias_ih_l0, bias_hh_l0). The named-load path uses a different
+    # offset model, so a partial match there (e.g. on adjacent dense
+    # weights) would skip the recurrent block and short-circuit the
+    # whole load. Force the positional path when LSTM or GRU is present.
     #
-    # The detection is structural (4*H gate ratio), not name-based — GRU
-    # and simple RNN also have weight_ih_l0/weight_hh_l0 keys but use
-    # 3*H and H gate layouts respectively. The positional recurrent
-    # block below assumes 4*H, so forcing GRU/RNN through it would
-    # crash with shape mismatches. They go through the generic 2D
-    # transpose case in _load_named_checkpoint, same as before BUG-39.
-    has_lstm = any(
-        "weight_ih_l0" in k
-        and v.dim() == 2
-        and k.replace("weight_ih_l0", "weight_hh_l0") in state
-        and v.shape[0] == 4 * state[k.replace("weight_ih_l0", "weight_hh_l0")].shape[1]
-        for k, v in state.items()
+    # Detection is structural (4*H or 3*H gate ratio), not name-based —
+    # this lets the matching extract/reload pair stay in lockstep
+    # regardless of how the user names their recurrent module.
+    def _gate_ratio(state, k):
+        v = state[k]
+        hh_name = k.replace("weight_ih_l0", "weight_hh_l0")
+        if v.dim() != 2 or hh_name not in state:
+            return 0
+        h_dim = state[hh_name].shape[1]
+        return v.shape[0] // h_dim if h_dim > 0 else 0
+
+    has_recurrent_special = any(
+        "weight_ih_l0" in k and _gate_ratio(state, k) in (3, 4)
+        for k in state.keys()
     )
-    if not has_lstm and _load_named_checkpoint(model, saved_map, flat):
+    if not has_recurrent_special and _load_named_checkpoint(model, saved_map, flat):
         return True
+
+    # GRU emits an extra "bias_hh_residual" spec per GRU layer that lives
+    # at the END of the value blob (so client positional reads stay
+    # aligned). Pre-collect their offsets in spec-emit order so the GRU
+    # branch below can fetch the right residual for each layer.
+    gru_residual_offsets = []
+    for spec in extract_weight_specs(config):
+        nm = str((spec or {}).get("name", "") or "")
+        if "bias_hh_residual" in nm:
+            gru_residual_offsets.append(int((spec or {}).get("offset", 0) or 0) // 4)
+    gru_residual_idx = 0
 
     bn_running = [k for k in state if "running_mean" in k or "running_var" in k]
     regular = [k for k in state if "num_batches_tracked" not in k and k not in bn_running]
@@ -178,30 +192,79 @@ def load_weights_into_model(model: Any, config: Any) -> bool:
         param = state[name]
 
         if "weight_ih_l0" in name and i + 3 < len(keys) and "weight_hh_l0" in keys[i + 1]:
-            H = param.shape[0] // 4
             in_dim = param.shape[1]
             hid_dim = state[keys[i + 1]].shape[1]
-            kernel_t = flat[offset:offset + in_dim * 4 * H].reshape(in_dim, 4 * H)
-            offset += in_dim * 4 * H
-            rec_t = flat[offset:offset + hid_dim * 4 * H].reshape(hid_dim, 4 * H)
-            offset += hid_dim * 4 * H
-            bias_combined = flat[offset:offset + 4 * H]
-            offset += 4 * H
+            gate_ratio = param.shape[0] // hid_dim if hid_dim > 0 else 0
+            H = hid_dim
 
-            # PyTorch [i,f,g,o] is byte-identical to Keras/TF.js [i,f,c,o]
-            # — Keras's "c" is the same cell-candidate gate PyTorch calls
-            # "g". So no gate reorder, just transpose kernels and split
-            # the combined bias evenly back into bias_ih + bias_hh. The
-            # earlier [i,f,g,o] → [i,g,f,o] unswap matched the broken
-            # extract path in checkpoint_format.py and produced corrupt
-            # LSTM state on server reload (BUG-39). Verified end-to-end
-            # by scripts/test_lstm_server_reload_parity.py.
-            new_state[keys[i]] = torch.tensor(kernel_t.T, dtype=torch.float32)
-            new_state[keys[i + 1]] = torch.tensor(rec_t.T, dtype=torch.float32)
-            new_state[keys[i + 2]] = torch.tensor(bias_combined / 2, dtype=torch.float32)
-            new_state[keys[i + 3]] = torch.tensor(bias_combined / 2, dtype=torch.float32)
-            i += 4
-            continue
+            if gate_ratio == 4:
+                # LSTM: 3 specs (kernel, recurrent_kernel, bias).
+                kernel_t = flat[offset:offset + in_dim * 4 * H].reshape(in_dim, 4 * H)
+                offset += in_dim * 4 * H
+                rec_t = flat[offset:offset + hid_dim * 4 * H].reshape(hid_dim, 4 * H)
+                offset += hid_dim * 4 * H
+                bias_combined = flat[offset:offset + 4 * H]
+                offset += 4 * H
+
+                # PyTorch [i,f,g,o] is byte-identical to Keras/TF.js
+                # [i,f,c,o]. No gate reorder; just transpose kernels and
+                # split the combined bias evenly. The original earlier
+                # [i,f,g,o] → [i,g,f,o] unswap broke LSTM inference end
+                # -to-end (BUG-39). Verified by
+                # scripts/test_lstm_server_reload_parity.py.
+                new_state[keys[i]] = torch.tensor(kernel_t.T, dtype=torch.float32)
+                new_state[keys[i + 1]] = torch.tensor(rec_t.T, dtype=torch.float32)
+                new_state[keys[i + 2]] = torch.tensor(bias_combined / 2, dtype=torch.float32)
+                new_state[keys[i + 3]] = torch.tensor(bias_combined / 2, dtype=torch.float32)
+                i += 4
+                continue
+
+            if gate_ratio == 3:
+                # GRU: 3 specs at the current offset (kernel,
+                # recurrent_kernel, bias=combined) plus 1 residual spec
+                # (bias_hh_residual) parked at the END of the value
+                # blob so client positional reads stay aligned.
+                kernel_t = flat[offset:offset + in_dim * 3 * H].reshape(in_dim, 3 * H)
+                offset += in_dim * 3 * H
+                rec_t = flat[offset:offset + hid_dim * 3 * H].reshape(hid_dim, 3 * H)
+                offset += hid_dim * 3 * H
+                bias_combined = flat[offset:offset + 3 * H]
+                offset += 3 * H
+
+                if gru_residual_idx >= len(gru_residual_offsets):
+                    raise ValueError(
+                        "GRU bias_hh_residual spec missing — checkpoint was "
+                        "extracted by an older version that does not emit "
+                        "the residual. Re-export with the current "
+                        "checkpoint_format.extract_pytorch_state."
+                    )
+                residual_offset = gru_residual_offsets[gru_residual_idx]
+                gru_residual_idx += 1
+                bias_hh_residual = flat[residual_offset:residual_offset + 3 * H]
+
+                def _gru_unswap_axis1(w):
+                    c = [w[:, j * H:(j + 1) * H] for j in range(3)]
+                    return np.concatenate([c[1], c[0], c[2]], axis=1)
+
+                def _gru_unswap_axis0(w):
+                    c = [w[j * H:(j + 1) * H] for j in range(3)]
+                    return np.concatenate([c[1], c[0], c[2]], axis=0)
+
+                # PyTorch [r,z,n] ← Keras/TF.js [z,r,h]. Reverse the
+                # extract swap, transpose kernels, and recover b_ih, b_hh.
+                weight_ih = _gru_unswap_axis1(kernel_t).T  # [3*H, in]
+                weight_hh = _gru_unswap_axis1(rec_t).T     # [3*H, H]
+                bias_hh = _gru_unswap_axis0(bias_hh_residual)  # [3*H]
+                bias_ih = _gru_unswap_axis0(bias_combined) - bias_hh  # combined - hh = ih
+
+                new_state[keys[i]] = torch.tensor(weight_ih, dtype=torch.float32)
+                new_state[keys[i + 1]] = torch.tensor(weight_hh, dtype=torch.float32)
+                new_state[keys[i + 2]] = torch.tensor(bias_ih, dtype=torch.float32)
+                new_state[keys[i + 3]] = torch.tensor(bias_hh, dtype=torch.float32)
+                i += 4
+                continue
+            # gate_ratio == 1 (simple RNN) or unrecognized: fall through
+            # to per-tensor generic handling below.
 
         size = param.numel()
         vals = flat[offset:offset + size]

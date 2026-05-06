@@ -78,19 +78,15 @@ if not ok:
 with torch.no_grad():
     reload_out = fresh(x).cpu().numpy()
 
-# GRU's named-load path goes through the generic 2D transpose case,
-# which doesn't apply the [r,z,n] → [z,r,n] gate swap that PyTorch GRU
-# vs Keras GRU requires. So we don't expect bit-exact server round-trip
-# parity for GRU yet — that's a known gap left for a follow-up fix
-# similar to BUG-39 but for GRU specifically.
-#
-# What this test pins down: load_weights_into_model must NOT crash on
-# GRU, regardless of whether the round trip is exact or not. The pre-
-# fix version of this PR (forcing all-recurrent positional) crashed
-# with shape mismatches.
+# BUG-40 fix: extract emits 4 specs for GRU (kernel, recurrent_kernel,
+# bias = b_ih + b_hh, bias_hh_residual = b_hh) with the proper
+# [r,z,n] → [z,r,h] swap. Server reload reads all 4 specs and recovers
+# b_ih = combined - residual exactly. Round trip is bit-exact.
 print(f"Reload output:    {reload_out[0]}")
-print(f"Max abs diff: {np.abs(ref_out - reload_out).max():.6e}")
-print("PASS: GRU reload completed without crashing.")
-print("      (Bit-exact server round-trip parity for GRU is a")
-print("       separate follow-up — see _gruGatesPyToTf in")
-print("       src/weight_converter.js for the canonical swap rule.)")
+diff = np.abs(ref_out - reload_out).max()
+print(f"Max abs diff: {diff:.6e}")
+if diff < 1e-5:
+    print("PASS: GRU server-side round trip is bit-exact.")
+else:
+    print(f"FAIL: GRU server-side round trip diverges (diff {diff:.6e}).")
+    sys.exit(1)
