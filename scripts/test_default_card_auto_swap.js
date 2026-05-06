@@ -3,16 +3,19 @@
 /**
  * BUG-35 regression test: every demo's generation cards must resolve to a
  * trainer that has artifacts (status:"done" with weights), either directly
- * via the card's preset trainerId or via the auto-swap helper that picks a
- * trained sibling for the same modelId.
+ * via the card's preset trainerId or via the display-time helper that
+ * picks a same-modelId sibling with artifacts.
  *
  * Without this, visitors land on the Generation tab and see a draft card
  * with no weights, no metrics, no loss curve — and have to click the
  * sidebar to switch to the pretrained variant before anything renders.
  *
- * The check here mirrors what _resolveTrainedTrainer does in
+ * The check here mirrors _resolveTrainedTrainer in
  * src/tabs/generation_tab.js: prefer the pinned trainer when artifacts are
- * present, otherwise prefer a same-modelId sibling that has artifacts.
+ * present, otherwise prefer a same-modelId sibling that has artifacts. The
+ * runtime helper does NOT mutate g — viewing a card never silently
+ * rewrites trainerId. Persistence happens only on explicit user action
+ * (clicking Generate).
  *
  * "Has artifacts" is determined from the preset's metadata.status — for
  * actual artifact bytes we'd have to load the pretrained .js file, which
@@ -41,14 +44,18 @@ function trainerHasArtifacts(t) {
   return String(t.status || "") === "done" && !!t._pretrainedVar;
 }
 
+// Mirror the runtime helper in src/tabs/generation_tab.js. Restricted to
+// SAME-modelId siblings so we never silently route the user to an unrelated
+// model that just happens to share the schema.
 function resolveTrainedTrainer(g, allTrainers) {
   var pinned = allTrainers.find(function (t) { return t.id === g.trainerId; });
   if (trainerHasArtifacts(pinned)) return pinned;
-  var sameModel = pinned ? allTrainers.filter(function (t) {
-    return t.modelId === pinned.modelId && trainerHasArtifacts(t);
-  }) : [];
-  if (sameModel.length) return sameModel[0];
-  return allTrainers.filter(trainerHasArtifacts)[0] || null;
+  if (!pinned) return null;
+  return allTrainers.find(function (t) {
+    return t.id !== pinned.id
+      && t.modelId === pinned.modelId
+      && trainerHasArtifacts(t);
+  }) || null;
 }
 
 var demos = fs.readdirSync(demoDir)

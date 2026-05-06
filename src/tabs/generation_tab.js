@@ -121,40 +121,44 @@
         .filter(function (t) { return t.modelId && (!schemaId || t.schemaId === schemaId); });
     }
 
-    // ─── Auto-swap a generation card's draft trainer for a trained sibling ───
-    // Many demo presets pin generation cards to the *draft* trainer (e.g. t-dcgan)
-    // alongside a "(pre-trained)" sibling for the same model (e.g. t-dcgan-trained).
-    // Visitors landing on the Generation tab without that swap see a card with
-    // no weights, no metrics, no loss curve — and have to click the sidebar to
-    // pick the pretrained variant before anything works.
+    // ─── Resolve a generation card to a trainer that has artifacts ───
+    // Many demo presets pin generation cards to the *draft* trainer (e.g.
+    // t-dcgan) even though a "(pre-trained)" sibling for the same model
+    // exists (e.g. t-dcgan-trained). Visitors landing on the Generation
+    // tab without resolution see a card with no weights, no metrics, no
+    // loss curve.
     //
-    // This helper resolves the card to a trainer with artifacts. Preference:
-    //   1. The card's own trainerId, if it already has artifacts.
-    //   2. A trainer with the same modelId that DOES have artifacts.
-    //   3. Any trainer for this schema with artifacts.
-    // Returns the resolved trainer (and persists the swap onto the card if it
-    // changed), or null when no trained option exists for this schema yet.
+    // This helper returns the trainer that should be USED for this card
+    // — for display (header, weight selector, checkpoint info) and for
+    // running. It does NOT mutate the card. Persisting the swap on
+    // every render would silently rewrite a user's trainerId — e.g. a
+    // user mid-training their own draft Conv-AE could open the
+    // Generation tab to inspect a card and find the trainerId rewritten
+    // to a pretrained sibling. So persistence is left to explicit user
+    // actions (clicking Generate goes through _handleGenerate which
+    // commits the swap there).
+    //
+    // Fallback is restricted to the SAME modelId. We never silently
+    // route to an unrelated model just because it shares the schema —
+    // that would replace the user's experiment target.
+    //
+    // Returns:
+    //   pinned trainer when it has artifacts;
+    //   else a same-modelId sibling with artifacts;
+    //   else null (caller falls back to whatever g.trainerId points at,
+    //   which is the user's pinned choice — even if it has no weights yet).
     function _resolveTrainedTrainer(g) {
       if (!g || !store) return null;
       var weightSel = g.config && g.config.weightSelection;
       var pinned = g.trainerId ? store.getTrainerCard(g.trainerId) : null;
       if (pinned && _getTrainerArtifacts(pinned, weightSel)) return pinned;
-
-      var siblings = _listTrainersForSchema(g.schemaId);
-      var sameModel = pinned ? siblings.filter(function (t) {
-        return t.modelId === pinned.modelId && !!_getTrainerArtifacts(t, weightSel);
-      }) : [];
-      var fallback = sameModel.length
-        ? sameModel[0]
-        : siblings.filter(function (t) { return !!_getTrainerArtifacts(t, weightSel); })[0];
-
-      if (fallback && fallback.id !== g.trainerId) {
-        g.trainerId = fallback.id;
-        var modelRec = store.getModel(fallback.modelId);
-        if (modelRec) g.family = _resolveGenerationInfo(modelRec).family || g.family;
-        _saveGen(g);
-      }
-      return fallback || null;
+      if (!pinned) return null;
+      var sibling = _listTrainersForSchema(g.schemaId).find(function (t) {
+        return t.id !== pinned.id
+          && t.modelId === pinned.modelId
+          && !!_getTrainerArtifacts(t, weightSel);
+      });
+      return sibling || null;
     }
 
     function _resolveGenerationInfo(modelRec) {
@@ -324,12 +328,13 @@
       var g = _getGen(_activeGenId);
       if (!g) { mainEl.appendChild(el("div", { className: "osc-empty" }, "Generation not found.")); return; }
 
-      // Auto-swap a draft trainer for its trained sibling so visitors landing
-      // on this card see weights/metrics immediately. See _resolveTrainedTrainer.
-      _resolveTrainedTrainer(g);
-
-      // header
-      var trainer = g.trainerId ? (store ? store.getTrainerCard(g.trainerId) : null) : null;
+      // Resolve the card's trainer for display only — never mutate g.
+      // _resolveTrainedTrainer prefers the pinned trainer if it has
+      // artifacts and falls back only to a same-modelId sibling. When
+      // the user clicks Generate, _handleGenerate persists the swap.
+      var pinnedTrainer = g.trainerId ? (store ? store.getTrainerCard(g.trainerId) : null) : null;
+      var trainer = _resolveTrainedTrainer(g) || pinnedTrainer;
+      var usingSibling = trainer && pinnedTrainer && trainer.id !== pinnedTrainer.id;
       var modelRec = trainer ? (store ? store.getModel(trainer.modelId) : null) : null;
       var header = el("div", { className: "osc-card" });
       header.appendChild(el("div", { style: "font-size:13px;color:#67e8f9;font-weight:600;" }, escapeHtml(g.name)));
@@ -337,6 +342,10 @@
       if (trainer) infoLine += " | Model: " + escapeHtml(trainer.name || trainer.id);
       if (g.family) infoLine += " | Family: " + g.family;
       header.appendChild(el("div", { style: "font-size:11px;color:#94a3b8;margin-top:2px;" }, infoLine));
+      if (usingSibling) {
+        header.appendChild(el("div", { style: "font-size:11px;color:#a3a3a3;margin-top:2px;font-style:italic;" },
+          "Pinned trainer \"" + escapeHtml(pinnedTrainer.name || pinnedTrainer.id) + "\" has no weights yet — showing pre-trained sibling. Click Generate to commit."));
+      }
 
       if (modelRec && modelRec.graph && modelBuilder) {
         var latentInfo = modelBuilder.extractLatentInfo ? modelBuilder.extractLatentInfo(modelRec.graph) : null;
@@ -645,8 +654,12 @@
         if (!g.config.outputNodeId) g.config.outputNodeId = _genNodes.outputNodes[0].id;
       }
 
-      // Weight selection / checkpoint identity
-      var _trainerForWeights = g.trainerId ? (store ? store.getTrainerCard(g.trainerId) : null) : null;
+      // Weight selection / checkpoint identity. Use the resolved trainer
+      // (pinned, or its same-modelId pretrained sibling) so visitors see the
+      // weight selector + checkpoint banner immediately on cards that pin a
+      // draft trainer. _resolveTrainedTrainer never mutates g.
+      var _trainerForWeights = _resolveTrainedTrainer(g)
+        || (g.trainerId ? (store ? store.getTrainerCard(g.trainerId) : null) : null);
       if (_trainerForWeights && (_trainerForWeights.modelArtifactsLast || _trainerForWeights.modelArtifactsBest || _trainerForWeights.modelArtifacts)) {
         var wsRow = el("div", { className: "osc-form-row" });
         wsRow.appendChild(el("label", { style: "font-size:11px;color:#94a3b8;" }, "Weights"));
@@ -828,12 +841,14 @@
       if (!g || !g.trainerId) { onStatus("Select a model first"); return; }
 
       var trainer = store.getTrainerCard(g.trainerId);
-      // if referenced trainer not trained, auto-find first trained model for this schema
+      // If the pinned trainer has no artifacts, swap to a same-modelId sibling
+      // that does. Restricted to same modelId so we don't silently change the
+      // user's experiment target — clicking Generate on a Conv-AE card should
+      // never run a pretrained MLP just because they share the schema.
       if (!trainer || !_getTrainerArtifacts(trainer, g.config && g.config.weightSelection)) {
-        var allTrainers = _listTrainersForSchema(g.schemaId);
-        var trained = allTrainers.filter(function (t) { return !!_getTrainerArtifacts(t, g.config && g.config.weightSelection); });
-        if (trained.length) {
-          trainer = trained[0];
+        var sibling = _resolveTrainedTrainer(g);
+        if (sibling) {
+          trainer = sibling;
           g.trainerId = trainer.id;
           var m2 = store ? store.getModel(trainer.modelId) : null;
           g.family = _resolveGenerationInfo(m2).family || g.family;
