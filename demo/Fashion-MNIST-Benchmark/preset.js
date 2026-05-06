@@ -203,8 +203,10 @@
     _nid++; var _cid = String(_nid);
     d[_cid] = { id: _nid, name: "concat_block", data: {}, class: "concat_block", html: "<div><div>Concat</div></div>", typenode: false, inputs: {}, outputs: {}, pos_x: 400, pos_y: 140 };
     var cat = _cid;
-    C(d, b, cat, "output_1", "input_1");
-    C(d, t, cat, "output_1", "input_2");
+    // Use C2 (port-aware) — plain C() ignores port args and would route both
+    // edges to input_1, dropping the noisy image entirely.
+    C2(d, b, cat, "output_1", "input_1");
+    C2(d, t, cat, "output_1", "input_2");
     var d1 = N(d, "dense",       { units: 512, activation: "relu" }, 560, 140);
     var ln1 = N(d, "layernorm",  {},                                  640, 140);
     var d2 = N(d, "dense",       { units: 512, activation: "relu" }, 720, 140);
