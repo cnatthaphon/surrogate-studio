@@ -1,5 +1,5 @@
 // Surrogate Studio - concatenated bundle
-// Generated: 2026-05-06T03:14:19Z
+// Generated: 2026-05-06T03:23:28Z
 // Source files: 58
 
 
@@ -31907,6 +31907,11 @@
           outputIndex: outputIndex, sampleInputIndex: sampleInputIndex,
           onStep: function (step, loss) { if (step % 10 === 0) onStatus("Step " + step + " loss=" + (typeof loss === "number" ? loss.toExponential(3) : "?")); },
         };
+        // Forward Langevin algorithm knobs from the preset config. Without
+        // these, walk-jump options set on a generation card never reach the
+        // engine and fall back to legacy "noise" init.
+        if (config.init != null) genConfig.init = config.init;
+        if (config.walkNoise != null) genConfig.walkNoise = config.walkNoise;
 
         // class conditioning: if model has class_embed input, provide one-hot classVector
         if (built.inputNodes && built.inputNodes.some(function (n) { return n.name === "class_embed_layer"; })) {
