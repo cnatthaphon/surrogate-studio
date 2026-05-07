@@ -426,6 +426,19 @@
       return (isFinite(p) && p >= 0) ? Math.min(p, 1) : 0;
     }
 
+    function addTargetSourceNode(editor, x, y, cfg) {
+      var targetKey = String((cfg && cfg.targetKey) || "bbox").trim();
+      var featureSize = Math.max(1, Number((cfg && cfg.featureSize) || 4));
+      var html =
+        "<div><div style='font-weight:700'>TargetSource</div>" +
+        "<div class='node-summary' style='font-size:11px;color:#94a3b8;'>key=" + targetKey + ", size=" + featureSize + "</div></div>";
+      return editor.addNode(
+        "target_source_layer", 0, 1, x, y, "target_source_layer",
+        { targetKey: targetKey, featureSize: featureSize },
+        html
+      );
+    }
+
     function addAugmentBboxNode(editor, x, y, cfg) {
       var transform = String((cfg && cfg.transform) || "horizontal_flip").toLowerCase();
       var probability = _clampAugProb(cfg && cfg.probability);
@@ -681,6 +694,7 @@
         augment_bbox: addAugmentBboxNode,
         augment_mask: addAugmentMaskNode,
         augment_label: addAugmentLabelNode,
+        target_source: addTargetSourceNode,
         time_embed: addTimeEmbedNode,
         patch_embed: addPatchEmbedNode,
         transformer_block: addTransformerBlockNode,
@@ -1090,6 +1104,16 @@
       // --- AugmentLabel node ---
       if (node.name === "augment_label_layer") {
         addField({ kind: "text", key: "seedLink", label: "Seed link (passthrough; reserved for paired transforms)", value: String(d.seedLink || ""), placeholder: "e.g. aug1" });
+        return spec;
+      }
+      // --- TargetSource node (#146) ---
+      // Emits a per-batch dataset target as a graph tensor so paired
+      // augment blocks can transform it before reaching output_layer.
+      // The training engine feeds dataset.yTrain (or a slice keyed by
+      // targetKey) to this node's tf.input during fit().
+      if (node.name === "target_source_layer") {
+        addField({ kind: "text", key: "targetKey", label: "Target key (dataset y slice)", value: String(d.targetKey || "bbox"), placeholder: "e.g. bbox, mask, label" });
+        addField({ kind: "number", key: "featureSize", label: "Feature size (target dim)", value: Math.max(1, Number(d.featureSize || 4)), min: 1, step: 1 });
         return spec;
       }
       // --- TimeEmbed node ---

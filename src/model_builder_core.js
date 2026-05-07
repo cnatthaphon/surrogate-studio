@@ -370,7 +370,7 @@
     var fallback = typeof fallbackTarget === "object" ? _okKey(fallbackTarget) : String(fallbackTarget || "");
     if (!fallback && Array.isArray(allowedOutputKeys) && allowedOutputKeys.length) fallback = _okKey(allowedOutputKeys[0]);
     var ids = Object.keys(data || {});
-    var inputNodeNames = { "input_layer": true, "image_source_block": true, "image_source_layer": true, "sample_z_layer": true, "time_embed_layer": true, "class_embed_layer": true };
+    var inputNodeNames = { "input_layer": true, "image_source_block": true, "image_source_layer": true, "sample_z_layer": true, "time_embed_layer": true, "class_embed_layer": true, "target_source_layer": true };
     // Feature blocks are visual/declarative — they don't create model inputs
     var featureBlockNames = { "window_hist_block": true, "window_hist_x_block": true, "window_hist_v_block": true, "hist_block": true, "params_block": true, "params_layer": true, "sliding_window_block": true, "time_sec_layer": true, "time_norm_layer": true, "sin_norm_layer": true, "cos_norm_layer": true, "onehot_layer": true };
     var inputIds = ids.filter(function (id) { return data[id] && inputNodeNames[data[id].name]; });
@@ -481,7 +481,7 @@
     var ids = Object.keys(moduleData || {});
     if (!ids.length) throw new Error("Graph is empty.");
 
-    var inputNodeNames = { "input_layer": true, "image_source_block": true, "image_source_layer": true, "sample_z_layer": true, "time_embed_layer": true, "class_embed_layer": true };
+    var inputNodeNames = { "input_layer": true, "image_source_block": true, "image_source_layer": true, "sample_z_layer": true, "time_embed_layer": true, "class_embed_layer": true, "target_source_layer": true };
     // Feature blocks are visual/declarative — they don't create model inputs
     var featureBlockNames = { "window_hist_block": true, "window_hist_x_block": true, "window_hist_v_block": true, "hist_block": true, "params_block": true, "params_layer": true, "sliding_window_block": true, "time_sec_layer": true, "time_norm_layer": true, "sin_norm_layer": true, "cos_norm_layer": true, "onehot_layer": true };
     // only nodes with NO incoming connections are true external inputs
@@ -611,6 +611,13 @@
       } else if (iname === "class_embed_layer") {
         var nClasses = Math.max(2, Number((inode.data && inode.data.numClasses) || 10));
         itensor = tf.input({ shape: [nClasses], name: "class_input_" + iid });
+      } else if (iname === "target_source_layer") {
+        // #146: TargetSource emits the dataset's target-y slice as a
+        // graph tensor. The training engine feeds dataset.yTrain (or
+        // a slice keyed by targetKey) to this input during fit().
+        var tgtKey = String((inode.data && inode.data.targetKey) || "bbox");
+        var tgtSize = Math.max(1, Number((inode.data && inode.data.featureSize) || 4));
+        itensor = tf.input({ shape: [tgtSize], name: "target_input_" + tgtKey + "_" + iid });
       } else if (iname === "constant_layer") {
         // Constant needs a dummy input to derive batch size — use featureSize=1
         itensor = tf.input({ shape: [1], name: "const_input_" + iid });
@@ -1381,8 +1388,12 @@
 
     var applyNodeOp = function (node, inTensor, laterHasRecurrent, nodeId) {
       var _n = "n" + String(nodeId || ""); // deterministic layer name from graph node ID
-      // input/image_source that receives from another node: passthrough
-      if (node.name === "input_layer" || node.name === "image_source_layer" || node.name === "image_source_block" || node.name === "time_embed_layer" || node.name === "class_embed_layer") {
+      // input/image_source/target_source that receives from another node: passthrough.
+      // (target_source as graph entry point already had its tf.input
+      // created in the input-building loop; this branch handles the
+      // case where a target_source node has incoming connections from
+      // a passthrough chain, which is unusual but possible.)
+      if (node.name === "input_layer" || node.name === "image_source_layer" || node.name === "image_source_block" || node.name === "time_embed_layer" || node.name === "class_embed_layer" || node.name === "target_source_layer") {
         return inTensor;
       }
       if (node.name === "dense_layer") {
