@@ -1084,6 +1084,14 @@
           this.seedLink = String((config && config.seedLink) || "");
           this.imageWidth = Math.max(1, Number((config && config.imageWidth) || 1));
           this.imageHeight = Math.max(1, Number((config && config.imageHeight) || 1));
+          // Bbox format. "x0y0x1y1" = corners (default, COCO-like).
+          // "xywh" = top-left + width/height (e.g. SAR-Ship's HRSID).
+          // Flip math differs:
+          //   x0y0x1y1 hflip: x0_new = W - x1, x1_new = W - x0  (swap)
+          //   xywh hflip:     x_new = W - x - w  (no swap of w; w stays)
+          var fmt = String((config && config.format) || "x0y0x1y1").toLowerCase();
+          if (fmt !== "x0y0x1y1" && fmt !== "xywh") fmt = "x0y0x1y1";
+          this.format = fmt;
         }
         build() { this.built = true; }
         computeOutputShape(inputShape) {
@@ -1106,26 +1114,41 @@
             var coin = sharedCoin ? sharedCoin.clone() : tf.randomUniform([], 0, 1);
             var doFlip = tf.less(coin, tf.scalar(self.probability));
             var maskScalar = tf.cast(doFlip, "float32");
-            // Split [..., 4] into x0, y0, x1, y1 along the last axis.
+            // Split [..., 4] into 4 components along the last axis.
+            // Component meaning depends on `format`:
+            //   x0y0x1y1: (x0, y0, x1, y1)  — corners
+            //   xywh:     (x,  y,  w,  h)   — top-left + size
             var lastDim = rank - 1;
             var splits = tf.split(x, 4, lastDim);
-            var x0 = splits[0], y0 = splits[1], x1 = splits[2], y1 = splits[3];
-            var xNew0, yNew0, xNew1, yNew1;
+            var a = splits[0], b = splits[1], c = splits[2], d = splits[3];
+            var nA, nB, nC, nD;
             if (self.transform === "horizontal_flip") {
-              // mirror x; swap x0 and x1 to keep box valid
-              var W = tf.scalar(self.imageWidth);
-              xNew0 = tf.sub(W, x1);
-              xNew1 = tf.sub(W, x0);
-              yNew0 = y0; yNew1 = y1;
+              if (self.format === "xywh") {
+                // x_new = W - x - w; w/y/h unchanged
+                nA = tf.sub(tf.sub(tf.scalar(self.imageWidth), a), c);
+                nB = b; nC = c; nD = d;
+              } else {
+                // x0y0x1y1: swap x0 and x1 about W to keep x0 ≤ x1
+                nA = tf.sub(tf.scalar(self.imageWidth), c);
+                nB = b;
+                nC = tf.sub(tf.scalar(self.imageWidth), a);
+                nD = d;
+              }
             } else if (self.transform === "vertical_flip") {
-              var H = tf.scalar(self.imageHeight);
-              yNew0 = tf.sub(H, y1);
-              yNew1 = tf.sub(H, y0);
-              xNew0 = x0; xNew1 = x1;
+              if (self.format === "xywh") {
+                nA = a;
+                nB = tf.sub(tf.sub(tf.scalar(self.imageHeight), b), d);
+                nC = c; nD = d;
+              } else {
+                nA = a;
+                nB = tf.sub(tf.scalar(self.imageHeight), d);
+                nC = c;
+                nD = tf.sub(tf.scalar(self.imageHeight), b);
+              }
             } else {
-              return x.clone();  // unknown transform → passthrough
+              return x.clone();
             }
-            var flipped = tf.concat([xNew0, yNew0, xNew1, yNew1], lastDim);
+            var flipped = tf.concat([nA, nB, nC, nD], lastDim);
             // Per-batch broadcast: maskScalar is [], expand to match.
             var bcastShape = x.shape.slice().fill(1);
             var maskB = maskScalar.reshape(bcastShape);
@@ -1139,6 +1162,7 @@
           cfg.seedLink = this.seedLink;
           cfg.imageWidth = this.imageWidth;
           cfg.imageHeight = this.imageHeight;
+          cfg.format = this.format;
           return cfg;
         }
       }
@@ -1579,6 +1603,7 @@
           seedLink: String((node.data && node.data.seedLink) || ""),
           imageWidth: Number((node.data && node.data.imageWidth) || 1),
           imageHeight: Number((node.data && node.data.imageHeight) || 1),
+          format: String((node.data && node.data.format) || "x0y0x1y1"),
           name: _n,
         };
         return _applyLayerMetadata(new AugmentBboxLayer(bboxCfg), node).apply(inTensor);

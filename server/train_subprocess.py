@@ -1256,6 +1256,10 @@ def build_model_from_graph(graph, feature_size, target_size, num_classes=0):
                     setattr(self, f"aug_seedlink_{nid}", str(c.get("seedLink", "")))
                     setattr(self, f"aug_imgw_{nid}", float(c.get("imageWidth", 1)))
                     setattr(self, f"aug_imgh_{nid}", float(c.get("imageHeight", 1)))
+                    fmt = str(c.get("format", "x0y0x1y1")).lower()
+                    if fmt not in ("x0y0x1y1", "xywh"):
+                        fmt = "x0y0x1y1"
+                    setattr(self, f"aug_format_{nid}", fmt)
                     setattr(self, f"aug_node_kind_{nid}", "bbox")
                     dim_map[nid] = in_dim
                 elif t == "augment_mask":
@@ -1817,18 +1821,24 @@ def build_model_from_graph(graph, feature_size, target_size, num_classes=0):
                         continue
                     img_w = float(getattr(self, f"aug_imgw_{nid}", 1.0))
                     img_h = float(getattr(self, f"aug_imgh_{nid}", 1.0))
-                    # Split last dim into x0,y0,x1,y1.
-                    x0, y0, x1, y1 = inp[..., 0], inp[..., 1], inp[..., 2], inp[..., 3]
+                    fmt = getattr(self, f"aug_format_{nid}", "x0y0x1y1")
+                    a = inp[..., 0]; b = inp[..., 1]; c = inp[..., 2]; d = inp[..., 3]
                     if transform == "horizontal_flip":
-                        nx0, nx1 = img_w - x1, img_w - x0
-                        ny0, ny1 = y0, y1
+                        if fmt == "xywh":
+                            # x_new = W - x - w; w/y/h unchanged
+                            na, nb, nc, nd = img_w - a - c, b, c, d
+                        else:
+                            # x0y0x1y1: swap about W
+                            na, nb, nc, nd = img_w - c, b, img_w - a, d
                     elif transform == "vertical_flip":
-                        nx0, nx1 = x0, x1
-                        ny0, ny1 = img_h - y1, img_h - y0
+                        if fmt == "xywh":
+                            na, nb, nc, nd = a, img_h - b - d, c, d
+                        else:
+                            na, nb, nc, nd = a, img_h - d, c, img_h - b
                     else:
                         tensors[nid] = inp
                         continue
-                    tensors[nid] = torch.stack([nx0, ny0, nx1, ny1], dim=-1)
+                    tensors[nid] = torch.stack([na, nb, nc, nd], dim=-1)
                 elif t == "augment_mask":
                     if not self.training:
                         tensors[nid] = inp
