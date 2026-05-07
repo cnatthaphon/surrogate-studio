@@ -126,15 +126,16 @@ def extract_pytorch_state(state_dict: Dict[str, Any]) -> tuple:
         an [i,f,g,o] → [i,g,f,o] swap that broke LSTM inference end-to-
         end (see scripts/test_lstm_gate_parity.py).
       - GRU: apply [r,z,n] → [z,r,h] gate swap (PyTorch and Keras differ
-        here — they really are different conventions). Emit 4 specs:
-        kernel, recurrent_kernel, bias (= b_ih + b_hh, matches Keras/TF.js
-        resetAfter=False forward), and bias_hh_residual (= b_hh alone, an
-        extra spec the client ignores but the server uses to reconstruct
-        b_ih and b_hh exactly on reload). Without the residual, splitting
-        the combined bias as (combined, 0) would corrupt PyTorch GRU's
-        n-gate which uses bias_ih and bias_hh asymmetrically:
-          n = tanh(W_in·x + b_in + r·(W_hn·h + b_hn))
-        — bit-exact server round trip needs both biases preserved.
+        here — they really are different conventions). Emit 3 specs:
+          tfjs_kernel             [in,  3*H]
+          tfjs_recurrent_kernel   [H,   3*H]
+          tfjs_bias               [2,   3*H]   row 0 = b_ih, row 1 = b_hh
+        Bias is [2, 3*H] matching Keras GRU resetAfter=True format. Both
+        the client (custom GRUResetAfterLayer in model_builder_core.js)
+        and server reload consume this layout and produce bit-exact
+        PyTorch GRU forward output. This replaces the earlier 4-spec
+        residual workaround (combined bias + bias_hh_residual at the
+        end of the value blob).
       - BatchNorm: running stats separated and appended at end
       - Skips num_batches_tracked
 
@@ -148,15 +149,6 @@ def extract_pytorch_state(state_dict: Dict[str, Any]) -> tuple:
 
     weight_specs: List[Dict[str, Any]] = []
     weight_arrays: list = []
-    # GRU emits an extra "bias_hh_residual" spec the SERVER uses to recover
-    # b_ih and b_hh exactly; the client only needs kernel/recurrent_kernel
-    # /bias (3 specs) and reads the value blob positionally. To keep
-    # client positional reads aligned across multi-layer graphs, residual
-    # specs are deferred and appended AFTER all primary specs — the
-    # client consumes the prefix; server-side named-load picks up
-    # residuals from anywhere in the spec list.
-    residual_specs: List[Dict[str, Any]] = []
-    residual_arrays: list = []
     offset = 0
     i = 0
     while i < len(ordered_keys):
@@ -190,29 +182,24 @@ def extract_pytorch_state(state_dict: Dict[str, Any]) -> tuple:
 
             if gate_ratio == 3:
                 # GRU. PyTorch [r,z,n] vs Keras [z,r,h] — real reorder.
+                # Bias is emitted as [2, 3*H] (Keras resetAfter=True
+                # layout): row 0 = b_ih, row 1 = b_hh, both gate-swapped.
+                # The custom GRUResetAfterLayer in model_builder_core.js
+                # consumes this layout for bit-exact PyTorch parity.
                 def _gru_swap(w: Any) -> Any:
                     chunks = [w[j * H:(j + 1) * H] for j in range(3)]
                     return np.concatenate([chunks[1], chunks[0], chunks[2]], axis=0)
 
                 kernel = _gru_swap(w_ih).T
                 recurrent = _gru_swap(w_hh).T
-                # Combined bias matches Keras GRU resetAfter=False forward.
-                bias = _gru_swap(b_ih + b_hh)
-                # Residual: b_hh alone, swapped. Server reload uses it to
-                # recover b_ih = combined - residual exactly. Client TF.js
-                # ignores this spec, so it goes into the residual bucket
-                # that's appended at the end of the value blob.
-                bias_hh_residual = _gru_swap(b_hh)
-                for arr, suffix in [(kernel, "kernel"), (recurrent, "recurrent_kernel"), (bias, "bias")]:
+                bias_swapped_ih = _gru_swap(b_ih)
+                bias_swapped_hh = _gru_swap(b_hh)
+                bias_2x = np.stack([bias_swapped_ih, bias_swapped_hh], axis=0)  # [2, 3*H]
+                for arr, suffix in [(kernel, "kernel"), (recurrent, "recurrent_kernel"), (bias_2x, "bias")]:
                     flat = arr.astype(np.float32).flatten()
                     weight_specs.append({"name": f"tfjs_{suffix}", "shape": list(arr.shape), "dtype": "float32", "offset": offset})
                     weight_arrays.append(flat)
                     offset += flat.size * 4
-                # Defer the residual spec — appended after all primary
-                # specs below. Its offset is fixed up there.
-                residual_flat = bias_hh_residual.astype(np.float32).flatten()
-                residual_specs.append({"name": "tfjs_bias_hh_residual", "shape": list(bias_hh_residual.shape), "dtype": "float32", "offset": -1})
-                residual_arrays.append(residual_flat)
                 i += 4
                 continue
 
@@ -232,15 +219,6 @@ def extract_pytorch_state(state_dict: Dict[str, Any]) -> tuple:
         weight_arrays.append(flat)
         offset += flat.size * 4
         i += 1
-
-    # Append residual specs/arrays (e.g. GRU bias_hh_residual) AFTER all
-    # primary tensors so client positional reads stay aligned. Fix up the
-    # placeholder offsets to point into the tail of the value blob.
-    for spec, flat in zip(residual_specs, residual_arrays):
-        spec["offset"] = offset
-        weight_specs.append(spec)
-        weight_arrays.append(flat)
-        offset += flat.size * 4
 
     if weight_arrays:
         weight_values = np.concatenate(weight_arrays).tolist()

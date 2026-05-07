@@ -169,17 +169,6 @@ def load_weights_into_model(model: Any, config: Any) -> bool:
     if not has_recurrent_special and _load_named_checkpoint(model, saved_map, flat):
         return True
 
-    # GRU emits an extra "bias_hh_residual" spec per GRU layer that lives
-    # at the END of the value blob (so client positional reads stay
-    # aligned). Pre-collect their offsets in spec-emit order so the GRU
-    # branch below can fetch the right residual for each layer.
-    gru_residual_offsets = []
-    for spec in extract_weight_specs(config):
-        nm = str((spec or {}).get("name", "") or "")
-        if "bias_hh_residual" in nm:
-            gru_residual_offsets.append(int((spec or {}).get("offset", 0) or 0) // 4)
-    gru_residual_idx = 0
-
     bn_running = [k for k in state if "running_mean" in k or "running_var" in k]
     regular = [k for k in state if "num_batches_tracked" not in k and k not in bn_running]
     keys = regular + bn_running
@@ -220,27 +209,15 @@ def load_weights_into_model(model: Any, config: Any) -> bool:
                 continue
 
             if gate_ratio == 3:
-                # GRU: 3 specs at the current offset (kernel,
-                # recurrent_kernel, bias=combined) plus 1 residual spec
-                # (bias_hh_residual) parked at the END of the value
-                # blob so client positional reads stay aligned.
+                # GRU: 3 specs (kernel, recurrent_kernel, bias). Bias
+                # shape [2, 3*H] — row 0 = b_ih, row 1 = b_hh, both
+                # gate-swapped. Reverse swap to recover PyTorch order.
                 kernel_t = flat[offset:offset + in_dim * 3 * H].reshape(in_dim, 3 * H)
                 offset += in_dim * 3 * H
                 rec_t = flat[offset:offset + hid_dim * 3 * H].reshape(hid_dim, 3 * H)
                 offset += hid_dim * 3 * H
-                bias_combined = flat[offset:offset + 3 * H]
-                offset += 3 * H
-
-                if gru_residual_idx >= len(gru_residual_offsets):
-                    raise ValueError(
-                        "GRU bias_hh_residual spec missing — checkpoint was "
-                        "extracted by an older version that does not emit "
-                        "the residual. Re-export with the current "
-                        "checkpoint_format.extract_pytorch_state."
-                    )
-                residual_offset = gru_residual_offsets[gru_residual_idx]
-                gru_residual_idx += 1
-                bias_hh_residual = flat[residual_offset:residual_offset + 3 * H]
+                bias_2x = flat[offset:offset + 2 * 3 * H].reshape(2, 3 * H)
+                offset += 2 * 3 * H
 
                 def _gru_unswap_axis1(w):
                     c = [w[:, j * H:(j + 1) * H] for j in range(3)]
@@ -251,11 +228,11 @@ def load_weights_into_model(model: Any, config: Any) -> bool:
                     return np.concatenate([c[1], c[0], c[2]], axis=0)
 
                 # PyTorch [r,z,n] ← Keras/TF.js [z,r,h]. Reverse the
-                # extract swap, transpose kernels, and recover b_ih, b_hh.
+                # extract swap, transpose kernels, split bias rows.
                 weight_ih = _gru_unswap_axis1(kernel_t).T  # [3*H, in]
                 weight_hh = _gru_unswap_axis1(rec_t).T     # [3*H, H]
-                bias_hh = _gru_unswap_axis0(bias_hh_residual)  # [3*H]
-                bias_ih = _gru_unswap_axis0(bias_combined) - bias_hh  # combined - hh = ih
+                bias_ih = _gru_unswap_axis0(bias_2x[0])    # [3*H]
+                bias_hh = _gru_unswap_axis0(bias_2x[1])    # [3*H]
 
                 new_state[keys[i]] = torch.tensor(weight_ih, dtype=torch.float32)
                 new_state[keys[i + 1]] = torch.tensor(weight_hh, dtype=torch.float32)
