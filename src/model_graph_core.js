@@ -409,12 +409,14 @@
       // values > 1 → 1. Keeps editor display in sync with TF.js + PyTorch.
       var probability = (isFinite(pRaw) && pRaw >= 0) ? Math.min(pRaw, 1) : 0;
       var seedLink = String((cfg && cfg.seedLink) || "");
+      var layout = String((cfg && cfg.layout) || "nhwc").toLowerCase();
+      if (layout !== "nhwc" && layout !== "nchw") layout = "nhwc";
       var html =
         "<div><div style='font-weight:700'>AugmentImage</div>" +
-        "<div class='node-summary' style='font-size:11px;color:#94a3b8;'>" + transform + ", p=" + probability + (seedLink ? ", link=" + seedLink : "") + "</div></div>";
+        "<div class='node-summary' style='font-size:11px;color:#94a3b8;'>" + transform + ", p=" + probability + ", " + layout + (seedLink ? ", link=" + seedLink : "") + "</div></div>";
       return editor.addNode(
         "augment_image_layer", 1, 1, x, y, "augment_image_layer",
-        { transform: transform, probability: probability, seedLink: seedLink },
+        { transform: transform, probability: probability, seedLink: seedLink, layout: layout },
         html
       );
     }

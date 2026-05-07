@@ -1218,14 +1218,22 @@ def build_model_from_graph(graph, feature_size, target_size, num_classes=0):
                     try:
                         p = float(p)
                     except (TypeError, ValueError):
-                        p = 0.5
+                        # Unparseable → safely disable (0.0). Earlier code
+                        # fell back to 0.5, which silently re-enabled
+                        # augmentation for malformed configs and diverged
+                        # from the JS side, which clamps the same way to 0.
+                        p = 0.0
                     if not (p == p) or p < 0:  # NaN-safe
                         p = 0.0
                     if p > 1:
                         p = 1.0
+                    layout = str(c.get("layout", "nhwc")).lower()
+                    if layout not in ("nhwc", "nchw"):
+                        layout = "nhwc"
                     setattr(self, f"aug_transform_{nid}", transform)
                     setattr(self, f"aug_probability_{nid}", p)
                     setattr(self, f"aug_seedlink_{nid}", str(c.get("seedLink", "")))
+                    setattr(self, f"aug_layout_{nid}", layout)
                     dim_map[nid] = in_dim
                 elif t == "patch_embed":
                     ps = int(c.get("patchSize", 7))
@@ -1700,11 +1708,24 @@ def build_model_from_graph(graph, feature_size, target_size, num_classes=0):
                     elif transform in ("horizontal_flip", "vertical_flip"):
                         # Whole-batch coin flip at the configured probability,
                         # matching AugmentImageLayer (Keras RandomFlip
-                        # semantics). NHWC layout (W axis = 2, H axis = 1)
-                        # — patch_embed confirms this codebase carries 4D
-                        # image tensors as NHWC and permutes to NCHW only
-                        # when conv'ing.
-                        flip_axis = 2 if transform == "horizontal_flip" else 1
+                        # semantics).
+                        #
+                        # Layout is read from explicit config — earlier
+                        # iterations tried a shape-based heuristic but a
+                        # tensor with H=2 and C=2 (or any small H/W) is
+                        # genuinely ambiguous. Explicit nhwc/nchw avoids
+                        # silent corruption when augment_image is wired
+                        # after Conv2d (which emits NCHW in PyTorch).
+                        # Default "nhwc" matches the typical image_source
+                        # dataloader output and the JS-side TF.js
+                        # convention.
+                        layout = getattr(self, f"aug_layout_{nid}", "nhwc")
+                        if layout == "nchw":
+                            # NCHW [B, C, H, W]: H = -2, W = -1
+                            flip_axis = -1 if transform == "horizontal_flip" else -2
+                        else:
+                            # NHWC [B, H, W, C]: H = -3, W = -2
+                            flip_axis = -2 if transform == "horizontal_flip" else -3
                         if torch.rand(()).item() < prob:
                             tensors[nid] = torch.flip(inp, dims=[flip_axis])
                         else:
