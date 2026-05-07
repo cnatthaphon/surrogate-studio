@@ -7,7 +7,28 @@
  *
  * Usage:
  *   node scripts/train_pretrained_server.js <demo-folder> [model-index]
+ *
+ * Memory: defaults to 8 GB heap. Some demos (Oscillator-Surrogate)
+ * carry 100k+ trajectory samples that exceed Node's stock 4 GB heap
+ * during JSON encoding for the server payload. Set NODE_OPTIONS to
+ * override (e.g. NODE_OPTIONS=--max-old-space-size=16384 for very
+ * large datasets).
  */
+if (!process.env.NODE_OPTIONS || !/--max-old-space-size/.test(process.env.NODE_OPTIONS)) {
+    var spawn = require("child_process").spawnSync;
+    var existing = process.env.NODE_OPTIONS || "";
+    var nodeOpts = (existing + " --max-old-space-size=8192").trim();
+    if (!process.env.__OSC_RETRAIN_RESPAWNED) {
+        var result = spawn(process.execPath, process.argv.slice(1), {
+            stdio: "inherit",
+            env: Object.assign({}, process.env, {
+                NODE_OPTIONS: nodeOpts,
+                __OSC_RETRAIN_RESPAWNED: "1",
+            }),
+        });
+        process.exit(result.status || 0);
+    }
+}
 
 var fs = require("fs");
 var path = require("path");
