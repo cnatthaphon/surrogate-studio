@@ -921,7 +921,10 @@
           super(config || {});
           this.transform = String((config && config.transform) || "horizontal_flip").toLowerCase();
           var p = Number((config && config.probability));
-          if (!isFinite(p) || p < 0) p = 0.5;
+          // Invalid/NaN/negative probability → safely disable (0), not a
+          // surprise re-enable at 0.5. Matches train_subprocess.py's clamp
+          // so a malformed graph trains identically across runtimes.
+          if (!isFinite(p) || p < 0) p = 0;
           if (p > 1) p = 1;
           this.probability = p;
           this.seedLink = String((config && config.seedLink) || "");
@@ -947,6 +950,12 @@
         }
         _applyTransform(x) {
           if (this.transform === "identity") return x.clone();
+          // Image augments expect 4D [B, H, W, C]. For any other rank
+          // (e.g. flat [batch, features]), passthrough rather than flip
+          // an unrelated axis. The PyTorch path (train_subprocess.py)
+          // applies the same guard, so a graph that misuses the block
+          // behaves identically across runtimes.
+          if (x.shape.length !== 4) return x.clone();
           if (this.transform === "horizontal_flip") {
             // Per-batch coin flip at the configured probability. When the
             // coin lands "flip", reverse the W axis (axis -2 for [B,H,W,C]).
