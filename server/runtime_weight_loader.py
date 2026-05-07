@@ -174,15 +174,33 @@ def load_weights_into_model(model: Any, config: Any) -> bool:
     # PR #70 [2, 3*H] format. Falls back to a legacy load that splits
     # the combined bias as (combined, 0) — approximate vs PyTorch's
     # asymmetric n-gate but doesn't crash. Multi-GRU graphs are
-    # supported by indexing in spec-emit order.
+    # supported by indexing in GRU encounter order.
+    #
+    # Only count biases that follow a GRU recurrent_kernel triple
+    # (kernel + recurrent_kernel + bias), not arbitrary tfjs_bias specs.
+    # In a mixed checkpoint (LSTM block before GRU), an unfiltered list
+    # would put the LSTM's [4*H] bias ahead of the GRU's bias and the
+    # GRU branch would consume the LSTM shape, mis-classify the
+    # checkpoint as legacy, and deserialize with wrong gate semantics.
     gru_bias_shapes = []
-    for spec in extract_weight_specs(config):
-        nm = str((spec or {}).get("name", "") or "")
-        if nm in ("tfjs_bias", "bias") and (spec or {}).get("shape"):
-            shp = list(spec["shape"])
-            # Only count biases adjacent to a recurrent kernel pair —
-            # those will be consumed by the GRU/LSTM branch below.
-            gru_bias_shapes.append(shp)
+    spec_list = list(extract_weight_specs(config))
+    for j in range(len(spec_list) - 2):
+        s0 = spec_list[j] or {}
+        s1 = spec_list[j + 1] or {}
+        s2 = spec_list[j + 2] or {}
+        if str(s0.get("name") or "") not in ("tfjs_kernel", "kernel"):
+            continue
+        if str(s1.get("name") or "") not in ("tfjs_recurrent_kernel", "recurrent_kernel"):
+            continue
+        if str(s2.get("name") or "") not in ("tfjs_bias", "bias"):
+            continue
+        rec_shape = list(s1.get("shape") or [])
+        if len(rec_shape) != 2 or rec_shape[0] <= 0:
+            continue
+        # Recurrent kernel shape is [H, gate*H]; gate=3 ⇒ GRU, 4 ⇒ LSTM.
+        if rec_shape[1] // rec_shape[0] != 3:
+            continue
+        gru_bias_shapes.append(list(s2.get("shape") or []))
     gru_bias_idx = 0
 
     bn_running = [k for k in state if "running_mean" in k or "running_var" in k]

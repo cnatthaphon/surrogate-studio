@@ -68,20 +68,33 @@
   function _lstmGatesPyToTf(flat4H /*, H */) { return flat4H; }
   function _lstmGatesTfToPy(flat4H /*, H */) { return flat4H; }
 
-  // GRU gate reorder: PyTorch [r,z,n] ↔ TF.js [z,r,n]
-  function _gruGatesPyToTf(flat3H, H) {
-    var out = new Float32Array(3 * H);
-    out.set(flat3H.slice(H, 2 * H), 0);     // z → position 0
-    out.set(flat3H.slice(0, H), H);          // r → position 1
-    out.set(flat3H.slice(2 * H, 3 * H), 2 * H); // n → position 2
+  // GRU gate reorder: PyTorch [r,z,n] ↔ TF.js [z,r,n].
+  //
+  // Works for either:
+  //   1D bias  [3*H]            (chunk = H)
+  //   2D kernel [3*H, in_dim] flattened row-major (chunk = H*in_dim)
+  // Chunk size is derived from total length so the same helper handles
+  // both. The H parameter is kept for readable callers but ignored —
+  // earlier code hardcoded chunk=H, silently truncating kernel data
+  // to the first 3*H floats and producing garbage for any GRU kernel
+  // wider than 1.
+  function _gruGatesPyToTf(flat, _H) {
+    var total = flat.length;
+    var chunk = (total / 3) | 0;
+    var out = new Float32Array(total);
+    out.set(flat.slice(chunk, 2 * chunk), 0);          // z (pyChunk[1]) → position 0
+    out.set(flat.slice(0, chunk), chunk);              // r (pyChunk[0]) → position 1
+    out.set(flat.slice(2 * chunk, 3 * chunk), 2 * chunk); // n (pyChunk[2]) → position 2
     return out;
   }
 
-  function _gruGatesTfToPy(flat3H, H) {
-    var out = new Float32Array(3 * H);
-    out.set(flat3H.slice(H, 2 * H), 0);     // r → position 0
-    out.set(flat3H.slice(0, H), H);          // z → position 1
-    out.set(flat3H.slice(2 * H, 3 * H), 2 * H); // n → position 2
+  function _gruGatesTfToPy(flat, _H) {
+    var total = flat.length;
+    var chunk = (total / 3) | 0;
+    var out = new Float32Array(total);
+    out.set(flat.slice(chunk, 2 * chunk), 0);          // r (tfChunk[1]) → position 0
+    out.set(flat.slice(0, chunk), chunk);              // z (tfChunk[0]) → position 1
+    out.set(flat.slice(2 * chunk, 3 * chunk), 2 * chunk); // n (tfChunk[2]) → position 2
     return out;
   }
 
@@ -336,12 +349,28 @@
         outSpecs.push({ name: "tfjs_recurrent_kernel", shape: [hiddenSize, pySpecs[i + 1].shape[0]] });
         outValues = outValues.concat(Array.from(recurrent));
 
-        // bias: combine ih + hh, then swap gates
-        var combinedBias = new Float32Array(sz2);
-        for (var bi = 0; bi < sz2; bi++) combinedBias[bi] = bih[bi] + bhh[bi];
-        var swappedBias = gateSwap(combinedBias, gateH);
-        outSpecs.push({ name: "tfjs_bias", shape: [sz2] });
-        outValues = outValues.concat(Array.from(swappedBias));
+        if (isGRU) {
+          // GRU under GRUResetAfterLayer expects bias [2, 3*H]:
+          //   row 0 = b_ih (gate-swapped), row 1 = b_hh (gate-swapped).
+          // resetAfter=True keeps b_ih and b_hh asymmetric — combining
+          // them would only match resetAfter=False semantics. The custom
+          // browser layer slices both rows separately during forward.
+          var swappedBih = gateSwap(new Float32Array(bih), gateH);
+          var swappedBhh = gateSwap(new Float32Array(bhh), gateH);
+          var bias2x = new Float32Array(2 * sz2);
+          bias2x.set(swappedBih, 0);
+          bias2x.set(swappedBhh, sz2);
+          outSpecs.push({ name: "tfjs_bias", shape: [2, sz2] });
+          outValues = outValues.concat(Array.from(bias2x));
+        } else {
+          // LSTM (and any other non-GRU recurrent): tf.layers.lstm
+          // accepts a single combined bias [4*H], so fold ih + hh.
+          var combinedBias = new Float32Array(sz2);
+          for (var bi = 0; bi < sz2; bi++) combinedBias[bi] = bih[bi] + bhh[bi];
+          var swappedBias = gateSwap(combinedBias, gateH);
+          outSpecs.push({ name: "tfjs_bias", shape: [sz2] });
+          outValues = outValues.concat(Array.from(swappedBias));
+        }
 
         i += 4;
         continue;

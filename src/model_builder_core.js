@@ -769,6 +769,14 @@
           this.units = Math.max(1, Number((config && config.units) || 1));
           this.returnSequences = !!(config && config.returnSequences);
           this.useBias = config && config.useBias !== false;
+          // Input dropout matching tf.layers.gru's `dropout` arg (Keras
+          // semantics): per-call dropout mask applied to xt during
+          // training. Clamp to [0, 1) so a dropout of 1 doesn't zero out
+          // the entire input.
+          var dropRate = Number((config && config.dropout) || 0);
+          if (!isFinite(dropRate) || dropRate < 0) dropRate = 0;
+          if (dropRate >= 1) dropRate = 0.9999;
+          this.dropout = dropRate;
           this._kernelInit = _initBy("glorotUniform");
           this._recurrentInit = _initBy("orthogonal");
           this._biasInit = _initBy("zeros");
@@ -793,8 +801,9 @@
           if (this.returnSequences && seq != null) return [batch, seq, this.units];
           return [batch, this.units];
         }
-        call(inputs) {
+        call(inputs, kwargs) {
           var self = this;
+          var training = !!(kwargs && (kwargs.training === true || kwargs.training === 1));
           return tf.tidy(function () {
             var x = Array.isArray(inputs) ? inputs[0] : inputs;
             // Promote 2D → 3D (single timestep) so the loop is uniform.
@@ -810,11 +819,22 @@
               biasX = biasFull.slice([0, 0], [1, 3 * H]).reshape([3 * H]);
               biasH = biasFull.slice([1, 0], [1, 3 * H]).reshape([3 * H]);
             }
+            // Per-call input dropout mask (Keras `dropout` semantics: same
+            // mask reused across timesteps within one call). Inactive when
+            // not training or rate=0 — purely a scaling op then.
+            var inputMask = null;
+            if (training && self.dropout > 0) {
+              var keepProb = 1 - self.dropout;
+              var inDim = x.shape[x.shape.length - 1];
+              var noise = tf.randomUniform([batch, inDim], 0, 1);
+              inputMask = tf.div(tf.cast(tf.greaterEqual(noise, self.dropout), "float32"), tf.scalar(keepProb));
+            }
             var h = tf.zeros([batch, H]);
             var outputs = [];
             for (var t = 0; t < seq; t++) {
               // Slice timestep and squeeze the seq dim → [batch, inDim]
               var xt = x.slice([0, t, 0], [-1, 1, -1]).reshape([batch, x.shape[2]]);
+              if (inputMask) xt = tf.mul(xt, inputMask);
               var xProj = tf.matMul(xt, kernel);
               if (biasX) xProj = tf.add(xProj, biasX);
               var hProj = tf.matMul(h, recurrent);
@@ -843,6 +863,7 @@
           cfg.units = this.units;
           cfg.returnSequences = this.returnSequences;
           cfg.useBias = this.useBias;
+          cfg.dropout = this.dropout;
           return cfg;
         }
       }
