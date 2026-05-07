@@ -895,6 +895,98 @@
       return GRURALayer;
     })();
 
+    // ─── Image-augmentation layer (training-only transforms) ────────
+    // Applies a config-selected geometric transform to the image input
+    // during training; identity at eval. Follows the resetAfter=True
+    // pattern: a custom tf.layers.Layer with getConfig + registerClass
+    // so it round-trips through tf.loadLayersModel.
+    //
+    // Supported transforms (extensible by adding cases in _applyTransform):
+    //   "horizontal_flip" — flip left/right with config.probability
+    //   "identity"        — passthrough (useful for graph debugging)
+    //
+    // The seedLink config string is reserved for paired image+target
+    // augments: two layers sharing a seedLink will use the same per-batch
+    // RNG seed so a flipped image stays aligned with its flipped target.
+    // For the image-only slice (#144), seedLink is recorded but
+    // unrealized — the bbox/mask/label paired blocks (#145) consume it.
+    var AugmentImageLayer = (function () {
+      if (!tf || typeof tf.layers !== "object" || typeof tf.layers.Layer !== "function") {
+        function Stub() {}
+        Stub.apply = function () { throw new Error("AugmentImageLayer requires tf.layers.Layer (TF.js >= 4.x)"); };
+        return Stub;
+      }
+      class AugImgLayer extends tf.layers.Layer {
+        constructor(config) {
+          super(config || {});
+          this.transform = String((config && config.transform) || "horizontal_flip").toLowerCase();
+          var p = Number((config && config.probability));
+          if (!isFinite(p) || p < 0) p = 0.5;
+          if (p > 1) p = 1;
+          this.probability = p;
+          this.seedLink = String((config && config.seedLink) || "");
+        }
+        build(inputShape) {
+          // No trainable weights — augment layers are stateless transforms.
+          this.built = true;
+        }
+        computeOutputShape(inputShape) {
+          return Array.isArray(inputShape) && Array.isArray(inputShape[0]) ? inputShape[0] : inputShape;
+        }
+        call(inputs, kwargs) {
+          var self = this;
+          var training = !!(kwargs && (kwargs.training === true || kwargs.training === 1));
+          return tf.tidy(function () {
+            var x = Array.isArray(inputs) ? inputs[0] : inputs;
+            // Eval-mode: pure passthrough so inference is deterministic.
+            // tf.identity isn't part of the public TF.js layers surface; clone
+            // so the returned tensor survives tidy's dispose pass.
+            if (!training) return tf.keep(x.clone());
+            return self._applyTransform(x);
+          });
+        }
+        _applyTransform(x) {
+          if (this.transform === "identity") return x.clone();
+          if (this.transform === "horizontal_flip") {
+            // Per-batch coin flip at the configured probability. When the
+            // coin lands "flip", reverse the W axis (axis -2 for [B,H,W,C]).
+            // This is a whole-batch decision, not per-sample, which matches
+            // how Keras's RandomFlip behaves at training time and lets a
+            // paired bbox/mask augment apply the same flip downstream by
+            // reading the same seedLink RNG.
+            var coin = tf.randomUniform([], 0, 1);
+            // tf.where requires both branches to have the same shape, so
+            // we precompute both and select via the scalar threshold.
+            var flipped = tf.reverse(x, [-2]);
+            var doFlip = tf.less(coin, tf.scalar(this.probability));
+            // Cast scalar bool to a [1,1,1,1] broadcastable mask.
+            var mask = tf.cast(doFlip, "float32").reshape([1, 1, 1, 1]);
+            return tf.add(tf.mul(mask, flipped), tf.mul(tf.sub(tf.scalar(1), mask), x));
+          }
+          // Unknown transform: passthrough rather than fail loudly so a
+          // typo doesn't crash training. Editor validation should catch
+          // the typo before the graph reaches the builder.
+          return x.clone();
+        }
+        getConfig() {
+          var cfg = super.getConfig();
+          cfg.transform = this.transform;
+          cfg.probability = this.probability;
+          cfg.seedLink = this.seedLink;
+          return cfg;
+        }
+      }
+      AugImgLayer.className = "AugmentImageLayer";
+      if (tf.serialization && typeof tf.serialization.registerClass === "function") {
+        try { tf.serialization.registerClass(AugImgLayer); } catch (e) {
+          if (typeof console !== "undefined" && console.warn) {
+            console.warn("AugmentImageLayer registerClass failed:", e && e.message || e);
+          }
+        }
+      }
+      return AugImgLayer;
+    })();
+
     // Determine output units per head. Priority (contract-driven):
     // 1. Explicit units/unitsHint on the output node
     // 2. Schema-declared featureSize on the matching allowedOutputKeys entry
@@ -1185,6 +1277,16 @@
       if (node.name === "noise_injection_layer") {
         var noiseScale = Number((node.data && node.data.scale) || 0.1);
         return _applyLayerMetadata(tf.layers.gaussianNoise({ stddev: noiseScale, name: _n }), node).apply(inTensor);
+      }
+      // AugmentImage: training-only image augmentation (flip/etc.)
+      if (node.name === "augment_image_layer") {
+        var augCfg = {
+          transform: String((node.data && node.data.transform) || "horizontal_flip"),
+          probability: Number((node.data && node.data.probability != null) ? node.data.probability : 0.5),
+          seedLink: String((node.data && node.data.seedLink) || ""),
+          name: _n,
+        };
+        return _applyLayerMetadata(new AugmentImageLayer(augCfg), node).apply(inTensor);
       }
 
       // PatchEmbed: flattened square image → non-overlapping patch tokens.
