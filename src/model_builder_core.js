@@ -956,17 +956,22 @@
           // applies the same guard, so a graph that misuses the block
           // behaves identically across runtimes.
           if (x.shape.length !== 4) return x.clone();
-          if (this.transform === "horizontal_flip") {
-            // Per-batch coin flip at the configured probability. When the
-            // coin lands "flip", reverse the W axis (axis -2 for [B,H,W,C]).
-            // This is a whole-batch decision, not per-sample, which matches
-            // how Keras's RandomFlip behaves at training time and lets a
-            // paired bbox/mask augment apply the same flip downstream by
-            // reading the same seedLink RNG.
+          if (this.transform === "horizontal_flip" || this.transform === "vertical_flip") {
+            // Per-batch coin flip at the configured probability. Whole-
+            // batch decision (not per-sample), matching Keras RandomFlip
+            // semantics. A paired bbox/mask augment applies the same
+            // flip downstream by reading the same seedLink RNG.
+            //
+            // Axis selection by transform name: NHWC means
+            //   horizontal_flip → reverse W (axis -2, the second-to-last)
+            //   vertical_flip   → reverse H (axis -3, the third-to-last)
+            // Both keep [B, H, W, C] rank intact.
+            var flipAxis = (this.transform === "horizontal_flip") ? -2 : -3;
             var coin = tf.randomUniform([], 0, 1);
-            // tf.where requires both branches to have the same shape, so
-            // we precompute both and select via the scalar threshold.
-            var flipped = tf.reverse(x, [-2]);
+            // Precompute both branches; select via mask. tf.where can't
+            // pick between two tensors at runtime via a scalar bool
+            // without both being materialized.
+            var flipped = tf.reverse(x, [flipAxis]);
             var doFlip = tf.less(coin, tf.scalar(this.probability));
             // Cast scalar bool to a [1,1,1,1] broadcastable mask.
             var mask = tf.cast(doFlip, "float32").reshape([1, 1, 1, 1]);

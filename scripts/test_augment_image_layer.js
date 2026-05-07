@@ -119,6 +119,23 @@ var MBC = require(path.join(__dirname, "..", "src/model_builder_core.js"));
   yId.dispose();
   console.log("  -> identity transform is passthrough");
 
+  // ─── Test 4b: vertical_flip — reverses H axis ──────────────────
+  console.log("Test 4b: training=true, transform=vertical_flip, p=1.0 → flips H axis");
+  var layerVF = new Layer({ transform: "vertical_flip", probability: 1.0 });
+  // Original [B=1, H=2, W=3, C=2]:
+  //   H=0: [[1,2], [3,4], [5,6]]
+  //   H=1: [[7,8], [9,10], [11,12]]
+  // After vertical_flip, H rows swap.
+  for (var trialV = 0; trialV < 5; trialV++) {
+    var yV = layerVF.apply(x, { training: true });
+    var arrV = yV.arraySync()[0];
+    // After H-axis flip: H=0 should be the original H=1.
+    assertClose("vflip trial " + trialV + " H[0][0][0]", arrV[0][0][0], 7, 1e-6);
+    assertClose("vflip trial " + trialV + " H[1][0][0]", arrV[1][0][0], 1, 1e-6);
+    yV.dispose();
+  }
+  console.log("  -> vertical_flip reverses the H axis (NHWC axis -3)");
+
   // ─── Test 5: non-4D input passthrough (Codex round-1 P1) ──────
   console.log("Test 5: non-4D input → passthrough (browser/server parity)");
   var layerFlat = new Layer({ transform: "horizontal_flip", probability: 1.0 });
