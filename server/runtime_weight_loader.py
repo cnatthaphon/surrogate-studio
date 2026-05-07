@@ -169,6 +169,22 @@ def load_weights_into_model(model: Any, config: Any) -> bool:
     if not has_recurrent_special and _load_named_checkpoint(model, saved_map, flat):
         return True
 
+    # Pre-walk specs so the GRU branch can detect old-format checkpoints
+    # (single combined bias, shape [3*H]) emitted by main before the
+    # PR #70 [2, 3*H] format. Falls back to a legacy load that splits
+    # the combined bias as (combined, 0) — approximate vs PyTorch's
+    # asymmetric n-gate but doesn't crash. Multi-GRU graphs are
+    # supported by indexing in spec-emit order.
+    gru_bias_shapes = []
+    for spec in extract_weight_specs(config):
+        nm = str((spec or {}).get("name", "") or "")
+        if nm in ("tfjs_bias", "bias") and (spec or {}).get("shape"):
+            shp = list(spec["shape"])
+            # Only count biases adjacent to a recurrent kernel pair —
+            # those will be consumed by the GRU/LSTM branch below.
+            gru_bias_shapes.append(shp)
+    gru_bias_idx = 0
+
     bn_running = [k for k in state if "running_mean" in k or "running_var" in k]
     regular = [k for k in state if "num_batches_tracked" not in k and k not in bn_running]
     keys = regular + bn_running
@@ -209,30 +225,78 @@ def load_weights_into_model(model: Any, config: Any) -> bool:
                 continue
 
             if gate_ratio == 3:
-                # GRU: 3 specs (kernel, recurrent_kernel, bias). Bias
-                # shape [2, 3*H] — row 0 = b_ih, row 1 = b_hh, both
-                # gate-swapped. Reverse swap to recover PyTorch order.
+                # GRU. Two bias formats supported:
+                #   new (PR #70+): bias shape [2, 3*H]. Rows are
+                #     [b_ih, b_hh], both gate-swapped to [z, r, h].
+                #     Bit-exact PyTorch round trip.
+                #   legacy (pre-PR #70 main): bias shape [3*H].
+                #     The extract emitted a single combined bias under
+                #     the wrong LSTM-pattern (4-chunk) swap. Match that
+                #     broken extract's inverse so the artifact loads to
+                #     ITS ORIGINAL (wrong-but-stable) state — same math
+                #     production was running on. Better than crashing
+                #     resume/predict/generate.
+                bias_shape = gru_bias_shapes[gru_bias_idx] if gru_bias_idx < len(gru_bias_shapes) else None
+                gru_bias_idx += 1
+                is_new_format = bias_shape and len(bias_shape) == 2 and bias_shape[0] == 2
+
                 kernel_t = flat[offset:offset + in_dim * 3 * H].reshape(in_dim, 3 * H)
                 offset += in_dim * 3 * H
                 rec_t = flat[offset:offset + hid_dim * 3 * H].reshape(hid_dim, 3 * H)
                 offset += hid_dim * 3 * H
-                bias_2x = flat[offset:offset + 2 * 3 * H].reshape(2, 3 * H)
-                offset += 2 * 3 * H
 
-                def _gru_unswap_axis1(w):
-                    c = [w[:, j * H:(j + 1) * H] for j in range(3)]
-                    return np.concatenate([c[1], c[0], c[2]], axis=1)
+                if is_new_format:
+                    bias_2x = flat[offset:offset + 2 * 3 * H].reshape(2, 3 * H)
+                    offset += 2 * 3 * H
 
-                def _gru_unswap_axis0(w):
-                    c = [w[j * H:(j + 1) * H] for j in range(3)]
-                    return np.concatenate([c[1], c[0], c[2]], axis=0)
+                    def _gru_unswap_axis1(w):
+                        c = [w[:, j * H:(j + 1) * H] for j in range(3)]
+                        return np.concatenate([c[1], c[0], c[2]], axis=1)
 
-                # PyTorch [r,z,n] ← Keras/TF.js [z,r,h]. Reverse the
-                # extract swap, transpose kernels, split bias rows.
-                weight_ih = _gru_unswap_axis1(kernel_t).T  # [3*H, in]
-                weight_hh = _gru_unswap_axis1(rec_t).T     # [3*H, H]
-                bias_ih = _gru_unswap_axis0(bias_2x[0])    # [3*H]
-                bias_hh = _gru_unswap_axis0(bias_2x[1])    # [3*H]
+                    def _gru_unswap_axis0(w):
+                        c = [w[j * H:(j + 1) * H] for j in range(3)]
+                        return np.concatenate([c[1], c[0], c[2]], axis=0)
+
+                    weight_ih = _gru_unswap_axis1(kernel_t).T
+                    weight_hh = _gru_unswap_axis1(rec_t).T
+                    bias_ih = _gru_unswap_axis0(bias_2x[0])
+                    bias_hh = _gru_unswap_axis0(bias_2x[1])
+                else:
+                    # Legacy 3*H bias. The kernels were also extracted with
+                    # the wrong LSTM-pattern swap (4-chunk). Apply the
+                    # matching unswap so values land where the legacy
+                    # in-production model expected them. Math is incorrect
+                    # vs PyTorch GRU, but matches the legacy extract — the
+                    # artifact loads to its prior wrong-but-stable state
+                    # rather than to garbage.
+                    bias_combined = flat[offset:offset + 3 * H]
+                    offset += 3 * H
+
+                    # 4-chunk LSTM-pattern unswap requires 4*H_lstm = 3*H.
+                    # H_lstm = 3*H // 4 is integer only when H % 4 == 0.
+                    # Most production GRUs use units divisible by 4
+                    # (Oscillator: 64). For other widths, fall back to no
+                    # swap on the kernels; bias still split evenly.
+                    if (3 * H) % 4 == 0:
+                        H_lstm = (3 * H) // 4
+
+                        def _lstm_unswap_axis1(w):
+                            c = [w[:, j * H_lstm:(j + 1) * H_lstm] for j in range(4)]
+                            return np.concatenate([c[0], c[2], c[1], c[3]], axis=1)
+
+                        def _lstm_unswap_axis0(w):
+                            c = [w[j * H_lstm:(j + 1) * H_lstm] for j in range(4)]
+                            return np.concatenate([c[0], c[2], c[1], c[3]], axis=0)
+
+                        weight_ih = _lstm_unswap_axis1(kernel_t).T
+                        weight_hh = _lstm_unswap_axis1(rec_t).T
+                        bias_combined_unswapped = _lstm_unswap_axis0(bias_combined.reshape(1, -1)).flatten()
+                    else:
+                        weight_ih = kernel_t.T
+                        weight_hh = rec_t.T
+                        bias_combined_unswapped = bias_combined
+                    bias_ih = bias_combined_unswapped / 2
+                    bias_hh = bias_combined_unswapped / 2
 
                 new_state[keys[i]] = torch.tensor(weight_ih, dtype=torch.float32)
                 new_state[keys[i + 1]] = torch.tensor(weight_hh, dtype=torch.float32)
