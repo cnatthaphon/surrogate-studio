@@ -328,14 +328,24 @@
         var bhh = pyValues.subarray ? pyValues.subarray(offset, offset + sz3) : new Float32Array(pyValues.slice(offset, offset + sz3));
         offset += sz3;
 
-        var H = shape[0] / 4; // hidden size
         var inputSize = shape[1];
         var hiddenSize = pySpecs[i + 1].shape[1];
-        var isLSTM = name.indexOf("lstm") >= 0 || (H === Math.floor(H) && shape[0] === 4 * H);
-        var isGRU = name.indexOf("gru") >= 0 || shape[0] === 3 * Math.floor(shape[0] / 3);
+        // Derive gate count from the recurrent_kernel: PyTorch lays out
+        // weight_hh_l0 as [gates*H, H], so shape[0] / hiddenSize is the
+        // gate ratio (3 for GRU, 4 for LSTM, 1 for vanilla RNN). This is
+        // the only reliable signal — name hints can be missing, and the
+        // older shape[0]/4 vs shape[0]/3 divisibility heuristic
+        // mis-classifies GRU as LSTM whenever H is divisible by 4 (e.g.
+        // H=8 means shape[0]=24 satisfies both 4*6 and 3*8). When both
+        // win the ternary picked LSTM and produced wrong-but-loadable
+        // weights — caught by Codex with HIDDEN=8 reproduction.
+        var gateRatio = hiddenSize > 0 ? Math.round(shape[0] / hiddenSize) : 0;
+        var isLSTM = gateRatio === 4;
+        var isGRU = gateRatio === 3;
+        var H = hiddenSize;
 
         var gateSwap = isLSTM ? _lstmGatesPyToTf : (isGRU ? _gruGatesPyToTf : function (x) { return x; });
-        var gateH = isLSTM ? H : (isGRU ? Math.floor(shape[0] / 3) : shape[0]);
+        var gateH = H;
 
         // kernel: swap gates, then transpose [4H, in] → [in, 4H]
         var swappedIh = gateSwap(new Float32Array(wih), gateH);
