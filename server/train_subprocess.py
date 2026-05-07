@@ -1556,6 +1556,16 @@ def build_model_from_graph(graph, feature_size, target_size, num_classes=0):
 
             tensors = {}
             runtime_time = None
+            # Reset the augmentation seedLink registry at the start of
+            # every forward so paired bbox/mask layers can never read a
+            # coin from a previous batch (Codex PR #72 round-1/2/3 P1:
+            # "Reset seedLink coin registry at each forward start").
+            # The per-passthrough-path clears in augment_image already
+            # cover the common case, but explicit forward-start reset
+            # makes the freshness guarantee unconditional regardless of
+            # graph topology (e.g. graph that has paired bbox without
+            # any matching upstream image augment).
+            self._aug_seed_registry = {}
             for nid in self.topo:
                 t = self.node_types[nid]
                 parents = self._edges_in.get(nid, [])
@@ -1816,6 +1826,11 @@ def build_model_from_graph(graph, feature_size, target_size, num_classes=0):
                         else:
                             tensors[nid] = inp
                     else:
+                        # Unknown transform fallthrough — also clear so
+                        # paired layers don't read a stale prior coin
+                        # (Codex round-3 P2).
+                        if seedlink and seedlink in self._aug_seed_registry:
+                            del self._aug_seed_registry[seedlink]
                         tensors[nid] = inp
                 elif t == "augment_bbox":
                     # Paired bbox augment — reads coin from registry.
