@@ -924,6 +924,19 @@
       // survives the publishing layer's tidy() scope.
       _augCoinRegistry.set(seedLink, tf.keep(coin.clone()));
     }
+    // Explicitly clear an entry. Called by the image augment when it
+    // takes the eval / identity / non-4D / prob=0 passthrough path so
+    // paired layers fall back to their own RNG instead of reading a
+    // stale coin from a previous forward pass (Codex PR #72 round-1
+    // P1: "Reset seedLink coin registry between forward passes").
+    function _augClearCoin(seedLink) {
+      if (!seedLink || !_augCoinRegistry) return;
+      var prev = _augCoinRegistry.get(seedLink);
+      if (prev && typeof prev.dispose === "function") {
+        try { prev.dispose(); } catch (e) {}
+      }
+      _augCoinRegistry.delete(seedLink);
+    }
     function _augReadCoin(seedLink) {
       if (!seedLink || !_augCoinRegistry) return null;
       var entry = _augCoinRegistry.get(seedLink);
@@ -983,21 +996,33 @@
           var training = !!(kwargs && (kwargs.training === true || kwargs.training === 1));
           return tf.tidy(function () {
             var x = Array.isArray(inputs) ? inputs[0] : inputs;
-            // Eval-mode: pure passthrough so inference is deterministic.
-            // tf.identity isn't part of the public TF.js layers surface; clone
-            // so the returned tensor survives tidy's dispose pass.
-            if (!training) return tf.keep(x.clone());
+            // Eval-mode: pure passthrough. Clear any stale registry entry
+            // for this seedLink so paired layers downstream fall back to
+            // their own RNG instead of reading a coin from a previous
+            // training-mode pass.
+            if (!training) {
+              _augClearCoin(self.seedLink);
+              return tf.keep(x.clone());
+            }
             return self._applyTransform(x);
           });
         }
         _applyTransform(x) {
-          if (this.transform === "identity") return x.clone();
+          if (this.transform === "identity") {
+            // Identity: clear registry so paired layers don't lock onto
+            // a stale prior-pass coin.
+            _augClearCoin(this.seedLink);
+            return x.clone();
+          }
           // Image augments expect 4D [B, H, W, C]. For any other rank
           // (e.g. flat [batch, features]), passthrough rather than flip
           // an unrelated axis. The PyTorch path (train_subprocess.py)
           // applies the same guard, so a graph that misuses the block
           // behaves identically across runtimes.
-          if (x.shape.length !== 4) return x.clone();
+          if (x.shape.length !== 4) {
+            _augClearCoin(this.seedLink);
+            return x.clone();
+          }
           if (this.transform === "horizontal_flip" || this.transform === "vertical_flip") {
             // Per-batch coin flip at the configured probability. Whole-
             // batch decision (not per-sample), matching Keras RandomFlip

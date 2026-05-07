@@ -1747,35 +1747,58 @@ def build_model_from_graph(graph, feature_size, target_size, num_classes=0):
                     else:
                         tensors[nid] = inp
                 elif t == "augment_image":
-                    # Eval mode: identity passthrough.
-                    if not self.training:
-                        tensors[nid] = inp
-                        continue
+                    # Initialize per-instance coin registry. Codex round-1
+                    # P1 fix: explicitly clear stale entries on passthrough
+                    # paths so paired layers fall back to own RNG instead
+                    # of reading a coin from a previous batch.
+                    if not hasattr(self, "_aug_seed_registry"):
+                        self._aug_seed_registry = {}
                     transform = getattr(self, f"aug_transform_{nid}", "horizontal_flip")
                     prob = float(getattr(self, f"aug_probability_{nid}", 0.5))
                     seedlink = getattr(self, f"aug_seedlink_{nid}", "")
-                    # Initialize per-forward-pass coin registry (cleared
-                    # at start of each forward via _aug_seed_registry
-                    # being reset just before the topological loop).
-                    if not hasattr(self, "_aug_seed_registry"):
-                        self._aug_seed_registry = {}
+                    # Eval mode: identity passthrough.
+                    if not self.training:
+                        if seedlink and seedlink in self._aug_seed_registry:
+                            del self._aug_seed_registry[seedlink]
+                        tensors[nid] = inp
+                        continue
                     if transform == "identity" or prob <= 0.0 or inp.dim() != 4:
                         # Identity transform, p=0, or non-4D input → passthrough.
-                        # Non-4D guard prevents misapplying flips to flat
-                        # vectors; image augments expect [B, H, W, C].
+                        # Clear any prior coin so paired readers fall back.
+                        if seedlink and seedlink in self._aug_seed_registry:
+                            del self._aug_seed_registry[seedlink]
                         tensors[nid] = inp
                     elif transform in ("horizontal_flip", "vertical_flip"):
                         # Whole-batch coin flip at the configured probability,
                         # matching AugmentImageLayer (Keras RandomFlip
                         # semantics).
                         #
-                        # Layout is read from explicit config — earlier
-                        # iterations tried a shape-based heuristic but a
-                        # tensor with H=2 and C=2 (or any small H/W) is
-                        # genuinely ambiguous. Explicit nhwc/nchw avoids
-                        # silent corruption when augment_image is wired
-                        # after Conv2d (which emits NCHW in PyTorch).
+                        # Layout is read from explicit config. Codex
+                        # round-1 P1 flagged that the server's "reshape"
+                        # block permutes NHWC→NCHW (line ~1974), so the
+                        # typical `reshape → augment_image` graph carries
+                        # NCHW tensors here even though the palette
+                        # default is nhwc. We auto-detect this specific
+                        # mismatch (config=nhwc but shape[1] is small
+                        # like a channel count and shape[-1] is large
+                        # like H/W) and override to nchw with a stderr
+                        # warning so the user notices.
                         layout = getattr(self, f"aug_layout_{nid}", "nhwc")
+                        if layout == "nhwc" and inp.dim() == 4:
+                            ch_axis_1 = inp.shape[1]
+                            last_axis = inp.shape[-1]
+                            # NCHW signature: small channel count at
+                            # axis 1, large H/W at axis -1.
+                            if ch_axis_1 in (1, 2, 3, 4) and last_axis > 8:
+                                if not getattr(self, f"_aug_layout_warned_{nid}", False):
+                                    sys.stderr.write(
+                                        f"[augment_image] node {nid}: layout=nhwc "
+                                        f"but input shape {tuple(inp.shape)} looks NCHW; "
+                                        f"auto-overriding to nchw. Set layout='nchw' explicitly "
+                                        f"to silence this warning.\n"
+                                    )
+                                    setattr(self, f"_aug_layout_warned_{nid}", True)
+                                layout = "nchw"
                         if layout == "nchw":
                             flip_axis = -1 if transform == "horizontal_flip" else -2
                         else:
