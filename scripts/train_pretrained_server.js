@@ -7,7 +7,40 @@
  *
  * Usage:
  *   node scripts/train_pretrained_server.js <demo-folder> [model-index]
+ *
+ * Memory: defaults to 8 GB heap. Some demos (Oscillator-Surrogate)
+ * carry 100k+ trajectory samples that exceed Node's stock 4 GB heap
+ * during JSON encoding for the server payload. Set NODE_OPTIONS to
+ * override (e.g. NODE_OPTIONS=--max-old-space-size=16384 for very
+ * large datasets).
  */
+if (!process.env.NODE_OPTIONS || !/--max-old-space-size/.test(process.env.NODE_OPTIONS)) {
+    var spawn = require("child_process").spawnSync;
+    var existing = process.env.NODE_OPTIONS || "";
+    var nodeOpts = (existing + " --max-old-space-size=8192").trim();
+    if (!process.env.__OSC_RETRAIN_RESPAWNED) {
+        var result = spawn(process.execPath, process.argv.slice(1), {
+            stdio: "inherit",
+            env: Object.assign({}, process.env, {
+                NODE_OPTIONS: nodeOpts,
+                __OSC_RETRAIN_RESPAWNED: "1",
+            }),
+        });
+        // Propagate child failure honestly. status === null means the
+        // child died from a signal (e.g. OOM kill, SIGABRT) — must NOT
+        // report success in that case. The previous `result.status || 0`
+        // collapsed null → 0, masking signal failures.
+        if (result.error) {
+            console.error("respawn failed:", result.error.message);
+            process.exit(1);
+        }
+        if (result.signal) {
+            console.error("child terminated by signal:", result.signal);
+            process.exit(1);
+        }
+        process.exit(typeof result.status === "number" ? result.status : 1);
+    }
+}
 
 var fs = require("fs");
 var path = require("path");
@@ -81,6 +114,93 @@ function slugify(name) {
   return s;
 }
 
+// Stream-encode `value` as JSON to a Writable. Built because Node's
+// JSON.stringify caps at the V8 max string length (~512 MB), which
+// the Oscillator-Surrogate dataset trips with totalCount >= ~150
+// trajectories (each window-expands into thousands of samples). For
+// huge arrays (xTrain, yTrain, ...) we batch CHUNK_ROWS rows per
+// JSON.stringify call so a 1.25M-row dataset is ~12K stream.writes
+// instead of 60M+ recursive callbacks. Backpressure is honored via
+// 'drain'.
+var _STREAM_CHUNK_ROWS = 256;
+
+function _streamJSONValue(stream, value, onDrain) {
+  if (value === null || value === undefined || typeof value !== "object") {
+    return _writeWithBackpressure(stream, JSON.stringify(value === undefined ? null : value), onDrain);
+  }
+  if (Array.isArray(value)) return _streamArray(stream, value, onDrain);
+  return _streamObject(stream, value, onDrain);
+}
+
+function _streamArray(stream, arr, onDrain) {
+  if (arr.length === 0) return _writeWithBackpressure(stream, "[]", onDrain);
+  // Empty array, plain primitives, or short arrays-of-primitives:
+  // stringify in one call.
+  if (arr.length < _STREAM_CHUNK_ROWS && _arrayDepth(arr) <= 1) {
+    return _writeWithBackpressure(stream, JSON.stringify(arr), onDrain);
+  }
+  // Big array: batch rows by chunk and stream each chunk.
+  _writeWithBackpressure(stream, "[", function () {
+    _streamArrayChunks(stream, arr, 0, function () {
+      _writeWithBackpressure(stream, "]", onDrain);
+    });
+  });
+}
+
+function _streamArrayChunks(stream, arr, i, done) {
+  if (i >= arr.length) return done();
+  var end = Math.min(i + _STREAM_CHUNK_ROWS, arr.length);
+  var parts = [];
+  for (var k = i; k < end; k++) {
+    if (k > 0) parts.push(",");
+    parts.push(JSON.stringify(arr[k]));
+  }
+  _writeWithBackpressure(stream, parts.join(""), function () {
+    _streamArrayChunks(stream, arr, end, done);
+  });
+}
+
+function _streamObject(stream, obj, onDrain) {
+  var keys = Object.keys(obj);
+  if (keys.length === 0) return _writeWithBackpressure(stream, "{}", onDrain);
+  _writeWithBackpressure(stream, "{", function () {
+    _streamObjectKey(stream, obj, keys, 0, function () {
+      _writeWithBackpressure(stream, "}", onDrain);
+    });
+  });
+}
+
+function _streamObjectKey(stream, obj, keys, i, done) {
+  if (i >= keys.length) return done();
+  var k = keys[i];
+  var prefix = (i > 0 ? "," : "") + JSON.stringify(k) + ":";
+  _writeWithBackpressure(stream, prefix, function () {
+    _streamJSONValue(stream, obj[k], function () {
+      _streamObjectKey(stream, obj, keys, i + 1, done);
+    });
+  });
+}
+
+// Quick depth probe for arrays. Returns 0 for primitive arrays,
+// 1 for arrays of primitive arrays (typical xTrain rows), 2+ for
+// nested. Cheap because we only sample arr[0].
+function _arrayDepth(arr) {
+  if (!Array.isArray(arr) || arr.length === 0) return 0;
+  if (typeof arr[0] !== "object" || arr[0] === null) return 0;
+  if (Array.isArray(arr[0])) {
+    return 1 + _arrayDepth(arr[0]);
+  }
+  return 2;  // contains plain objects — needs recursive encode
+}
+
+function _writeWithBackpressure(stream, chunk, done) {
+  if (stream.write(chunk)) {
+    setImmediate(done);  // setImmediate yields the event loop better than nextTick for huge loops
+  } else {
+    stream.once("drain", done);
+  }
+}
+
 function httpRequest(method, urlPath, body) {
   return new Promise(function (resolve, reject) {
     var opts = {
@@ -106,8 +226,17 @@ function httpRequest(method, urlPath, body) {
       });
     });
     req.on("error", reject);
-    if (body) req.write(typeof body === "string" ? body : JSON.stringify(body));
-    req.end();
+    if (body == null) {
+      req.end();
+      return;
+    }
+    if (typeof body === "string") {
+      req.write(body);
+      req.end();
+      return;
+    }
+    // Object: stream-encode to avoid JSON.stringify's V8 string-length cap.
+    _streamJSONValue(req, body, function () { req.end(); });
   });
 }
 

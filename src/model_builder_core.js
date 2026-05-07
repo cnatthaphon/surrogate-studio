@@ -730,6 +730,171 @@
       return RL;
     })();
 
+    // ─── GRU layer with resetAfter=True (PyTorch semantics) ──────
+    // tf.layers.gru hard-rejects resetAfter=True (throws at TF.js
+    // tf.js:73422). PyTorch GRU's forward equation matches Keras
+    // resetAfter=True, NOT the resetAfter=False that TF.js ships.
+    // The math difference is in the n-gate's reset-gate placement:
+    //     resetAfter=False: n = tanh(W_xn·x + b_xn + r·W_hn·h + r·b_hn)  [Keras default]
+    //     resetAfter=True:  n = tanh(W_xn·x + b_xn + r·(W_hn·h + b_hn)) [PyTorch / CuDNN]
+    // The two are inequivalent unless b_hn = 0.
+    //
+    // To get PyTorch ↔ TF.js bit-exact GRU inference we provide our own
+    // recurrent layer that runs the resetAfter=True forward inside
+    // tf.tidy. Weight layout matches Keras:
+    //   kernel:           [in,  3*H]  in [z, r, h] gate order
+    //   recurrentKernel:  [H,   3*H]  in [z, r, h] gate order
+    //   bias:             [2,   3*H]  row 0 = b_x*, row 1 = b_h*
+    //
+    // Registered with tf.serialization so it round-trips through
+    // tf.loadLayersModel.
+    var GRUResetAfterLayer = (function () {
+      if (!tf || typeof tf.layers !== "object" || typeof tf.layers.Layer !== "function") {
+        function Stub() {}
+        Stub.apply = function () { throw new Error("GRUResetAfterLayer requires tf.layers.Layer (TF.js >= 4.x)"); };
+        return Stub;
+      }
+      function _initBy(name) {
+        var n = String(name || "").toLowerCase();
+        if (n === "zeros") return tf.initializers.zeros();
+        if (n === "ones") return tf.initializers.ones();
+        if (n === "orthogonal") return tf.initializers.orthogonal({});
+        if (n === "glorotuniform" || n === "glorot_uniform") return tf.initializers.glorotUniform({});
+        if (n === "glorotnormal" || n === "glorot_normal") return tf.initializers.glorotNormal({});
+        return tf.initializers.glorotUniform({});
+      }
+      // Accept either an initializer instance (what _assignInitializer
+      // emits via tf.initializers.X()) or a string name; fall back to
+      // the named default. Without this, the layer silently ignored
+      // user-configured kernelInitializer/recurrentInitializer/
+      // biasInitializer in rnnCfg and always rebuilt with the layer's
+      // hardcoded defaults.
+      function _resolveInit(cfgInit, fallbackName) {
+        if (cfgInit && typeof cfgInit.apply === "function") return cfgInit;
+        if (typeof cfgInit === "string" && cfgInit) return _initBy(cfgInit);
+        return _initBy(fallbackName);
+      }
+      class GRURALayer extends tf.layers.Layer {
+        constructor(config) {
+          super(config || {});
+          this.units = Math.max(1, Number((config && config.units) || 1));
+          this.returnSequences = !!(config && config.returnSequences);
+          this.useBias = config && config.useBias !== false;
+          // Input dropout matching tf.layers.gru's `dropout` arg (Keras
+          // semantics): per-call dropout mask applied to xt during
+          // training. Clamp to [0, 1) so a dropout of 1 doesn't zero out
+          // the entire input.
+          var dropRate = Number((config && config.dropout) || 0);
+          if (!isFinite(dropRate) || dropRate < 0) dropRate = 0;
+          if (dropRate >= 1) dropRate = 0.9999;
+          this.dropout = dropRate;
+          this._kernelInit = _resolveInit(config && config.kernelInitializer, "glorotUniform");
+          this._recurrentInit = _resolveInit(config && config.recurrentInitializer, "orthogonal");
+          this._biasInit = _resolveInit(config && config.biasInitializer, "zeros");
+        }
+        build(inputShape) {
+          // inputShape is [batch, seq, features] (or [batch, features] for
+          // unbatched single-step). Last dim = features = inDim.
+          var shape = Array.isArray(inputShape) && Array.isArray(inputShape[0]) ? inputShape[0] : inputShape;
+          var inDim = shape[shape.length - 1];
+          var H = this.units;
+          this.kernel = this.addWeight("kernel", [inDim, 3 * H], "float32", this._kernelInit);
+          this.recurrentKernel = this.addWeight("recurrent_kernel", [H, 3 * H], "float32", this._recurrentInit);
+          if (this.useBias) {
+            this.bias = this.addWeight("bias", [2, 3 * H], "float32", this._biasInit);
+          }
+          this.built = true;
+        }
+        computeOutputShape(inputShape) {
+          var shape = Array.isArray(inputShape) && Array.isArray(inputShape[0]) ? inputShape[0] : inputShape;
+          var batch = shape[0];
+          var seq = shape.length === 3 ? shape[1] : null;
+          // returnSequences=true must always preserve the time axis,
+          // even when seq is null (dynamic / unknown timestep length).
+          // Earlier this branch dropped to [batch, units] whenever seq
+          // was null, breaking downstream Layer-shape inference for
+          // any graph where the recurrent layer feeds another sequence
+          // op without a fixed timestep.
+          if (this.returnSequences) return [batch, seq, this.units];
+          return [batch, this.units];
+        }
+        call(inputs, kwargs) {
+          var self = this;
+          var training = !!(kwargs && (kwargs.training === true || kwargs.training === 1));
+          return tf.tidy(function () {
+            var x = Array.isArray(inputs) ? inputs[0] : inputs;
+            // Promote 2D → 3D (single timestep) so the loop is uniform.
+            if (x.shape.length === 2) x = tf.expandDims(x, 1);
+            var batch = x.shape[0];
+            var seq = x.shape[1];
+            var H = self.units;
+            var kernel = self.kernel.read();
+            var recurrent = self.recurrentKernel.read();
+            var biasX = null, biasH = null;
+            if (self.useBias && self.bias) {
+              var biasFull = self.bias.read();
+              biasX = biasFull.slice([0, 0], [1, 3 * H]).reshape([3 * H]);
+              biasH = biasFull.slice([1, 0], [1, 3 * H]).reshape([3 * H]);
+            }
+            // Per-call input dropout mask (Keras `dropout` semantics: same
+            // mask reused across timesteps within one call). Inactive when
+            // not training or rate=0 — purely a scaling op then.
+            var inputMask = null;
+            if (training && self.dropout > 0) {
+              var keepProb = 1 - self.dropout;
+              var inDim = x.shape[x.shape.length - 1];
+              var noise = tf.randomUniform([batch, inDim], 0, 1);
+              inputMask = tf.div(tf.cast(tf.greaterEqual(noise, self.dropout), "float32"), tf.scalar(keepProb));
+            }
+            var h = tf.zeros([batch, H]);
+            var outputs = [];
+            for (var t = 0; t < seq; t++) {
+              // Slice timestep and squeeze the seq dim → [batch, inDim]
+              var xt = x.slice([0, t, 0], [-1, 1, -1]).reshape([batch, x.shape[2]]);
+              if (inputMask) xt = tf.mul(xt, inputMask);
+              var xProj = tf.matMul(xt, kernel);
+              if (biasX) xProj = tf.add(xProj, biasX);
+              var hProj = tf.matMul(h, recurrent);
+              if (biasH) hProj = tf.add(hProj, biasH);
+              // [z, r, h] gate order matching Keras.
+              var xz = xProj.slice([0, 0],     [-1, H]);
+              var xr = xProj.slice([0, H],     [-1, H]);
+              var xn = xProj.slice([0, 2 * H], [-1, H]);
+              var hz = hProj.slice([0, 0],     [-1, H]);
+              var hr = hProj.slice([0, H],     [-1, H]);
+              var hn = hProj.slice([0, 2 * H], [-1, H]);
+              var z = tf.sigmoid(tf.add(xz, hz));
+              var r = tf.sigmoid(tf.add(xr, hr));
+              // resetAfter=True: r multiplies (W_hn·h + b_hn) BEFORE adding to x-side.
+              var n = tf.tanh(tf.add(xn, tf.mul(r, hn)));
+              // h = (1 - z) * n + z * h_prev
+              h = tf.add(tf.mul(tf.sub(tf.scalar(1), z), n), tf.mul(z, h));
+              if (self.returnSequences) outputs.push(h);
+            }
+            if (self.returnSequences) return tf.stack(outputs, 1);
+            return tf.keep(h);
+          });
+        }
+        getConfig() {
+          var cfg = super.getConfig();
+          cfg.units = this.units;
+          cfg.returnSequences = this.returnSequences;
+          cfg.useBias = this.useBias;
+          cfg.dropout = this.dropout;
+          return cfg;
+        }
+      }
+      GRURALayer.className = "GRUResetAfterLayer";
+      if (tf.serialization && typeof tf.serialization.registerClass === "function") {
+        try { tf.serialization.registerClass(GRURALayer); } catch (e) {
+          if (typeof console !== "undefined" && console.warn) {
+            console.warn("GRUResetAfterLayer registerClass failed:", e && e.message || e);
+          }
+        }
+      }
+      return GRURALayer;
+    })();
+
     // Determine output units per head. Priority (contract-driven):
     // 1. Explicit units/unitsHint on the output node
     // 2. Schema-declared featureSize on the matching allowedOutputKeys entry
@@ -994,7 +1159,13 @@
         }
         rnnCfg.name = _n;
         if (node.name === "rnn_layer") return _applyLayerMetadata(tf.layers.simpleRNN(rnnCfg), node).apply(rnnIn);
-        if (node.name === "gru_layer") return _applyLayerMetadata(tf.layers.gru(rnnCfg), node).apply(rnnIn);
+        if (node.name === "gru_layer") {
+          // Use the resetAfter=True custom layer so PyTorch ↔ TF.js GRU
+          // inference is bit-exact. tf.layers.gru defaults to
+          // resetAfter=False (n-gate uses r·b_hn outside the inner sum)
+          // and refuses to flip it (throws at TF.js tf.js:73422).
+          return _applyLayerMetadata(new GRUResetAfterLayer(rnnCfg), node).apply(rnnIn);
+        }
         return _applyLayerMetadata(tf.layers.lstm(rnnCfg), node).apply(rnnIn);
       }
       if (node.name === "concat_block") return inTensor;

@@ -125,6 +125,17 @@ def extract_pytorch_state(state_dict: Dict[str, Any]) -> tuple:
         gate PyTorch calls "g"). No reorder needed. Earlier code applied
         an [i,f,g,o] → [i,g,f,o] swap that broke LSTM inference end-to-
         end (see scripts/test_lstm_gate_parity.py).
+      - GRU: apply [r,z,n] → [z,r,h] gate swap (PyTorch and Keras differ
+        here — they really are different conventions). Emit 3 specs:
+          tfjs_kernel             [in,  3*H]
+          tfjs_recurrent_kernel   [H,   3*H]
+          tfjs_bias               [2,   3*H]   row 0 = b_ih, row 1 = b_hh
+        Bias is [2, 3*H] matching Keras GRU resetAfter=True format. Both
+        the client (custom GRUResetAfterLayer in model_builder_core.js)
+        and server reload consume this layout and produce bit-exact
+        PyTorch GRU forward output. This replaces the earlier 4-spec
+        residual workaround (combined bias + bias_hh_residual at the
+        end of the value blob).
       - BatchNorm: running stats separated and appended at end
       - Skips num_batches_tracked
 
@@ -144,25 +155,57 @@ def extract_pytorch_state(state_dict: Dict[str, Any]) -> tuple:
         name = ordered_keys[i]
         param = state_dict[name].detach().cpu().numpy()
 
-        # LSTM: combine weight_ih + weight_hh + bias_ih + bias_hh
+        # Recurrent layers: weight_ih_l0/weight_hh_l0/bias_ih_l0/bias_hh_l0
+        # bundle. Use the gate ratio (4*H = LSTM, 3*H = GRU, 1*H = simple
+        # RNN) to choose the right per-type extract path.
         if "weight_ih_l0" in name and i + 3 < len(ordered_keys) and "weight_hh_l0" in ordered_keys[i + 1]:
             w_ih = state_dict[ordered_keys[i]].detach().cpu().numpy()
             w_hh = state_dict[ordered_keys[i + 1]].detach().cpu().numpy()
             b_ih = state_dict[ordered_keys[i + 2]].detach().cpu().numpy()
             b_hh = state_dict[ordered_keys[i + 3]].detach().cpu().numpy()
-            # Gate order is identical between PyTorch [i,f,g,o] and Keras
-            # [i,f,c,o] — Keras's "c" is the same cell-candidate gate
-            # PyTorch calls "g". Just transpose kernels and sum biases.
-            kernel = w_ih.T
-            recurrent = w_hh.T
-            bias = b_ih + b_hh
-            for arr, suffix in [(kernel, "kernel"), (recurrent, "recurrent_kernel"), (bias, "bias")]:
-                flat = arr.astype(np.float32).flatten()
-                weight_specs.append({"name": f"tfjs_{suffix}", "shape": list(arr.shape), "dtype": "float32", "offset": offset})
-                weight_arrays.append(flat)
-                offset += flat.size * 4
-            i += 4
-            continue
+            H = w_hh.shape[1]
+            gate_ratio = w_ih.shape[0] // H if H > 0 else 0
+
+            if gate_ratio == 4:
+                # LSTM. Gate order [i,f,g,o] is identical to Keras [i,f,c,o].
+                # No reorder; transpose kernels and sum biases.
+                kernel = w_ih.T
+                recurrent = w_hh.T
+                bias = b_ih + b_hh
+                for arr, suffix in [(kernel, "kernel"), (recurrent, "recurrent_kernel"), (bias, "bias")]:
+                    flat = arr.astype(np.float32).flatten()
+                    weight_specs.append({"name": f"tfjs_{suffix}", "shape": list(arr.shape), "dtype": "float32", "offset": offset})
+                    weight_arrays.append(flat)
+                    offset += flat.size * 4
+                i += 4
+                continue
+
+            if gate_ratio == 3:
+                # GRU. PyTorch [r,z,n] vs Keras [z,r,h] — real reorder.
+                # Bias is emitted as [2, 3*H] (Keras resetAfter=True
+                # layout): row 0 = b_ih, row 1 = b_hh, both gate-swapped.
+                # The custom GRUResetAfterLayer in model_builder_core.js
+                # consumes this layout for bit-exact PyTorch parity.
+                def _gru_swap(w: Any) -> Any:
+                    chunks = [w[j * H:(j + 1) * H] for j in range(3)]
+                    return np.concatenate([chunks[1], chunks[0], chunks[2]], axis=0)
+
+                kernel = _gru_swap(w_ih).T
+                recurrent = _gru_swap(w_hh).T
+                bias_swapped_ih = _gru_swap(b_ih)
+                bias_swapped_hh = _gru_swap(b_hh)
+                bias_2x = np.stack([bias_swapped_ih, bias_swapped_hh], axis=0)  # [2, 3*H]
+                for arr, suffix in [(kernel, "kernel"), (recurrent, "recurrent_kernel"), (bias_2x, "bias")]:
+                    flat = arr.astype(np.float32).flatten()
+                    weight_specs.append({"name": f"tfjs_{suffix}", "shape": list(arr.shape), "dtype": "float32", "offset": offset})
+                    weight_arrays.append(flat)
+                    offset += flat.size * 4
+                i += 4
+                continue
+
+            # Simple RNN (gate_ratio == 1) or unrecognized: fall through
+            # to the per-weight generic 2D path so each tensor is emitted
+            # under its own name. Server reload's named-load matches.
 
         # Conv2D / Conv2DTranspose: NCHW → NHWC
         if param.ndim == 4 and ".weight" in name and any(name.startswith(p) for p in ("conv2d_", "convt2d_", "pe_proj_")):
