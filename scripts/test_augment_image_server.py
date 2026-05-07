@@ -32,9 +32,10 @@ def _run_augment(inp, transform="horizontal_flip", probability=1.0, training=Tru
         return inp
     if transform == "identity" or probability <= 0.0 or inp.dim() != 4:
         return inp
-    if transform == "horizontal_flip":
+    if transform in ("horizontal_flip", "vertical_flip"):
+        flip_axis = 2 if transform == "horizontal_flip" else 1
         if torch.rand(()).item() < probability:
-            return torch.flip(inp, dims=[2])
+            return torch.flip(inp, dims=[flip_axis])
         return inp
     return inp
 
@@ -81,6 +82,15 @@ print("Test 4: transform=\"identity\" → passthrough")
 y = _run_augment(x, "identity", 1.0, training=True)
 if not assert_close("identity W[0]", y[0, 0, 0, 0], 1.0): ok = False
 print("  -> identity transform is passthrough")
+
+print("Test 4b: transform=\"vertical_flip\" → reverses H axis")
+# Original H=0: [[1,2],[3,4],[5,6]], H=1: [[7,8],[9,10],[11,12]].
+# After vflip, H rows swap so H=0 should be the old H=1.
+for trial in range(5):
+    y = _run_augment(x, "vertical_flip", 1.0, training=True)
+    if not assert_close(f"vflip trial {trial} H[0][0][0]", y[0, 0, 0, 0], 7.0): ok = False
+    if not assert_close(f"vflip trial {trial} H[1][0][0]", y[0, 1, 0, 0], 1.0): ok = False
+print("  -> vertical_flip reverses the H axis (NHWC axis 1)")
 
 print("Test 5: non-4D input → passthrough (safety guard)")
 flat = torch.tensor([1.0, 2.0, 3.0, 4.0])

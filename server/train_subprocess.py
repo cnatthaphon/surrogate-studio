@@ -1697,14 +1697,16 @@ def build_model_from_graph(graph, feature_size, target_size, num_classes=0):
                         # Non-4D guard prevents misapplying flips to flat
                         # vectors; image augments expect [B, H, W, C].
                         tensors[nid] = inp
-                    elif transform == "horizontal_flip":
+                    elif transform in ("horizontal_flip", "vertical_flip"):
                         # Whole-batch coin flip at the configured probability,
                         # matching AugmentImageLayer (Keras RandomFlip
-                        # semantics). NHWC layout (W axis = 2) — patch_embed
-                        # confirms this codebase carries 4D image tensors as
-                        # NHWC and permutes to NCHW only when conv'ing.
+                        # semantics). NHWC layout (W axis = 2, H axis = 1)
+                        # — patch_embed confirms this codebase carries 4D
+                        # image tensors as NHWC and permutes to NCHW only
+                        # when conv'ing.
+                        flip_axis = 2 if transform == "horizontal_flip" else 1
                         if torch.rand(()).item() < prob:
-                            tensors[nid] = torch.flip(inp, dims=[2])
+                            tensors[nid] = torch.flip(inp, dims=[flip_axis])
                         else:
                             tensors[nid] = inp
                     else:
