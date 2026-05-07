@@ -895,6 +895,41 @@
       return GRURALayer;
     })();
 
+    // ─── Augmentation seedLink registry ──────────────────────────────
+    // Module-level Map shared across all augment layers. When the image
+    // augment runs in training mode with seedLink set, it publishes its
+    // per-batch coin to this registry; paired bbox/mask/label augments
+    // read the same coin so they make the same flip decision and stay
+    // aligned with the augmented image.
+    //
+    // The registry survives tf.tidy boundaries because we call tf.keep
+    // on each published coin. Disposal is explicit: when a new coin is
+    // published for the same seedLink, the old one is disposed first
+    // (otherwise we leak one scalar per training step per seedLink).
+    //
+    // Topological assumption: model_builder visits nodes in DAG order, so
+    // the image augment layer's call() runs before paired augments'
+    // call() within a single forward pass. If a graph wires a paired
+    // augment without an upstream image augment using the same seedLink,
+    // the paired layer falls back to its own coin (unsynced) — same
+    // behaviour as the unpaired path.
+    var _augCoinRegistry = (typeof Map === "function") ? new Map() : null;
+    function _augPublishCoin(seedLink, coin) {
+      if (!seedLink || !_augCoinRegistry || !coin) return;
+      var prev = _augCoinRegistry.get(seedLink);
+      if (prev && typeof prev.dispose === "function") {
+        try { prev.dispose(); } catch (e) {}
+      }
+      // tf.keep returns the same tensor with refcount bumped so it
+      // survives the publishing layer's tidy() scope.
+      _augCoinRegistry.set(seedLink, tf.keep(coin.clone()));
+    }
+    function _augReadCoin(seedLink) {
+      if (!seedLink || !_augCoinRegistry) return null;
+      var entry = _augCoinRegistry.get(seedLink);
+      return entry || null;
+    }
+
     // ─── Image-augmentation layer (training-only transforms) ────────
     // Applies a config-selected geometric transform to the image input
     // during training; identity at eval. Follows the resetAfter=True
@@ -903,13 +938,12 @@
     //
     // Supported transforms (extensible by adding cases in _applyTransform):
     //   "horizontal_flip" — flip left/right with config.probability
+    //   "vertical_flip"   — flip top/bottom with config.probability
     //   "identity"        — passthrough (useful for graph debugging)
     //
-    // The seedLink config string is reserved for paired image+target
-    // augments: two layers sharing a seedLink will use the same per-batch
-    // RNG seed so a flipped image stays aligned with its flipped target.
-    // For the image-only slice (#144), seedLink is recorded but
-    // unrealized — the bbox/mask/label paired blocks (#145) consume it.
+    // When seedLink is set in training mode, the layer publishes its
+    // per-batch coin to _augCoinRegistry so paired bbox/mask/label
+    // augments downstream can read it and make the same flip decision.
     var AugmentImageLayer = (function () {
       if (!tf || typeof tf.layers !== "object" || typeof tf.layers.Layer !== "function") {
         function Stub() {}
@@ -980,6 +1014,10 @@
               flipAxis = (this.transform === "horizontal_flip") ? -2 : -3;
             }
             var coin = tf.randomUniform([], 0, 1);
+            // Publish the coin for paired augments downstream that share
+            // this seedLink. Stored as a scalar in [0,1); paired layers
+            // compare against their own probability threshold.
+            _augPublishCoin(this.seedLink, coin);
             // Precompute both branches; select via mask. tf.where can't
             // pick between two tensors at runtime via a scalar bool
             // without both being materialized.
@@ -1012,6 +1050,223 @@
         }
       }
       return AugImgLayer;
+    })();
+
+    // ─── Paired bbox augment ────────────────────────────────────────
+    // Reads the same per-batch coin the image augment published via
+    // _augCoinRegistry (matched by seedLink), then applies the
+    // equivalent transform to bbox coords:
+    //   horizontal_flip: x_new = imageWidth  - x_old (mirror x)
+    //   vertical_flip:   y_new = imageHeight - y_old (mirror y)
+    //
+    // Bbox format: x0y0x1y1 (corners). For shape [B, 4] (single box per
+    // sample) and [B, N, 4] (multi-box). On hflip/vflip both corners
+    // mirror, but x0/x1 swap so the resulting box stays valid
+    // (x0_new <= x1_new). Same for y0/y1 on vflip.
+    //
+    // Eval mode is identity. Without a published coin (seedLink unset
+    // or upstream image augment missing), each call generates its own
+    // coin — same behaviour as the unpaired image augment.
+    var AugmentBboxLayer = (function () {
+      if (!tf || typeof tf.layers !== "object" || typeof tf.layers.Layer !== "function") {
+        function Stub() {}
+        Stub.apply = function () { throw new Error("AugmentBboxLayer requires tf.layers.Layer (TF.js >= 4.x)"); };
+        return Stub;
+      }
+      class AugBboxLayer extends tf.layers.Layer {
+        constructor(config) {
+          super(config || {});
+          this.transform = String((config && config.transform) || "horizontal_flip").toLowerCase();
+          var p = Number((config && config.probability));
+          if (!isFinite(p) || p < 0) p = 0;
+          if (p > 1) p = 1;
+          this.probability = p;
+          this.seedLink = String((config && config.seedLink) || "");
+          this.imageWidth = Math.max(1, Number((config && config.imageWidth) || 1));
+          this.imageHeight = Math.max(1, Number((config && config.imageHeight) || 1));
+        }
+        build() { this.built = true; }
+        computeOutputShape(inputShape) {
+          return Array.isArray(inputShape) && Array.isArray(inputShape[0]) ? inputShape[0] : inputShape;
+        }
+        call(inputs, kwargs) {
+          var self = this;
+          var training = !!(kwargs && (kwargs.training === true || kwargs.training === 1));
+          return tf.tidy(function () {
+            var x = Array.isArray(inputs) ? inputs[0] : inputs;
+            if (!training) return tf.keep(x.clone());
+            if (self.transform === "identity") return x.clone();
+            // bbox tensor: [B, 4] or [B, N, 4] with x0,y0,x1,y1
+            var rank = x.shape.length;
+            if (rank !== 2 && rank !== 3) return x.clone();
+            if (x.shape[rank - 1] !== 4) return x.clone();
+            // Read shared coin if the image augment published one for
+            // this seedLink; otherwise roll our own (unsynced fallback).
+            var sharedCoin = _augReadCoin(self.seedLink);
+            var coin = sharedCoin ? sharedCoin.clone() : tf.randomUniform([], 0, 1);
+            var doFlip = tf.less(coin, tf.scalar(self.probability));
+            var maskScalar = tf.cast(doFlip, "float32");
+            // Split [..., 4] into x0, y0, x1, y1 along the last axis.
+            var lastDim = rank - 1;
+            var splits = tf.split(x, 4, lastDim);
+            var x0 = splits[0], y0 = splits[1], x1 = splits[2], y1 = splits[3];
+            var xNew0, yNew0, xNew1, yNew1;
+            if (self.transform === "horizontal_flip") {
+              // mirror x; swap x0 and x1 to keep box valid
+              var W = tf.scalar(self.imageWidth);
+              xNew0 = tf.sub(W, x1);
+              xNew1 = tf.sub(W, x0);
+              yNew0 = y0; yNew1 = y1;
+            } else if (self.transform === "vertical_flip") {
+              var H = tf.scalar(self.imageHeight);
+              yNew0 = tf.sub(H, y1);
+              yNew1 = tf.sub(H, y0);
+              xNew0 = x0; xNew1 = x1;
+            } else {
+              return x.clone();  // unknown transform → passthrough
+            }
+            var flipped = tf.concat([xNew0, yNew0, xNew1, yNew1], lastDim);
+            // Per-batch broadcast: maskScalar is [], expand to match.
+            var bcastShape = x.shape.slice().fill(1);
+            var maskB = maskScalar.reshape(bcastShape);
+            return tf.add(tf.mul(maskB, flipped), tf.mul(tf.sub(tf.scalar(1), maskB), x));
+          });
+        }
+        getConfig() {
+          var cfg = super.getConfig();
+          cfg.transform = this.transform;
+          cfg.probability = this.probability;
+          cfg.seedLink = this.seedLink;
+          cfg.imageWidth = this.imageWidth;
+          cfg.imageHeight = this.imageHeight;
+          return cfg;
+        }
+      }
+      AugBboxLayer.className = "AugmentBboxLayer";
+      if (tf.serialization && typeof tf.serialization.registerClass === "function") {
+        try { tf.serialization.registerClass(AugBboxLayer); } catch (e) {
+          if (typeof console !== "undefined" && console.warn) {
+            console.warn("AugmentBboxLayer registerClass failed:", e && e.message || e);
+          }
+        }
+      }
+      return AugBboxLayer;
+    })();
+
+    // ─── Paired mask augment ────────────────────────────────────────
+    // Same logic as image augment: flip the H/W axis under the same
+    // per-batch coin. Mask tensors here are 4D ([B, H, W, 1] for
+    // segmentation) or 3D ([B, H, W]) — for 3D we expand to 4D, flip,
+    // then squeeze back.
+    var AugmentMaskLayer = (function () {
+      if (!tf || typeof tf.layers !== "object" || typeof tf.layers.Layer !== "function") {
+        function Stub() {}
+        Stub.apply = function () { throw new Error("AugmentMaskLayer requires tf.layers.Layer (TF.js >= 4.x)"); };
+        return Stub;
+      }
+      class AugMaskLayer extends tf.layers.Layer {
+        constructor(config) {
+          super(config || {});
+          this.transform = String((config && config.transform) || "horizontal_flip").toLowerCase();
+          var p = Number((config && config.probability));
+          if (!isFinite(p) || p < 0) p = 0;
+          if (p > 1) p = 1;
+          this.probability = p;
+          this.seedLink = String((config && config.seedLink) || "");
+          var lay = String((config && config.layout) || "nhwc").toLowerCase();
+          if (lay !== "nhwc" && lay !== "nchw") lay = "nhwc";
+          this.layout = lay;
+        }
+        build() { this.built = true; }
+        computeOutputShape(inputShape) {
+          return Array.isArray(inputShape) && Array.isArray(inputShape[0]) ? inputShape[0] : inputShape;
+        }
+        call(inputs, kwargs) {
+          var self = this;
+          var training = !!(kwargs && (kwargs.training === true || kwargs.training === 1));
+          return tf.tidy(function () {
+            var x = Array.isArray(inputs) ? inputs[0] : inputs;
+            if (!training) return tf.keep(x.clone());
+            if (self.transform === "identity") return x.clone();
+            if (x.shape.length !== 4) return x.clone();
+            if (self.transform !== "horizontal_flip" && self.transform !== "vertical_flip") return x.clone();
+            var flipAxis;
+            if (self.layout === "nchw") {
+              flipAxis = (self.transform === "horizontal_flip") ? -1 : -2;
+            } else {
+              flipAxis = (self.transform === "horizontal_flip") ? -2 : -3;
+            }
+            var sharedCoin = _augReadCoin(self.seedLink);
+            var coin = sharedCoin ? sharedCoin.clone() : tf.randomUniform([], 0, 1);
+            var flipped = tf.reverse(x, [flipAxis]);
+            var doFlip = tf.less(coin, tf.scalar(self.probability));
+            var mask = tf.cast(doFlip, "float32").reshape([1, 1, 1, 1]);
+            return tf.add(tf.mul(mask, flipped), tf.mul(tf.sub(tf.scalar(1), mask), x));
+          });
+        }
+        getConfig() {
+          var cfg = super.getConfig();
+          cfg.transform = this.transform;
+          cfg.probability = this.probability;
+          cfg.seedLink = this.seedLink;
+          cfg.layout = this.layout;
+          return cfg;
+        }
+      }
+      AugMaskLayer.className = "AugmentMaskLayer";
+      if (tf.serialization && typeof tf.serialization.registerClass === "function") {
+        try { tf.serialization.registerClass(AugMaskLayer); } catch (e) {
+          if (typeof console !== "undefined" && console.warn) {
+            console.warn("AugmentMaskLayer registerClass failed:", e && e.message || e);
+          }
+        }
+      }
+      return AugMaskLayer;
+    })();
+
+    // ─── Paired label augment ──────────────────────────────────────
+    // Class labels are flip-invariant (a flipped ship is still a ship,
+    // a flipped digit is NOT still the same digit — but for many tasks
+    // labels passthrough is correct). Provided as a graph block so the
+    // user can wire a label tensor through an augment node and have
+    // the graph still typecheck. Pure passthrough — but registers in
+    // the seedLink registry as a "consumer" so future label-aware
+    // transforms (e.g. label smoothing tied to flip strength) can hook
+    // in without breaking the graph.
+    var AugmentLabelLayer = (function () {
+      if (!tf || typeof tf.layers !== "object" || typeof tf.layers.Layer !== "function") {
+        function Stub() {}
+        Stub.apply = function () { throw new Error("AugmentLabelLayer requires tf.layers.Layer (TF.js >= 4.x)"); };
+        return Stub;
+      }
+      class AugLabelLayer extends tf.layers.Layer {
+        constructor(config) {
+          super(config || {});
+          this.seedLink = String((config && config.seedLink) || "");
+        }
+        build() { this.built = true; }
+        computeOutputShape(inputShape) {
+          return Array.isArray(inputShape) && Array.isArray(inputShape[0]) ? inputShape[0] : inputShape;
+        }
+        call(inputs) {
+          var x = Array.isArray(inputs) ? inputs[0] : inputs;
+          return tf.tidy(function () { return tf.keep(x.clone()); });
+        }
+        getConfig() {
+          var cfg = super.getConfig();
+          cfg.seedLink = this.seedLink;
+          return cfg;
+        }
+      }
+      AugLabelLayer.className = "AugmentLabelLayer";
+      if (tf.serialization && typeof tf.serialization.registerClass === "function") {
+        try { tf.serialization.registerClass(AugLabelLayer); } catch (e) {
+          if (typeof console !== "undefined" && console.warn) {
+            console.warn("AugmentLabelLayer registerClass failed:", e && e.message || e);
+          }
+        }
+      }
+      return AugLabelLayer;
     })();
 
     // Determine output units per head. Priority (contract-driven):
@@ -1315,6 +1570,38 @@
           name: _n,
         };
         return _applyLayerMetadata(new AugmentImageLayer(augCfg), node).apply(inTensor);
+      }
+      // AugmentBbox: paired bbox augment — reads coin from seedLink registry.
+      if (node.name === "augment_bbox_layer") {
+        var bboxCfg = {
+          transform: String((node.data && node.data.transform) || "horizontal_flip"),
+          probability: Number((node.data && node.data.probability != null) ? node.data.probability : 0.5),
+          seedLink: String((node.data && node.data.seedLink) || ""),
+          imageWidth: Number((node.data && node.data.imageWidth) || 1),
+          imageHeight: Number((node.data && node.data.imageHeight) || 1),
+          name: _n,
+        };
+        return _applyLayerMetadata(new AugmentBboxLayer(bboxCfg), node).apply(inTensor);
+      }
+      // AugmentMask: paired mask augment — reads coin from seedLink registry.
+      if (node.name === "augment_mask_layer") {
+        var maskCfg = {
+          transform: String((node.data && node.data.transform) || "horizontal_flip"),
+          probability: Number((node.data && node.data.probability != null) ? node.data.probability : 0.5),
+          seedLink: String((node.data && node.data.seedLink) || ""),
+          layout: String((node.data && node.data.layout) || "nhwc"),
+          name: _n,
+        };
+        return _applyLayerMetadata(new AugmentMaskLayer(maskCfg), node).apply(inTensor);
+      }
+      // AugmentLabel: paired label augment — passthrough, registers as
+      // a consumer so future label-aware transforms can hook in.
+      if (node.name === "augment_label_layer") {
+        var labelCfg = {
+          seedLink: String((node.data && node.data.seedLink) || ""),
+          name: _n,
+        };
+        return _applyLayerMetadata(new AugmentLabelLayer(labelCfg), node).apply(inTensor);
       }
 
       // PatchEmbed: flattened square image → non-overlapping patch tokens.
