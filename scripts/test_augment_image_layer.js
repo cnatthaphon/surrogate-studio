@@ -119,8 +119,31 @@ var MBC = require(path.join(__dirname, "..", "src/model_builder_core.js"));
   yId.dispose();
   console.log("  -> identity transform is passthrough");
 
-  // ─── Test 5: getConfig round-trip ──────────────────────────────
-  console.log("Test 5: getConfig captures transform/probability/seedLink");
+  // ─── Test 5: non-4D input passthrough (Codex round-1 P1) ──────
+  console.log("Test 5: non-4D input → passthrough (browser/server parity)");
+  var layerFlat = new Layer({ transform: "horizontal_flip", probability: 1.0 });
+  var flat = tf.tensor2d([[1, 2, 3, 4], [5, 6, 7, 8]]);  // [B=2, F=4]
+  var yFlat = layerFlat.apply(flat, { training: true });
+  var fArr = yFlat.arraySync();
+  // If the rank guard is broken, axis -2 = batch axis, so row 0 becomes [5,6,7,8].
+  // With the guard, row 0 stays [1,2,3,4].
+  assertClose("flat[0][0] unchanged", fArr[0][0], 1, 1e-6);
+  assertClose("flat[1][0] unchanged", fArr[1][0], 5, 1e-6);
+  yFlat.dispose();
+  console.log("  -> 2D [batch, features] is passthrough");
+
+  // ─── Test 6: invalid probability clamps to 0 (Codex round-1 P2) ──
+  console.log("Test 6: invalid probability (NaN, negative) clamps to 0");
+  var layerNeg = new Layer({ transform: "horizontal_flip", probability: -0.5 });
+  if (Math.abs(layerNeg.probability - 0) > 1e-9) fail("negative prob did not clamp to 0 (got " + layerNeg.probability + ")");
+  var layerNaN = new Layer({ transform: "horizontal_flip", probability: NaN });
+  if (Math.abs(layerNaN.probability - 0) > 1e-9) fail("NaN prob did not clamp to 0 (got " + layerNaN.probability + ")");
+  var layerOver = new Layer({ transform: "horizontal_flip", probability: 5 });
+  if (Math.abs(layerOver.probability - 1) > 1e-9) fail("p=5 did not clamp to 1 (got " + layerOver.probability + ")");
+  console.log("  -> invalid probabilities clamp to 0; >1 clamps to 1");
+
+  // ─── Test 7: getConfig round-trip ──────────────────────────────
+  console.log("Test 7: getConfig captures transform/probability/seedLink");
   var layerCfg = new Layer({ transform: "horizontal_flip", probability: 0.7, seedLink: "shared_aug_42" });
   var cfg = layerCfg.getConfig();
   if (cfg.transform !== "horizontal_flip") fail("getConfig transform mismatch: " + cfg.transform);
