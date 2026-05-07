@@ -432,12 +432,14 @@
       var seedLink = String((cfg && cfg.seedLink) || "");
       var imageWidth = Math.max(1, Number((cfg && cfg.imageWidth) || 32));
       var imageHeight = Math.max(1, Number((cfg && cfg.imageHeight) || 32));
+      var format = String((cfg && cfg.format) || "x0y0x1y1").toLowerCase();
+      if (format !== "x0y0x1y1" && format !== "xywh") format = "x0y0x1y1";
       var html =
         "<div><div style='font-weight:700'>AugmentBbox</div>" +
-        "<div class='node-summary' style='font-size:11px;color:#94a3b8;'>" + transform + ", p=" + probability + ", " + imageWidth + "×" + imageHeight + (seedLink ? ", link=" + seedLink : "") + "</div></div>";
+        "<div class='node-summary' style='font-size:11px;color:#94a3b8;'>" + transform + ", p=" + probability + ", " + format + ", " + imageWidth + "×" + imageHeight + (seedLink ? ", link=" + seedLink : "") + "</div></div>";
       return editor.addNode(
         "augment_bbox_layer", 1, 1, x, y, "augment_bbox_layer",
-        { transform: transform, probability: probability, seedLink: seedLink, imageWidth: imageWidth, imageHeight: imageHeight },
+        { transform: transform, probability: probability, seedLink: seedLink, imageWidth: imageWidth, imageHeight: imageHeight, format: format },
         html
       );
     }
@@ -1061,6 +1063,10 @@
           { value: "identity", label: "Identity (passthrough)" },
         ] });
         addField({ kind: "number", key: "probability", label: "Probability", value: Number(d.probability != null ? d.probability : 0.5), min: 0, max: 1, step: 0.05 });
+        addField({ kind: "select", key: "format", label: "Bbox format", value: String(d.format || "x0y0x1y1"), options: [
+          { value: "x0y0x1y1", label: "x0,y0,x1,y1 (corners)" },
+          { value: "xywh", label: "x,y,w,h (top-left + size)" },
+        ] });
         addField({ kind: "number", key: "imageWidth", label: "Image width (px)", value: Math.max(1, Number(d.imageWidth || 32)), min: 1, step: 1 });
         addField({ kind: "number", key: "imageHeight", label: "Image height (px)", value: Math.max(1, Number(d.imageHeight || 32)), min: 1, step: 1 });
         addField({ kind: "text", key: "seedLink", label: "Seed link (must match image augment)", value: String(d.seedLink || ""), placeholder: "e.g. aug1" });

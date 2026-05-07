@@ -128,6 +128,26 @@ var MBC = require(path.join(__dirname, "..", "src/model_builder_core.js"));
   console.log("  mask disagreements: " + maskDisagreements + "/100");
   if (maskDisagreements > 0) fail("image+mask disagreed on " + maskDisagreements + " trials");
 
+  // ─── Test 4b: xywh bbox format ──────────────────────────────────
+  console.log("Test 4b: bbox format=\"xywh\" — hflip uses W-x-w, vflip uses H-y-h");
+  var bboxXywh = new BboxLayer({ transform: "horizontal_flip", probability: 1.0, format: "xywh", imageWidth: 100, seedLink: "" });
+  // Original [x=10, y=20, w=15, h=25]: spans x=[10,25] horizontally.
+  // After hflip with W=100: x_new = 100 - 10 - 15 = 75. New box [75, 20, 15, 25].
+  var bx = tf.tensor2d([[10, 20, 15, 25]]);
+  var bxOut = bboxXywh.apply(bx, { training: true });
+  var bxArr = bxOut.arraySync()[0];
+  if (Math.abs(bxArr[0] - 75) > 1e-3) fail("xywh hflip x: got " + bxArr[0] + ", expected 75");
+  if (Math.abs(bxArr[2] - 15) > 1e-3) fail("xywh hflip w (should be unchanged): got " + bxArr[2]);
+  bxOut.dispose();
+  var bboxXywhV = new BboxLayer({ transform: "vertical_flip", probability: 1.0, format: "xywh", imageHeight: 100, seedLink: "" });
+  // After vflip with H=100: y_new = 100 - 20 - 25 = 55. New box [10, 55, 15, 25].
+  var bvOut = bboxXywhV.apply(bx, { training: true });
+  var bvArr = bvOut.arraySync()[0];
+  if (Math.abs(bvArr[1] - 55) > 1e-3) fail("xywh vflip y: got " + bvArr[1] + ", expected 55");
+  if (Math.abs(bvArr[3] - 25) > 1e-3) fail("xywh vflip h: got " + bvArr[3]);
+  bvOut.dispose(); bx.dispose();
+  console.log("  -> xywh format flips correctly without swap-of-dims");
+
   // ─── Test 5: label is passthrough ────────────────────────────────
   console.log("Test 5: label → passthrough always");
   var label = new LabelLayer({ seedLink: "aug1" });
