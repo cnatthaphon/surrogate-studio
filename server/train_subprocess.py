@@ -1207,6 +1207,26 @@ def build_model_from_graph(graph, feature_size, target_size, num_classes=0):
                     scale = float(c.get("scale", 0.1))
                     setattr(self, f"noise_scale_{nid}", scale)
                     dim_map[nid] = in_dim
+                elif t == "augment_image":
+                    # Image augmentation (training only): config-driven
+                    # geometric transform; identity at eval. Mirrors
+                    # AugmentImageLayer in src/model_builder_core.js so
+                    # browser-trained and server-trained models converge
+                    # to the same training distribution.
+                    transform = str(c.get("transform", "horizontal_flip")).lower()
+                    p = c.get("probability", 0.5)
+                    try:
+                        p = float(p)
+                    except (TypeError, ValueError):
+                        p = 0.5
+                    if not (p == p) or p < 0:  # NaN-safe
+                        p = 0.0
+                    if p > 1:
+                        p = 1.0
+                    setattr(self, f"aug_transform_{nid}", transform)
+                    setattr(self, f"aug_probability_{nid}", p)
+                    setattr(self, f"aug_seedlink_{nid}", str(c.get("seedLink", "")))
+                    dim_map[nid] = in_dim
                 elif t == "patch_embed":
                     ps = int(c.get("patchSize", 7))
                     ed = int(c.get("embedDim", 64))
@@ -1664,6 +1684,33 @@ def build_model_from_graph(graph, feature_size, target_size, num_classes=0):
                     if self.training:
                         tensors[nid] = inp + torch.randn_like(inp) * scale
                     else:
+                        tensors[nid] = inp
+                elif t == "augment_image":
+                    # Eval mode: identity passthrough.
+                    if not self.training:
+                        tensors[nid] = inp
+                        continue
+                    transform = getattr(self, f"aug_transform_{nid}", "horizontal_flip")
+                    prob = float(getattr(self, f"aug_probability_{nid}", 0.5))
+                    if transform == "identity" or prob <= 0.0 or inp.dim() != 4:
+                        # Identity transform, p=0, or non-4D input → passthrough.
+                        # Non-4D guard prevents misapplying flips to flat
+                        # vectors; image augments expect [B, H, W, C].
+                        tensors[nid] = inp
+                    elif transform == "horizontal_flip":
+                        # Whole-batch coin flip at the configured probability,
+                        # matching AugmentImageLayer (Keras RandomFlip
+                        # semantics). NHWC layout (W axis = 2) — patch_embed
+                        # confirms this codebase carries 4D image tensors as
+                        # NHWC and permutes to NCHW only when conv'ing.
+                        if torch.rand(()).item() < prob:
+                            tensors[nid] = torch.flip(inp, dims=[2])
+                        else:
+                            tensors[nid] = inp
+                    else:
+                        # Unknown transform: passthrough rather than crash.
+                        # Editor validation should catch typos before
+                        # graph reaches the trainer.
                         tensors[nid] = inp
                 elif t == "patch_embed":
                     img_size = getattr(self, f"pe_img_size_{nid}")
