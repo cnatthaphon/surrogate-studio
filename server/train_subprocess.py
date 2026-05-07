@@ -1875,7 +1875,26 @@ def build_model_from_graph(graph, feature_size, target_size, num_classes=0):
                     if transform not in ("horizontal_flip", "vertical_flip"):
                         tensors[nid] = inp
                         continue
+                    # Same NCHW auto-detect as augment_image (Codex
+                    # round-2 P1: "Mirror augment_image layout override
+                    # in augment_mask"). Otherwise paired image+mask
+                    # diverge after a `reshape → augment_image
+                    # → augment_mask` chain on server, where the image
+                    # gets axis -1 (after override) but mask gets axis
+                    # -2 (no override).
                     layout = getattr(self, f"aug_layout_{nid}", "nhwc")
+                    if layout == "nhwc":
+                        ch_axis_1 = inp.shape[1]
+                        last_axis = inp.shape[-1]
+                        if ch_axis_1 in (1, 2, 3, 4) and last_axis > 8:
+                            if not getattr(self, f"_aug_layout_warned_{nid}", False):
+                                sys.stderr.write(
+                                    f"[augment_mask] node {nid}: layout=nhwc "
+                                    f"but input shape {tuple(inp.shape)} looks NCHW; "
+                                    f"auto-overriding to nchw.\n"
+                                )
+                                setattr(self, f"_aug_layout_warned_{nid}", True)
+                            layout = "nchw"
                     if layout == "nchw":
                         flip_axis = -1 if transform == "horizontal_flip" else -2
                     else:
