@@ -182,17 +182,35 @@ def load_weights_into_model(model: Any, config: Any) -> bool:
     # would put the LSTM's [4*H] bias ahead of the GRU's bias and the
     # GRU branch would consume the LSTM shape, mis-classify the
     # checkpoint as legacy, and deserialize with wrong gate semantics.
+    # Compare by the suffix after any "tfjs_" prefix and any "<layer>/"
+    # path so the matcher accepts every naming convention this codebase
+    # produces:
+    #   server-emit:    tfjs_kernel / tfjs_recurrent_kernel / tfjs_bias
+    #   raw PyTorch:    kernel      / recurrent_kernel      / bias
+    #   browser-emit:   n2/kernel   / n2/recurrent_kernel   / n2/bias
+    # Earlier this matcher only knew the first two; browser-trained GRU
+    # checkpoints (n*/...) silently fell through, the GRU branch saw no
+    # bias shape, defaulted to legacy [3*H], read 3*H bytes instead of
+    # 6*H, and the offset shift corrupted every following weight.
+    def _suffix(name: str) -> str:
+        s = str(name or "")
+        if s.startswith("tfjs_"):
+            s = s[5:]
+        if "/" in s:
+            s = s.split("/")[-1]
+        return s
+
     gru_bias_shapes = []
     spec_list = list(extract_weight_specs(config))
     for j in range(len(spec_list) - 2):
         s0 = spec_list[j] or {}
         s1 = spec_list[j + 1] or {}
         s2 = spec_list[j + 2] or {}
-        if str(s0.get("name") or "") not in ("tfjs_kernel", "kernel"):
+        if _suffix(s0.get("name")) != "kernel":
             continue
-        if str(s1.get("name") or "") not in ("tfjs_recurrent_kernel", "recurrent_kernel"):
+        if _suffix(s1.get("name")) != "recurrent_kernel":
             continue
-        if str(s2.get("name") or "") not in ("tfjs_bias", "bias"):
+        if _suffix(s2.get("name")) != "bias":
             continue
         rec_shape = list(s1.get("shape") or [])
         if len(rec_shape) != 2 or rec_shape[0] <= 0:
