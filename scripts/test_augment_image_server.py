@@ -24,16 +24,19 @@ REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "server"))
 
 
-def _run_augment(inp, transform="horizontal_flip", probability=1.0, training=True):
+def _run_augment(inp, transform="horizontal_flip", probability=1.0, training=True, layout="nhwc"):
     """Replicate the train_subprocess augment_image forward branch in
-    isolation so we can assert behavior without spinning up the full
-    DAG construction pipeline."""
+    isolation. Layout is explicit config (nhwc default) — see comment
+    in train_subprocess.py for why heuristics are unsafe."""
     if not training:
         return inp
     if transform == "identity" or probability <= 0.0 or inp.dim() != 4:
         return inp
     if transform in ("horizontal_flip", "vertical_flip"):
-        flip_axis = 2 if transform == "horizontal_flip" else 1
+        if layout == "nchw":
+            flip_axis = -1 if transform == "horizontal_flip" else -2
+        else:
+            flip_axis = -2 if transform == "horizontal_flip" else -3
         if torch.rand(()).item() < probability:
             return torch.flip(inp, dims=[flip_axis])
         return inp
@@ -91,6 +94,22 @@ for trial in range(5):
     if not assert_close(f"vflip trial {trial} H[0][0][0]", y[0, 0, 0, 0], 7.0): ok = False
     if not assert_close(f"vflip trial {trial} H[1][0][0]", y[0, 1, 0, 0], 1.0): ok = False
 print("  -> vertical_flip reverses the H axis (NHWC axis 1)")
+
+print("Test 4c: NCHW layout=\"nchw\" → flips W axis -1 (Codex round-2 P1)")
+# NCHW [B=1, C=2, H=2, W=3] with explicit layout="nchw"
+x_nchw = torch.tensor([[
+    [[1.0, 3.0, 5.0],
+     [7.0, 9.0, 11.0]],
+    [[2.0, 4.0, 6.0],
+     [8.0, 10.0, 12.0]],
+]])
+y_nchw_h = _run_augment(x_nchw, "horizontal_flip", 1.0, training=True, layout="nchw")
+if not assert_close("NCHW hflip C=0 H=0 W[0]", y_nchw_h[0, 0, 0, 0], 5.0): ok = False
+if not assert_close("NCHW hflip C=0 H=0 W[2]", y_nchw_h[0, 0, 0, 2], 1.0): ok = False
+y_nchw_v = _run_augment(x_nchw, "vertical_flip", 1.0, training=True, layout="nchw")
+if not assert_close("NCHW vflip C=0 H=0", y_nchw_v[0, 0, 0, 0], 7.0): ok = False
+if not assert_close("NCHW vflip C=0 H=1", y_nchw_v[0, 0, 1, 0], 1.0): ok = False
+print("  -> layout=nchw selects axis -1 for hflip, -2 for vflip")
 
 print("Test 5: non-4D input → passthrough (safety guard)")
 flat = torch.tensor([1.0, 2.0, 3.0, 4.0])

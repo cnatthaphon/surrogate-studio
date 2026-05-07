@@ -65,7 +65,7 @@
     return [
       _paletteItem("addImageSourceBtn", "image_source", "ImageSource", "Feature Nodes", { sourceKey: "pixel_values", featureSize: 784, imageShape: [28, 28, 1], imageHeight: 28, imageWidth: 28, imageChannels: 1 }),
       _paletteItem("addScenarioBtn", "onehot", "OneHot", "Feature Nodes", { oneHotKey: "label" }),
-      _paletteItem("addAugmentImageBtn", "augment_image", "AugmentImage", "Augment", { transform: "horizontal_flip", probability: 0.5, seedLink: "" }),
+      _paletteItem("addAugmentImageBtn", "augment_image", "AugmentImage", "Augment", { transform: "horizontal_flip", probability: 0.5, seedLink: "", layout: "nhwc" }),
       _paletteItem("addInputBtn", "input", "Input", "NN", { mode: "flat" }),
       _paletteItem("addDenseBtn", "dense", "Dense", "NN", { units: 32, activation: "relu" }),
       _paletteItem("addConv1dBtn", "conv1d", "Conv1D", "NN", { filters: 32, kernelSize: 3, stride: 1, activation: "relu" }),

@@ -928,6 +928,14 @@
           if (p > 1) p = 1;
           this.probability = p;
           this.seedLink = String((config && config.seedLink) || "");
+          // Layout: explicit "nhwc" (default) or "nchw". Default matches
+          // the typical image_source dataloader output and TF.js's
+          // default Conv2D format. Server-side picks the same axis based
+          // on the same config; an out-of-band heuristic isn't safe when
+          // small H/W collide with channel counts.
+          var lay = String((config && config.layout) || "nhwc").toLowerCase();
+          if (lay !== "nhwc" && lay !== "nchw") lay = "nhwc";
+          this.layout = lay;
         }
         build(inputShape) {
           // No trainable weights — augment layers are stateless transforms.
@@ -962,11 +970,15 @@
             // semantics. A paired bbox/mask augment applies the same
             // flip downstream by reading the same seedLink RNG.
             //
-            // Axis selection by transform name: NHWC means
-            //   horizontal_flip → reverse W (axis -2, the second-to-last)
-            //   vertical_flip   → reverse H (axis -3, the third-to-last)
-            // Both keep [B, H, W, C] rank intact.
-            var flipAxis = (this.transform === "horizontal_flip") ? -2 : -3;
+            // Axis depends on layout config:
+            //   NHWC [B, H, W, C]: hflip → -2 (W),  vflip → -3 (H)
+            //   NCHW [B, C, H, W]: hflip → -1 (W),  vflip → -2 (H)
+            var flipAxis;
+            if (this.layout === "nchw") {
+              flipAxis = (this.transform === "horizontal_flip") ? -1 : -2;
+            } else {
+              flipAxis = (this.transform === "horizontal_flip") ? -2 : -3;
+            }
             var coin = tf.randomUniform([], 0, 1);
             // Precompute both branches; select via mask. tf.where can't
             // pick between two tensors at runtime via a scalar bool
@@ -987,6 +999,7 @@
           cfg.transform = this.transform;
           cfg.probability = this.probability;
           cfg.seedLink = this.seedLink;
+          cfg.layout = this.layout;
           return cfg;
         }
       }
@@ -1298,6 +1311,7 @@
           transform: String((node.data && node.data.transform) || "horizontal_flip"),
           probability: Number((node.data && node.data.probability != null) ? node.data.probability : 0.5),
           seedLink: String((node.data && node.data.seedLink) || ""),
+          layout: String((node.data && node.data.layout) || "nhwc"),
           name: _n,
         };
         return _applyLayerMetadata(new AugmentImageLayer(augCfg), node).apply(inTensor);

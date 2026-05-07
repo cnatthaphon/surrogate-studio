@@ -119,22 +119,43 @@ var MBC = require(path.join(__dirname, "..", "src/model_builder_core.js"));
   yId.dispose();
   console.log("  -> identity transform is passthrough");
 
-  // ─── Test 4b: vertical_flip — reverses H axis ──────────────────
-  console.log("Test 4b: training=true, transform=vertical_flip, p=1.0 → flips H axis");
-  var layerVF = new Layer({ transform: "vertical_flip", probability: 1.0 });
-  // Original [B=1, H=2, W=3, C=2]:
-  //   H=0: [[1,2], [3,4], [5,6]]
-  //   H=1: [[7,8], [9,10], [11,12]]
-  // After vertical_flip, H rows swap.
+  // ─── Test 4b: vertical_flip on NHWC — reverses H (axis -3) ────
+  console.log("Test 4b: NHWC vertical_flip, p=1.0 → flips H axis (-3)");
+  var layerVF = new Layer({ transform: "vertical_flip", probability: 1.0, layout: "nhwc" });
   for (var trialV = 0; trialV < 5; trialV++) {
     var yV = layerVF.apply(x, { training: true });
     var arrV = yV.arraySync()[0];
-    // After H-axis flip: H=0 should be the original H=1.
     assertClose("vflip trial " + trialV + " H[0][0][0]", arrV[0][0][0], 7, 1e-6);
     assertClose("vflip trial " + trialV + " H[1][0][0]", arrV[1][0][0], 1, 1e-6);
     yV.dispose();
   }
-  console.log("  -> vertical_flip reverses the H axis (NHWC axis -3)");
+  console.log("  -> NHWC vertical_flip reverses axis -3");
+
+  // ─── Test 4c: NCHW layout="nchw" → flips axis -1 / -2 ──────────
+  console.log("Test 4c: layout=\"nchw\" → flips axis -1 (hflip), -2 (vflip)");
+  // NCHW [B=1, C=2, H=2, W=3]:
+  //   C=0: [[1,3,5], [7,9,11]]
+  //   C=1: [[2,4,6], [8,10,12]]
+  var xNchw = tf.tensor4d([
+    [[[1, 3, 5], [7, 9, 11]],   // channel 0
+     [[2, 4, 6], [8, 10, 12]]]  // channel 1
+  ]);
+  var layerHFNchw = new Layer({ transform: "horizontal_flip", probability: 1.0, layout: "nchw" });
+  var yHN = layerHFNchw.apply(xNchw, { training: true });
+  var arrHN = yHN.arraySync()[0];
+  // NCHW hflip: axis -1 (W) reversed. C=0 H=0 was [1,3,5] → [5,3,1].
+  assertClose("NCHW hflip C=0 H=0 W[0]", arrHN[0][0][0], 5, 1e-6);
+  assertClose("NCHW hflip C=0 H=0 W[2]", arrHN[0][0][2], 1, 1e-6);
+  yHN.dispose();
+  var layerVFNchw = new Layer({ transform: "vertical_flip", probability: 1.0, layout: "nchw" });
+  var yVN = layerVFNchw.apply(xNchw, { training: true });
+  var arrVN = yVN.arraySync()[0];
+  // NCHW vflip: axis -2 (H) reversed. C=0 H=0 was [1,3,5], H=1 was [7,9,11] → swap.
+  assertClose("NCHW vflip C=0 H=0", arrVN[0][0][0], 7, 1e-6);
+  assertClose("NCHW vflip C=0 H=1", arrVN[0][1][0], 1, 1e-6);
+  yVN.dispose();
+  xNchw.dispose();
+  console.log("  -> layout=nchw selects correct axis for both flips");
 
   // ─── Test 5: non-4D input passthrough (Codex round-1 P1) ──────
   console.log("Test 5: non-4D input → passthrough (browser/server parity)");
@@ -160,13 +181,14 @@ var MBC = require(path.join(__dirname, "..", "src/model_builder_core.js"));
   console.log("  -> invalid probabilities clamp to 0; >1 clamps to 1");
 
   // ─── Test 7: getConfig round-trip ──────────────────────────────
-  console.log("Test 7: getConfig captures transform/probability/seedLink");
-  var layerCfg = new Layer({ transform: "horizontal_flip", probability: 0.7, seedLink: "shared_aug_42" });
+  console.log("Test 7: getConfig captures transform/probability/seedLink/layout");
+  var layerCfg = new Layer({ transform: "horizontal_flip", probability: 0.7, seedLink: "shared_aug_42", layout: "nchw" });
   var cfg = layerCfg.getConfig();
   if (cfg.transform !== "horizontal_flip") fail("getConfig transform mismatch: " + cfg.transform);
   if (Math.abs(cfg.probability - 0.7) > 1e-6) fail("getConfig probability mismatch: " + cfg.probability);
   if (cfg.seedLink !== "shared_aug_42") fail("getConfig seedLink mismatch: " + cfg.seedLink);
-  console.log("  -> config round-trips: " + JSON.stringify({ transform: cfg.transform, probability: cfg.probability, seedLink: cfg.seedLink }));
+  if (cfg.layout !== "nchw") fail("getConfig layout mismatch: " + cfg.layout);
+  console.log("  -> config round-trips: " + JSON.stringify({ transform: cfg.transform, probability: cfg.probability, seedLink: cfg.seedLink, layout: cfg.layout }));
 
   if (ok) {
     console.log("\nPASS: AugmentImageLayer behaves correctly (flip/no-flip/eval/identity/graph/getConfig).");
