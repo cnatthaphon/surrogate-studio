@@ -1235,6 +1235,55 @@ def build_model_from_graph(graph, feature_size, target_size, num_classes=0):
                     setattr(self, f"aug_seedlink_{nid}", str(c.get("seedLink", "")))
                     setattr(self, f"aug_layout_{nid}", layout)
                     dim_map[nid] = in_dim
+                elif t == "augment_bbox":
+                    # Paired bbox augment — reads coin from seedLink
+                    # registry (populated by upstream augment_image).
+                    # Mirrors x0/x1 (hflip) or y0/y1 (vflip) using
+                    # configured imageWidth / imageHeight. Eval mode is
+                    # identity passthrough.
+                    transform = str(c.get("transform", "horizontal_flip")).lower()
+                    p = c.get("probability", 0.5)
+                    try:
+                        p = float(p)
+                    except (TypeError, ValueError):
+                        p = 0.0
+                    if not (p == p) or p < 0:
+                        p = 0.0
+                    if p > 1:
+                        p = 1.0
+                    setattr(self, f"aug_transform_{nid}", transform)
+                    setattr(self, f"aug_probability_{nid}", p)
+                    setattr(self, f"aug_seedlink_{nid}", str(c.get("seedLink", "")))
+                    setattr(self, f"aug_imgw_{nid}", float(c.get("imageWidth", 1)))
+                    setattr(self, f"aug_imgh_{nid}", float(c.get("imageHeight", 1)))
+                    setattr(self, f"aug_node_kind_{nid}", "bbox")
+                    dim_map[nid] = in_dim
+                elif t == "augment_mask":
+                    transform = str(c.get("transform", "horizontal_flip")).lower()
+                    p = c.get("probability", 0.5)
+                    try:
+                        p = float(p)
+                    except (TypeError, ValueError):
+                        p = 0.0
+                    if not (p == p) or p < 0:
+                        p = 0.0
+                    if p > 1:
+                        p = 1.0
+                    layout = str(c.get("layout", "nhwc")).lower()
+                    if layout not in ("nhwc", "nchw"):
+                        layout = "nhwc"
+                    setattr(self, f"aug_transform_{nid}", transform)
+                    setattr(self, f"aug_probability_{nid}", p)
+                    setattr(self, f"aug_seedlink_{nid}", str(c.get("seedLink", "")))
+                    setattr(self, f"aug_layout_{nid}", layout)
+                    setattr(self, f"aug_node_kind_{nid}", "mask")
+                    dim_map[nid] = in_dim
+                elif t == "augment_label":
+                    # Pure passthrough — class labels are flip-invariant
+                    # in this codebase's tasks.
+                    setattr(self, f"aug_seedlink_{nid}", str(c.get("seedLink", "")))
+                    setattr(self, f"aug_node_kind_{nid}", "label")
+                    dim_map[nid] = in_dim
                 elif t == "patch_embed":
                     ps = int(c.get("patchSize", 7))
                     ed = int(c.get("embedDim", 64))
@@ -1700,6 +1749,12 @@ def build_model_from_graph(graph, feature_size, target_size, num_classes=0):
                         continue
                     transform = getattr(self, f"aug_transform_{nid}", "horizontal_flip")
                     prob = float(getattr(self, f"aug_probability_{nid}", 0.5))
+                    seedlink = getattr(self, f"aug_seedlink_{nid}", "")
+                    # Initialize per-forward-pass coin registry (cleared
+                    # at start of each forward via _aug_seed_registry
+                    # being reset just before the topological loop).
+                    if not hasattr(self, "_aug_seed_registry"):
+                        self._aug_seed_registry = {}
                     if transform == "identity" or prob <= 0.0 or inp.dim() != 4:
                         # Identity transform, p=0, or non-4D input → passthrough.
                         # Non-4D guard prevents misapplying flips to flat
@@ -1716,25 +1771,94 @@ def build_model_from_graph(graph, feature_size, target_size, num_classes=0):
                         # genuinely ambiguous. Explicit nhwc/nchw avoids
                         # silent corruption when augment_image is wired
                         # after Conv2d (which emits NCHW in PyTorch).
-                        # Default "nhwc" matches the typical image_source
-                        # dataloader output and the JS-side TF.js
-                        # convention.
                         layout = getattr(self, f"aug_layout_{nid}", "nhwc")
                         if layout == "nchw":
-                            # NCHW [B, C, H, W]: H = -2, W = -1
                             flip_axis = -1 if transform == "horizontal_flip" else -2
                         else:
-                            # NHWC [B, H, W, C]: H = -3, W = -2
                             flip_axis = -2 if transform == "horizontal_flip" else -3
-                        if torch.rand(()).item() < prob:
+                        # Roll a coin; publish to the seedLink registry
+                        # so paired bbox/mask layers downstream make the
+                        # same flip decision. Topological order in the
+                        # node loop guarantees augment_image runs before
+                        # paired augments within a single forward pass.
+                        coin = float(torch.rand(()).item())
+                        if seedlink:
+                            self._aug_seed_registry[seedlink] = coin
+                        if coin < prob:
                             tensors[nid] = torch.flip(inp, dims=[flip_axis])
                         else:
                             tensors[nid] = inp
                     else:
-                        # Unknown transform: passthrough rather than crash.
-                        # Editor validation should catch typos before
-                        # graph reaches the trainer.
                         tensors[nid] = inp
+                elif t == "augment_bbox":
+                    # Paired bbox augment — reads coin from registry.
+                    if not self.training:
+                        tensors[nid] = inp
+                        continue
+                    transform = getattr(self, f"aug_transform_{nid}", "horizontal_flip")
+                    prob = float(getattr(self, f"aug_probability_{nid}", 0.5))
+                    seedlink = getattr(self, f"aug_seedlink_{nid}", "")
+                    if transform == "identity" or prob <= 0.0:
+                        tensors[nid] = inp
+                        continue
+                    # bbox shape: [B, 4] or [B, N, 4] in x0y0x1y1.
+                    if inp.dim() not in (2, 3) or inp.shape[-1] != 4:
+                        tensors[nid] = inp
+                        continue
+                    # Read shared coin (set by upstream augment_image with
+                    # same seedLink); fallback to own RNG if missing.
+                    if not hasattr(self, "_aug_seed_registry"):
+                        self._aug_seed_registry = {}
+                    coin = self._aug_seed_registry.get(seedlink) if seedlink else None
+                    if coin is None:
+                        coin = float(torch.rand(()).item())
+                    if coin >= prob:
+                        tensors[nid] = inp
+                        continue
+                    img_w = float(getattr(self, f"aug_imgw_{nid}", 1.0))
+                    img_h = float(getattr(self, f"aug_imgh_{nid}", 1.0))
+                    # Split last dim into x0,y0,x1,y1.
+                    x0, y0, x1, y1 = inp[..., 0], inp[..., 1], inp[..., 2], inp[..., 3]
+                    if transform == "horizontal_flip":
+                        nx0, nx1 = img_w - x1, img_w - x0
+                        ny0, ny1 = y0, y1
+                    elif transform == "vertical_flip":
+                        nx0, nx1 = x0, x1
+                        ny0, ny1 = img_h - y1, img_h - y0
+                    else:
+                        tensors[nid] = inp
+                        continue
+                    tensors[nid] = torch.stack([nx0, ny0, nx1, ny1], dim=-1)
+                elif t == "augment_mask":
+                    if not self.training:
+                        tensors[nid] = inp
+                        continue
+                    transform = getattr(self, f"aug_transform_{nid}", "horizontal_flip")
+                    prob = float(getattr(self, f"aug_probability_{nid}", 0.5))
+                    seedlink = getattr(self, f"aug_seedlink_{nid}", "")
+                    if transform == "identity" or prob <= 0.0 or inp.dim() != 4:
+                        tensors[nid] = inp
+                        continue
+                    if transform not in ("horizontal_flip", "vertical_flip"):
+                        tensors[nid] = inp
+                        continue
+                    layout = getattr(self, f"aug_layout_{nid}", "nhwc")
+                    if layout == "nchw":
+                        flip_axis = -1 if transform == "horizontal_flip" else -2
+                    else:
+                        flip_axis = -2 if transform == "horizontal_flip" else -3
+                    if not hasattr(self, "_aug_seed_registry"):
+                        self._aug_seed_registry = {}
+                    coin = self._aug_seed_registry.get(seedlink) if seedlink else None
+                    if coin is None:
+                        coin = float(torch.rand(()).item())
+                    if coin < prob:
+                        tensors[nid] = torch.flip(inp, dims=[flip_axis])
+                    else:
+                        tensors[nid] = inp
+                elif t == "augment_label":
+                    # Pure passthrough.
+                    tensors[nid] = inp
                 elif t == "patch_embed":
                     img_size = getattr(self, f"pe_img_size_{nid}")
                     embed_dim = getattr(self, f"pe_embed_dim_{nid}")

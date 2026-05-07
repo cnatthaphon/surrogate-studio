@@ -421,6 +421,55 @@
       );
     }
 
+    function _clampAugProb(raw) {
+      var p = (raw != null) ? Number(raw) : 0.5;
+      return (isFinite(p) && p >= 0) ? Math.min(p, 1) : 0;
+    }
+
+    function addAugmentBboxNode(editor, x, y, cfg) {
+      var transform = String((cfg && cfg.transform) || "horizontal_flip").toLowerCase();
+      var probability = _clampAugProb(cfg && cfg.probability);
+      var seedLink = String((cfg && cfg.seedLink) || "");
+      var imageWidth = Math.max(1, Number((cfg && cfg.imageWidth) || 32));
+      var imageHeight = Math.max(1, Number((cfg && cfg.imageHeight) || 32));
+      var html =
+        "<div><div style='font-weight:700'>AugmentBbox</div>" +
+        "<div class='node-summary' style='font-size:11px;color:#94a3b8;'>" + transform + ", p=" + probability + ", " + imageWidth + "×" + imageHeight + (seedLink ? ", link=" + seedLink : "") + "</div></div>";
+      return editor.addNode(
+        "augment_bbox_layer", 1, 1, x, y, "augment_bbox_layer",
+        { transform: transform, probability: probability, seedLink: seedLink, imageWidth: imageWidth, imageHeight: imageHeight },
+        html
+      );
+    }
+
+    function addAugmentMaskNode(editor, x, y, cfg) {
+      var transform = String((cfg && cfg.transform) || "horizontal_flip").toLowerCase();
+      var probability = _clampAugProb(cfg && cfg.probability);
+      var seedLink = String((cfg && cfg.seedLink) || "");
+      var layout = String((cfg && cfg.layout) || "nhwc").toLowerCase();
+      if (layout !== "nhwc" && layout !== "nchw") layout = "nhwc";
+      var html =
+        "<div><div style='font-weight:700'>AugmentMask</div>" +
+        "<div class='node-summary' style='font-size:11px;color:#94a3b8;'>" + transform + ", p=" + probability + ", " + layout + (seedLink ? ", link=" + seedLink : "") + "</div></div>";
+      return editor.addNode(
+        "augment_mask_layer", 1, 1, x, y, "augment_mask_layer",
+        { transform: transform, probability: probability, seedLink: seedLink, layout: layout },
+        html
+      );
+    }
+
+    function addAugmentLabelNode(editor, x, y, cfg) {
+      var seedLink = String((cfg && cfg.seedLink) || "");
+      var html =
+        "<div><div style='font-weight:700'>AugmentLabel</div>" +
+        "<div class='node-summary' style='font-size:11px;color:#94a3b8;'>passthrough" + (seedLink ? ", link=" + seedLink : "") + "</div></div>";
+      return editor.addNode(
+        "augment_label_layer", 1, 1, x, y, "augment_label_layer",
+        { seedLink: seedLink },
+        html
+      );
+    }
+
     function addTimeEmbedNode(editor, x, y, cfg) {
       var dim = Math.max(1, Number((cfg && cfg.dim) || 64));
       var html =
@@ -627,6 +676,9 @@
         phase_switch: addPhaseSwitchNode,
         noise_injection: addNoiseInjectionNode,
         augment_image: addAugmentImageNode,
+        augment_bbox: addAugmentBboxNode,
+        augment_mask: addAugmentMaskNode,
+        augment_label: addAugmentLabelNode,
         time_embed: addTimeEmbedNode,
         patch_embed: addPatchEmbedNode,
         transformer_block: addTransformerBlockNode,
@@ -999,6 +1051,39 @@
           { value: "nchw", label: "NCHW ([B, C, H, W])" },
         ] });
         addField({ kind: "text", key: "seedLink", label: "Seed link (for paired augments)", value: String(d.seedLink || ""), placeholder: "e.g. aug1 (links image with bbox/mask/label)" });
+        return spec;
+      }
+      // --- AugmentBbox node ---
+      if (node.name === "augment_bbox_layer") {
+        addField({ kind: "select", key: "transform", label: "Transform", value: String(d.transform || "horizontal_flip"), options: [
+          { value: "horizontal_flip", label: "Horizontal flip (mirror x)" },
+          { value: "vertical_flip", label: "Vertical flip (mirror y)" },
+          { value: "identity", label: "Identity (passthrough)" },
+        ] });
+        addField({ kind: "number", key: "probability", label: "Probability", value: Number(d.probability != null ? d.probability : 0.5), min: 0, max: 1, step: 0.05 });
+        addField({ kind: "number", key: "imageWidth", label: "Image width (px)", value: Math.max(1, Number(d.imageWidth || 32)), min: 1, step: 1 });
+        addField({ kind: "number", key: "imageHeight", label: "Image height (px)", value: Math.max(1, Number(d.imageHeight || 32)), min: 1, step: 1 });
+        addField({ kind: "text", key: "seedLink", label: "Seed link (must match image augment)", value: String(d.seedLink || ""), placeholder: "e.g. aug1" });
+        return spec;
+      }
+      // --- AugmentMask node ---
+      if (node.name === "augment_mask_layer") {
+        addField({ kind: "select", key: "transform", label: "Transform", value: String(d.transform || "horizontal_flip"), options: [
+          { value: "horizontal_flip", label: "Horizontal flip" },
+          { value: "vertical_flip", label: "Vertical flip" },
+          { value: "identity", label: "Identity (passthrough)" },
+        ] });
+        addField({ kind: "number", key: "probability", label: "Probability", value: Number(d.probability != null ? d.probability : 0.5), min: 0, max: 1, step: 0.05 });
+        addField({ kind: "select", key: "layout", label: "Tensor layout", value: String(d.layout || "nhwc"), options: [
+          { value: "nhwc", label: "NHWC ([B, H, W, C])" },
+          { value: "nchw", label: "NCHW ([B, C, H, W])" },
+        ] });
+        addField({ kind: "text", key: "seedLink", label: "Seed link (must match image augment)", value: String(d.seedLink || ""), placeholder: "e.g. aug1" });
+        return spec;
+      }
+      // --- AugmentLabel node ---
+      if (node.name === "augment_label_layer") {
+        addField({ kind: "text", key: "seedLink", label: "Seed link (passthrough; reserved for paired transforms)", value: String(d.seedLink || ""), placeholder: "e.g. aug1" });
         return spec;
       }
       // --- TimeEmbed node ---
