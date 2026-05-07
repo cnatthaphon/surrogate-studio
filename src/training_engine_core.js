@@ -314,6 +314,25 @@
           randClasses.dispose();
           return oneHot;
         }
+        if (name === "target_source_layer") {
+          // #146: feed the dataset's target tensor to the target_source
+          // node so paired augment_bbox/mask/label downstream can
+          // augment it and the result reaches output_layer.input_2.
+          // For now: feed dataset.yTrain wholesale. Multi-target slicing
+          // by targetKey config is a future enhancement.
+          var ySource = (typeof baseTensor === "object" && baseTensor) ? baseTensor : null;
+          // baseTensor here is the x source. For target_source we need
+          // the y source — pull from the closure's dataset.
+          var rows = null;
+          if (count <= dataset.yTrain.length) rows = dataset.yTrain.slice(0, count);
+          else if (count <= (dataset.yVal || []).length) rows = dataset.yVal.slice(0, count);
+          else if (count <= (dataset.yTest || []).length) rows = dataset.yTest.slice(0, count);
+          if (rows && Array.isArray(rows) && rows.length) {
+            return tf.tensor2d(rows);
+          }
+          // Fallback: zeros (shouldn't happen if dataset is wired correctly).
+          return tf.zeros([count, _inferModelInputDim(idx)]);
+        }
         return baseTensor;
       });
     }
