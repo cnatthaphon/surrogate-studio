@@ -986,6 +986,21 @@
         addField({ kind: "select", key: "schedule", label: "Schedule", value: String(d.schedule || "constant"), options: [{ value: "constant", label: "Constant" }, { value: "linear", label: "Linear" }, { value: "cosine", label: "Cosine" }] });
         return spec;
       }
+      // --- AugmentImage node ---
+      if (node.name === "augment_image_layer") {
+        addField({ kind: "select", key: "transform", label: "Transform", value: String(d.transform || "horizontal_flip"), options: [
+          { value: "horizontal_flip", label: "Horizontal flip" },
+          { value: "vertical_flip", label: "Vertical flip" },
+          { value: "identity", label: "Identity (passthrough)" },
+        ] });
+        addField({ kind: "number", key: "probability", label: "Probability", value: Number(d.probability != null ? d.probability : 0.5), min: 0, max: 1, step: 0.05 });
+        addField({ kind: "select", key: "layout", label: "Tensor layout", value: String(d.layout || "nhwc"), options: [
+          { value: "nhwc", label: "NHWC ([B, H, W, C])" },
+          { value: "nchw", label: "NCHW ([B, C, H, W])" },
+        ] });
+        addField({ kind: "text", key: "seedLink", label: "Seed link (for paired augments)", value: String(d.seedLink || ""), placeholder: "e.g. aug1 (links image with bbox/mask/label)" });
+        return spec;
+      }
       // --- TimeEmbed node ---
       if (node.name === "time_embed_layer") {
         addField({ kind: "number", key: "dim", label: "Embed dim", value: Math.max(1, Number(d.dim || 64)), min: 1, step: 1 });

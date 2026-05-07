@@ -1,5 +1,5 @@
 // Surrogate Studio - concatenated bundle
-// Generated: 2026-05-07T16:10:06Z
+// Generated: 2026-05-07T16:38:04Z
 // Source files: 58
 
 
@@ -15275,6 +15275,21 @@
       if (node.name === "noise_injection_layer") {
         addField({ kind: "number", key: "scale", label: "Noise scale", value: Number(d.scale || 0.1), min: 0, step: 0.01 });
         addField({ kind: "select", key: "schedule", label: "Schedule", value: String(d.schedule || "constant"), options: [{ value: "constant", label: "Constant" }, { value: "linear", label: "Linear" }, { value: "cosine", label: "Cosine" }] });
+        return spec;
+      }
+      // --- AugmentImage node ---
+      if (node.name === "augment_image_layer") {
+        addField({ kind: "select", key: "transform", label: "Transform", value: String(d.transform || "horizontal_flip"), options: [
+          { value: "horizontal_flip", label: "Horizontal flip" },
+          { value: "vertical_flip", label: "Vertical flip" },
+          { value: "identity", label: "Identity (passthrough)" },
+        ] });
+        addField({ kind: "number", key: "probability", label: "Probability", value: Number(d.probability != null ? d.probability : 0.5), min: 0, max: 1, step: 0.05 });
+        addField({ kind: "select", key: "layout", label: "Tensor layout", value: String(d.layout || "nhwc"), options: [
+          { value: "nhwc", label: "NHWC ([B, H, W, C])" },
+          { value: "nchw", label: "NCHW ([B, C, H, W])" },
+        ] });
+        addField({ kind: "text", key: "seedLink", label: "Seed link (for paired augments)", value: String(d.seedLink || ""), placeholder: "e.g. aug1 (links image with bbox/mask/label)" });
         return spec;
       }
       // --- TimeEmbed node ---
