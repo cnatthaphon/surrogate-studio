@@ -1053,8 +1053,12 @@
             return tf.add(tf.mul(mask, flipped), tf.mul(tf.sub(tf.scalar(1), mask), x));
           }
           // Unknown transform: passthrough rather than fail loudly so a
-          // typo doesn't crash training. Editor validation should catch
-          // the typo before the graph reaches the builder.
+          // typo doesn't crash training. Clear seedLink registry so
+          // paired layers don't read a stale prior coin (Codex round-3
+          // P2 for the server side; same fix applied here for parity).
+          // Editor validation should catch the typo before the graph
+          // reaches the builder.
+          _augClearCoin(this.seedLink);
           return x.clone();
         }
         getConfig() {
