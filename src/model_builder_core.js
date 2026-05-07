@@ -763,6 +763,17 @@
         if (n === "glorotnormal" || n === "glorot_normal") return tf.initializers.glorotNormal({});
         return tf.initializers.glorotUniform({});
       }
+      // Accept either an initializer instance (what _assignInitializer
+      // emits via tf.initializers.X()) or a string name; fall back to
+      // the named default. Without this, the layer silently ignored
+      // user-configured kernelInitializer/recurrentInitializer/
+      // biasInitializer in rnnCfg and always rebuilt with the layer's
+      // hardcoded defaults.
+      function _resolveInit(cfgInit, fallbackName) {
+        if (cfgInit && typeof cfgInit.apply === "function") return cfgInit;
+        if (typeof cfgInit === "string" && cfgInit) return _initBy(cfgInit);
+        return _initBy(fallbackName);
+      }
       class GRURALayer extends tf.layers.Layer {
         constructor(config) {
           super(config || {});
@@ -777,9 +788,9 @@
           if (!isFinite(dropRate) || dropRate < 0) dropRate = 0;
           if (dropRate >= 1) dropRate = 0.9999;
           this.dropout = dropRate;
-          this._kernelInit = _initBy("glorotUniform");
-          this._recurrentInit = _initBy("orthogonal");
-          this._biasInit = _initBy("zeros");
+          this._kernelInit = _resolveInit(config && config.kernelInitializer, "glorotUniform");
+          this._recurrentInit = _resolveInit(config && config.recurrentInitializer, "orthogonal");
+          this._biasInit = _resolveInit(config && config.biasInitializer, "zeros");
         }
         build(inputShape) {
           // inputShape is [batch, seq, features] (or [batch, features] for
@@ -798,7 +809,13 @@
           var shape = Array.isArray(inputShape) && Array.isArray(inputShape[0]) ? inputShape[0] : inputShape;
           var batch = shape[0];
           var seq = shape.length === 3 ? shape[1] : null;
-          if (this.returnSequences && seq != null) return [batch, seq, this.units];
+          // returnSequences=true must always preserve the time axis,
+          // even when seq is null (dynamic / unknown timestep length).
+          // Earlier this branch dropped to [batch, units] whenever seq
+          // was null, breaking downstream Layer-shape inference for
+          // any graph where the recurrent layer feeds another sequence
+          // op without a fixed timestep.
+          if (this.returnSequences) return [batch, seq, this.units];
           return [batch, this.units];
         }
         call(inputs, kwargs) {
