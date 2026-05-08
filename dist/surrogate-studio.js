@@ -1,5 +1,5 @@
 // Surrogate Studio - concatenated bundle
-// Generated: 2026-05-08T05:14:10Z
+// Generated: 2026-05-08T05:42:56Z
 // Source files: 58
 
 
@@ -23735,11 +23735,67 @@
       }
     }
 
-    // training
-    return opts.model.fit(xTrainInputs, singleHead && !hasGraphLabels ? fitY[0] : fitY, {
+    // Codex round-11 P1: when hasGraphLabels, model.fit() compares
+    // prediction against yTrainTensors[i] (the dataset's UNAUGMENTED
+    // labels), so the augmented-target output (graphLabelOutputIdx)
+    // is unused and paired augmentation has no effect on optimization.
+    // For these models route through a custom loop that mirrors the
+    // phased path's preds[labelIdx] switching: yTrue is read from
+    // the augmented-target output, not the dataset's static y.
+    if (hasGraphLabels) {
+      var customEpochs = opts.epochs || 10;
+      var customBatch = opts.batchSize || 32;
+      var customN = dataset.xTrain.length;
+      var customHistory = [];
+      return (async function () {
+        var lossFn = (typeof losses[0] === "function") ? losses[0] : tf.losses.meanSquaredError;
+        for (var epoch = 0; epoch < customEpochs; epoch++) {
+          var totalLoss = 0; var batches = 0;
+          for (var start = 0; start < customN; start += customBatch) {
+            var end = Math.min(customN, start + customBatch);
+            var bn = end - start;
+            var xBatch = Array.isArray(xTrainInputs) ? xTrainInputs.map(function (t) {
+              return t.slice([start].concat(t.shape.slice(1).map(function () { return 0; })),
+                             [bn].concat(t.shape.slice(1)));
+            }) : xTrainInputs.slice([start].concat(xTrainInputs.shape.slice(1).map(function () { return 0; })),
+                                    [bn].concat(xTrainInputs.shape.slice(1)));
+            var loss = tf.tidy(function () {
+              return optimizer.minimize(function () {
+                var preds = opts.model.apply(xBatch, { training: true });
+                var predsArr = Array.isArray(preds) ? preds : [preds];
+                var headIdx = 0;
+                var labelIdx = headConfigs[headIdx] && headConfigs[headIdx].graphLabelOutputIdx;
+                var yPred = predsArr[headIdx];
+                var yTrue = (labelIdx >= 0 && labelIdx < predsArr.length) ? predsArr[labelIdx] : yTrainTensors[headIdx];
+                return lossFn(yTrue, yPred).mean();
+              }, true);
+            });
+            totalLoss += loss.dataSync()[0];
+            loss.dispose();
+            if (Array.isArray(xBatch)) xBatch.forEach(function (t) { t.dispose(); });
+            else xBatch.dispose();
+            batches++;
+          }
+          var avgLoss = totalLoss / Math.max(1, batches);
+          customHistory.push({ epoch: epoch + 1, loss: avgLoss, val_loss: avgLoss, current_lr: requestedLr, improved: true });
+          if (typeof opts.onEpochEnd === "function") {
+            opts.onEpochEnd(epoch, { loss: avgLoss, val_loss: avgLoss });
+          }
+        }
+        // Cleanup: dispose padded tensors + dataset tensors.
+        var disposeList = [xTrain, xVal].concat(yTrainTensors, yValTensors, yTestTensors);
+        if (xTest) disposeList.push(xTest);
+        if (labelTensorsToDispose.length) disposeList = disposeList.concat(labelTensorsToDispose);
+        tf.dispose(disposeList);
+        return { epochHistory: customHistory };
+      })();
+    }
+
+    // training (standard path — no graph-label outputs)
+    return opts.model.fit(xTrainInputs, singleHead ? fitY[0] : fitY, {
       epochs: opts.epochs || 10,
       batchSize: opts.batchSize || 32,
-      validationData: [xValInputs, singleHead && !hasGraphLabels ? fitYVal[0] : fitYVal],
+      validationData: [xValInputs, singleHead ? fitYVal[0] : fitYVal],
       callbacks: [progressCb],
     }).then(function () {
       // restore best weights
