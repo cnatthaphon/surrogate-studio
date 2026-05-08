@@ -327,7 +327,15 @@
           // build because val/test sets are usually smaller — data
           // leakage. ySource matches the same split as baseTensor.
           if (ySource && Array.isArray(ySource) && ySource.length >= count) {
-            return tf.tensor2d(ySource.slice(0, count));
+            var slice = ySource.slice(0, count);
+            // Codex round-2 P1: ySource may be a flat array of scalars
+            // (1D regression / class-id targets). tf.tensor2d() throws
+            // unless rows are arrays. Wrap scalar entries as [v] so
+            // shape becomes [count, 1].
+            if (slice.length && !Array.isArray(slice[0]) && (typeof slice[0] === "number")) {
+              slice = slice.map(function (v) { return [v]; });
+            }
+            return tf.tensor2d(slice);
           }
           // Fallback: zeros (caller didn't pass ySource — shouldn't
           // happen for the standard train/val/test paths).
