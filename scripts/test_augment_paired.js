@@ -27,10 +27,14 @@ var MBC = require(path.join(__dirname, "..", "src/model_builder_core.js"));
   // Build a graph that exercises augment_image_layer so the IIFE runs
   // and registers the layer classes. We'll construct paired layers by
   // hand because we want to call .apply() with explicit training=true.
+  // #147 Layer 1: augment_image now hard-validates rank=4. Reshape between
+  // flat input and the augment so the bootstrap graph builds cleanly.
   var bootstrap = { drawflow: { Home: { data: {
     "1": { id:1, name:"input_layer", data:{mode:"flat", featureSize:12, imageShape:[2,3,2]}, class:"input_layer", html:"", typenode:false, inputs:{}, outputs:{output_1:{connections:[{node:"2",input:"input_1"}]}}, pos_x:0, pos_y:0 },
-    "2": { id:2, name:"augment_image_layer", data:{transform:"horizontal_flip", probability:0.5, seedLink:"aug1"}, class:"augment_image_layer", html:"", typenode:false, inputs:{input_1:{connections:[{node:"1",output:"output_1"}]}}, outputs:{output_1:{connections:[{node:"3",input:"input_1"}]}}, pos_x:200, pos_y:0 },
-    "3": { id:3, name:"output_layer", data:{target:"pixel_values", targetType:"pixel_values", loss:"none", units:12}, class:"output_layer", html:"", typenode:false, inputs:{input_1:{connections:[{node:"2",output:"output_1"}]}}, outputs:{}, pos_x:400, pos_y:0 },
+    "2": { id:2, name:"reshape_layer", data:{targetShape:"2,3,2"}, class:"reshape_layer", html:"", typenode:false, inputs:{input_1:{connections:[{node:"1",output:"output_1"}]}}, outputs:{output_1:{connections:[{node:"3",input:"input_1"}]}}, pos_x:100, pos_y:0 },
+    "3": { id:3, name:"augment_image_layer", data:{transform:"horizontal_flip", probability:0.5, seedLink:"aug1"}, class:"augment_image_layer", html:"", typenode:false, inputs:{input_1:{connections:[{node:"2",output:"output_1"}]}}, outputs:{output_1:{connections:[{node:"4",input:"input_1"}]}}, pos_x:200, pos_y:0 },
+    "4": { id:4, name:"flatten_layer", data:{}, class:"flatten_layer", html:"", typenode:false, inputs:{input_1:{connections:[{node:"3",output:"output_1"}]}}, outputs:{output_1:{connections:[{node:"5",input:"input_1"}]}}, pos_x:300, pos_y:0 },
+    "5": { id:5, name:"output_layer", data:{target:"pixel_values", targetType:"pixel_values", loss:"none", units:12}, class:"output_layer", html:"", typenode:false, inputs:{input_1:{connections:[{node:"4",output:"output_1"}]}}, outputs:{}, pos_x:400, pos_y:0 },
   } } } };
   MBC.buildModelFromGraph(tf, bootstrap, {
     mode: "direct", featureSize: 12, windowSize: 1, seqFeatureSize: 12,

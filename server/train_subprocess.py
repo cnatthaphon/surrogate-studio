@@ -1814,9 +1814,21 @@ def build_model_from_graph(graph, feature_size, target_size, num_classes=0):
                             del self._aug_seed_registry[seedlink]
                         tensors[nid] = inp
                         continue
-                    if transform == "identity" or prob <= 0.0 or inp.dim() != 4:
-                        # Identity transform, p=0, or non-4D input → passthrough.
-                        # Clear any prior coin so paired readers fall back.
+                    # #147 Layer 1: rank validation. Identity / p=0 are
+                    # legitimate config-driven passthroughs; non-4D rank is
+                    # a wiring mistake and should fail loud rather than
+                    # silently skip augmentation (which masquerades as
+                    # working training while the model never sees flips).
+                    if inp.dim() != 4:
+                        raise RuntimeError(
+                            f"augment_image (node {nid}) requires a 4D tensor "
+                            f"[B,H,W,C] or [B,C,H,W]; got rank {inp.dim()} "
+                            f"shape {tuple(inp.shape)}. Wire it to an image-shaped "
+                            f"tensor (e.g. image_source -> reshape -> augment_image)."
+                        )
+                    if transform == "identity" or prob <= 0.0:
+                        # Config-driven passthrough — clear any prior coin
+                        # so paired readers fall back to own RNG.
                         if seedlink and seedlink in self._aug_seed_registry:
                             del self._aug_seed_registry[seedlink]
                         tensors[nid] = inp
@@ -1880,11 +1892,17 @@ def build_model_from_graph(graph, feature_size, target_size, num_classes=0):
                     transform = getattr(self, f"aug_transform_{nid}", "horizontal_flip")
                     prob = float(getattr(self, f"aug_probability_{nid}", 0.5))
                     seedlink = getattr(self, f"aug_seedlink_{nid}", "")
-                    if transform == "identity" or prob <= 0.0:
-                        tensors[nid] = inp
-                        continue
-                    # bbox shape: [B, 4] or [B, N, 4] in x0y0x1y1.
+                    # #147 Layer 1: bbox shape signature [B,4] or [B,N,4].
+                    # Wrong shape = wiring mistake → fail loud. Identity /
+                    # p=0 stay as legitimate config-driven passthroughs.
                     if inp.dim() not in (2, 3) or inp.shape[-1] != 4:
+                        raise RuntimeError(
+                            f"augment_bbox (node {nid}) requires a 2D [B,4] or "
+                            f"3D [B,N,4] tensor; got rank {inp.dim()} shape "
+                            f"{tuple(inp.shape)}. Wire it to a bbox tensor "
+                            f"(e.g. target_source(targetKey='bbox') -> augment_bbox)."
+                        )
+                    if transform == "identity" or prob <= 0.0:
                         tensors[nid] = inp
                         continue
                     # Read shared coin from upstream augment_image with
@@ -1939,17 +1957,22 @@ def build_model_from_graph(graph, feature_size, target_size, num_classes=0):
                     transform = getattr(self, f"aug_transform_{nid}", "horizontal_flip")
                     prob = float(getattr(self, f"aug_probability_{nid}", 0.5))
                     seedlink = getattr(self, f"aug_seedlink_{nid}", "")
+                    # #147 Layer 1: mask shape signature 3D [B,H,W] or 4D
+                    # [B,H,W,C]/[B,C,H,W]. Wrong rank = wiring mistake.
+                    if inp.dim() not in (3, 4):
+                        raise RuntimeError(
+                            f"augment_mask (node {nid}) requires a 3D [B,H,W] or "
+                            f"4D mask tensor; got rank {inp.dim()} shape "
+                            f"{tuple(inp.shape)}. Wire it to a mask tensor."
+                        )
                     if transform == "identity" or prob <= 0.0:
                         tensors[nid] = inp
                         continue
                     # Codex round-8 P2: support both rank-3 [B, H, W]
                     # and rank-4 [B, H, W, C] / [B, C, H, W] masks.
                     # 3D promotes to 4D NHWC ([B, H, W, 1]), flips,
-                    # then squeezes back. Other ranks skip.
+                    # then squeezes back.
                     orig_rank = inp.dim()
-                    if orig_rank not in (3, 4):
-                        tensors[nid] = inp
-                        continue
                     if transform not in ("horizontal_flip", "vertical_flip"):
                         tensors[nid] = inp
                         continue

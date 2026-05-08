@@ -36,10 +36,14 @@ var MBC = require(path.join(__dirname, "..", "src/model_builder_core.js"));
   // we look it up via tf.serialization).
   // Build a minimal graph that uses augment_image_layer so the IIFE in
   // model_builder_core runs and registers the class.
+  // #147 Layer 1: augment_image now hard-validates rank=4 at build time, so
+  // we have to wire a reshape between flat input and the augment block.
   var smallImage = { drawflow: { Home: { data: {
     "1": { id:1, name:"input_layer", data:{mode:"image", featureSize:12, imageShape:[2,3,2]}, class:"input_layer", html:"", typenode:false, inputs:{}, outputs:{output_1:{connections:[{node:"2",input:"input_1"}]}}, pos_x:0, pos_y:0 },
-    "2": { id:2, name:"augment_image_layer", data:{transform:"horizontal_flip", probability:1.0, seedLink:""}, class:"augment_image_layer", html:"", typenode:false, inputs:{input_1:{connections:[{node:"1",output:"output_1"}]}}, outputs:{output_1:{connections:[{node:"3",input:"input_1"}]}}, pos_x:200, pos_y:0 },
-    "3": { id:3, name:"output_layer", data:{target:"pixel_values", targetType:"pixel_values", loss:"none", units:12}, class:"output_layer", html:"", typenode:false, inputs:{input_1:{connections:[{node:"2",output:"output_1"}]}}, outputs:{}, pos_x:400, pos_y:0 },
+    "2": { id:2, name:"reshape_layer", data:{targetShape:"2,3,2"}, class:"reshape_layer", html:"", typenode:false, inputs:{input_1:{connections:[{node:"1",output:"output_1"}]}}, outputs:{output_1:{connections:[{node:"3",input:"input_1"}]}}, pos_x:100, pos_y:0 },
+    "3": { id:3, name:"augment_image_layer", data:{transform:"horizontal_flip", probability:1.0, seedLink:""}, class:"augment_image_layer", html:"", typenode:false, inputs:{input_1:{connections:[{node:"2",output:"output_1"}]}}, outputs:{output_1:{connections:[{node:"4",input:"input_1"}]}}, pos_x:200, pos_y:0 },
+    "4": { id:4, name:"flatten_layer", data:{}, class:"flatten_layer", html:"", typenode:false, inputs:{input_1:{connections:[{node:"3",output:"output_1"}]}}, outputs:{output_1:{connections:[{node:"5",input:"input_1"}]}}, pos_x:300, pos_y:0 },
+    "5": { id:5, name:"output_layer", data:{target:"pixel_values", targetType:"pixel_values", loss:"none", units:12}, class:"output_layer", html:"", typenode:false, inputs:{input_1:{connections:[{node:"4",output:"output_1"}]}}, outputs:{}, pos_x:400, pos_y:0 },
   } } } };
   var built = MBC.buildModelFromGraph(tf, smallImage, {
     mode: "direct", featureSize: 12, windowSize: 1, seqFeatureSize: 12,
@@ -157,18 +161,24 @@ var MBC = require(path.join(__dirname, "..", "src/model_builder_core.js"));
   xNchw.dispose();
   console.log("  -> layout=nchw selects correct axis for both flips");
 
-  // ─── Test 5: non-4D input passthrough (Codex round-1 P1) ──────
-  console.log("Test 5: non-4D input → passthrough (browser/server parity)");
+  // ─── Test 5: non-4D input must throw (#147 Layer 1 hard validation) ─
+  // Previously this silently passed through. The silent path hid wiring
+  // bugs (image-augment block wired to a flat dense output would never
+  // augment, and training looked healthy). Now build/apply throws.
+  console.log("Test 5: non-4D input → throws at apply time (was: silent passthrough)");
   var layerFlat = new Layer({ transform: "horizontal_flip", probability: 1.0 });
   var flat = tf.tensor2d([[1, 2, 3, 4], [5, 6, 7, 8]]);  // [B=2, F=4]
-  var yFlat = layerFlat.apply(flat, { training: true });
-  var fArr = yFlat.arraySync();
-  // If the rank guard is broken, axis -2 = batch axis, so row 0 becomes [5,6,7,8].
-  // With the guard, row 0 stays [1,2,3,4].
-  assertClose("flat[0][0] unchanged", fArr[0][0], 1, 1e-6);
-  assertClose("flat[1][0] unchanged", fArr[1][0], 5, 1e-6);
-  yFlat.dispose();
-  console.log("  -> 2D [batch, features] is passthrough");
+  var threw = false;
+  try {
+    layerFlat.apply(flat, { training: true });
+  } catch (e) {
+    threw = true;
+    var m = String(e && e.message || e);
+    if (!/4D|rank/i.test(m)) fail("threw, but message lacks 4D/rank hint: " + m.slice(0, 200));
+  }
+  if (!threw) fail("non-4D input should throw, not passthrough");
+  flat.dispose();
+  console.log("  -> 2D [batch, features] correctly rejected with rank/4D error");
 
   // ─── Test 6: invalid probability clamps to 0 (Codex round-1 P2) ──
   console.log("Test 6: invalid probability (NaN, negative) clamps to 0");
