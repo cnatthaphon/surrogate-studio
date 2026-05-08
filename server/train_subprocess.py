@@ -1235,7 +1235,7 @@ def build_model_from_graph(graph, feature_size, target_size, num_classes=0):
                     if p > 1:
                         p = 1.0
                     layout = str(c.get("layout", "nhwc")).lower()
-                    if layout not in ("nhwc", "nchw"):
+                    if layout not in ("nhwc", "nchw", "auto"):
                         layout = "nhwc"
                     setattr(self, f"aug_transform_{nid}", transform)
                     setattr(self, f"aug_probability_{nid}", p)
@@ -1281,7 +1281,7 @@ def build_model_from_graph(graph, feature_size, target_size, num_classes=0):
                     if p > 1:
                         p = 1.0
                     layout = str(c.get("layout", "nhwc")).lower()
-                    if layout not in ("nhwc", "nchw"):
+                    if layout not in ("nhwc", "nchw", "auto"):
                         layout = "nhwc"
                     setattr(self, f"aug_transform_{nid}", transform)
                     setattr(self, f"aug_probability_{nid}", p)
