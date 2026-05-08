@@ -827,6 +827,13 @@
           _inputBatchMeta[idx] = { kind: "class_embed", dim: _inferSampleZDim(idx) };
           return null;
         }
+        if (inp.name === "target_source_layer") {
+          // Codex round-10 P2: phased path now feeds target_source from
+          // dataset.yTrain like trainModel does, so paired augment
+          // pipelines work in phased schedules too.
+          _inputBatchMeta[idx] = { kind: "target_source" };
+          return null;
+        }
         _inputBatchMeta[idx] = { kind: "dataset" };
         return _sharedTrainInput;
       });
@@ -995,6 +1002,20 @@
             var oh = tf.oneHot(rc, meta.dim).cast("float32");
             rc.dispose();
             return oh;
+          }
+          if (meta && meta.kind === "target_source") {
+            // Codex round-10 P2: same dataset.yTrain feed as trainModel.
+            if (dataset.yTrain && Array.isArray(dataset.yTrain) && dataset.yTrain.length >= end) {
+              var ySlice = dataset.yTrain.slice(start, end);
+              if (ySlice.length && (typeof ySlice[0] === "number")) {
+                ySlice = ySlice.map(function (v) { return [v]; });
+              }
+              return tf.tensor(ySlice);
+            }
+            // Fallback: zeros (matches trainModel's safety path).
+            var oShape = (model && model.inputs && model.inputs[xi] && model.inputs[xi].shape) || [];
+            var dim = Math.max(1, Number(oShape[oShape.length - 1] || 1));
+            return tf.zeros([batchN, dim]);
           }
           return _sliceOrGather(x);
         }) : _sliceOrGather(xFull);
