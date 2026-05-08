@@ -81,11 +81,13 @@ var MBC = require(path.join(__dirname, "..", "src/model_builder_core.js"));
   // With p=0.5, expect ~100 flips. Allow wide tolerance (50-150) since RNG is real.
   if (flipCount < 50 || flipCount > 150) fail("flip count " + flipCount + " is suspiciously skewed; RNG may be broken");
 
-  // ─── Test 2: bbox with no shared coin (no upstream image) — falls back to own RNG ───
-  console.log("Test 2: bbox alone (no upstream image with same seedLink) — fallback to own coin");
-  var bboxAlone = new BboxLayer({ transform: "horizontal_flip", probability: 0.5, seedLink: "lonely_link", imageWidth: 100 });
-  // Read registry directly to confirm no entry exists for this seedLink yet.
-  // Just exercise the fallback path — should not throw.
+  // ─── Test 2: bbox with empty seedLink (genuinely unpaired) — own RNG ───
+  // Codex round-6 P1: when seedLink is set but no coin published,
+  // the layer now SKIPS rather than falling back to own RNG. The
+  // own-RNG path is reserved for empty seedLink (deliberately
+  // unpaired use). Test reflects new semantics.
+  console.log("Test 2: bbox with empty seedLink (unpaired) — own RNG");
+  var bboxAlone = new BboxLayer({ transform: "horizontal_flip", probability: 0.5, seedLink: "", imageWidth: 100 });
   var b2 = tf.tensor2d([[10, 20, 30, 40]]);
   var loneCount = 0;
   for (var t2 = 0; t2 < 100; t2++) {
@@ -95,7 +97,17 @@ var MBC = require(path.join(__dirname, "..", "src/model_builder_core.js"));
     y.dispose();
   }
   console.log("  flipped " + loneCount + "/100 with own RNG (expect ~50)");
-  if (loneCount < 25 || loneCount > 75) fail("lone bbox flip count " + loneCount + " is suspicious");
+  if (loneCount < 25 || loneCount > 75) fail("unpaired bbox flip count " + loneCount + " is suspicious");
+
+  // ─── Test 2b: bbox with seedLink but no upstream — skips ─────────
+  console.log("Test 2b: bbox with seedLink set but no upstream image — skips (no desync)");
+  var bboxOrphan = new BboxLayer({ transform: "horizontal_flip", probability: 1.0, seedLink: "no_upstream", imageWidth: 100 });
+  var b2b = tf.tensor2d([[10, 20, 30, 40]]);
+  var yOrphan = bboxOrphan.apply(b2b, { training: true });
+  var arrOrphan = yOrphan.arraySync()[0];
+  if (Math.abs(arrOrphan[0] - 10) > 1e-6) fail("orphaned bbox should pass through unchanged (got " + arrOrphan[0] + ")");
+  yOrphan.dispose(); b2b.dispose();
+  console.log("  -> orphan bbox passes through (skip-to-avoid-desync)");
 
   // ─── Test 3: eval mode — bbox passthrough ───────────────────────
   console.log("Test 3: bbox eval mode → passthrough");

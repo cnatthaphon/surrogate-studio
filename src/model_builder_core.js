@@ -1144,9 +1144,19 @@
             var rank = x.shape.length;
             if (rank !== 2 && rank !== 3) return x.clone();
             if (x.shape[rank - 1] !== 4) return x.clone();
-            // Read shared coin if the image augment published one for
-            // this seedLink; otherwise roll our own (unsynced fallback).
+            // Codex round-6 P1: when seedLink is set but no coin
+            // published yet (paired image runs later in topo order, or
+            // doesn't exist), the silent own-RNG fallback hides a
+            // desync bug. Skip the augment instead of fabricating a
+            // coin that won't match the image. Empty seedLink → roll
+            // own (genuinely unpaired).
             var sharedCoin = _augReadCoin(self.seedLink);
+            if (self.seedLink && !sharedCoin) {
+              if (typeof console !== "undefined" && console.warn) {
+                console.warn("[AugmentBboxLayer] seedLink='" + self.seedLink + "' set but no coin published; skipping to avoid desync.");
+              }
+              return x.clone();
+            }
             var coin = sharedCoin ? sharedCoin.clone() : tf.randomUniform([], 0, 1);
             var doFlip = tf.less(coin, tf.scalar(self.probability));
             var maskScalar = tf.cast(doFlip, "float32");
@@ -1261,7 +1271,15 @@
             } else {
               flipAxis = (self.transform === "horizontal_flip") ? -2 : -3;
             }
+            // Same paired-coin discipline as bbox: empty seedLink rolls
+            // own; non-empty without published coin skips to avoid desync.
             var sharedCoin = _augReadCoin(self.seedLink);
+            if (self.seedLink && !sharedCoin) {
+              if (typeof console !== "undefined" && console.warn) {
+                console.warn("[AugmentMaskLayer] seedLink='" + self.seedLink + "' set but no coin published; skipping to avoid desync.");
+              }
+              return (origRank === 3) ? promoted.squeeze([-1]).clone() : promoted.clone();
+            }
             var coin = sharedCoin ? sharedCoin.clone() : tf.randomUniform([], 0, 1);
             var flipped = tf.reverse(promoted, [flipAxis]);
             var doFlip = tf.less(coin, tf.scalar(self.probability));

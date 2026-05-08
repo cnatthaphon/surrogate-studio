@@ -1574,6 +1574,18 @@ def build_model_from_graph(graph, feature_size, target_size, num_classes=0):
                 if t == "input":
                     tensors[nid] = x
                     continue
+                if t == "target_source":
+                    # #146 Codex round-6 P1: feed the dataset target
+                    # tensor (self._runtime_target) as graph data so
+                    # paired augment_bbox/mask/label downstream can
+                    # transform it. If unset (e.g. inference path),
+                    # falls through to feature input as a safe default
+                    # (won't flip if bbox layer's shape guard rejects).
+                    if hasattr(self, "_runtime_target") and self._runtime_target is not None:
+                        tensors[nid] = self._runtime_target
+                    else:
+                        tensors[nid] = x
+                    continue
                 if t == "image_source":
                     tensors[nid] = x
                     continue
@@ -1852,12 +1864,27 @@ def build_model_from_graph(graph, feature_size, target_size, num_classes=0):
                     if inp.dim() not in (2, 3) or inp.shape[-1] != 4:
                         tensors[nid] = inp
                         continue
-                    # Read shared coin (set by upstream augment_image with
-                    # same seedLink); fallback to own RNG if missing.
+                    # Read shared coin from upstream augment_image with
+                    # same seedLink. Codex round-6 P1: if seedlink is set
+                    # but no coin published yet (upstream image augment
+                    # ran later in topo order, or doesn't exist), the
+                    # silent own-RNG fallback hides a desync bug. Now:
+                    # only fall back to own RNG when seedlink is empty
+                    # (genuinely unpaired). Otherwise warn loudly.
                     if not hasattr(self, "_aug_seed_registry"):
                         self._aug_seed_registry = {}
-                    coin = self._aug_seed_registry.get(seedlink) if seedlink else None
-                    if coin is None:
+                    if seedlink:
+                        coin = self._aug_seed_registry.get(seedlink)
+                        if coin is None:
+                            sys.stderr.write(
+                                f"[augment_bbox] node {nid}: seedLink='{seedlink}' "
+                                f"set but no upstream augment_image published a coin "
+                                f"for it in this forward pass. Skipping augmentation "
+                                f"to avoid desync. Check graph topology.\n"
+                            )
+                            tensors[nid] = inp
+                            continue
+                    else:
                         coin = float(torch.rand(()).item())
                     if coin >= prob:
                         tensors[nid] = inp
@@ -1923,8 +1950,17 @@ def build_model_from_graph(graph, feature_size, target_size, num_classes=0):
                         flip_axis = -2 if transform == "horizontal_flip" else -3
                     if not hasattr(self, "_aug_seed_registry"):
                         self._aug_seed_registry = {}
-                    coin = self._aug_seed_registry.get(seedlink) if seedlink else None
-                    if coin is None:
+                    if seedlink:
+                        coin = self._aug_seed_registry.get(seedlink)
+                        if coin is None:
+                            sys.stderr.write(
+                                f"[augment_mask] node {nid}: seedLink='{seedlink}' "
+                                f"set but no upstream augment_image published a coin. "
+                                f"Skipping to avoid desync.\n"
+                            )
+                            tensors[nid] = inp
+                            continue
+                    else:
                         coin = float(torch.rand(()).item())
                     if coin < prob:
                         tensors[nid] = torch.flip(inp, dims=[flip_axis])
