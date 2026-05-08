@@ -627,6 +627,10 @@ def main():
                 # it during forward for training and validation objective
                 # evaluation. Non-VAE graphs leave it at 0.
                 model._kl_total = torch.tensor(0.0, device=device)
+                # #146 Codex round-7 P1: bind the batch target to the
+                # model so target_source forward dispatch can read it.
+                # Falls back to None on inference paths where yb is unset.
+                model._runtime_target = yb if yb is not None else None
                 pred = model(xb)
                 loss = compute_loss(pred, xb, yb, "", lb=lb) + model._kl_total
                 loss.backward()
@@ -673,6 +677,7 @@ def main():
                             model._class_labels = lb
                         step_opt.zero_grad()
                         model._kl_total = torch.tensor(0.0, device=device)
+                        model._runtime_target = yb if yb is not None else None
                         pred = model(xb)
                         loss = compute_loss(pred, xb, yb, phase_name, lb=lb) + model._kl_total
                         if loss.requires_grad:
@@ -724,6 +729,7 @@ def main():
                                 model._class_labels = lb
                             step_opt.zero_grad()
                             model._kl_total = torch.tensor(0.0, device=device)
+                            model._runtime_target = yb if yb is not None else None
                             pred = model(xb)
                             loss = compute_loss(pred, xb, yb, phase_name, lb=lb) + model._kl_total
                             if loss.requires_grad:
@@ -769,6 +775,7 @@ def main():
                     if lb is not None:
                         model._class_labels = lb
                     model._kl_total = torch.tensor(0.0, device=device)
+                    model._runtime_target = yb if yb is not None else None
                     pred = model(xb)
                     loss = compute_loss(pred, xb, yb, "", lb=lb) + model._kl_total
                     val_loss += loss.item()
