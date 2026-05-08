@@ -1248,8 +1248,13 @@
             var x = Array.isArray(inputs) ? inputs[0] : inputs;
             if (!training) return tf.keep(x.clone());
             if (self.transform === "identity") return x.clone();
-            if (x.shape.length !== 4) return x.clone();
+            // Codex round-5 P2: doc claimed 3D + 4D support but code
+            // only flipped 4D. Now: promote 3D [B, H, W] to 4D
+            // [B, H, W, 1], flip, squeeze back. Other ranks pass through.
+            var origRank = x.shape.length;
+            if (origRank !== 3 && origRank !== 4) return x.clone();
             if (self.transform !== "horizontal_flip" && self.transform !== "vertical_flip") return x.clone();
+            var promoted = (origRank === 3) ? tf.expandDims(x, -1) : x;
             var flipAxis;
             if (self.layout === "nchw") {
               flipAxis = (self.transform === "horizontal_flip") ? -1 : -2;
@@ -1258,10 +1263,11 @@
             }
             var sharedCoin = _augReadCoin(self.seedLink);
             var coin = sharedCoin ? sharedCoin.clone() : tf.randomUniform([], 0, 1);
-            var flipped = tf.reverse(x, [flipAxis]);
+            var flipped = tf.reverse(promoted, [flipAxis]);
             var doFlip = tf.less(coin, tf.scalar(self.probability));
             var mask = tf.cast(doFlip, "float32").reshape([1, 1, 1, 1]);
-            return tf.add(tf.mul(mask, flipped), tf.mul(tf.sub(tf.scalar(1), mask), x));
+            var blended = tf.add(tf.mul(mask, flipped), tf.mul(tf.sub(tf.scalar(1), mask), promoted));
+            return (origRank === 3) ? tf.squeeze(blended, [-1]) : blended;
           });
         }
         getConfig() {

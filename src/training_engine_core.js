@@ -421,11 +421,32 @@
     applyGradientClipping(tf, optimizer, gradClipNorm, gradClipValue);
 
     var singleHead = headConfigs.length === 1;
-    opts.model.compile({
+    // Codex round-5 P1: when graph-label outputs exist, model.outputs
+    // is longer than headConfigs. Compile with per-output loss array
+    // and zero loss-weights for the label slots so fit's loss
+    // computation ignores them. The custom training loop reads label
+    // outputs via graphLabelOutputIdx as yTrue (not as predictions
+    // to compare against zero pads).
+    var hasGraphLabelsCompile = headConfigs.some(function (h) { return h && h.graphLabelOutputIdx >= 0; });
+    var compileLoss, compileWeights;
+    if (hasGraphLabelsCompile && opts.model.outputs.length > headConfigs.length) {
+      compileLoss = losses.slice();
+      compileWeights = headConfigs.map(function () { return 1; });
+      for (var pi = headConfigs.length; pi < opts.model.outputs.length; pi++) {
+        compileLoss.push("meanSquaredError");
+        compileWeights.push(0);
+      }
+    } else {
+      compileLoss = singleHead ? losses[0] : losses;
+      compileWeights = null;
+    }
+    var compileCfg = {
       optimizer: optimizer,
-      loss: singleHead ? losses[0] : losses,
-      metrics: singleHead ? ["mae"] : headConfigs.map(function () { return "mae"; }),
-    });
+      loss: compileLoss,
+      metrics: (singleHead && !hasGraphLabelsCompile) ? ["mae"] : headConfigs.map(function () { return "mae"; }),
+    };
+    if (compileWeights) compileCfg.lossWeights = compileWeights;
+    opts.model.compile(compileCfg);
 
     var bestValLoss = Number.POSITIVE_INFINITY;
     var bestEpoch = -1;
