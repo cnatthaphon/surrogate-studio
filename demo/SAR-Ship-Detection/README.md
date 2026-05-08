@@ -76,16 +76,23 @@ The training-time val MAE was much lower (~0.013) because the val split shares i
 
 The third model variant adds horizontal-flip augmentation paired across the image branch and the bounding-box label branch (via `seedLink`), training otherwise identical to model 1 (50 epochs, batch 16, lr=0.001, seed=42, PyTorch CUDA).
 
-| Model (per-coord normalized MAE on test split, from pretrained metadata) | best epoch | val_loss | test MAE |
+| Model (per-coord normalized MAE on test split, from pretrained metadata) | best epoch | best val_loss | test MAE |
 |---|---|---|---|
-| CNN Ship Detector | 21 | 0.0040 | **0.0376** |
-| CNN Detector + Augmentation | 28 | 0.0078 | 0.0509 |
+| CNN Ship Detector | 21 | 0.0040 | 0.0376 |
+| **CNN Detector + Augmentation** | 50 | **0.0027** | **0.0344** |
 
-**Augmentation hurts here, by ~35% on test MAE.** This isn't a pipeline bug — paired flip alignment is verified end-to-end by `scripts/test_sar_ship_aug_demo.js` and `scripts/test_augment_paired_server.py`, and turning aug on extends training from 36 to 43 epochs (so the model genuinely keeps trying to fit). The likely cause is domain physics: SAR ship signatures are not invariant under horizontal flip. Radar geometry encodes look-direction, range walk, and azimuth shift into the pixel pattern, so a horizontally flipped patch is *not* a plausible draw from the same distribution. The augmented model has to learn two non-symmetric mappings at the same parameter count, and degrades.
+**Augmentation helps by ~9% on test MAE and ~33% on val_loss**, and the model trains the full 50 epochs (no early-stop) because val keeps improving — the classic small-data signature where regularization actually had room to help. With 210 training patches, doubling the effective dataset via paired hflip lets the CNN see ships in both image-orientations without needing any real new data.
 
-The takeaway is the same one most augmentation papers underline as a footnote: augmentation only helps when the transform respects the data-generating process. For 64×64 grayscale natural-image patches, hflip is free data; for SAR, it's mislabeled noise. A useful real-world augmentation set for this task would be speckle-noise injection, intensity rescaling, and small rotations within the radar look angle — none of which are bounding-box-paired in the same way.
+#### Bug found while building this demo
 
-The augmentation **blocks** themselves (image, bbox, mask, label, target_source, seedLink RNG) work correctly across browser TF.js, PyTorch CUDA server, and the notebook export — see `scripts/test_target_source_engine_fit.js`, `test_augment_image_server.py`, and `test_server_graphlabel_loss.py` for cross-runtime parity. They're the right tool for tasks where flip-invariance holds (Fashion-MNIST, synthetic detection); for SAR they're the wrong tool, and the demo records that honestly rather than picking the augmentation that happened to win.
+The first round of aug retrains came back *worse* than baseline (test MAE 0.0509, +35%), which seemed wrong for a 210-sample image task where augmentation should be unambiguously useful. Investigation traced it to a silent runtime asymmetry:
+
+- The server's `reshape` block (`train_subprocess.py`) reshapes input as NHWC then permutes to NCHW with `nhwc.permute(0, 3, 1, 2)` — because PyTorch's `Conv2d` expects NCHW.
+- The `augment_image` block reads its `layout` config to decide which axis to flip. The palette default was `"nhwc"`, which on the server gave `flip_axis = -2`. After reshape's silent permute, axis -2 is **H, not W** — so the image was being vertically flipped while the bounding box was horizontally flipped. Every flipped batch (50% of training) trained the model on a 90°-mismatched label.
+
+The fix in this demo: set `layout: "auto"` on the augment_image node. JS-side falls through to "nhwc" (correct, since TF.js reshape doesn't permute), and the PyTorch server's auto-detect picks NCHW from the `[B, 1, 64, 64]` shape. Both runtimes now flip W consistently. `scripts/test_sar_ship_aug_demo.js` and `scripts/test_augment_paired_server.py` cover the alignment; `scripts/test_server_graphlabel_loss.py` covers the loss-routing path.
+
+The augmentation blocks (image, bbox, mask, label, target_source, seedLink RNG) work correctly across browser TF.js, PyTorch CUDA server, and notebook export. The `layout: "auto"` setting is recommended whenever a `reshape` node sits upstream of `augment_image` — the palette will likely default to "auto" once this lesson is folded back into the schema.
 
 ## How to Use
 
