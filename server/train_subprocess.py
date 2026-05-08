@@ -1798,8 +1798,13 @@ def build_model_from_graph(graph, feature_size, target_size, num_classes=0):
                             ch_axis_1 = inp.shape[1]
                             last_axis = inp.shape[-1]
                             # NCHW signature: small channel count at
-                            # axis 1, large H/W at axis -1.
-                            if ch_axis_1 in (1, 2, 3, 4) and last_axis > 8:
+                            # axis 1, large H/W at axis -1. Codex
+                            # round-3 P1: lowered threshold from > 8
+                            # to > 4 so legitimate small images (8x8
+                            # CIFAR patches, etc.) trigger the override
+                            # too. Channel counts are typically 1-4
+                            # so > 4 is sufficient to distinguish.
+                            if ch_axis_1 in (1, 2, 3, 4) and last_axis > 4:
                                 if not getattr(self, f"_aug_layout_warned_{nid}", False):
                                     sys.stderr.write(
                                         f"[augment_image] node {nid}: layout=nhwc "
@@ -1901,7 +1906,9 @@ def build_model_from_graph(graph, feature_size, target_size, num_classes=0):
                     if layout == "nhwc":
                         ch_axis_1 = inp.shape[1]
                         last_axis = inp.shape[-1]
-                        if ch_axis_1 in (1, 2, 3, 4) and last_axis > 8:
+                        # Codex round-3 P1: lowered threshold from > 8
+                        # to > 4 to handle small images correctly.
+                        if ch_axis_1 in (1, 2, 3, 4) and last_axis > 4:
                             if not getattr(self, f"_aug_layout_warned_{nid}", False):
                                 sys.stderr.write(
                                     f"[augment_mask] node {nid}: layout=nhwc "
