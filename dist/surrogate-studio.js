@@ -1,5 +1,5 @@
 // Surrogate Studio - concatenated bundle
-// Generated: 2026-05-08T01:48:19Z
+// Generated: 2026-05-08T02:44:41Z
 // Source files: 58
 
 
@@ -22153,8 +22153,13 @@
             var x = Array.isArray(inputs) ? inputs[0] : inputs;
             if (!training) return tf.keep(x.clone());
             if (self.transform === "identity") return x.clone();
-            if (x.shape.length !== 4) return x.clone();
+            // Codex round-5 P2: doc claimed 3D + 4D support but code
+            // only flipped 4D. Now: promote 3D [B, H, W] to 4D
+            // [B, H, W, 1], flip, squeeze back. Other ranks pass through.
+            var origRank = x.shape.length;
+            if (origRank !== 3 && origRank !== 4) return x.clone();
             if (self.transform !== "horizontal_flip" && self.transform !== "vertical_flip") return x.clone();
+            var promoted = (origRank === 3) ? tf.expandDims(x, -1) : x;
             var flipAxis;
             if (self.layout === "nchw") {
               flipAxis = (self.transform === "horizontal_flip") ? -1 : -2;
@@ -22163,10 +22168,11 @@
             }
             var sharedCoin = _augReadCoin(self.seedLink);
             var coin = sharedCoin ? sharedCoin.clone() : tf.randomUniform([], 0, 1);
-            var flipped = tf.reverse(x, [flipAxis]);
+            var flipped = tf.reverse(promoted, [flipAxis]);
             var doFlip = tf.less(coin, tf.scalar(self.probability));
             var mask = tf.cast(doFlip, "float32").reshape([1, 1, 1, 1]);
-            return tf.add(tf.mul(mask, flipped), tf.mul(tf.sub(tf.scalar(1), mask), x));
+            var blended = tf.add(tf.mul(mask, flipped), tf.mul(tf.sub(tf.scalar(1), mask), promoted));
+            return (origRank === 3) ? tf.squeeze(blended, [-1]) : blended;
           });
         }
         getConfig() {
@@ -23549,11 +23555,32 @@
     applyGradientClipping(tf, optimizer, gradClipNorm, gradClipValue);
 
     var singleHead = headConfigs.length === 1;
-    opts.model.compile({
+    // Codex round-5 P1: when graph-label outputs exist, model.outputs
+    // is longer than headConfigs. Compile with per-output loss array
+    // and zero loss-weights for the label slots so fit's loss
+    // computation ignores them. The custom training loop reads label
+    // outputs via graphLabelOutputIdx as yTrue (not as predictions
+    // to compare against zero pads).
+    var hasGraphLabelsCompile = headConfigs.some(function (h) { return h && h.graphLabelOutputIdx >= 0; });
+    var compileLoss, compileWeights;
+    if (hasGraphLabelsCompile && opts.model.outputs.length > headConfigs.length) {
+      compileLoss = losses.slice();
+      compileWeights = headConfigs.map(function () { return 1; });
+      for (var pi = headConfigs.length; pi < opts.model.outputs.length; pi++) {
+        compileLoss.push("meanSquaredError");
+        compileWeights.push(0);
+      }
+    } else {
+      compileLoss = singleHead ? losses[0] : losses;
+      compileWeights = null;
+    }
+    var compileCfg = {
       optimizer: optimizer,
-      loss: singleHead ? losses[0] : losses,
-      metrics: singleHead ? ["mae"] : headConfigs.map(function () { return "mae"; }),
-    });
+      loss: compileLoss,
+      metrics: (singleHead && !hasGraphLabelsCompile) ? ["mae"] : headConfigs.map(function () { return "mae"; }),
+    };
+    if (compileWeights) compileCfg.lossWeights = compileWeights;
+    opts.model.compile(compileCfg);
 
     var bestValLoss = Number.POSITIVE_INFINITY;
     var bestEpoch = -1;
@@ -23656,9 +23683,17 @@
       fitYVal = yValTensors.slice();
       for (var oi = yTrainTensors.length; oi < opts.model.outputs.length; oi++) {
         var oShape = opts.model.outputs[oi].shape || [];
-        var dim = Math.max(1, Number(oShape[oShape.length - 1] || 1));
-        var padTr = tf.zeros([dataset.xTrain.length, dim]);
-        var padVl = tf.zeros([dataset.xVal.length, dim]);
+        // Codex round-3 P1: preserve full output rank when padding.
+        // Earlier code used [N, last_dim] (always 2D), which broke
+        // model.fit for label outputs with rank > 2 (e.g. mask
+        // [N, H, W, C]). Build the pad shape from the actual output's
+        // non-batch dims, replacing None/null with 1.
+        var sampleShape = oShape.slice(1).map(function (d) {
+          return (d == null || !isFinite(d) || d <= 0) ? 1 : d;
+        });
+        if (!sampleShape.length) sampleShape = [1];
+        var padTr = tf.zeros([dataset.xTrain.length].concat(sampleShape));
+        var padVl = tf.zeros([dataset.xVal.length].concat(sampleShape));
         fitY.push(padTr); fitYVal.push(padVl);
         labelTensorsToDispose.push(padTr); labelTensorsToDispose.push(padVl);
       }
