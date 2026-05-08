@@ -1923,12 +1923,21 @@ def build_model_from_graph(graph, feature_size, target_size, num_classes=0):
                     transform = getattr(self, f"aug_transform_{nid}", "horizontal_flip")
                     prob = float(getattr(self, f"aug_probability_{nid}", 0.5))
                     seedlink = getattr(self, f"aug_seedlink_{nid}", "")
-                    if transform == "identity" or prob <= 0.0 or inp.dim() != 4:
+                    if transform == "identity" or prob <= 0.0:
+                        tensors[nid] = inp
+                        continue
+                    # Codex round-8 P2: support both rank-3 [B, H, W]
+                    # and rank-4 [B, H, W, C] / [B, C, H, W] masks.
+                    # 3D promotes to 4D NHWC ([B, H, W, 1]), flips,
+                    # then squeezes back. Other ranks skip.
+                    orig_rank = inp.dim()
+                    if orig_rank not in (3, 4):
                         tensors[nid] = inp
                         continue
                     if transform not in ("horizontal_flip", "vertical_flip"):
                         tensors[nid] = inp
                         continue
+                    promoted = inp.unsqueeze(-1) if orig_rank == 3 else inp
                     # Same NCHW auto-detect as augment_image (Codex
                     # round-2 P1: "Mirror augment_image layout override
                     # in augment_mask"). Otherwise paired image+mask
@@ -1937,16 +1946,22 @@ def build_model_from_graph(graph, feature_size, target_size, num_classes=0):
                     # gets axis -1 (after override) but mask gets axis
                     # -2 (no override).
                     layout = getattr(self, f"aug_layout_{nid}", "nhwc")
-                    if layout == "nhwc":
-                        ch_axis_1 = inp.shape[1]
-                        last_axis = inp.shape[-1]
-                        # Codex round-3 P1: lowered threshold from > 8
-                        # to > 4 to handle small images correctly.
+                    # When promoted from rank-3, the synthetic last dim
+                    # is always the channel slot (NHWC). Force NHWC
+                    # layout for that case so we flip real spatial
+                    # axes (H/W), not the synthetic size-1 dim.
+                    # Mirrors the JS fix from round-7 P2.
+                    if orig_rank == 3:
+                        layout = "nhwc"
+                    elif layout == "nhwc":
+                        # Same NCHW auto-detect as augment_image.
+                        ch_axis_1 = promoted.shape[1]
+                        last_axis = promoted.shape[-1]
                         if ch_axis_1 in (1, 2, 3, 4) and last_axis > 4:
                             if not getattr(self, f"_aug_layout_warned_{nid}", False):
                                 sys.stderr.write(
                                     f"[augment_mask] node {nid}: layout=nhwc "
-                                    f"but input shape {tuple(inp.shape)} looks NCHW; "
+                                    f"but input shape {tuple(promoted.shape)} looks NCHW; "
                                     f"auto-overriding to nchw.\n"
                                 )
                                 setattr(self, f"_aug_layout_warned_{nid}", True)
@@ -1970,7 +1985,8 @@ def build_model_from_graph(graph, feature_size, target_size, num_classes=0):
                     else:
                         coin = float(torch.rand(()).item())
                     if coin < prob:
-                        tensors[nid] = torch.flip(inp, dims=[flip_axis])
+                        flipped = torch.flip(promoted, dims=[flip_axis])
+                        tensors[nid] = flipped.squeeze(-1) if orig_rank == 3 else flipped
                     else:
                         tensors[nid] = inp
                 elif t == "augment_label":

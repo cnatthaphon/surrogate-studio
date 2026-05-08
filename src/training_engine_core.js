@@ -328,14 +328,15 @@
           // leakage. ySource matches the same split as baseTensor.
           if (ySource && Array.isArray(ySource) && ySource.length >= count) {
             var slice = ySource.slice(0, count);
-            // Codex round-2 P1: ySource may be a flat array of scalars
-            // (1D regression / class-id targets). tf.tensor2d() throws
-            // unless rows are arrays. Wrap scalar entries as [v] so
-            // shape becomes [count, 1].
-            if (slice.length && !Array.isArray(slice[0]) && (typeof slice[0] === "number")) {
+            // Codex round-8 P1: ySource entries can be scalars
+            // (1D), arrays (2D), or arrays-of-arrays (3D+ for masks
+            // [B, H, W] etc). tf.tensor2d only handles 2D; use
+            // tf.tensor (rank-agnostic) which infers shape from
+            // nesting depth. For pure-scalar entries, wrap once.
+            if (slice.length && (typeof slice[0] === "number")) {
               slice = slice.map(function (v) { return [v]; });
             }
-            return tf.tensor2d(slice);
+            return tf.tensor(slice);
           }
           // Fallback: zeros (caller didn't pass ySource — shouldn't
           // happen for the standard train/val/test paths).
