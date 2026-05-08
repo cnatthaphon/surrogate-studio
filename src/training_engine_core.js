@@ -505,11 +505,34 @@
       },
     };
 
+    // #146: when graphLabelOutputIdx >= 0 on any head, the model has
+    // extra outputs (the in-graph augmented-target tensors). model.fit
+    // expects one y tensor per output, so pad y* arrays with zeros
+    // for those slots. The custom training loop ignores these (yTrue
+    // is pulled from preds[labelIdx] instead) — placeholders just
+    // satisfy fit's shape validation.
+    var hasGraphLabels = headConfigs.some(function (h) { return h && h.graphLabelOutputIdx >= 0; });
+    var fitY = yTrainTensors;
+    var fitYVal = yValTensors;
+    var labelTensorsToDispose = [];
+    if (hasGraphLabels && opts.model.outputs.length > yTrainTensors.length) {
+      fitY = yTrainTensors.slice();
+      fitYVal = yValTensors.slice();
+      for (var oi = yTrainTensors.length; oi < opts.model.outputs.length; oi++) {
+        var oShape = opts.model.outputs[oi].shape || [];
+        var dim = Math.max(1, Number(oShape[oShape.length - 1] || 1));
+        var padTr = tf.zeros([dataset.xTrain.length, dim]);
+        var padVl = tf.zeros([dataset.xVal.length, dim]);
+        fitY.push(padTr); fitYVal.push(padVl);
+        labelTensorsToDispose.push(padTr); labelTensorsToDispose.push(padVl);
+      }
+    }
+
     // training
-    return opts.model.fit(xTrainInputs, singleHead ? yTrainTensors[0] : yTrainTensors, {
+    return opts.model.fit(xTrainInputs, singleHead && !hasGraphLabels ? fitY[0] : fitY, {
       epochs: opts.epochs || 10,
       batchSize: opts.batchSize || 32,
-      validationData: [xValInputs, singleHead ? yValTensors[0] : yValTensors],
+      validationData: [xValInputs, singleHead && !hasGraphLabels ? fitYVal[0] : fitYVal],
       callbacks: [progressCb],
     }).then(function () {
       // restore best weights
@@ -521,11 +544,16 @@
       var predValRaw = opts.model.predict(xValInputs);
       var predVals = Array.isArray(predValRaw) ? predValRaw : [predValRaw];
       var mse = 0, mae = 0, testMse = 0, testMae = 0;
-      for (var i = 0; i < predVals.length; i++) {
+      // #146: when graphLabelOutputIdx adds augmented-target outputs,
+      // predVals.length > yValTensors.length. Cap iteration at the
+      // number of real heads (== yValTensors.length) so we don't try
+      // to compute metrics against undefined y for the label outputs.
+      var metricLen = Math.min(predVals.length, yValTensors.length);
+      for (var i = 0; i < metricLen; i++) {
         mse += tf.losses.meanSquaredError(yValTensors[i], predVals[i]).dataSync()[0];
         mae += tf.metrics.meanAbsoluteError(yValTensors[i], predVals[i]).dataSync()[0];
       }
-      var denom = Math.max(1, predVals.length);
+      var denom = Math.max(1, metricLen);
       mse /= denom;
       mae /= denom;
 
@@ -544,7 +572,8 @@
         testTruth = yTestTensors[0].arraySync();
         testN = testPredictions.length;
 
-        for (var j = 0; j < predTests.length; j++) {
+        var testMetricLen = Math.min(predTests.length, yTestTensors.length);
+        for (var j = 0; j < testMetricLen; j++) {
           testMse += tf.losses.meanSquaredError(yTestTensors[j], predTests[j]).dataSync()[0];
           testMae += tf.metrics.meanAbsoluteError(yTestTensors[j], predTests[j]).dataSync()[0];
         }
