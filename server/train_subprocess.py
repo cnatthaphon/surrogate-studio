@@ -476,6 +476,29 @@ def main():
                     target = xb
                 else:
                     target = yb
+            # #146/147: if this head was wired with a graph label tensor
+            # (output_layer.input_2 sourced from target_source → augment_*),
+            # the augmented target was captured by the output_layer forward
+            # in self._custom_labels[node_id]. Using that as the regression
+            # target keeps it in sync with whatever transform was applied to
+            # the paired image — without this, raw yb is used and any flip on
+            # the image runs against an unflipped label, actively confusing
+            # the model. Mirrors the JS-side custom training loop fix where
+            # graphLabelOutputIdx is set whenever a graph-label tensor was
+            # captured. _custom_labels is also used by GAN PhaseSwitch heads,
+            # but those go through the binary_target branch above and never
+            # reach here.
+            if i < len(head_configs):
+                _glIdx = head_configs[i].get("graphLabelOutputIdx", -1)
+                try:
+                    _glIdx = int(_glIdx) if _glIdx is not None else -1
+                except (TypeError, ValueError):
+                    _glIdx = -1
+                if _glIdx >= 0:
+                    _hc_nid = str(head_configs[i].get("nodeId", ""))
+                    _custom = getattr(model, "_custom_labels", {}) or {}
+                    if _hc_nid and _hc_nid in _custom:
+                        target = _custom[_hc_nid]
             # match target shape to prediction shape
             if target.shape != head_pred.shape:
                 if head_pred.shape[-1] == 1 and target.dim() > 1:
