@@ -63,7 +63,7 @@
     // Image path
     var imgSrc  = N(d, "image_source",   { sourceKey: "pixel_values", featureSize: FEATURE_SIZE, imageShape: [64,64,1] }, 50, 200);
     var reshape = N(d, "reshape",         { targetShape: "64,64,1" },                                                     200, 200);
-    var augImg  = N(d, "augment_image",   { transform: "horizontal_flip", probability: 0.5, seedLink: "sar_aug", layout: "nhwc" }, 380, 200);
+    var augImg  = N(d, "augment_image",   { transform: "horizontal_flip", probability: 0.5, seedLink: "sar_aug", layout: "auto" }, 380, 200);
     var c1      = N(d, "conv2d",          { filters: 16, kernelSize: 3, strides: 2, padding: "same", activation: "relu" }, 560, 200);
     var c2      = N(d, "conv2d",          { filters: 32, kernelSize: 3, strides: 2, padding: "same", activation: "relu" }, 730, 200);
     var c3      = N(d, "conv2d",          { filters: 64, kernelSize: 3, strides: 2, padding: "same", activation: "relu" }, 900, 200);
