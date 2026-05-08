@@ -289,7 +289,7 @@
       var shape = modelInput && modelInput.shape;
       return Math.max(1, Number(shape && shape.length ? shape[shape.length - 1] : 1) || 1);
     }
-    function _buildInputSet(baseTensor, count, labelRows) {
+    function _buildInputSet(baseTensor, count, labelRows, ySource) {
       if (!(opts.model && opts.model.inputs) || opts.model.inputs.length <= 1 || !modelInputNodes.length) return baseTensor;
       return modelInputNodes.map(function (inp, idx) {
         var name = String((inp && inp.name) || "");
@@ -320,26 +320,26 @@
           // augment it and the result reaches output_layer.input_2.
           // For now: feed dataset.yTrain wholesale. Multi-target slicing
           // by targetKey config is a future enhancement.
-          var ySource = (typeof baseTensor === "object" && baseTensor) ? baseTensor : null;
-          // baseTensor here is the x source. For target_source we need
-          // the y source — pull from the closure's dataset.
-          var rows = null;
-          if (count <= dataset.yTrain.length) rows = dataset.yTrain.slice(0, count);
-          else if (count <= (dataset.yVal || []).length) rows = dataset.yVal.slice(0, count);
-          else if (count <= (dataset.yTest || []).length) rows = dataset.yTest.slice(0, count);
-          if (rows && Array.isArray(rows) && rows.length) {
-            return tf.tensor2d(rows);
+          // Use the explicit ySource the caller passed for THIS split
+          // (yTrain/yVal/yTest). Codex round-1 P1: the previous
+          // implementation picked yTrain whenever count <= yTrain.length,
+          // which silently fed training labels to the validation/test
+          // build because val/test sets are usually smaller — data
+          // leakage. ySource matches the same split as baseTensor.
+          if (ySource && Array.isArray(ySource) && ySource.length >= count) {
+            return tf.tensor2d(ySource.slice(0, count));
           }
-          // Fallback: zeros (shouldn't happen if dataset is wired correctly).
+          // Fallback: zeros (caller didn't pass ySource — shouldn't
+          // happen for the standard train/val/test paths).
           return tf.zeros([count, _inferModelInputDim(idx)]);
         }
         return baseTensor;
       });
     }
 
-    var xTrainInputs = _buildInputSet(xTrain, dataset.xTrain.length, dataset.labelsTrain);
-    var xValInputs = _buildInputSet(xVal, dataset.xVal.length, dataset.labelsVal);
-    var xTestInputs = xTest ? _buildInputSet(xTest, dataset.xTest.length, dataset.labelsTest) : null;
+    var xTrainInputs = _buildInputSet(xTrain, dataset.xTrain.length, dataset.labelsTrain, dataset.yTrain);
+    var xValInputs = _buildInputSet(xVal, dataset.xVal.length, dataset.labelsVal, dataset.yVal);
+    var xTestInputs = xTest ? _buildInputSet(xTest, dataset.xTest.length, dataset.labelsTest, dataset.yTest) : null;
 
     var yTrainTensors = [];
     var yValTensors = [];
@@ -609,6 +609,10 @@
       // cleanup
       var disposeList = [xTrain, xVal].concat(yTrainTensors, yValTensors, yTestTensors, predVals);
       if (xTest) disposeList.push(xTest);
+      // #146: dispose padded zero tensors created for fit's y-shape
+      // validation. Without this, re-training in the same process
+      // leaks one [N, dim] zero tensor per output per split per call.
+      if (labelTensorsToDispose.length) disposeList = disposeList.concat(labelTensorsToDispose);
       tf.dispose(disposeList);
       if (Array.isArray(xTrainInputs)) tf.dispose(xTrainInputs.filter(function (t) { return t !== xTrain; }));
       if (Array.isArray(xValInputs)) tf.dispose(xValInputs.filter(function (t) { return t !== xVal; }));
