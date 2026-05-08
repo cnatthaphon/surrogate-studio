@@ -528,9 +528,17 @@
       fitYVal = yValTensors.slice();
       for (var oi = yTrainTensors.length; oi < opts.model.outputs.length; oi++) {
         var oShape = opts.model.outputs[oi].shape || [];
-        var dim = Math.max(1, Number(oShape[oShape.length - 1] || 1));
-        var padTr = tf.zeros([dataset.xTrain.length, dim]);
-        var padVl = tf.zeros([dataset.xVal.length, dim]);
+        // Codex round-3 P1: preserve full output rank when padding.
+        // Earlier code used [N, last_dim] (always 2D), which broke
+        // model.fit for label outputs with rank > 2 (e.g. mask
+        // [N, H, W, C]). Build the pad shape from the actual output's
+        // non-batch dims, replacing None/null with 1.
+        var sampleShape = oShape.slice(1).map(function (d) {
+          return (d == null || !isFinite(d) || d <= 0) ? 1 : d;
+        });
+        if (!sampleShape.length) sampleShape = [1];
+        var padTr = tf.zeros([dataset.xTrain.length].concat(sampleShape));
+        var padVl = tf.zeros([dataset.xVal.length].concat(sampleShape));
         fitY.push(padTr); fitYVal.push(padVl);
         labelTensorsToDispose.push(padTr); labelTensorsToDispose.push(padVl);
       }
