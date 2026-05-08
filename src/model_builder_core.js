@@ -1265,8 +1265,14 @@
             if (origRank !== 3 && origRank !== 4) return x.clone();
             if (self.transform !== "horizontal_flip" && self.transform !== "vertical_flip") return x.clone();
             var promoted = (origRank === 3) ? tf.expandDims(x, -1) : x;
+            // Codex round-7 P2: when promoting 3D [B, H, W] → 4D, the
+            // synthetic last dim is a channel slot (NHWC-like). Layout
+            // config doesn't apply to that synthetic dim. Always use
+            // NHWC axes for the 3D-promoted case so we flip H/W (real
+            // spatial axes), not the synthetic channel.
+            var effectiveLayout = (origRank === 3) ? "nhwc" : self.layout;
             var flipAxis;
-            if (self.layout === "nchw") {
+            if (effectiveLayout === "nchw") {
               flipAxis = (self.transform === "horizontal_flip") ? -1 : -2;
             } else {
               flipAxis = (self.transform === "horizontal_flip") ? -2 : -3;
