@@ -43,8 +43,13 @@ class _PairedRig:
             return inp
         if inp.dim() not in (2, 3) or inp.shape[-1] != 4:
             return inp
-        coin = self._aug_seed_registry.get(seedlink) if seedlink else None
-        if coin is None:
+        # Round-6 P1: if seedlink is set but no coin published, skip
+        # to avoid desync. Empty seedlink → roll own (unpaired).
+        if seedlink:
+            coin = self._aug_seed_registry.get(seedlink)
+            if coin is None:
+                return inp
+        else:
             coin = float(torch.rand(()).item())
         if coin >= prob:
             return inp
@@ -64,8 +69,11 @@ class _PairedRig:
             flip_axis = -1 if transform == "horizontal_flip" else -2
         else:
             flip_axis = -2 if transform == "horizontal_flip" else -3
-        coin = self._aug_seed_registry.get(seedlink) if seedlink else None
-        if coin is None:
+        if seedlink:
+            coin = self._aug_seed_registry.get(seedlink)
+            if coin is None:
+                return inp
+        else:
             coin = float(torch.rand(()).item())
         if coin < prob:
             return torch.flip(inp, dims=[flip_axis])
@@ -99,17 +107,25 @@ if not (50 <= flips <= 150):
     print(f"  FAIL: flip count {flips} suspiciously skewed")
     ok = False
 
-print("Test 2: bbox alone (no upstream image with same seedLink) → fallback to own RNG")
+print("Test 2: bbox with empty seedlink (unpaired) → own RNG")
 rig2 = _PairedRig()
 lone_flips = 0
 for _ in range(100):
-    yb = rig2.bbox_forward(bbox, transform="horizontal_flip", prob=0.5, seedlink="lonely", img_w=100.0)
+    yb = rig2.bbox_forward(bbox, transform="horizontal_flip", prob=0.5, seedlink="", img_w=100.0)
     if abs(yb[0, 0].item() - 70.0) < 1e-3:
         lone_flips += 1
-print(f"  lone bbox flipped {lone_flips}/100 (expect ~50)")
+print(f"  unpaired bbox flipped {lone_flips}/100 (expect ~50)")
 if not (25 <= lone_flips <= 75):
     print(f"  FAIL: suspicious flip count")
     ok = False
+
+print("Test 2b: bbox with seedlink set but no upstream → skip (no desync)")
+rig2b = _PairedRig()
+yb = rig2b.bbox_forward(bbox, transform="horizontal_flip", prob=1.0, seedlink="orphan", img_w=100.0)
+if not torch.allclose(yb, bbox):
+    print(f"  FAIL: orphan bbox should pass through, got {yb}")
+    ok = False
+print(f"  -> orphan bbox passes through")
 
 print("Test 3: bbox eval mode → passthrough")
 rig.training = False
