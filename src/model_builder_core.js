@@ -615,9 +615,18 @@
         // #146: TargetSource emits the dataset's target-y slice as a
         // graph tensor. The training engine feeds dataset.yTrain (or
         // a slice keyed by targetKey) to this input during fit().
+        // Codex round-9 P1: targetShape config supports rank-2+ targets
+        // (e.g. mask [H, W]). Falls back to [featureSize] for 1D legacy.
         var tgtKey = String((inode.data && inode.data.targetKey) || "bbox");
-        var tgtSize = Math.max(1, Number((inode.data && inode.data.featureSize) || 4));
-        itensor = tf.input({ shape: [tgtSize], name: "target_input_" + tgtKey + "_" + iid });
+        var tgtShapeRaw = (inode.data && inode.data.targetShape);
+        var tgtShape;
+        if (Array.isArray(tgtShapeRaw) && tgtShapeRaw.length) {
+          tgtShape = tgtShapeRaw.map(function (d) { return Math.max(1, Number(d) || 1); });
+        } else {
+          var tgtSize = Math.max(1, Number((inode.data && inode.data.featureSize) || 4));
+          tgtShape = [tgtSize];
+        }
+        itensor = tf.input({ shape: tgtShape, name: "target_input_" + tgtKey + "_" + iid });
       } else if (iname === "constant_layer") {
         // Constant needs a dummy input to derive batch size — use featureSize=1
         itensor = tf.input({ shape: [1], name: "const_input_" + iid });

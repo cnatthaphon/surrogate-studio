@@ -410,7 +410,7 @@
       var probability = (isFinite(pRaw) && pRaw >= 0) ? Math.min(pRaw, 1) : 0;
       var seedLink = String((cfg && cfg.seedLink) || "");
       var layout = String((cfg && cfg.layout) || "nhwc").toLowerCase();
-      if (layout !== "nhwc" && layout !== "nchw") layout = "nhwc";
+      if (layout !== "nhwc" && layout !== "nchw" && layout !== "auto") layout = "nhwc";
       var html =
         "<div><div style='font-weight:700'>AugmentImage</div>" +
         "<div class='node-summary' style='font-size:11px;color:#94a3b8;'>" + transform + ", p=" + probability + ", " + layout + (seedLink ? ", link=" + seedLink : "") + "</div></div>";
@@ -462,7 +462,7 @@
       var probability = _clampAugProb(cfg && cfg.probability);
       var seedLink = String((cfg && cfg.seedLink) || "");
       var layout = String((cfg && cfg.layout) || "nhwc").toLowerCase();
-      if (layout !== "nhwc" && layout !== "nchw") layout = "nhwc";
+      if (layout !== "nhwc" && layout !== "nchw" && layout !== "auto") layout = "nhwc";
       var html =
         "<div><div style='font-weight:700'>AugmentMask</div>" +
         "<div class='node-summary' style='font-size:11px;color:#94a3b8;'>" + transform + ", p=" + probability + ", " + layout + (seedLink ? ", link=" + seedLink : "") + "</div></div>";
@@ -1065,6 +1065,7 @@
         addField({ kind: "select", key: "layout", label: "Tensor layout", value: String(d.layout || "nhwc"), options: [
           { value: "nhwc", label: "NHWC ([B, H, W, C])" },
           { value: "nchw", label: "NCHW ([B, C, H, W])" },
+          { value: "auto", label: "Auto-detect (server only)" },
         ] });
         addField({ kind: "text", key: "seedLink", label: "Seed link (for paired augments)", value: String(d.seedLink || ""), placeholder: "e.g. aug1 (links image with bbox/mask/label)" });
         return spec;
@@ -1097,6 +1098,7 @@
         addField({ kind: "select", key: "layout", label: "Tensor layout", value: String(d.layout || "nhwc"), options: [
           { value: "nhwc", label: "NHWC ([B, H, W, C])" },
           { value: "nchw", label: "NCHW ([B, C, H, W])" },
+          { value: "auto", label: "Auto-detect (server only)" },
         ] });
         addField({ kind: "text", key: "seedLink", label: "Seed link (must match image augment)", value: String(d.seedLink || ""), placeholder: "e.g. aug1" });
         return spec;

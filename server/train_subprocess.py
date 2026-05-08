@@ -1813,26 +1813,19 @@ def build_model_from_graph(graph, feature_size, target_size, num_classes=0):
                         # like H/W) and override to nchw with a stderr
                         # warning so the user notices.
                         layout = getattr(self, f"aug_layout_{nid}", "nhwc")
-                        if layout == "nhwc" and inp.dim() == 4:
+                        # Codex round-9 P2: auto-detect only fires when
+                        # user explicitly opts in via layout="auto", so
+                        # legitimate NHWC tensors with small H aren't
+                        # silently treated as NCHW. The "nhwc" / "nchw"
+                        # values are now strict — what you set is what
+                        # gets used.
+                        if layout == "auto" and inp.dim() == 4:
                             ch_axis_1 = inp.shape[1]
                             last_axis = inp.shape[-1]
-                            # NCHW signature: small channel count at
-                            # axis 1, large H/W at axis -1. Codex
-                            # round-3 P1: lowered threshold from > 8
-                            # to > 4 so legitimate small images (8x8
-                            # CIFAR patches, etc.) trigger the override
-                            # too. Channel counts are typically 1-4
-                            # so > 4 is sufficient to distinguish.
                             if ch_axis_1 in (1, 2, 3, 4) and last_axis > 4:
-                                if not getattr(self, f"_aug_layout_warned_{nid}", False):
-                                    sys.stderr.write(
-                                        f"[augment_image] node {nid}: layout=nhwc "
-                                        f"but input shape {tuple(inp.shape)} looks NCHW; "
-                                        f"auto-overriding to nchw. Set layout='nchw' explicitly "
-                                        f"to silence this warning.\n"
-                                    )
-                                    setattr(self, f"_aug_layout_warned_{nid}", True)
                                 layout = "nchw"
+                            else:
+                                layout = "nhwc"
                         if layout == "nchw":
                             flip_axis = -1 if transform == "horizontal_flip" else -2
                         else:
@@ -1946,26 +1939,19 @@ def build_model_from_graph(graph, feature_size, target_size, num_classes=0):
                     # gets axis -1 (after override) but mask gets axis
                     # -2 (no override).
                     layout = getattr(self, f"aug_layout_{nid}", "nhwc")
-                    # When promoted from rank-3, the synthetic last dim
-                    # is always the channel slot (NHWC). Force NHWC
-                    # layout for that case so we flip real spatial
-                    # axes (H/W), not the synthetic size-1 dim.
-                    # Mirrors the JS fix from round-7 P2.
+                    # When promoted from rank-3, synthetic last dim is
+                    # always the channel slot (NHWC). Force NHWC for
+                    # that case (mirrors JS round-7 P2). For 4D, only
+                    # auto-detect when layout=="auto" (round-9 P2).
                     if orig_rank == 3:
                         layout = "nhwc"
-                    elif layout == "nhwc":
-                        # Same NCHW auto-detect as augment_image.
+                    elif layout == "auto":
                         ch_axis_1 = promoted.shape[1]
                         last_axis = promoted.shape[-1]
                         if ch_axis_1 in (1, 2, 3, 4) and last_axis > 4:
-                            if not getattr(self, f"_aug_layout_warned_{nid}", False):
-                                sys.stderr.write(
-                                    f"[augment_mask] node {nid}: layout=nhwc "
-                                    f"but input shape {tuple(promoted.shape)} looks NCHW; "
-                                    f"auto-overriding to nchw.\n"
-                                )
-                                setattr(self, f"_aug_layout_warned_{nid}", True)
                             layout = "nchw"
+                        else:
+                            layout = "nhwc"
                     if layout == "nchw":
                         flip_axis = -1 if transform == "horizontal_flip" else -2
                     else:
