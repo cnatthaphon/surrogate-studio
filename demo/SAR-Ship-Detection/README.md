@@ -79,9 +79,9 @@ The third model variant adds horizontal-flip augmentation paired across the imag
 | Model (per-coord normalized MAE on test split, from pretrained metadata) | best epoch | best val_loss | test MAE |
 |---|---|---|---|
 | CNN Ship Detector | 21 | 0.0040 | 0.0376 |
-| **CNN Detector + Augmentation** | 50 | **0.0027** | **0.0344** |
+| **CNN Detector + Augmentation** | 19 | **0.0027** | **0.0367** |
 
-**Augmentation helps by ~9% on test MAE and ~33% on val_loss**, and the model trains the full 50 epochs (no early-stop) because val keeps improving — the classic small-data signature where regularization actually had room to help. With 210 training patches, doubling the effective dataset via paired hflip lets the CNN see ships in both image-orientations without needing any real new data.
+**Augmentation helps on both val and test** (~33% lower val_loss, ~2-9% lower test MAE depending on the run). Run-to-run variance on a 210-sample dataset is meaningful — both v4 (test MAE 0.0344) and v5 (0.0367) of this model beat the baseline, but the exact margin shifts a few percent because cuDNN algorithm selection on CUDA isn't fully reproducible even at fixed `torch.manual_seed`. The directional result is robust: doubling effective data via paired hflip lets the CNN see ships in both image-orientations, and val-loss drops sharply.
 
 #### Bug found while building this demo
 

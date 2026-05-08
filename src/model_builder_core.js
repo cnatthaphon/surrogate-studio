@@ -1001,7 +1001,21 @@
           this.layout = lay;
         }
         build(inputShape) {
-          // No trainable weights — augment layers are stateless transforms.
+          // #147 Layer 1: hard shape validation at build time. augment_image
+          // requires a 4D tensor [B,H,W,C] (NHWC) or [B,C,H,W] (NCHW). Any
+          // other rank (flat features, sequences, scalars) means the user
+          // wired the block to the wrong upstream — fail loud here rather
+          // than silently passing through at runtime, which would hide the
+          // mistake and produce un-augmented training while looking healthy.
+          var s = Array.isArray(inputShape) && Array.isArray(inputShape[0]) ? inputShape[0] : inputShape;
+          if (Array.isArray(s) && s.length !== 4) {
+            throw new Error(
+              "augment_image requires a 4D tensor [B,H,W,C] or [B,C,H,W]; " +
+              "got rank " + s.length + " shape " + JSON.stringify(s) + ". " +
+              "Wire it to an image-shaped tensor (e.g. image_source -> reshape -> augment_image) " +
+              "or remove the block if the upstream isn't an image."
+            );
+          }
           this.built = true;
         }
         computeOutputShape(inputShape) {
@@ -1030,14 +1044,14 @@
             _augClearCoin(this.seedLink);
             return x.clone();
           }
-          // Image augments expect 4D [B, H, W, C]. For any other rank
-          // (e.g. flat [batch, features]), passthrough rather than flip
-          // an unrelated axis. The PyTorch path (train_subprocess.py)
-          // applies the same guard, so a graph that misuses the block
-          // behaves identically across runtimes.
+          // Defensive: rank already validated in build(), but at predict
+          // time TF.js may reuse a layer with a freshly-shaped input. If
+          // we somehow get a non-4D tensor here, fail loud.
           if (x.shape.length !== 4) {
-            _augClearCoin(this.seedLink);
-            return x.clone();
+            throw new Error(
+              "augment_image runtime got rank-" + x.shape.length + " tensor; " +
+              "expected 4D. shape=" + JSON.stringify(x.shape)
+            );
           }
           if (this.transform === "horizontal_flip" || this.transform === "vertical_flip") {
             // Per-batch coin flip at the configured probability. Whole-
@@ -1138,7 +1152,30 @@
           if (fmt !== "x0y0x1y1" && fmt !== "xywh") fmt = "x0y0x1y1";
           this.format = fmt;
         }
-        build() { this.built = true; }
+        build(inputShape) {
+          // #147 Layer 1: bbox tensor must be [B,4] (single box per sample)
+          // or [B,N,4] (variable-length boxes). Any other shape means the
+          // block is wired to a non-bbox tensor — fail loud here.
+          var s = Array.isArray(inputShape) && Array.isArray(inputShape[0]) ? inputShape[0] : inputShape;
+          if (Array.isArray(s)) {
+            var rank = s.length;
+            if (rank !== 2 && rank !== 3) {
+              throw new Error(
+                "augment_bbox requires a 2D [B,4] or 3D [B,N,4] tensor; " +
+                "got rank " + rank + " shape " + JSON.stringify(s) + ". " +
+                "Wire it to a bbox-shaped tensor (e.g. target_source(targetKey='bbox') -> augment_bbox)."
+              );
+            }
+            if (s[rank - 1] !== 4) {
+              throw new Error(
+                "augment_bbox requires last dim = 4 (x,y coords); " +
+                "got shape " + JSON.stringify(s) + ". " +
+                "Check that the upstream node emits bbox coordinates (x0,y0,x1,y1 or x,y,w,h)."
+              );
+            }
+          }
+          this.built = true;
+        }
         computeOutputShape(inputShape) {
           return Array.isArray(inputShape) && Array.isArray(inputShape[0]) ? inputShape[0] : inputShape;
         }
@@ -1256,7 +1293,20 @@
           if (lay !== "nhwc" && lay !== "nchw") lay = "nhwc";
           this.layout = lay;
         }
-        build() { this.built = true; }
+        build(inputShape) {
+          // #147 Layer 1: mask tensor must be 3D [B,H,W] or 4D
+          // [B,H,W,C]/[B,C,H,W]. The 3D form is auto-expanded to 4D in the
+          // forward pass; rank 1, 2, or 5+ means a wiring mistake.
+          var s = Array.isArray(inputShape) && Array.isArray(inputShape[0]) ? inputShape[0] : inputShape;
+          if (Array.isArray(s) && s.length !== 3 && s.length !== 4) {
+            throw new Error(
+              "augment_mask requires a 3D [B,H,W] or 4D [B,H,W,C]/[B,C,H,W] tensor; " +
+              "got rank " + s.length + " shape " + JSON.stringify(s) + ". " +
+              "Wire it to a mask-shaped tensor (e.g. target_source(targetKey='mask') -> augment_mask)."
+            );
+          }
+          this.built = true;
+        }
         computeOutputShape(inputShape) {
           return Array.isArray(inputShape) && Array.isArray(inputShape[0]) ? inputShape[0] : inputShape;
         }
