@@ -55,13 +55,19 @@ ImageSource → Dense(256) → Dense(64) → Output(bbox)
 
 ## Results & Interpretation
 
-Both models trained 50 epochs on PyTorch CUDA, predicting normalized [x, y, w, h] bounding boxes. Evaluated on the held-out 45-patch test split via the in-app `bbox_mae` / `bbox_rmse` / `bbox_bias` recipe.
+Both models trained up to 50 epochs on PyTorch CUDA (with early-stopping at patience 15), predicting normalized [x, y, w, h] bounding boxes. Evaluated on the held-out 45-patch test split via the in-app `bbox_mae` / `bbox_rmse` / `bbox_bias` recipe.
+
+> **Two MAE conventions appear in this README, and they're not directly comparable:**
+> - **In-app evaluator** (`bbox_mae`, the table directly below) — sums absolute error across all four bbox coordinates, then averages over the test set. Larger absolute number, but it's the one shown in the demo's Evaluation tab.
+> - **Per-coord MAE from pretrained metadata** (the augmentation comparison further down) — averages absolute error across coordinates *and* coords. Smaller absolute number; this is the standard regression MAE the trainer reports.
+>
+> Both reflect the same models on the same test split, just normalized differently. The augmentation-vs-baseline comparison uses metadata MAE because it lets us read both numbers directly from the `.bin` checkpoint without re-running evaluation.
 
 ![Evaluation results](images/04_test.png)
 
 | Model | Params | BBox MAE | BBox RMSE | BBox Bias |
 |---|---|---|---|---|
-| **CNN Ship Detector** | 35K | **0.2962** | **0.3274** | -0.2939 |
+| **CNN Ship Detector** | 548K | **0.2962** | **0.3274** | -0.2939 |
 | MLP Baseline | 1.07M | 0.3059 | 0.3366 | -0.1816 |
 
 **The honest result: both models are barely better than a center-of-image guess, and the CNN/MLP gap is small (~3% relative).** This is what makes SAR ship detection genuinely hard — and it's the lesson the demo was redesigned around.
