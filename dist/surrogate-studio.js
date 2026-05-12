@@ -1,5 +1,5 @@
 // Surrogate Studio - concatenated bundle
-// Generated: 2026-05-12T16:43:47Z
+// Generated: 2026-05-12T16:55:02Z
 // Source files: 58
 
 
@@ -21503,15 +21503,24 @@
 
     // #172 Layer 2: graph-walk type validation for augment blocks. Each
     // augment node must trace upstream to the right kind of source so we
-    // catch semantic mistakes that Layer 1 (shape validation) can't:
-    //   - augment_image / augment_mask wired to target data (bbox tensor
-    //     that happens to be rank-4 from some odd graph)
-    //   - augment_bbox / augment_mask wired to image data (image_source
-    //     with last-dim=4, e.g. RGBA, where shape happens to match bbox)
-    // augment_label stays permissive: it's a flip-invariant passthrough.
+    // catch semantic mistakes that Layer 1 (shape validation) can't.
+    //
+    // Per-block lineage rule:
+    //   - augment_image: must NOT trace back to target_source (image data
+    //     only).
+    //   - augment_bbox: MUST trace exclusively to target_source (bbox flip
+    //     math only makes sense on actual coords).
+    //   - augment_mask: PERMISSIVE — masks legitimately flow from either
+    //     direction. Paired with augment_image via seedLink in joint
+    //     image+mask augmentation (mask on image-flow side), AND directly
+    //     from target_source(targetKey="mask") in segmentation graphs
+    //     (mask on target-flow side). Only Layer 1 shape check applies.
+    //     #175 fix: previously bucketed with augment_image and rejected
+    //     target_source roots, breaking the segmentation pattern.
+    //   - augment_label: PERMISSIVE — flip-invariant passthrough.
     (function _checkAugmentTypeLineage() {
-      var imageAugTypes = { "augment_image_layer": 1, "augment_mask_layer": 1 };
-      var targetAugTypes = { "augment_bbox_layer": 1 };  // bbox is the strict one
+      var imageAugTypes = { "augment_image_layer": 1 };  // image only
+      var targetAugTypes = { "augment_bbox_layer": 1 };  // target only (strict)
       function rootsFor(startId) {
         var seen = {}, stack = [], roots = [];
         seen[startId] = true;

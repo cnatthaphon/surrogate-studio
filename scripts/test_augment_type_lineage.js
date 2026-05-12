@@ -116,8 +116,52 @@ var MBC = require(path.join(__dirname, "..", "src/model_builder_core.js"));
     });
   });
 
-  // Test 5: full SAR-Ship aug graph (image + target_source branches) still builds
-  console.log("Test 5: full SAR-Ship aug graph still builds (regression)");
+  // Test 5: augment_mask must accept target_source upstream (segmentation pattern)
+  // This is the #175 regression: a segmentation graph like
+  //   target_source(targetKey="mask") -> augment_mask -> output.input_2
+  // is legitimate (the mask label being augmented in lockstep with the image
+  // via seedLink). Lineage check must NOT reject target_source for augment_mask.
+  console.log("Test 5: augment_mask after target_source builds cleanly (#175 P1 regression)");
+  var goodMaskFromTarget = { drawflow: { Home: { data: {
+    "1": { id:1, name:"target_source_layer", data:{ targetKey:"mask", featureSize:16, targetShape:[4,4,1] }, class:"target_source_layer", html:"", typenode:false,
+           inputs:{}, outputs:{ output_1:{ connections:[{ node:"2", input:"input_1" }] } }, pos_x:0, pos_y:0 },
+    "2": { id:2, name:"augment_mask_layer", data:{ transform:"horizontal_flip", probability:0.5, seedLink:"", layout:"nhwc" }, class:"augment_mask_layer", html:"", typenode:false,
+           inputs:{ input_1:{ connections:[{ node:"1", output:"output_1" }] } }, outputs:{ output_1:{ connections:[{ node:"3", input:"input_1" }] } }, pos_x:100, pos_y:0 },
+    "3": { id:3, name:"output_layer", data:{ target:"mask", targetType:"mask", loss:"mse", units:16, headType:"regression" }, class:"output_layer", html:"", typenode:false,
+           inputs:{ input_1:{ connections:[{ node:"2", output:"output_1" }] } }, outputs:{}, pos_x:200, pos_y:0 },
+  } } } };
+  expectOk("augment_mask <- target_source(targetKey='mask')", function () {
+    MBC.buildModelFromGraph(tf, goodMaskFromTarget, {
+      mode: "direct", featureSize: 16, imageShape: [4, 4, 1],
+      allowedOutputKeys: [{ key: "mask", featureSize: 16, headType: "regression" }],
+      defaultTarget: "mask", numClasses: 1, targetSize: 16,
+    });
+  });
+
+  // Test 6: augment_mask also accepts image_source upstream (paired with augment_image)
+  console.log("Test 6: augment_mask after image_source -> reshape builds cleanly (paired image+mask)");
+  var goodMaskFromImg = { drawflow: { Home: { data: {
+    "1": { id:1, name:"image_source_layer", data:{ sourceKey:"pixel_values", featureSize:16, imageShape:[4,4,1] }, class:"image_source_layer", html:"", typenode:false,
+           inputs:{}, outputs:{ output_1:{ connections:[{ node:"2", input:"input_1" }] } }, pos_x:0, pos_y:0 },
+    "2": { id:2, name:"reshape_layer", data:{ targetShape:"4,4,1" }, class:"reshape_layer", html:"", typenode:false,
+           inputs:{ input_1:{ connections:[{ node:"1", output:"output_1" }] } }, outputs:{ output_1:{ connections:[{ node:"3", input:"input_1" }] } }, pos_x:100, pos_y:0 },
+    "3": { id:3, name:"augment_mask_layer", data:{ transform:"horizontal_flip", probability:0.5, seedLink:"", layout:"nhwc" }, class:"augment_mask_layer", html:"", typenode:false,
+           inputs:{ input_1:{ connections:[{ node:"2", output:"output_1" }] } }, outputs:{ output_1:{ connections:[{ node:"4", input:"input_1" }] } }, pos_x:200, pos_y:0 },
+    "4": { id:4, name:"flatten_layer", data:{}, class:"flatten_layer", html:"", typenode:false,
+           inputs:{ input_1:{ connections:[{ node:"3", output:"output_1" }] } }, outputs:{ output_1:{ connections:[{ node:"5", input:"input_1" }] } }, pos_x:300, pos_y:0 },
+    "5": { id:5, name:"output_layer", data:{ target:"mask", targetType:"mask", loss:"mse", units:16, headType:"regression" }, class:"output_layer", html:"", typenode:false,
+           inputs:{ input_1:{ connections:[{ node:"4", output:"output_1" }] } }, outputs:{}, pos_x:400, pos_y:0 },
+  } } } };
+  expectOk("augment_mask <- image_source -> reshape", function () {
+    MBC.buildModelFromGraph(tf, goodMaskFromImg, {
+      mode: "direct", featureSize: 16, imageShape: [4, 4, 1],
+      allowedOutputKeys: [{ key: "mask", featureSize: 16, headType: "regression" }],
+      defaultTarget: "mask", numClasses: 1, targetSize: 16,
+    });
+  });
+
+  // Test 7: full SAR-Ship aug graph (image + target_source branches) still builds
+  console.log("Test 7: full SAR-Ship aug graph still builds (regression)");
   require(path.join(__dirname, "..", "demo/SAR-Ship-Detection/preset.js"));
   var preset = global.SAR_SHIP_DETECTION_PRESET;
   var augModel = preset.models.filter(function (m) { return m.id === "sar_cnn_aug"; })[0];
