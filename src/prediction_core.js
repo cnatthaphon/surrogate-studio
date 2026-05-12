@@ -88,29 +88,60 @@
   // the call. The augment-on-target nodes pass through in eval mode, so
   // the dummy zero target doesn't affect output[0] (the head we care
   // about). Mirrors the generation_engine_core multi-input handling.
+  //
+  // #174 (P1 from PR #75 review): match by FULL trailing shape (everything
+  // past the batch dim), not just rank. Both [B,4096] image and [B,4] target
+  // are rank-2, so a rank-only match would feed image data into the target
+  // slot whenever target_source happens to come first in model.inputs.
+  // We compare the primary tensor's trailing shape against each input's
+  // trailing shape; the first model input whose declared trailing shape
+  // matches the primary (with null treated as wildcard) wins. Remaining
+  // inputs get zero placeholders sized from their declared shape.
+  function _trailingShape(shape) {
+    if (!shape || shape.length <= 1) return [];
+    return shape.slice(1);
+  }
+  function _trailingMatches(declared, actual) {
+    if (declared.length !== actual.length) return false;
+    for (var i = 0; i < declared.length; i++) {
+      var d = declared[i];
+      // null/undefined in declared shape is a wildcard (rare; usually for
+      // symbolic sequence length). Otherwise require strict equality.
+      if (d != null && d !== actual[i]) return false;
+    }
+    return true;
+  }
   function _buildPredictInputs(tf, model, primaryTensor) {
     if (!model || !model.inputs || model.inputs.length <= 1) return { input: primaryTensor, extras: [] };
     var batch = primaryTensor.shape[0];
-    var primaryRank = primaryTensor.shape.length;
+    var primaryTrailing = _trailingShape(primaryTensor.shape);
+    // First pass: identify which model input slot the primary belongs in
+    // by trailing-shape match. Falls back to first input if no match (e.g.
+    // primary tensor was reshaped to something the model didn't declare).
+    var primarySlot = -1;
+    for (var pi = 0; pi < model.inputs.length; pi++) {
+      var declTrail = _trailingShape(model.inputs[pi].shape);
+      if (_trailingMatches(declTrail, primaryTrailing)) {
+        primarySlot = pi;
+        break;
+      }
+    }
+    if (primarySlot < 0) primarySlot = 0;
+    // Second pass: build the full input list, slotting primary into the
+    // matched index and zero-filling the rest.
     var inputs = [];
     var extras = [];
     for (var ii = 0; ii < model.inputs.length; ii++) {
-      var inputShape = model.inputs[ii].shape;
-      // Match the primary tensor to the input whose rank+trailing-shape lines up
-      // (image input typically has rank 2 [B,F] or rank 4 [B,H,W,C]; target_source
-      // input typically has rank 2 [B,target_dim]). We pick the FIRST not-yet-used
-      // input whose rank matches the primary; remaining inputs get zero placeholders.
-      if (inputs.length === 0 && inputShape.length === primaryRank) {
+      if (ii === primarySlot) {
         inputs.push(primaryTensor);
         continue;
       }
+      var inputShape = model.inputs[ii].shape;
       var dummyShape = inputShape.map(function (d, idx) { return idx === 0 ? batch : (d == null ? 1 : d); });
       var dummy = tf.zeros(dummyShape);
       inputs.push(dummy);
       extras.push(dummy);
     }
-    // Defensive: if no input matched, fall back to feeding the primary at index 0.
-    if (inputs[0] !== primaryTensor) inputs[0] = primaryTensor;
     return { input: inputs, extras: extras };
   }
 
