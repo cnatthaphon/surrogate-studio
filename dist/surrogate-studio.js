@@ -1,5 +1,5 @@
 // Surrogate Studio - concatenated bundle
-// Generated: 2026-05-12T10:03:45Z
+// Generated: 2026-05-12T16:43:47Z
 // Source files: 58
 
 
@@ -21500,6 +21500,67 @@
       tq.sort(function (a, b) { return Number(a) - Number(b); });
     }
     if (topo.length !== reachableIds.length) throw new Error("Graph contains cycle(s).");
+
+    // #172 Layer 2: graph-walk type validation for augment blocks. Each
+    // augment node must trace upstream to the right kind of source so we
+    // catch semantic mistakes that Layer 1 (shape validation) can't:
+    //   - augment_image / augment_mask wired to target data (bbox tensor
+    //     that happens to be rank-4 from some odd graph)
+    //   - augment_bbox / augment_mask wired to image data (image_source
+    //     with last-dim=4, e.g. RGBA, where shape happens to match bbox)
+    // augment_label stays permissive: it's a flip-invariant passthrough.
+    (function _checkAugmentTypeLineage() {
+      var imageAugTypes = { "augment_image_layer": 1, "augment_mask_layer": 1 };
+      var targetAugTypes = { "augment_bbox_layer": 1 };  // bbox is the strict one
+      function rootsFor(startId) {
+        var seen = {}, stack = [], roots = [];
+        seen[startId] = true;
+        getIncoming(startId).forEach(function (e) {
+          if (!seen[e.from]) { seen[e.from] = true; stack.push(e.from); }
+        });
+        while (stack.length) {
+          var cur = stack.pop();
+          var inc = getIncoming(cur);
+          if (inc.length === 0) { roots.push(cur); continue; }
+          inc.forEach(function (e) {
+            if (!seen[e.from]) { seen[e.from] = true; stack.push(e.from); }
+          });
+        }
+        return roots;
+      }
+      topo.forEach(function (id) {
+        var node = moduleData[id]; if (!node) return;
+        var name = node.name;
+        if (!imageAugTypes[name] && !targetAugTypes[name]) return;
+        var roots = rootsFor(id);
+        if (!roots.length) return;  // no parents at all — Layer 1 will catch
+        var rootNames = roots.map(function (r) { return (moduleData[r] && moduleData[r].name) || "?"; });
+        if (imageAugTypes[name]) {
+          // Image augments must not trace back to target_source.
+          if (rootNames.indexOf("target_source_layer") >= 0) {
+            throw new Error(
+              name + " (node " + id + ") traces upstream to target_source — but this " +
+              "block expects image data. Wire " + name + " downstream of " +
+              "image_source (or an input(mode=image)), not target_source. If you intended " +
+              "to augment the bounding box, use augment_bbox instead. " +
+              "Upstream roots seen: " + JSON.stringify(rootNames) + "."
+            );
+          }
+        } else {
+          // augment_bbox must come from target_source. Allow target_source-only chains.
+          var allTarget = rootNames.every(function (n) { return n === "target_source_layer"; });
+          if (!allTarget) {
+            throw new Error(
+              name + " (node " + id + ") traces upstream to root(s) " +
+              JSON.stringify(rootNames) + " — expected target_source_layer (so the " +
+              "bbox flip math operates on actual bbox coords, not image features that " +
+              "happen to be rank-2 with last-dim=4). Wire " + name + " downstream of " +
+              "target_source(targetKey=\"bbox\")."
+            );
+          }
+        }
+      });
+    })();
 
     // build TF.js model — create input tensors for ALL input nodes
     var allInputTensors = []; // { id, tensor, name }
