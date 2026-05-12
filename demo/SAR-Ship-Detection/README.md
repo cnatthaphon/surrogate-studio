@@ -82,12 +82,17 @@ The training-time val MAE was much lower (~0.013) because the val split shares i
 
 The third model variant adds horizontal-flip augmentation paired across the image branch and the bounding-box label branch (via `seedLink`), training otherwise identical to model 1 (50 epochs, batch 16, lr=0.001, seed=42, PyTorch CUDA).
 
-| Model (per-coord normalized MAE on test split, from pretrained metadata) | best epoch | best val_loss | test MAE |
-|---|---|---|---|
-| CNN Ship Detector | 21 | 0.0040 | 0.0376 |
-| **CNN Detector + Augmentation** | 19 | **0.0027** | **0.0367** |
+**Two signals from the same retrain, looking in different directions:**
 
-**Augmentation helps on both val and test** (~33% lower val_loss, ~2-9% lower test MAE depending on the run). Run-to-run variance on a 210-sample dataset is meaningful — both v4 (test MAE 0.0344) and v5 (0.0367) of this model beat the baseline, but the exact margin shifts a few percent because cuDNN algorithm selection on CUDA isn't fully reproducible even at fixed `torch.manual_seed`. The directional result is robust: doubling effective data via paired hflip lets the CNN see ships in both image-orientations, and val-loss drops sharply.
+| Signal | CNN baseline | CNN + Aug | Interpretation |
+|---|---|---|---|
+| Best val_loss (PyTorch metadata) | 0.0040 | **0.0027** (↓33%) | Training-time, **clear win** for aug |
+| Per-coord test MAE (PyTorch metadata) | 0.0376 | 0.0367 (↓2%) | Test-time, in the noise |
+| In-app `bbox_mae` (shown in screenshot above, TF.js client) | 0.3685 | 0.3709 (~equal) | Test-time, in the noise |
+
+**Honest read.** Augmentation produces a large and reliable **val-loss** improvement (~33%) — the regularization signal during training is real. On the held-out test split (only 45 patches), the test-MAE difference between aug and no-aug is **within run-to-run noise**: per-coord metadata says aug is ~2% better, the in-app evaluator says it's ~0.6% worse, and cuDNN algorithm selection on CUDA isn't fully reproducible even at fixed `torch.manual_seed` (I've seen metadata MAE land anywhere from 0.0344 to 0.0367 across retrains). With 45 test samples, you need a much larger improvement than that to be confident the test-set difference isn't sampling variance.
+
+What the demo therefore demonstrates is the **pipeline**, not a definitive "aug helps SAR detection" claim: the paired `augment_image` + `augment_bbox` + `target_source` blocks function correctly across all three runtimes (browser TF.js, PyTorch CUDA server, embedded notebook export), shape validation catches wiring mistakes, and regularization is visible during training. Whether that translates into reliably better held-out generalization needs a larger test split to confirm.
 
 #### Bug found while building this demo
 

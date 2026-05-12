@@ -68,9 +68,11 @@
     for (var j = warmupSteps; j < steps; j++) {
       var feature = buildFeature(j, history, predictions);
       var inputTensor = isSequence ? tf.tensor3d([feature]) : tf.tensor2d([feature]);
-      var yPred = model.predict(inputTensor);
+      var wrapped = _buildPredictInputs(tf, model, inputTensor);
+      var yPred = model.predict(wrapped.input);
       var out = (Array.isArray(yPred) ? yPred[0] : yPred).dataSync();
       inputTensor.dispose();
+      wrapped.extras.forEach(function (t) { t.dispose(); });
       if (Array.isArray(yPred)) { yPred.forEach(function (t) { t.dispose(); }); } else { yPred.dispose(); }
 
       var value = extractPrediction(out, j, predictions);
@@ -78,6 +80,38 @@
       history.push(value);
     }
     return { predictions: predictions };
+  }
+
+  // Multi-input model support (#147): graphs using target_source build a
+  // 2-input model (image + target). At inference we only have image-side
+  // data; pad extra inputs with zero tensors so model.predict() accepts
+  // the call. The augment-on-target nodes pass through in eval mode, so
+  // the dummy zero target doesn't affect output[0] (the head we care
+  // about). Mirrors the generation_engine_core multi-input handling.
+  function _buildPredictInputs(tf, model, primaryTensor) {
+    if (!model || !model.inputs || model.inputs.length <= 1) return { input: primaryTensor, extras: [] };
+    var batch = primaryTensor.shape[0];
+    var primaryRank = primaryTensor.shape.length;
+    var inputs = [];
+    var extras = [];
+    for (var ii = 0; ii < model.inputs.length; ii++) {
+      var inputShape = model.inputs[ii].shape;
+      // Match the primary tensor to the input whose rank+trailing-shape lines up
+      // (image input typically has rank 2 [B,F] or rank 4 [B,H,W,C]; target_source
+      // input typically has rank 2 [B,target_dim]). We pick the FIRST not-yet-used
+      // input whose rank matches the primary; remaining inputs get zero placeholders.
+      if (inputs.length === 0 && inputShape.length === primaryRank) {
+        inputs.push(primaryTensor);
+        continue;
+      }
+      var dummyShape = inputShape.map(function (d, idx) { return idx === 0 ? batch : (d == null ? 1 : d); });
+      var dummy = tf.zeros(dummyShape);
+      inputs.push(dummy);
+      extras.push(dummy);
+    }
+    // Defensive: if no input matched, fall back to feeding the primary at index 0.
+    if (inputs[0] !== primaryTensor) inputs[0] = primaryTensor;
+    return { input: inputs, extras: extras };
   }
 
   // --- generic batch predict for classification ---
@@ -89,11 +123,13 @@
     for (var i = 0; i < n; i += batchSize) {
       var batch = xData.slice(i, Math.min(i + batchSize, n));
       var tensor = tf.tensor2d(batch);
-      var predRaw = model.predict(tensor);
+      var wrapped = _buildPredictInputs(tf, model, tensor);
+      var predRaw = model.predict(wrapped.input);
       var pred = Array.isArray(predRaw) ? predRaw[0] : predRaw;
       var data = pred.arraySync();
       allPreds = allPreds.concat(data);
       tensor.dispose();
+      wrapped.extras.forEach(function (t) { t.dispose(); });
       if (Array.isArray(predRaw)) { predRaw.forEach(function (t) { t.dispose(); }); } else { predRaw.dispose(); }
       // yield to renderer between batches so UI stays responsive
       if (tf.nextFrame) await tf.nextFrame();
@@ -504,6 +540,7 @@
     argmax: argmax,
     rolloutAutoregressive: rolloutAutoregressive,
     batchPredict: batchPredict,
+    buildPredictInputs: _buildPredictInputs,
     batchPredictClassification: batchPredictClassification,
     confusionMatrix: confusionMatrix,
     precisionRecallF1: precisionRecallF1,

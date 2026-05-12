@@ -1032,7 +1032,10 @@
             // training-mode pass.
             if (!training) {
               _augClearCoin(self.seedLink);
-              return tf.keep(x.clone());
+              // #173: just return clone — tf.tidy preserves the return
+              // value automatically. tf.keep here prevented downstream
+              // disposal and leaked one tensor per model.predict().
+              return x.clone();
             }
             return self._applyTransform(x);
           });
@@ -1184,7 +1187,7 @@
           var training = !!(kwargs && (kwargs.training === true || kwargs.training === 1));
           return tf.tidy(function () {
             var x = Array.isArray(inputs) ? inputs[0] : inputs;
-            if (!training) return tf.keep(x.clone());
+            if (!training) return x.clone();  // #173: drop tf.keep — see AugmentImage note
             if (self.transform === "identity") return x.clone();
             // bbox tensor: [B, 4] or [B, N, 4] with x0,y0,x1,y1
             var rank = x.shape.length;
@@ -1315,7 +1318,7 @@
           var training = !!(kwargs && (kwargs.training === true || kwargs.training === 1));
           return tf.tidy(function () {
             var x = Array.isArray(inputs) ? inputs[0] : inputs;
-            if (!training) return tf.keep(x.clone());
+            if (!training) return x.clone();  // #173: drop tf.keep — see AugmentImage note
             if (self.transform === "identity") return x.clone();
             // Codex round-5 P2: doc claimed 3D + 4D support but code
             // only flipped 4D. Now: promote 3D [B, H, W] to 4D
@@ -1399,7 +1402,7 @@
         }
         call(inputs) {
           var x = Array.isArray(inputs) ? inputs[0] : inputs;
-          return tf.tidy(function () { return tf.keep(x.clone()); });
+          return tf.tidy(function () { return x.clone(); });  // #173: drop tf.keep
         }
         getConfig() {
           var cfg = super.getConfig();
