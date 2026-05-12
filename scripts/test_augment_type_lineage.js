@@ -160,6 +160,54 @@ var MBC = require(path.join(__dirname, "..", "src/model_builder_core.js"));
     });
   });
 
+  // #176 (P1 from PR #76 round-2): feature-block parents on a source must
+  // NOT shadow the actual source in the lineage walk. The reviewer reproduced:
+  //   - VALID params_layer -> target_source -> augment_bbox was rejected
+  //     (walker reported params_layer as root instead of target_source)
+  //   - INVALID params_layer -> target_source -> augment_image was allowed
+  //     (root != target_source vacuously passed the reject-target rule)
+  // Fix: stop the walk at declared input/source node names regardless of
+  // feature-block parents, mirroring input-detection logic.
+  console.log("Test 7a: params_layer -> target_source -> augment_bbox builds cleanly (#176)");
+  var paramsBbox = { drawflow: { Home: { data: {
+    "1": { id:1, name:"params_layer", data:{ paramKeys:["m","k","c"] }, class:"params_layer", html:"", typenode:false,
+           inputs:{}, outputs:{ output_1:{ connections:[{ node:"2", input:"input_1" }] } }, pos_x:0, pos_y:-100 },
+    "2": { id:2, name:"target_source_layer", data:{ targetKey:"bbox", featureSize:4 }, class:"target_source_layer", html:"", typenode:false,
+           inputs:{ input_1:{ connections:[{ node:"1", output:"output_1" }] } }, outputs:{ output_1:{ connections:[{ node:"3", input:"input_1" }] } }, pos_x:0, pos_y:0 },
+    "3": { id:3, name:"augment_bbox_layer", data:{ transform:"horizontal_flip", probability:0.5, seedLink:"", format:"x0y0x1y1", imageWidth:1, imageHeight:1 }, class:"augment_bbox_layer", html:"", typenode:false,
+           inputs:{ input_1:{ connections:[{ node:"2", output:"output_1" }] } }, outputs:{ output_1:{ connections:[{ node:"4", input:"input_1" }] } }, pos_x:100, pos_y:0 },
+    "4": { id:4, name:"output_layer", data:{ target:"bbox", targetType:"bbox", loss:"mse", units:4, headType:"regression" }, class:"output_layer", html:"", typenode:false,
+           inputs:{ input_1:{ connections:[{ node:"3", output:"output_1" }] } }, outputs:{}, pos_x:200, pos_y:0 },
+  } } } };
+  expectOk("params_layer -> target_source -> augment_bbox", function () {
+    MBC.buildModelFromGraph(tf, paramsBbox, {
+      mode: "direct", featureSize: 4,
+      allowedOutputKeys: [{ key: "bbox", featureSize: 4, headType: "regression" }],
+      defaultTarget: "bbox", numClasses: 1, targetSize: 4,
+    });
+  });
+
+  console.log("Test 7b: params_layer -> target_source -> augment_image must STILL throw (#176)");
+  var paramsImg = { drawflow: { Home: { data: {
+    "1": { id:1, name:"params_layer", data:{ paramKeys:["m","k","c"] }, class:"params_layer", html:"", typenode:false,
+           inputs:{}, outputs:{ output_1:{ connections:[{ node:"2", input:"input_1" }] } }, pos_x:0, pos_y:-100 },
+    "2": { id:2, name:"target_source_layer", data:{ targetKey:"mask", featureSize:4, targetShape:[2,2,1] }, class:"target_source_layer", html:"", typenode:false,
+           inputs:{ input_1:{ connections:[{ node:"1", output:"output_1" }] } }, outputs:{ output_1:{ connections:[{ node:"3", input:"input_1" }] } }, pos_x:0, pos_y:0 },
+    "3": { id:3, name:"reshape_layer", data:{ targetShape:"2,2,1" }, class:"reshape_layer", html:"", typenode:false,
+           inputs:{ input_1:{ connections:[{ node:"2", output:"output_1" }] } }, outputs:{ output_1:{ connections:[{ node:"4", input:"input_1" }] } }, pos_x:100, pos_y:0 },
+    "4": { id:4, name:"augment_image_layer", data:{ transform:"horizontal_flip", probability:0.5, seedLink:"", layout:"nhwc" }, class:"augment_image_layer", html:"", typenode:false,
+           inputs:{ input_1:{ connections:[{ node:"3", output:"output_1" }] } }, outputs:{ output_1:{ connections:[{ node:"5", input:"input_1" }] } }, pos_x:200, pos_y:0 },
+    "5": { id:5, name:"output_layer", data:{ target:"mask", targetType:"mask", loss:"mse", units:4, headType:"regression" }, class:"output_layer", html:"", typenode:false,
+           inputs:{ input_1:{ connections:[{ node:"4", output:"output_1" }] } }, outputs:{}, pos_x:300, pos_y:0 },
+  } } } };
+  expectThrow("params_layer -> target_source -> augment_image", function () {
+    MBC.buildModelFromGraph(tf, paramsImg, {
+      mode: "direct", featureSize: 4, imageShape: [2, 2, 1],
+      allowedOutputKeys: [{ key: "mask", featureSize: 4, headType: "regression" }],
+      defaultTarget: "mask", numClasses: 1, targetSize: 4,
+    });
+  }, /augment_image.*target_source|image data/);
+
   // Test 7: full SAR-Ship aug graph (image + target_source branches) still builds
   console.log("Test 7: full SAR-Ship aug graph still builds (regression)");
   require(path.join(__dirname, "..", "demo/SAR-Ship-Detection/preset.js"));

@@ -1,5 +1,5 @@
 // Surrogate Studio - concatenated bundle
-// Generated: 2026-05-12T16:55:02Z
+// Generated: 2026-05-12T17:56:13Z
 // Source files: 58
 
 
@@ -21521,6 +21521,16 @@
     (function _checkAugmentTypeLineage() {
       var imageAugTypes = { "augment_image_layer": 1 };  // image only
       var targetAugTypes = { "augment_bbox_layer": 1 };  // target only (strict)
+      // #176 fix (P1 from PR #76 round-2): the walk must STOP at declared
+      // source/input nodes. Otherwise a graph like
+      //   params_layer -> target_source -> augment_bbox
+      // walks past target_source (because it has a feature-block parent)
+      // and reports params_layer as the root, which then makes the lineage
+      // rule reject augment_bbox even though target_source IS the actual
+      // tensor source. Mirrors the existing input-detection logic at
+      // model_builder_core.js:489-501 which treats feature blocks as
+      // declarative/visual and an input node as terminal regardless of
+      // feature-block parents.
       function rootsFor(startId) {
         var seen = {}, stack = [], roots = [];
         seen[startId] = true;
@@ -21529,9 +21539,21 @@
         });
         while (stack.length) {
           var cur = stack.pop();
+          var curNode = moduleData[cur];
+          var curName = curNode && curNode.name;
+          // Declared source/input nodes are terminal — they represent the
+          // actual tensor origin regardless of any feature-block parents.
+          if (curName && inputNodeNames[curName]) { roots.push(cur); continue; }
           var inc = getIncoming(cur);
-          if (inc.length === 0) { roots.push(cur); continue; }
-          inc.forEach(function (e) {
+          // Only follow non-feature-block edges. Feature blocks (params,
+          // hist, etc.) are visual metadata, not tensor flow — they
+          // shouldn't shadow the real source.
+          var realInc = inc.filter(function (e) {
+            var fromNode = moduleData[e.from];
+            return fromNode && !featureBlockNames[fromNode.name];
+          });
+          if (realInc.length === 0) { roots.push(cur); continue; }
+          realInc.forEach(function (e) {
             if (!seen[e.from]) { seen[e.from] = true; stack.push(e.from); }
           });
         }
