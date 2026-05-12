@@ -1280,10 +1280,20 @@
         var allPreds = [];
         var headOutputs = null;
         var batchSize = 256;
+        // #173: target_source graphs build models with >1 input (image +
+        // target). At eval time we only have image-side data; rely on
+        // prediction_core.buildPredictInputs to pad extra inputs with
+        // zero tensors so model.predict() accepts the call. The augment
+        // layers run in eval mode (no flip), so the dummy zero target
+        // doesn't perturb output[0] (the bbox head we actually evaluate).
+        var predCore = predictionCore || (typeof window !== "undefined" && window.OSCPredictionCore) || null;
         for (var bi = 0; bi < testX.length; bi += batchSize) {
           var bEnd = Math.min(bi + batchSize, testX.length);
           var bt = tf.tensor2d(testX.slice(bi, bEnd));
-          var br = built.model.predict(bt);
+          var wrapped = predCore && typeof predCore.buildPredictInputs === "function"
+            ? predCore.buildPredictInputs(tf, built.model, bt)
+            : { input: bt, extras: [] };
+          var br = built.model.predict(wrapped.input);
           var outputs = Array.isArray(br) ? br : [br];
           if (!headOutputs) headOutputs = outputs.map(function () { return []; });
           outputs.forEach(function (tensor, idx) {
@@ -1291,6 +1301,7 @@
           });
           allPreds = allPreds.concat(outputs[0].arraySync());
           bt.dispose();
+          wrapped.extras.forEach(function (t) { t.dispose(); });
           outputs.forEach(function (t) { t.dispose(); });
         }
         built.model.dispose();
