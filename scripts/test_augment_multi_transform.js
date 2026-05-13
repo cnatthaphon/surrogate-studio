@@ -150,6 +150,22 @@ var MBC = require(path.join(__dirname, "..", "src/model_builder_core.js"));
     fail("matching paired probs should build but threw: " + e.message.slice(0, 200));
   }
 
+  // Test 6: layout="auto" round-trips and resolves to NHWC behavior in browser
+  // (#183 P2). TF.js reshape preserves NHWC unlike the PyTorch server's
+  // reshape (which permutes to NCHW), so "auto" in browser is functionally
+  // equivalent to "nhwc" — but the stored config value must be "auto" so
+  // server-side auto-detect still works when the same graph trains there.
+  console.log("Test 6: layout=\"auto\" stays as \"auto\" in config and uses NHWC axes in TF.js");
+  var autoLayer = new ImgLayer({ hflipProb: 1.0, vflipProb: 0, layout: "auto" });
+  if (autoLayer.layout !== "auto") fail("layout=\"auto\" should round-trip as \"auto\", got " + autoLayer.layout);
+  var autoProbe = tf.tensor4d([[[[1],[2],[3]],[[4],[5],[6]]]]);  // [B=1, H=2, W=3, C=1]
+  var autoOut = autoLayer.apply(autoProbe, { training: true });
+  var autoArr = autoOut.arraySync()[0];
+  // Under NHWC axes hflip reverses W, so [0][0][0] should become 3 (was 1).
+  if (autoArr[0][0][0] !== 3) fail("layout=\"auto\" should use NHWC axes in browser (hflip on W); got " + autoArr[0][0][0]);
+  autoProbe.dispose(); autoOut.dispose();
+  console.log("  ✓ layout=\"auto\" round-trips and resolves to NHWC in browser");
+
   if (ok) console.log("\nPASS: multi-transform per block + Layer 3 sync validation.");
   else { console.error("\nFAIL: at least one assertion failed."); process.exit(1); }
 })().catch(function (e) { console.error(e && e.stack ? e.stack : e); process.exit(1); });

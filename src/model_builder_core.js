@@ -1176,7 +1176,14 @@
           this.vflipProb = _clampProb(config && config.vflipProb);
           this.seedLink = String((config && config.seedLink) || "");
           var lay = String((config && config.layout) || "nhwc").toLowerCase();
-          if (lay !== "nhwc" && lay !== "nchw") lay = "nhwc";
+          // #182 P2 fix: accept "auto" as a first-class value alongside
+          // explicit "nhwc" / "nchw". TF.js reshape preserves NHWC (unlike
+          // the PyTorch server's reshape which permutes to NCHW), so in
+          // the browser there's nothing to auto-detect — "auto" simply
+          // resolves to "nhwc" at flip-axis time. Reflecting "auto" in
+          // the stored value keeps the config round-trippable and the
+          // server-side auto-detect logic intact.
+          if (lay !== "nhwc" && lay !== "nchw" && lay !== "auto") lay = "auto";
           this.layout = lay;
         }
         build(inputShape) {
@@ -1447,7 +1454,14 @@
           this.vflipProb = _clampProb(config && config.vflipProb);
           this.seedLink = String((config && config.seedLink) || "");
           var lay = String((config && config.layout) || "nhwc").toLowerCase();
-          if (lay !== "nhwc" && lay !== "nchw") lay = "nhwc";
+          // #182 P2 fix: accept "auto" as a first-class value alongside
+          // explicit "nhwc" / "nchw". TF.js reshape preserves NHWC (unlike
+          // the PyTorch server's reshape which permutes to NCHW), so in
+          // the browser there's nothing to auto-detect — "auto" simply
+          // resolves to "nhwc" at flip-axis time. Reflecting "auto" in
+          // the stored value keeps the config round-trippable and the
+          // server-side auto-detect logic intact.
+          if (lay !== "nhwc" && lay !== "nchw" && lay !== "auto") lay = "auto";
           this.layout = lay;
         }
         build(inputShape) {

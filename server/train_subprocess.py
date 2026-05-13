@@ -1581,6 +1581,44 @@ def build_model_from_graph(graph, feature_size, target_size, num_classes=0):
                 else:
                     dim_map[nid] = in_dim
 
+            # #183 Layer 3 (server mirror): paired augment blocks sharing a
+            # seedLink MUST have identical (hflipProb, vflipProb) tuples.
+            # Otherwise the publisher (image) rolls a coin for a transform
+            # the paired reader (bbox/mask) ignores (or vice versa) → silent
+            # desync. Mirrors the JS check in model_builder_core.js so the
+            # server fails loud at build time instead of producing a
+            # mis-augmented training run.
+            aug_types = ("augment_image", "augment_bbox", "augment_mask")
+            by_seedlink = {}
+            for _nid in self.topo:
+                _t = self.node_types.get(_nid, "")
+                if _t not in aug_types:
+                    continue
+                _sl = getattr(self, f"aug_seedlink_{_nid}", "")
+                if not _sl:
+                    continue  # empty seedLink = unpaired, no sync required
+                _hp = float(getattr(self, f"aug_hflipprob_{_nid}", 0.0))
+                _vp = float(getattr(self, f"aug_vflipprob_{_nid}", 0.0))
+                by_seedlink.setdefault(_sl, []).append({
+                    "nid": _nid, "type": _t, "hflipProb": _hp, "vflipProb": _vp,
+                })
+            for _sl, _group in by_seedlink.items():
+                if len(_group) < 2:
+                    continue
+                _ref = _group[0]
+                for _cur in _group[1:]:
+                    if _cur["hflipProb"] != _ref["hflipProb"] or _cur["vflipProb"] != _ref["vflipProb"]:
+                        raise RuntimeError(
+                            f"Augment blocks sharing seedLink=\"{_sl}\" have divergent "
+                            f"probabilities. node {_ref['nid']} ({_ref['type']}) has "
+                            f"{{hflipProb:{_ref['hflipProb']}, vflipProb:{_ref['vflipProb']}}}, "
+                            f"but node {_cur['nid']} ({_cur['type']}) has "
+                            f"{{hflipProb:{_cur['hflipProb']}, vflipProb:{_cur['vflipProb']}}}. "
+                            f"Paired blocks must use the same probabilities so the image and "
+                            f"label stay aligned. Fix the configs, or give the diverging block "
+                            f"a different seedLink."
+                        )
+
         def forward(self, x):
             def _make_time_embedding(tensor, dim):
                 d = max(1, int(dim or 1))

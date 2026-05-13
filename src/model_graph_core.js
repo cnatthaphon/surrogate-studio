@@ -1063,7 +1063,7 @@
         addField({ kind: "number", key: "hflipProb", label: "Horizontal flip probability", value: Number(d.hflipProb != null ? d.hflipProb : 0.5), min: 0, max: 1, step: 0.05 });
         addField({ kind: "number", key: "vflipProb", label: "Vertical flip probability",   value: Number(d.vflipProb != null ? d.vflipProb : 0),   min: 0, max: 1, step: 0.05 });
         addField({ kind: "select", key: "layout", label: "Tensor layout", value: String(d.layout || "auto"), options: [
-          { value: "auto", label: "Auto-detect (recommended)" },
+          { value: "auto", label: "Auto (recommended) — NHWC in browser, NCHW-detect on server" },
           { value: "nhwc", label: "NHWC ([B, H, W, C])" },
           { value: "nchw", label: "NCHW ([B, C, H, W])" },
         ] });
@@ -1088,7 +1088,7 @@
         addField({ kind: "number", key: "hflipProb", label: "Horizontal flip probability", value: Number(d.hflipProb != null ? d.hflipProb : 0.5), min: 0, max: 1, step: 0.05 });
         addField({ kind: "number", key: "vflipProb", label: "Vertical flip probability",   value: Number(d.vflipProb != null ? d.vflipProb : 0),   min: 0, max: 1, step: 0.05 });
         addField({ kind: "select", key: "layout", label: "Tensor layout", value: String(d.layout || "auto"), options: [
-          { value: "auto", label: "Auto-detect (recommended)" },
+          { value: "auto", label: "Auto (recommended) — NHWC in browser, NCHW-detect on server" },
           { value: "nhwc", label: "NHWC ([B, H, W, C])" },
           { value: "nchw", label: "NCHW ([B, C, H, W])" },
         ] });
