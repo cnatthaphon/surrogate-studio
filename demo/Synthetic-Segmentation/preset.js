@@ -92,6 +92,60 @@
     return graph(d);
   }
 
+  // Seg-UNet + paired horizontal-flip augmentation (image + mask via seedLink).
+  // Image flows through augment_image; mask label via target_source -> augment_mask -> flatten
+  // -> output.input_2 so BCE compares against the augmented mask (rather than raw flat yb).
+  function buildSegUNetAug() {
+    _nid = 200;
+    var d = {};
+    var imgSrc  = N(d, "image_source", { sourceKey: "pixel_values", featureSize: IMAGE_SIZE, imageShape: [32,32,1] }, 50, 300);
+    var reshape = N(d, "reshape",      { targetShape: "32,32,1" },            200, 300);
+    var augImg  = N(d, "augment_image",{ transform: "horizontal_flip", probability: 0.5, seedLink: "segshape_aug", layout: "auto" }, 320, 300);
+
+    var enc1    = N(d, "conv2d",       { filters: 16, kernelSize: 3, strides: 1, padding: "same", activation: "relu" }, 480, 200);
+    var pool1   = N(d, "maxpool2d",    { poolSize: 2, strides: 2 },            640, 200);
+    var enc2    = N(d, "conv2d",       { filters: 32, kernelSize: 3, strides: 1, padding: "same", activation: "relu" }, 480, 400);
+    var pool2   = N(d, "maxpool2d",    { poolSize: 2, strides: 2 },            640, 400);
+    var bottle  = N(d, "conv2d",       { filters: 64, kernelSize: 3, strides: 1, padding: "same", activation: "relu" }, 640, 600);
+
+    var up2     = N(d, "upsample2d",   { size: 2 },                            810, 600);
+    var cat2    = NR(d, "concat_block", {},                                    810, 400);
+    var dec2    = N(d, "conv2d",       { filters: 32, kernelSize: 3, strides: 1, padding: "same", activation: "relu" }, 990, 400);
+    var up1     = N(d, "upsample2d",   { size: 2 },                            990, 200);
+    var cat1    = NR(d, "concat_block", {},                                    990, 100);
+    var dec1    = N(d, "conv2d",       { filters: 16, kernelSize: 3, strides: 1, padding: "same", activation: "relu" }, 1170, 100);
+
+    var conv1x1 = N(d, "conv2d",      { filters: 1, kernelSize: 1, strides: 1, padding: "same", activation: "sigmoid" }, 1170, 300);
+    var flat    = N(d, "flatten",      {},                                     1340, 300);
+    var out     = N(d, "output",       { target: "mask", targetType: "mask", loss: "binaryCrossentropy", matchWeight: 1, headType: "segmentation" }, 1510, 300);
+
+    // Mask branch
+    var tgtSrc   = N(d, "target_source",{ targetKey: "mask", featureSize: IMAGE_SIZE, targetShape: [32, 32] }, 320, 550);
+    var augMask  = N(d, "augment_mask", { transform: "horizontal_flip", probability: 0.5, seedLink: "segshape_aug", layout: "auto" }, 1170, 550);
+    var maskFlat = N(d, "flatten",      {},                                                                   1340, 550);
+
+    C(d, imgSrc, reshape); C(d, reshape, augImg);
+    C(d, augImg, enc1); C(d, enc1, pool1);
+    C(d, pool1, enc2); C(d, enc2, pool2);
+    C(d, pool2, bottle);
+    C(d, bottle, up2);
+    C(d, up2, cat2, "output_1", "input_1");
+    C(d, enc2, cat2, "output_1", "input_2");
+    C(d, cat2, dec2);
+    C(d, dec2, up1);
+    C(d, up1, cat1, "output_1", "input_1");
+    C(d, enc1, cat1, "output_1", "input_2");
+    C(d, cat1, dec1);
+    C(d, dec1, conv1x1);
+    C(d, conv1x1, flat);
+    C(d, flat, out);
+    C(d, tgtSrc, augMask);
+    C(d, augMask, maskFlat);
+    C(d, maskFlat, out, "output_1", "input_2");
+
+    return graph(d);
+  }
+
   // Simple baseline: dense MLP (no spatial skip)
   function buildMlpSeg() {
     _nid = 100;
@@ -126,6 +180,7 @@
     },
     models: [
       { id: "seg_unet", name: "Seg-UNet (skip connections)", schemaId: sid, graph: buildSegUNet(), createdAt: Date.now() },
+      { id: "seg_unet_aug", name: "Seg-UNet + Augmentation", schemaId: sid, graph: buildSegUNetAug(), createdAt: Date.now() },
       { id: "seg_mlp", name: "MLP Baseline", schemaId: sid, graph: buildMlpSeg(), createdAt: Date.now() },
     ],
     trainers: [
@@ -133,6 +188,12 @@
         id: "seg_unet_pre", name: "Seg-UNet (pre-trained)", schemaId: sid,
         datasetId: DS_ID, modelId: "seg_unet", status: "done",
         _pretrainedVar: "SEG_UNET_SKIP_CONNECTIONS_PRE_TRAINED_PRETRAINED_BIN_B64",
+        config: { epochs: 30, batchSize: 32, learningRate: 0.001, optimizerType: "adam" },
+      },
+      {
+        id: "seg_unet_aug_pre", name: "Seg-UNet + Augmentation (pre-trained)", schemaId: sid,
+        datasetId: DS_ID, modelId: "seg_unet_aug", status: "done",
+        _pretrainedVar: "SEG_UNET_AUGMENTATION_PRE_TRAINED_PRETRAINED_BIN_B64",
         config: { epochs: 30, batchSize: 32, learningRate: 0.001, optimizerType: "adam" },
       },
       {
@@ -148,6 +209,12 @@
         trainCfg: { epochs: 30, batchSize: 32, learningRate: 0.001, optimizer: "adam" },
       },
       {
+        id: "seg_unet_aug_trainer", name: "Seg-UNet + Augmentation Trainer", schemaId: sid,
+        datasetId: DS_ID, modelId: "seg_unet_aug",
+        runtime: "js_client", runtimeBackend: "auto", status: "draft",
+        trainCfg: { epochs: 30, batchSize: 32, learningRate: 0.001, optimizer: "adam" },
+      },
+      {
         id: "seg_mlp_trainer", name: "MLP Baseline Trainer", schemaId: sid,
         datasetId: DS_ID, modelId: "seg_mlp",
         runtime: "js_client", runtimeBackend: "auto", status: "draft",
@@ -157,8 +224,8 @@
     generations: [],
     evaluations: [
       {
-        id: "seg_eval", name: "Segmentation: UNet vs MLP", schemaId: sid, datasetId: DS_ID,
-        trainerIds: ["seg_unet_pre", "seg_mlp_pre"],
+        id: "seg_eval", name: "Segmentation: UNet vs UNet+Aug vs MLP", schemaId: sid, datasetId: DS_ID,
+        trainerIds: ["seg_unet_pre", "seg_unet_aug_pre", "seg_mlp_pre"],
         evaluatorIds: ["mask_iou", "dice", "pixel_accuracy"],
         status: "draft", runs: [], createdAt: Date.now(),
       },

@@ -79,6 +79,50 @@
     return graph(d);
   }
 
+  // +Aug variant: same backbone + paired horizontal-flip on image and bbox.
+  // Image branch: image_source -> reshape -> augment_image -> conv stack.
+  // Target branch: target_source(bbox) -> augment_bbox -> bboxOut.input_2.
+  // Both augments share seedLink="synthdet_aug" so flips stay aligned.
+  // Class head (label) is flip-invariant under hflip so we don't augment it
+  // (a star is still a star when mirrored); cls supervision uses raw yb.
+  function buildDetectionAug() {
+    _nid = 100;
+    var d = {};
+    var img = N(d, "image_source", { sourceKey: "pixel_values", featureSize: 1024, imageShape: [32, 32, 1] }, 60, 240);
+    var reshape = N(d, "reshape", { targetShape: "32,32,1" }, 230, 240);
+    var augImg = N(d, "augment_image", { transform: "horizontal_flip", probability: 0.5, seedLink: "synthdet_aug", layout: "auto" }, 360, 240);
+    var conv1 = N(d, "conv2d", { filters: 16, kernelSize: 3, strides: 1, padding: "same", activation: "relu" }, 520, 180);
+    var pool1 = N(d, "maxpool2d", { poolSize: 2, strides: 2 }, 700, 180);
+    var conv2 = N(d, "conv2d", { filters: 32, kernelSize: 3, strides: 1, padding: "same", activation: "relu" }, 880, 180);
+    var pool2 = N(d, "maxpool2d", { poolSize: 2, strides: 2 }, 1060, 180);
+    var flat = N(d, "flatten", {}, 1240, 240);
+    var dense = N(d, "dense", { units: 96, activation: "relu" }, 1420, 240);
+    var bboxDense = N(d, "dense", { units: 32, activation: "relu" }, 1600, 160);
+    var bboxOut = N(d, "output", {
+      target: "bbox", targetType: "bbox", headType: "regression",
+      loss: "mse", units: 4, unitsHint: 4, matchWeight: 1
+    }, 1780, 140);
+    var clsDense = N(d, "dense", { units: 32, activation: "relu" }, 1600, 320);
+    var clsOut = N(d, "output", {
+      target: "label", targetType: "label", headType: "classification",
+      loss: "cross_entropy", units: 3, unitsHint: 3, matchWeight: 0.4
+    }, 1780, 320);
+    // Target branch
+    var tgtSrc = N(d, "target_source", { targetKey: "bbox", featureSize: 4 }, 360, 480);
+    var augBox = N(d, "augment_bbox", {
+      transform: "horizontal_flip", probability: 0.5, seedLink: "synthdet_aug",
+      format: "x0y0x1y1", imageWidth: 1, imageHeight: 1
+    }, 1600, 480);
+
+    C(d, img, reshape); C(d, reshape, augImg); C(d, augImg, conv1);
+    C(d, conv1, pool1); C(d, pool1, conv2); C(d, conv2, pool2);
+    C(d, pool2, flat); C(d, flat, dense);
+    C(d, dense, bboxDense); C(d, bboxDense, bboxOut);
+    C(d, dense, clsDense); C(d, clsDense, clsOut);
+    C(d, tgtSrc, augBox); C(d, augBox, bboxOut, "output_1", "input_2");
+    return graph(d);
+  }
+
   window.SYNTHETIC_DETECTION_PRESET = {
     dataset: {
       id: DS_ID,
@@ -101,6 +145,13 @@
         schemaId: sid,
         graph: buildDetectionBaseline(),
         createdAt: Date.now(),
+      },
+      {
+        id: "synthetic_detection_model_aug",
+        name: "Single-Box Detector + Augmentation",
+        schemaId: sid,
+        graph: buildDetectionAug(),
+        createdAt: Date.now(),
       }
     ],
     trainers: [
@@ -110,6 +161,22 @@
         schemaId: sid,
         datasetId: DS_ID,
         modelId: "synthetic_detection_model",
+        runtime: "server_pytorch",
+        runtimeBackend: "auto",
+        status: "draft",
+        trainCfg: {
+          epochs: 18,
+          batchSize: 64,
+          learningRate: 0.001,
+          optimizerType: "adam",
+        }
+      },
+      {
+        id: "synthetic_detection_aug_trainer",
+        name: "Detection+Aug Trainer",
+        schemaId: sid,
+        datasetId: DS_ID,
+        modelId: "synthetic_detection_model_aug",
         runtime: "server_pytorch",
         runtimeBackend: "auto",
         status: "draft",
@@ -137,15 +204,32 @@
           learningRate: 0.001,
           optimizerType: "adam",
         }
+      },
+      {
+        id: "synthetic_detection_aug_trainer-pre",
+        name: "Single-Box Detector + Augmentation (pre-trained)",
+        schemaId: sid,
+        datasetId: DS_ID,
+        modelId: "synthetic_detection_model_aug",
+        runtime: "server_pytorch",
+        runtimeBackend: "auto",
+        status: "done",
+        _pretrainedVar: "SINGLE_BOX_DETECTOR_AUGMENTATION_PRE_TRAINED_PRETRAINED_BIN_B64",
+        trainCfg: {
+          epochs: 18,
+          batchSize: 64,
+          learningRate: 0.001,
+          optimizerType: "adam",
+        }
       }
     ],
     evaluations: [
       {
         id: "synthetic_detection_eval",
-        name: "BBox Quality",
+        name: "BBox Quality: Baseline vs +Aug",
         schemaId: sid,
         datasetId: DS_ID,
-        trainerIds: ["synthetic_detection_trainer-pre"],
+        trainerIds: ["synthetic_detection_trainer-pre", "synthetic_detection_aug_trainer-pre"],
         evaluatorIds: ["bbox_mae", "class_accuracy", "iou_mean"],
         status: "draft",
         runs: [],

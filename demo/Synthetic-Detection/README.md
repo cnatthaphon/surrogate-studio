@@ -55,6 +55,26 @@ The Single-Box Detector trained 18 epochs on PyTorch CUDA (early-stopped at epoc
 
 **To improve class accuracy** you'd either separate the class-head representation (deeper class branch) or sharpen the dataset (less ambiguous class boundaries). The point of the synthetic data is to keep the demo small enough to train in seconds, not to win a detection benchmark.
 
+### Does augmentation help here? (paired hflip)
+
+The second variant **Single-Box Detector + Augmentation** adds `augment_image` on the image branch and `target_source(bbox) → augment_bbox(x0y0x1y1)` on the target branch — both sharing `seedLink="synthdet_aug"` so the bbox flips in lockstep with the image. The classification head doesn't need augmenting (a square stays a square when mirrored), so its supervision continues to use raw labels.
+
+Both variants retrained at the same code rev, same seed=42, 18 epochs on PyTorch CUDA:
+
+| Variant (from pretrained metadata) | best epoch | best val_loss | bbox MAE |
+|---|---|---|---|
+| Single-Box Detector | 17 | 0.00115 | 0.0220 |
+| **Single-Box Detector + Augmentation** | 18 | **0.00105** ↓8.7% | **0.0203** ↓7.9% |
+
+Aug gives a small but consistent improvement on bbox regression. The synthetic dataset is easy enough that both models train close to the floor; the gap closes further if you push to more epochs (val_loss is still decreasing on the +Aug variant at epoch 18 while the baseline plateaus around epoch 17, consistent with augmentation as a regularizer that defers the overfitting point).
+
+The educational point is that the same `augment_image` + `target_source` + `augment_bbox` triad works equally on:
+- Real radar imagery (SAR-Ship demo, `format="xywh"`)
+- Synthetic shapes here (`format="x0y0x1y1"`)
+- Microscopy masks (Cell-Nuclei demo with `augment_mask` instead)
+
+Same blocks, same `seedLink` mechanism, different `format`/`layout` configs. The contract is data-shape driven, not task-specific.
+
 ## How to Use
 
 1. **Dataset** tab — click Generate Dataset (instant, synthetic)
