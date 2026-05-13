@@ -33,7 +33,7 @@ var MBC = require(path.join(__dirname, "..", "src/model_builder_core.js"));
     "4": { id:4, name:"flatten_layer", data:{}, class:"flatten_layer", html:"", typenode:false, inputs:{input_1:{connections:[{node:"3",output:"output_1"}]}}, outputs:{output_1:{connections:[{node:"5",input:"input_1"}]}}, pos_x:360, pos_y:0 },
     "5": { id:5, name:"output_layer", data:{target:"bbox", targetType:"bbox", loss:"mse", units:4}, class:"output_layer", html:"", typenode:false, inputs:{input_1:{connections:[{node:"4",output:"output_1"}]}, input_2:{connections:[{node:"7",output:"output_1"}]}}, outputs:{}, pos_x:480, pos_y:0 },
     "6": { id:6, name:"target_source_layer", data:{targetKey:"bbox", featureSize:4}, class:"target_source_layer", html:"", typenode:false, inputs:{}, outputs:{output_1:{connections:[{node:"7",input:"input_1"}]}}, pos_x:120, pos_y:200 },
-    "7": { id:7, name:"augment_bbox_layer", data:{transform:"horizontal_flip", probability:0.5, seedLink:"aug1", imageWidth:W, imageHeight:H, format:"x0y0x1y1"}, class:"augment_bbox_layer", html:"", typenode:false, inputs:{input_1:{connections:[{node:"6",output:"output_1"}]}}, outputs:{output_1:{connections:[{node:"5",input:"input_2"}]}}, pos_x:240, pos_y:200 },
+    "7": { id:7, name:"augment_bbox_layer", data:{hflipProb: 0.5, vflipProb: 0, seedLink:"aug1", imageWidth:W, imageHeight:H, format:"x0y0x1y1"}, class:"augment_bbox_layer", html:"", typenode:false, inputs:{input_1:{connections:[{node:"6",output:"output_1"}]}}, outputs:{output_1:{connections:[{node:"5",input:"input_2"}]}}, pos_x:240, pos_y:200 },
   } } } };
 
   console.log("Building graph with target_source → augment_bbox → output_layer.input_2...");

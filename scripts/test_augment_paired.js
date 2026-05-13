@@ -32,7 +32,7 @@ var MBC = require(path.join(__dirname, "..", "src/model_builder_core.js"));
   var bootstrap = { drawflow: { Home: { data: {
     "1": { id:1, name:"input_layer", data:{mode:"flat", featureSize:12, imageShape:[2,3,2]}, class:"input_layer", html:"", typenode:false, inputs:{}, outputs:{output_1:{connections:[{node:"2",input:"input_1"}]}}, pos_x:0, pos_y:0 },
     "2": { id:2, name:"reshape_layer", data:{targetShape:"2,3,2"}, class:"reshape_layer", html:"", typenode:false, inputs:{input_1:{connections:[{node:"1",output:"output_1"}]}}, outputs:{output_1:{connections:[{node:"3",input:"input_1"}]}}, pos_x:100, pos_y:0 },
-    "3": { id:3, name:"augment_image_layer", data:{transform:"horizontal_flip", probability:0.5, seedLink:"aug1"}, class:"augment_image_layer", html:"", typenode:false, inputs:{input_1:{connections:[{node:"2",output:"output_1"}]}}, outputs:{output_1:{connections:[{node:"4",input:"input_1"}]}}, pos_x:200, pos_y:0 },
+    "3": { id:3, name:"augment_image_layer", data:{hflipProb: 0.5, vflipProb: 0, seedLink:"aug1"}, class:"augment_image_layer", html:"", typenode:false, inputs:{input_1:{connections:[{node:"2",output:"output_1"}]}}, outputs:{output_1:{connections:[{node:"4",input:"input_1"}]}}, pos_x:200, pos_y:0 },
     "4": { id:4, name:"flatten_layer", data:{}, class:"flatten_layer", html:"", typenode:false, inputs:{input_1:{connections:[{node:"3",output:"output_1"}]}}, outputs:{output_1:{connections:[{node:"5",input:"input_1"}]}}, pos_x:300, pos_y:0 },
     "5": { id:5, name:"output_layer", data:{target:"pixel_values", targetType:"pixel_values", loss:"none", units:12}, class:"output_layer", html:"", typenode:false, inputs:{input_1:{connections:[{node:"4",output:"output_1"}]}}, outputs:{}, pos_x:400, pos_y:0 },
   } } } };
@@ -58,8 +58,8 @@ var MBC = require(path.join(__dirname, "..", "src/model_builder_core.js"));
 
   // ─── Test 1: paired image + bbox always agree under shared seedLink ───
   console.log("Test 1: image+bbox with seedLink=aug1, probability=0.5 — agreement over 200 trials");
-  var img = new ImgLayer({ transform: "horizontal_flip", probability: 0.5, seedLink: "aug1" });
-  var bbox = new BboxLayer({ transform: "horizontal_flip", probability: 0.5, seedLink: "aug1", imageWidth: 100 });
+  var img = new ImgLayer({ hflipProb: 0.5, vflipProb: 0, seedLink: "aug1" });
+  var bbox = new BboxLayer({ hflipProb: 0.5, vflipProb: 0, seedLink: "aug1", imageWidth: 100 });
   // Image [B=1, H=2, W=3, C=1] with distinct W values so a flip is detectable.
   // Bbox [B=1, 4] = [x0=10, y0=20, x1=30, y1=40].  Under hflip with imgWidth=100:
   //   x0_new = 100-30 = 70,  x1_new = 100-10 = 90.
@@ -91,7 +91,7 @@ var MBC = require(path.join(__dirname, "..", "src/model_builder_core.js"));
   // own-RNG path is reserved for empty seedLink (deliberately
   // unpaired use). Test reflects new semantics.
   console.log("Test 2: bbox with empty seedLink (unpaired) — own RNG");
-  var bboxAlone = new BboxLayer({ transform: "horizontal_flip", probability: 0.5, seedLink: "", imageWidth: 100 });
+  var bboxAlone = new BboxLayer({ hflipProb: 0.5, vflipProb: 0, seedLink: "", imageWidth: 100 });
   var b2 = tf.tensor2d([[10, 20, 30, 40]]);
   var loneCount = 0;
   for (var t2 = 0; t2 < 100; t2++) {
@@ -105,7 +105,7 @@ var MBC = require(path.join(__dirname, "..", "src/model_builder_core.js"));
 
   // ─── Test 2b: bbox with seedLink but no upstream — skips ─────────
   console.log("Test 2b: bbox with seedLink set but no upstream image — skips (no desync)");
-  var bboxOrphan = new BboxLayer({ transform: "horizontal_flip", probability: 1.0, seedLink: "no_upstream", imageWidth: 100 });
+  var bboxOrphan = new BboxLayer({ hflipProb: 1.0, vflipProb: 0, seedLink: "no_upstream", imageWidth: 100 });
   var b2b = tf.tensor2d([[10, 20, 30, 40]]);
   var yOrphan = bboxOrphan.apply(b2b, { training: true });
   var arrOrphan = yOrphan.arraySync()[0];
@@ -115,7 +115,7 @@ var MBC = require(path.join(__dirname, "..", "src/model_builder_core.js"));
 
   // ─── Test 3: eval mode — bbox passthrough ───────────────────────
   console.log("Test 3: bbox eval mode → passthrough");
-  var bboxEval = new BboxLayer({ transform: "horizontal_flip", probability: 1.0, seedLink: "aug1", imageWidth: 100 });
+  var bboxEval = new BboxLayer({ hflipProb: 1.0, vflipProb: 0, seedLink: "aug1", imageWidth: 100 });
   var bIn = tf.tensor2d([[10, 20, 30, 40]]);
   var bOut = bboxEval.apply(bIn, { training: false });
   var bArr = bOut.arraySync()[0];
@@ -126,8 +126,8 @@ var MBC = require(path.join(__dirname, "..", "src/model_builder_core.js"));
 
   // ─── Test 4: paired image + mask agree under shared seedLink ────
   console.log("Test 4: image+mask with seedLink=aug2 — agreement over 100 trials");
-  var img2 = new ImgLayer({ transform: "horizontal_flip", probability: 0.5, seedLink: "aug2" });
-  var mask = new MaskLayer({ transform: "horizontal_flip", probability: 0.5, seedLink: "aug2" });
+  var img2 = new ImgLayer({ hflipProb: 0.5, vflipProb: 0, seedLink: "aug2" });
+  var mask = new MaskLayer({ hflipProb: 0.5, vflipProb: 0, seedLink: "aug2" });
   var imgX = tf.tensor4d([[[[1], [2], [3]], [[4], [5], [6]]]]);
   var maskX = tf.tensor4d([[[[10], [20], [30]], [[40], [50], [60]]]]);
   var maskDisagreements = 0;
@@ -146,7 +146,7 @@ var MBC = require(path.join(__dirname, "..", "src/model_builder_core.js"));
 
   // ─── Test 4b: xywh bbox format ──────────────────────────────────
   console.log("Test 4b: bbox format=\"xywh\" — hflip uses W-x-w, vflip uses H-y-h");
-  var bboxXywh = new BboxLayer({ transform: "horizontal_flip", probability: 1.0, format: "xywh", imageWidth: 100, seedLink: "" });
+  var bboxXywh = new BboxLayer({ hflipProb: 1.0, vflipProb: 0, format: "xywh", imageWidth: 100, seedLink: "" });
   // Original [x=10, y=20, w=15, h=25]: spans x=[10,25] horizontally.
   // After hflip with W=100: x_new = 100 - 10 - 15 = 75. New box [75, 20, 15, 25].
   var bx = tf.tensor2d([[10, 20, 15, 25]]);
@@ -155,7 +155,7 @@ var MBC = require(path.join(__dirname, "..", "src/model_builder_core.js"));
   if (Math.abs(bxArr[0] - 75) > 1e-3) fail("xywh hflip x: got " + bxArr[0] + ", expected 75");
   if (Math.abs(bxArr[2] - 15) > 1e-3) fail("xywh hflip w (should be unchanged): got " + bxArr[2]);
   bxOut.dispose();
-  var bboxXywhV = new BboxLayer({ transform: "vertical_flip", probability: 1.0, format: "xywh", imageHeight: 100, seedLink: "" });
+  var bboxXywhV = new BboxLayer({ hflipProb: 0, vflipProb: 1.0, format: "xywh", imageHeight: 100, seedLink: "" });
   // After vflip with H=100: y_new = 100 - 20 - 25 = 55. New box [10, 55, 15, 25].
   var bvOut = bboxXywhV.apply(bx, { training: true });
   var bvArr = bvOut.arraySync()[0];

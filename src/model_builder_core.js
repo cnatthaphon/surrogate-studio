@@ -730,6 +730,50 @@
       });
     })();
 
+    // #182 Layer 3: paired-augment config sync. All augment blocks sharing
+    // the same seedLink MUST have identical (hflipProb, vflipProb) tuples.
+    // Otherwise the publisher (image) might roll a coin for vflip but the
+    // paired reader (bbox/mask) has vflipProb=0 and ignores it — silent
+    // desync. Fail loud at build time with a message naming both nodes
+    // and the divergent values.
+    (function _checkAugmentConfigSync() {
+      var augTypes = {
+        "augment_image_layer": 1,
+        "augment_bbox_layer": 1,
+        "augment_mask_layer": 1,
+      };
+      var bySeedLink = {};
+      topo.forEach(function (id) {
+        var node = moduleData[id]; if (!node) return;
+        if (!augTypes[node.name]) return;
+        var sl = String((node.data && node.data.seedLink) || "");
+        if (!sl) return;  // empty seedLink = unpaired, no sync required
+        var hp = _clampProb(node.data && node.data.hflipProb);
+        var vp = _clampProb(node.data && node.data.vflipProb);
+        if (!bySeedLink[sl]) bySeedLink[sl] = [];
+        bySeedLink[sl].push({ id: id, name: node.name, hflipProb: hp, vflipProb: vp });
+      });
+      Object.keys(bySeedLink).forEach(function (sl) {
+        var group = bySeedLink[sl];
+        if (group.length < 2) return;
+        var ref = group[0];
+        for (var i = 1; i < group.length; i++) {
+          var cur = group[i];
+          if (cur.hflipProb !== ref.hflipProb || cur.vflipProb !== ref.vflipProb) {
+            throw new Error(
+              "Augment blocks sharing seedLink=\"" + sl + "\" have divergent " +
+              "probabilities. node " + ref.id + " (" + ref.name + ") has " +
+              "{hflipProb:" + ref.hflipProb + ", vflipProb:" + ref.vflipProb + "}, " +
+              "but node " + cur.id + " (" + cur.name + ") has " +
+              "{hflipProb:" + cur.hflipProb + ", vflipProb:" + cur.vflipProb + "}. " +
+              "Paired blocks must use the same probabilities so the image and label " +
+              "stay aligned. Fix the configs, or give the diverging block a different seedLink."
+            );
+          }
+        }
+      });
+    })();
+
     // build TF.js model — create input tensors for ALL input nodes
     var allInputTensors = []; // { id, tensor, name }
     var tensorById = {};
@@ -1065,34 +1109,42 @@
     // augment without an upstream image augment using the same seedLink,
     // the paired layer falls back to its own coin (unsynced) — same
     // behaviour as the unpaired path.
+    // Registry stores a coin MAP per seedLink: { hflip: <scalar>, vflip: <scalar> }.
+    // Only keys for transforms whose prob>0 are present. Paired blocks look up by
+    // transform key. Cleared explicitly on eval / disabled-transform paths.
     var _augCoinRegistry = (typeof Map === "function") ? new Map() : null;
-    function _augPublishCoin(seedLink, coin) {
-      if (!seedLink || !_augCoinRegistry || !coin) return;
-      var prev = _augCoinRegistry.get(seedLink);
+    function _augPublishCoinKey(seedLink, key, coin) {
+      if (!seedLink || !_augCoinRegistry || !coin || !key) return;
+      var entry = _augCoinRegistry.get(seedLink);
+      if (!entry) { entry = {}; _augCoinRegistry.set(seedLink, entry); }
+      var prev = entry[key];
       if (prev && typeof prev.dispose === "function") {
         try { prev.dispose(); } catch (e) {}
       }
-      // tf.keep returns the same tensor with refcount bumped so it
-      // survives the publishing layer's tidy() scope.
-      _augCoinRegistry.set(seedLink, tf.keep(coin.clone()));
+      entry[key] = tf.keep(coin.clone());
     }
-    // Explicitly clear an entry. Called by the image augment when it
-    // takes the eval / identity / non-4D / prob=0 passthrough path so
-    // paired layers fall back to their own RNG instead of reading a
-    // stale coin from a previous forward pass (Codex PR #72 round-1
-    // P1: "Reset seedLink coin registry between forward passes").
     function _augClearCoin(seedLink) {
       if (!seedLink || !_augCoinRegistry) return;
-      var prev = _augCoinRegistry.get(seedLink);
-      if (prev && typeof prev.dispose === "function") {
-        try { prev.dispose(); } catch (e) {}
+      var entry = _augCoinRegistry.get(seedLink);
+      if (entry) {
+        Object.keys(entry).forEach(function (k) {
+          var t = entry[k];
+          if (t && typeof t.dispose === "function") { try { t.dispose(); } catch (e) {} }
+        });
       }
       _augCoinRegistry.delete(seedLink);
     }
-    function _augReadCoin(seedLink) {
-      if (!seedLink || !_augCoinRegistry) return null;
+    function _augReadCoinKey(seedLink, key) {
+      if (!seedLink || !_augCoinRegistry || !key) return null;
       var entry = _augCoinRegistry.get(seedLink);
-      return entry || null;
+      return (entry && entry[key]) || null;
+    }
+    // Clamp a probability config field to [0,1]. Non-finite / negative → 0.
+    function _clampProb(v) {
+      var p = Number(v);
+      if (!isFinite(p) || p < 0) return 0;
+      if (p > 1) return 1;
+      return p;
     }
 
     // ─── Image-augmentation layer (training-only transforms) ────────
@@ -1118,20 +1170,11 @@
       class AugImgLayer extends tf.layers.Layer {
         constructor(config) {
           super(config || {});
-          this.transform = String((config && config.transform) || "horizontal_flip").toLowerCase();
-          var p = Number((config && config.probability));
-          // Invalid/NaN/negative probability → safely disable (0), not a
-          // surprise re-enable at 0.5. Matches train_subprocess.py's clamp
-          // so a malformed graph trains identically across runtimes.
-          if (!isFinite(p) || p < 0) p = 0;
-          if (p > 1) p = 1;
-          this.probability = p;
+          // #182: multi-transform per block. Each transform has its own
+          // probability (0 = disabled). Independent coins per transform.
+          this.hflipProb = _clampProb(config && config.hflipProb);
+          this.vflipProb = _clampProb(config && config.vflipProb);
           this.seedLink = String((config && config.seedLink) || "");
-          // Layout: explicit "nhwc" (default) or "nchw". Default matches
-          // the typical image_source dataloader output and TF.js's
-          // default Conv2D format. Server-side picks the same axis based
-          // on the same config; an out-of-band heuristic isn't safe when
-          // small H/W collide with channel counts.
           var lay = String((config && config.layout) || "nhwc").toLowerCase();
           if (lay !== "nhwc" && lay !== "nchw") lay = "nhwc";
           this.layout = lay;
@@ -1177,63 +1220,49 @@
           });
         }
         _applyTransform(x) {
-          if (this.transform === "identity") {
-            // Identity: clear registry so paired layers don't lock onto
-            // a stale prior-pass coin.
-            _augClearCoin(this.seedLink);
-            return x.clone();
-          }
-          // Defensive: rank already validated in build(), but at predict
-          // time TF.js may reuse a layer with a freshly-shaped input. If
-          // we somehow get a non-4D tensor here, fail loud.
+          // Defensive rank check (Layer 1 validates at build, but predict
+          // calls bypass that). Fail loud rather than silent passthrough.
           if (x.shape.length !== 4) {
             throw new Error(
               "augment_image runtime got rank-" + x.shape.length + " tensor; " +
               "expected 4D. shape=" + JSON.stringify(x.shape)
             );
           }
-          if (this.transform === "horizontal_flip" || this.transform === "vertical_flip") {
-            // Per-batch coin flip at the configured probability. Whole-
-            // batch decision (not per-sample), matching Keras RandomFlip
-            // semantics. A paired bbox/mask augment applies the same
-            // flip downstream by reading the same seedLink RNG.
-            //
-            // Axis depends on layout config:
-            //   NHWC [B, H, W, C]: hflip → -2 (W),  vflip → -3 (H)
-            //   NCHW [B, C, H, W]: hflip → -1 (W),  vflip → -2 (H)
-            var flipAxis;
-            if (this.layout === "nchw") {
-              flipAxis = (this.transform === "horizontal_flip") ? -1 : -2;
-            } else {
-              flipAxis = (this.transform === "horizontal_flip") ? -2 : -3;
-            }
-            var coin = tf.randomUniform([], 0, 1);
-            // Publish the coin for paired augments downstream that share
-            // this seedLink. Stored as a scalar in [0,1); paired layers
-            // compare against their own probability threshold.
-            _augPublishCoin(this.seedLink, coin);
-            // Precompute both branches; select via mask. tf.where can't
-            // pick between two tensors at runtime via a scalar bool
-            // without both being materialized.
-            var flipped = tf.reverse(x, [flipAxis]);
-            var doFlip = tf.less(coin, tf.scalar(this.probability));
-            // Cast scalar bool to a [1,1,1,1] broadcastable mask.
-            var mask = tf.cast(doFlip, "float32").reshape([1, 1, 1, 1]);
-            return tf.add(tf.mul(mask, flipped), tf.mul(tf.sub(tf.scalar(1), mask), x));
+          // If everything is disabled (all probs 0): identity passthrough.
+          // Clear registry so paired blocks fall back to own RNG.
+          if (this.hflipProb <= 0 && this.vflipProb <= 0) {
+            _augClearCoin(this.seedLink);
+            return x.clone();
           }
-          // Unknown transform: passthrough rather than fail loudly so a
-          // typo doesn't crash training. Clear seedLink registry so
-          // paired layers don't read a stale prior coin (Codex round-3
-          // P2 for the server side; same fix applied here for parity).
-          // Editor validation should catch the typo before the graph
-          // reaches the builder.
-          _augClearCoin(this.seedLink);
-          return x.clone();
+          // Layout-aware axis selection.
+          //   NHWC [B,H,W,C]: hflip→-2 (W),  vflip→-3 (H)
+          //   NCHW [B,C,H,W]: hflip→-1 (W),  vflip→-2 (H)
+          var hflipAxis = (this.layout === "nchw") ? -1 : -2;
+          var vflipAxis = (this.layout === "nchw") ? -2 : -3;
+          // Apply each enabled transform in fixed order. Each has its own
+          // independent coin; publishing happens by transform key so paired
+          // blocks read the right one.
+          var cur = x;
+          var transforms = [
+            { key: "hflip", prob: this.hflipProb, axis: hflipAxis },
+            { key: "vflip", prob: this.vflipProb, axis: vflipAxis },
+          ];
+          for (var i = 0; i < transforms.length; i++) {
+            var t = transforms[i];
+            if (t.prob <= 0) continue;
+            var coin = tf.randomUniform([], 0, 1);
+            _augPublishCoinKey(this.seedLink, t.key, coin);
+            var flipped = tf.reverse(cur, [t.axis]);
+            var doFlip = tf.less(coin, tf.scalar(t.prob));
+            var mask = tf.cast(doFlip, "float32").reshape([1, 1, 1, 1]);
+            cur = tf.add(tf.mul(mask, flipped), tf.mul(tf.sub(tf.scalar(1), mask), cur));
+          }
+          return cur;
         }
         getConfig() {
           var cfg = super.getConfig();
-          cfg.transform = this.transform;
-          cfg.probability = this.probability;
+          cfg.hflipProb = this.hflipProb;
+          cfg.vflipProb = this.vflipProb;
           cfg.seedLink = this.seedLink;
           cfg.layout = this.layout;
           return cfg;
@@ -1274,19 +1303,12 @@
       class AugBboxLayer extends tf.layers.Layer {
         constructor(config) {
           super(config || {});
-          this.transform = String((config && config.transform) || "horizontal_flip").toLowerCase();
-          var p = Number((config && config.probability));
-          if (!isFinite(p) || p < 0) p = 0;
-          if (p > 1) p = 1;
-          this.probability = p;
+          // #182: multi-transform per block.
+          this.hflipProb = _clampProb(config && config.hflipProb);
+          this.vflipProb = _clampProb(config && config.vflipProb);
           this.seedLink = String((config && config.seedLink) || "");
           this.imageWidth = Math.max(1, Number((config && config.imageWidth) || 1));
           this.imageHeight = Math.max(1, Number((config && config.imageHeight) || 1));
-          // Bbox format. "x0y0x1y1" = corners (default, COCO-like).
-          // "xywh" = top-left + width/height (e.g. SAR-Ship's HRSID).
-          // Flip math differs:
-          //   x0y0x1y1 hflip: x0_new = W - x1, x1_new = W - x0  (swap)
-          //   xywh hflip:     x_new = W - x - w  (no swap of w; w stays)
           var fmt = String((config && config.format) || "x0y0x1y1").toLowerCase();
           if (fmt !== "x0y0x1y1" && fmt !== "xywh") fmt = "x0y0x1y1";
           this.format = fmt;
@@ -1323,73 +1345,71 @@
           var training = !!(kwargs && (kwargs.training === true || kwargs.training === 1));
           return tf.tidy(function () {
             var x = Array.isArray(inputs) ? inputs[0] : inputs;
-            if (!training) return x.clone();  // #173: drop tf.keep — see AugmentImage note
-            if (self.transform === "identity") return x.clone();
-            // bbox tensor: [B, 4] or [B, N, 4] with x0,y0,x1,y1
+            if (!training) return x.clone();
+            // All transforms disabled → passthrough.
+            if (self.hflipProb <= 0 && self.vflipProb <= 0) return x.clone();
             var rank = x.shape.length;
             if (rank !== 2 && rank !== 3) return x.clone();
             if (x.shape[rank - 1] !== 4) return x.clone();
-            // Codex round-6 P1: when seedLink is set but no coin
-            // published yet (paired image runs later in topo order, or
-            // doesn't exist), the silent own-RNG fallback hides a
-            // desync bug. Skip the augment instead of fabricating a
-            // coin that won't match the image. Empty seedLink → roll
-            // own (genuinely unpaired).
-            var sharedCoin = _augReadCoin(self.seedLink);
-            if (self.seedLink && !sharedCoin) {
-              if (typeof console !== "undefined" && console.warn) {
-                console.warn("[AugmentBboxLayer] seedLink='" + self.seedLink + "' set but no coin published; skipping to avoid desync.");
-              }
-              return x.clone();
-            }
-            var coin = sharedCoin ? sharedCoin.clone() : tf.randomUniform([], 0, 1);
-            var doFlip = tf.less(coin, tf.scalar(self.probability));
-            var maskScalar = tf.cast(doFlip, "float32");
-            // Split [..., 4] into 4 components along the last axis.
-            // Component meaning depends on `format`:
-            //   x0y0x1y1: (x0, y0, x1, y1)  — corners
-            //   xywh:     (x,  y,  w,  h)   — top-left + size
             var lastDim = rank - 1;
-            var splits = tf.split(x, 4, lastDim);
-            var a = splits[0], b = splits[1], c = splits[2], d = splits[3];
-            var nA, nB, nC, nD;
-            if (self.transform === "horizontal_flip") {
-              if (self.format === "xywh") {
-                // x_new = W - x - w; w/y/h unchanged
-                nA = tf.sub(tf.sub(tf.scalar(self.imageWidth), a), c);
-                nB = b; nC = c; nD = d;
-              } else {
-                // x0y0x1y1: swap x0 and x1 about W to keep x0 ≤ x1
-                nA = tf.sub(tf.scalar(self.imageWidth), c);
-                nB = b;
-                nC = tf.sub(tf.scalar(self.imageWidth), a);
-                nD = d;
+            // Apply each enabled transform in fixed order, reading the
+            // matching coin key from the seedLink registry (or rolling own
+            // if unpaired). Each transform composes on the running tensor.
+            var cur = x;
+            var transforms = [
+              { key: "hflip", prob: self.hflipProb },
+              { key: "vflip", prob: self.vflipProb },
+            ];
+            for (var ti = 0; ti < transforms.length; ti++) {
+              var t = transforms[ti];
+              if (t.prob <= 0) continue;
+              var sharedCoin = _augReadCoinKey(self.seedLink, t.key);
+              if (self.seedLink && !sharedCoin) {
+                if (typeof console !== "undefined" && console.warn) {
+                  console.warn("[AugmentBboxLayer] seedLink='" + self.seedLink + "' transform=" + t.key + " has no upstream coin; skipping (avoid desync).");
+                }
+                continue;
               }
-            } else if (self.transform === "vertical_flip") {
-              if (self.format === "xywh") {
-                nA = a;
-                nB = tf.sub(tf.sub(tf.scalar(self.imageHeight), b), d);
-                nC = c; nD = d;
-              } else {
-                nA = a;
-                nB = tf.sub(tf.scalar(self.imageHeight), d);
-                nC = c;
-                nD = tf.sub(tf.scalar(self.imageHeight), b);
+              var coin = sharedCoin ? sharedCoin.clone() : tf.randomUniform([], 0, 1);
+              var splits = tf.split(cur, 4, lastDim);
+              var a = splits[0], b = splits[1], c = splits[2], d = splits[3];
+              var nA, nB, nC, nD;
+              if (t.key === "hflip") {
+                if (self.format === "xywh") {
+                  nA = tf.sub(tf.sub(tf.scalar(self.imageWidth), a), c);
+                  nB = b; nC = c; nD = d;
+                } else {
+                  nA = tf.sub(tf.scalar(self.imageWidth), c);
+                  nB = b;
+                  nC = tf.sub(tf.scalar(self.imageWidth), a);
+                  nD = d;
+                }
+              } else {  // vflip
+                if (self.format === "xywh") {
+                  nA = a;
+                  nB = tf.sub(tf.sub(tf.scalar(self.imageHeight), b), d);
+                  nC = c; nD = d;
+                } else {
+                  nA = a;
+                  nB = tf.sub(tf.scalar(self.imageHeight), d);
+                  nC = c;
+                  nD = tf.sub(tf.scalar(self.imageHeight), b);
+                }
               }
-            } else {
-              return x.clone();
+              var flipped = tf.concat([nA, nB, nC, nD], lastDim);
+              var doFlip = tf.less(coin, tf.scalar(t.prob));
+              var maskScalar = tf.cast(doFlip, "float32");
+              var bcastShape = cur.shape.slice().fill(1);
+              var maskB = maskScalar.reshape(bcastShape);
+              cur = tf.add(tf.mul(maskB, flipped), tf.mul(tf.sub(tf.scalar(1), maskB), cur));
             }
-            var flipped = tf.concat([nA, nB, nC, nD], lastDim);
-            // Per-batch broadcast: maskScalar is [], expand to match.
-            var bcastShape = x.shape.slice().fill(1);
-            var maskB = maskScalar.reshape(bcastShape);
-            return tf.add(tf.mul(maskB, flipped), tf.mul(tf.sub(tf.scalar(1), maskB), x));
+            return cur;
           });
         }
         getConfig() {
           var cfg = super.getConfig();
-          cfg.transform = this.transform;
-          cfg.probability = this.probability;
+          cfg.hflipProb = this.hflipProb;
+          cfg.vflipProb = this.vflipProb;
           cfg.seedLink = this.seedLink;
           cfg.imageWidth = this.imageWidth;
           cfg.imageHeight = this.imageHeight;
@@ -1422,11 +1442,9 @@
       class AugMaskLayer extends tf.layers.Layer {
         constructor(config) {
           super(config || {});
-          this.transform = String((config && config.transform) || "horizontal_flip").toLowerCase();
-          var p = Number((config && config.probability));
-          if (!isFinite(p) || p < 0) p = 0;
-          if (p > 1) p = 1;
-          this.probability = p;
+          // #182: multi-transform per block.
+          this.hflipProb = _clampProb(config && config.hflipProb);
+          this.vflipProb = _clampProb(config && config.vflipProb);
           this.seedLink = String((config && config.seedLink) || "");
           var lay = String((config && config.layout) || "nhwc").toLowerCase();
           if (lay !== "nhwc" && lay !== "nchw") lay = "nhwc";
@@ -1454,48 +1472,44 @@
           var training = !!(kwargs && (kwargs.training === true || kwargs.training === 1));
           return tf.tidy(function () {
             var x = Array.isArray(inputs) ? inputs[0] : inputs;
-            if (!training) return x.clone();  // #173: drop tf.keep — see AugmentImage note
-            if (self.transform === "identity") return x.clone();
-            // Codex round-5 P2: doc claimed 3D + 4D support but code
-            // only flipped 4D. Now: promote 3D [B, H, W] to 4D
-            // [B, H, W, 1], flip, squeeze back. Other ranks pass through.
+            if (!training) return x.clone();
+            if (self.hflipProb <= 0 && self.vflipProb <= 0) return x.clone();
             var origRank = x.shape.length;
             if (origRank !== 3 && origRank !== 4) return x.clone();
-            if (self.transform !== "horizontal_flip" && self.transform !== "vertical_flip") return x.clone();
             var promoted = (origRank === 3) ? tf.expandDims(x, -1) : x;
-            // Codex round-7 P2: when promoting 3D [B, H, W] → 4D, the
-            // synthetic last dim is a channel slot (NHWC-like). Layout
-            // config doesn't apply to that synthetic dim. Always use
-            // NHWC axes for the 3D-promoted case so we flip H/W (real
-            // spatial axes), not the synthetic channel.
+            // 3D promoted → synthetic last dim is channel; use NHWC axes.
+            // 4D → respect config layout.
             var effectiveLayout = (origRank === 3) ? "nhwc" : self.layout;
-            var flipAxis;
-            if (effectiveLayout === "nchw") {
-              flipAxis = (self.transform === "horizontal_flip") ? -1 : -2;
-            } else {
-              flipAxis = (self.transform === "horizontal_flip") ? -2 : -3;
-            }
-            // Same paired-coin discipline as bbox: empty seedLink rolls
-            // own; non-empty without published coin skips to avoid desync.
-            var sharedCoin = _augReadCoin(self.seedLink);
-            if (self.seedLink && !sharedCoin) {
-              if (typeof console !== "undefined" && console.warn) {
-                console.warn("[AugmentMaskLayer] seedLink='" + self.seedLink + "' set but no coin published; skipping to avoid desync.");
+            var hflipAxis = (effectiveLayout === "nchw") ? -1 : -2;
+            var vflipAxis = (effectiveLayout === "nchw") ? -2 : -3;
+            var cur = promoted;
+            var transforms = [
+              { key: "hflip", prob: self.hflipProb, axis: hflipAxis },
+              { key: "vflip", prob: self.vflipProb, axis: vflipAxis },
+            ];
+            for (var ti = 0; ti < transforms.length; ti++) {
+              var t = transforms[ti];
+              if (t.prob <= 0) continue;
+              var sharedCoin = _augReadCoinKey(self.seedLink, t.key);
+              if (self.seedLink && !sharedCoin) {
+                if (typeof console !== "undefined" && console.warn) {
+                  console.warn("[AugmentMaskLayer] seedLink='" + self.seedLink + "' transform=" + t.key + " has no upstream coin; skipping (avoid desync).");
+                }
+                continue;
               }
-              return (origRank === 3) ? promoted.squeeze([-1]).clone() : promoted.clone();
+              var coin = sharedCoin ? sharedCoin.clone() : tf.randomUniform([], 0, 1);
+              var flipped = tf.reverse(cur, [t.axis]);
+              var doFlip = tf.less(coin, tf.scalar(t.prob));
+              var mask = tf.cast(doFlip, "float32").reshape([1, 1, 1, 1]);
+              cur = tf.add(tf.mul(mask, flipped), tf.mul(tf.sub(tf.scalar(1), mask), cur));
             }
-            var coin = sharedCoin ? sharedCoin.clone() : tf.randomUniform([], 0, 1);
-            var flipped = tf.reverse(promoted, [flipAxis]);
-            var doFlip = tf.less(coin, tf.scalar(self.probability));
-            var mask = tf.cast(doFlip, "float32").reshape([1, 1, 1, 1]);
-            var blended = tf.add(tf.mul(mask, flipped), tf.mul(tf.sub(tf.scalar(1), mask), promoted));
-            return (origRank === 3) ? tf.squeeze(blended, [-1]) : blended;
+            return (origRank === 3) ? tf.squeeze(cur, [-1]) : cur;
           });
         }
         getConfig() {
           var cfg = super.getConfig();
-          cfg.transform = this.transform;
-          cfg.probability = this.probability;
+          cfg.hflipProb = this.hflipProb;
+          cfg.vflipProb = this.vflipProb;
           cfg.seedLink = this.seedLink;
           cfg.layout = this.layout;
           return cfg;
@@ -1852,22 +1866,22 @@
         var noiseScale = Number((node.data && node.data.scale) || 0.1);
         return _applyLayerMetadata(tf.layers.gaussianNoise({ stddev: noiseScale, name: _n }), node).apply(inTensor);
       }
-      // AugmentImage: training-only image augmentation (flip/etc.)
+      // AugmentImage: training-only image augmentation (per-transform probability).
       if (node.name === "augment_image_layer") {
         var augCfg = {
-          transform: String((node.data && node.data.transform) || "horizontal_flip"),
-          probability: Number((node.data && node.data.probability != null) ? node.data.probability : 0.5),
+          hflipProb: Number((node.data && node.data.hflipProb != null) ? node.data.hflipProb : 0),
+          vflipProb: Number((node.data && node.data.vflipProb != null) ? node.data.vflipProb : 0),
           seedLink: String((node.data && node.data.seedLink) || ""),
-          layout: String((node.data && node.data.layout) || "nhwc"),
+          layout: String((node.data && node.data.layout) || "auto"),
           name: _n,
         };
         return _applyLayerMetadata(new AugmentImageLayer(augCfg), node).apply(inTensor);
       }
-      // AugmentBbox: paired bbox augment — reads coin from seedLink registry.
+      // AugmentBbox: paired bbox augment — reads per-transform coins from seedLink registry.
       if (node.name === "augment_bbox_layer") {
         var bboxCfg = {
-          transform: String((node.data && node.data.transform) || "horizontal_flip"),
-          probability: Number((node.data && node.data.probability != null) ? node.data.probability : 0.5),
+          hflipProb: Number((node.data && node.data.hflipProb != null) ? node.data.hflipProb : 0),
+          vflipProb: Number((node.data && node.data.vflipProb != null) ? node.data.vflipProb : 0),
           seedLink: String((node.data && node.data.seedLink) || ""),
           imageWidth: Number((node.data && node.data.imageWidth) || 1),
           imageHeight: Number((node.data && node.data.imageHeight) || 1),
@@ -1876,13 +1890,13 @@
         };
         return _applyLayerMetadata(new AugmentBboxLayer(bboxCfg), node).apply(inTensor);
       }
-      // AugmentMask: paired mask augment — reads coin from seedLink registry.
+      // AugmentMask: paired mask augment — reads per-transform coins from seedLink registry.
       if (node.name === "augment_mask_layer") {
         var maskCfg = {
-          transform: String((node.data && node.data.transform) || "horizontal_flip"),
-          probability: Number((node.data && node.data.probability != null) ? node.data.probability : 0.5),
+          hflipProb: Number((node.data && node.data.hflipProb != null) ? node.data.hflipProb : 0),
+          vflipProb: Number((node.data && node.data.vflipProb != null) ? node.data.vflipProb : 0),
           seedLink: String((node.data && node.data.seedLink) || ""),
-          layout: String((node.data && node.data.layout) || "nhwc"),
+          layout: String((node.data && node.data.layout) || "auto"),
           name: _n,
         };
         return _applyLayerMetadata(new AugmentMaskLayer(maskCfg), node).apply(inTensor);

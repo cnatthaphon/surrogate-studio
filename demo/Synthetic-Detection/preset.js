@@ -90,7 +90,7 @@
     var d = {};
     var img = N(d, "image_source", { sourceKey: "pixel_values", featureSize: 1024, imageShape: [32, 32, 1] }, 60, 240);
     var reshape = N(d, "reshape", { targetShape: "32,32,1" }, 230, 240);
-    var augImg = N(d, "augment_image", { transform: "horizontal_flip", probability: 0.5, seedLink: "synthdet_aug", layout: "auto" }, 360, 240);
+    var augImg = N(d, "augment_image", { hflipProb: 0.5, vflipProb: 0, seedLink: "synthdet_aug", layout: "auto" }, 360, 240);
     var conv1 = N(d, "conv2d", { filters: 16, kernelSize: 3, strides: 1, padding: "same", activation: "relu" }, 520, 180);
     var pool1 = N(d, "maxpool2d", { poolSize: 2, strides: 2 }, 700, 180);
     var conv2 = N(d, "conv2d", { filters: 32, kernelSize: 3, strides: 1, padding: "same", activation: "relu" }, 880, 180);
@@ -110,7 +110,7 @@
     // Target branch
     var tgtSrc = N(d, "target_source", { targetKey: "bbox", featureSize: 4 }, 360, 480);
     var augBox = N(d, "augment_bbox", {
-      transform: "horizontal_flip", probability: 0.5, seedLink: "synthdet_aug",
+      hflipProb: 0.5, vflipProb: 0, seedLink: "synthdet_aug",
       format: "x0y0x1y1", imageWidth: 1, imageHeight: 1
     }, 1600, 480);
 

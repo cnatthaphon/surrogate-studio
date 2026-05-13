@@ -119,6 +119,18 @@ def _resolve_restore_best_weights(config, head_configs):
         return False
     return True
 
+def _clamp_prob(v):
+    """#182: clamp augment-transform probability to [0,1]. Non-finite / negative → 0."""
+    try:
+        p = float(v)
+    except (TypeError, ValueError):
+        return 0.0
+    if not (p == p) or p < 0:  # NaN-safe
+        return 0.0
+    if p > 1:
+        return 1.0
+    return p
+
 def main():
     global _STOP_REQUESTED
     _STOP_REQUESTED = False
@@ -1281,51 +1293,28 @@ def build_model_from_graph(graph, feature_size, target_size, num_classes=0):
                     setattr(self, f"noise_scale_{nid}", scale)
                     dim_map[nid] = in_dim
                 elif t == "augment_image":
-                    # Image augmentation (training only): config-driven
-                    # geometric transform; identity at eval. Mirrors
-                    # AugmentImageLayer in src/model_builder_core.js so
-                    # browser-trained and server-trained models converge
-                    # to the same training distribution.
-                    transform = str(c.get("transform", "horizontal_flip")).lower()
-                    p = c.get("probability", 0.5)
-                    try:
-                        p = float(p)
-                    except (TypeError, ValueError):
-                        # Unparseable → safely disable (0.0). Earlier code
-                        # fell back to 0.5, which silently re-enabled
-                        # augmentation for malformed configs and diverged
-                        # from the JS side, which clamps the same way to 0.
-                        p = 0.0
-                    if not (p == p) or p < 0:  # NaN-safe
-                        p = 0.0
-                    if p > 1:
-                        p = 1.0
-                    layout = str(c.get("layout", "nhwc")).lower()
+                    # #182: per-transform probability (hflipProb, vflipProb).
+                    # 0 = transform disabled; >0 = enabled with that probability.
+                    # Each enabled transform rolls an independent coin per batch
+                    # and is composed in fixed order (hflip then vflip).
+                    # Mirrors AugmentImageLayer in src/model_builder_core.js.
+                    hp = _clamp_prob(c.get("hflipProb", 0))
+                    vp = _clamp_prob(c.get("vflipProb", 0))
+                    layout = str(c.get("layout", "auto")).lower()
                     if layout not in ("nhwc", "nchw", "auto"):
-                        layout = "nhwc"
-                    setattr(self, f"aug_transform_{nid}", transform)
-                    setattr(self, f"aug_probability_{nid}", p)
+                        layout = "auto"
+                    setattr(self, f"aug_hflipprob_{nid}", hp)
+                    setattr(self, f"aug_vflipprob_{nid}", vp)
                     setattr(self, f"aug_seedlink_{nid}", str(c.get("seedLink", "")))
                     setattr(self, f"aug_layout_{nid}", layout)
                     dim_map[nid] = in_dim
                 elif t == "augment_bbox":
-                    # Paired bbox augment — reads coin from seedLink
-                    # registry (populated by upstream augment_image).
-                    # Mirrors x0/x1 (hflip) or y0/y1 (vflip) using
-                    # configured imageWidth / imageHeight. Eval mode is
-                    # identity passthrough.
-                    transform = str(c.get("transform", "horizontal_flip")).lower()
-                    p = c.get("probability", 0.5)
-                    try:
-                        p = float(p)
-                    except (TypeError, ValueError):
-                        p = 0.0
-                    if not (p == p) or p < 0:
-                        p = 0.0
-                    if p > 1:
-                        p = 1.0
-                    setattr(self, f"aug_transform_{nid}", transform)
-                    setattr(self, f"aug_probability_{nid}", p)
+                    # Paired bbox augment — reads per-transform coins from
+                    # the seedLink registry (populated by upstream augment_image).
+                    hp = _clamp_prob(c.get("hflipProb", 0))
+                    vp = _clamp_prob(c.get("vflipProb", 0))
+                    setattr(self, f"aug_hflipprob_{nid}", hp)
+                    setattr(self, f"aug_vflipprob_{nid}", vp)
                     setattr(self, f"aug_seedlink_{nid}", str(c.get("seedLink", "")))
                     setattr(self, f"aug_imgw_{nid}", float(c.get("imageWidth", 1)))
                     setattr(self, f"aug_imgh_{nid}", float(c.get("imageHeight", 1)))
@@ -1336,21 +1325,13 @@ def build_model_from_graph(graph, feature_size, target_size, num_classes=0):
                     setattr(self, f"aug_node_kind_{nid}", "bbox")
                     dim_map[nid] = in_dim
                 elif t == "augment_mask":
-                    transform = str(c.get("transform", "horizontal_flip")).lower()
-                    p = c.get("probability", 0.5)
-                    try:
-                        p = float(p)
-                    except (TypeError, ValueError):
-                        p = 0.0
-                    if not (p == p) or p < 0:
-                        p = 0.0
-                    if p > 1:
-                        p = 1.0
-                    layout = str(c.get("layout", "nhwc")).lower()
+                    hp = _clamp_prob(c.get("hflipProb", 0))
+                    vp = _clamp_prob(c.get("vflipProb", 0))
+                    layout = str(c.get("layout", "auto")).lower()
                     if layout not in ("nhwc", "nchw", "auto"):
-                        layout = "nhwc"
-                    setattr(self, f"aug_transform_{nid}", transform)
-                    setattr(self, f"aug_probability_{nid}", p)
+                        layout = "auto"
+                    setattr(self, f"aug_hflipprob_{nid}", hp)
+                    setattr(self, f"aug_vflipprob_{nid}", vp)
                     setattr(self, f"aug_seedlink_{nid}", str(c.get("seedLink", "")))
                     setattr(self, f"aug_layout_{nid}", layout)
                     setattr(self, f"aug_node_kind_{nid}", "mask")
@@ -1864,26 +1845,23 @@ def build_model_from_graph(graph, feature_size, target_size, num_classes=0):
                     else:
                         tensors[nid] = inp
                 elif t == "augment_image":
-                    # Initialize per-instance coin registry. Codex round-1
-                    # P1 fix: explicitly clear stale entries on passthrough
-                    # paths so paired layers fall back to own RNG instead
-                    # of reading a coin from a previous batch.
+                    # #182: multi-transform per block. Each transform has
+                    # its own probability (hflipProb, vflipProb); 0=disabled.
+                    # Each enabled transform rolls its own coin per batch
+                    # and the registry stores a per-key coin map so paired
+                    # bbox/mask blocks read the right coin.
                     if not hasattr(self, "_aug_seed_registry"):
                         self._aug_seed_registry = {}
-                    transform = getattr(self, f"aug_transform_{nid}", "horizontal_flip")
-                    prob = float(getattr(self, f"aug_probability_{nid}", 0.5))
+                    hflip_prob = float(getattr(self, f"aug_hflipprob_{nid}", 0.0))
+                    vflip_prob = float(getattr(self, f"aug_vflipprob_{nid}", 0.0))
                     seedlink = getattr(self, f"aug_seedlink_{nid}", "")
-                    # Eval mode: identity passthrough.
+                    # Eval mode: identity passthrough, clear stale registry.
                     if not self.training:
                         if seedlink and seedlink in self._aug_seed_registry:
                             del self._aug_seed_registry[seedlink]
                         tensors[nid] = inp
                         continue
-                    # #147 Layer 1: rank validation. Identity / p=0 are
-                    # legitimate config-driven passthroughs; non-4D rank is
-                    # a wiring mistake and should fail loud rather than
-                    # silently skip augmentation (which masquerades as
-                    # working training while the model never sees flips).
+                    # Layer 1: rank validation — wrong rank = wiring mistake.
                     if inp.dim() != 4:
                         raise RuntimeError(
                             f"augment_image (node {nid}) requires a 4D tensor "
@@ -1891,75 +1869,50 @@ def build_model_from_graph(graph, feature_size, target_size, num_classes=0):
                             f"shape {tuple(inp.shape)}. Wire it to an image-shaped "
                             f"tensor (e.g. image_source -> reshape -> augment_image)."
                         )
-                    if transform == "identity" or prob <= 0.0:
-                        # Config-driven passthrough — clear any prior coin
-                        # so paired readers fall back to own RNG.
+                    # All transforms disabled → passthrough, clear registry.
+                    if hflip_prob <= 0.0 and vflip_prob <= 0.0:
                         if seedlink and seedlink in self._aug_seed_registry:
                             del self._aug_seed_registry[seedlink]
                         tensors[nid] = inp
-                    elif transform in ("horizontal_flip", "vertical_flip"):
-                        # Whole-batch coin flip at the configured probability,
-                        # matching AugmentImageLayer (Keras RandomFlip
-                        # semantics).
-                        #
-                        # Layout is read from explicit config. Codex
-                        # round-1 P1 flagged that the server's "reshape"
-                        # block permutes NHWC→NCHW (line ~1974), so the
-                        # typical `reshape → augment_image` graph carries
-                        # NCHW tensors here even though the palette
-                        # default is nhwc. We auto-detect this specific
-                        # mismatch (config=nhwc but shape[1] is small
-                        # like a channel count and shape[-1] is large
-                        # like H/W) and override to nchw with a stderr
-                        # warning so the user notices.
-                        layout = getattr(self, f"aug_layout_{nid}", "nhwc")
-                        # Codex round-9 P2: auto-detect only fires when
-                        # user explicitly opts in via layout="auto", so
-                        # legitimate NHWC tensors with small H aren't
-                        # silently treated as NCHW. The "nhwc" / "nchw"
-                        # values are now strict — what you set is what
-                        # gets used.
-                        if layout == "auto" and inp.dim() == 4:
-                            ch_axis_1 = inp.shape[1]
-                            last_axis = inp.shape[-1]
-                            if ch_axis_1 in (1, 2, 3, 4) and last_axis > 4:
-                                layout = "nchw"
-                            else:
-                                layout = "nhwc"
-                        if layout == "nchw":
-                            flip_axis = -1 if transform == "horizontal_flip" else -2
+                        continue
+                    # Layout: explicit nhwc / nchw is strict; "auto" detects
+                    # the NCHW shape that follows server reshape's permute.
+                    layout = getattr(self, f"aug_layout_{nid}", "auto")
+                    if layout == "auto":
+                        ch_axis_1 = inp.shape[1]
+                        last_axis = inp.shape[-1]
+                        if ch_axis_1 in (1, 2, 3, 4) and last_axis > 4:
+                            layout = "nchw"
                         else:
-                            flip_axis = -2 if transform == "horizontal_flip" else -3
-                        # Roll a coin; publish to the seedLink registry
-                        # so paired bbox/mask layers downstream make the
-                        # same flip decision. Topological order in the
-                        # node loop guarantees augment_image runs before
-                        # paired augments within a single forward pass.
+                            layout = "nhwc"
+                    hflip_axis = -1 if layout == "nchw" else -2
+                    vflip_axis = -2 if layout == "nchw" else -3
+                    if seedlink:
+                        # Reset just this seedLink's coin map for this forward.
+                        self._aug_seed_registry[seedlink] = {}
+                    cur = inp
+                    for key, prob, axis in (
+                        ("hflip", hflip_prob, hflip_axis),
+                        ("vflip", vflip_prob, vflip_axis),
+                    ):
+                        if prob <= 0.0:
+                            continue
                         coin = float(torch.rand(()).item())
                         if seedlink:
-                            self._aug_seed_registry[seedlink] = coin
+                            self._aug_seed_registry[seedlink][key] = coin
                         if coin < prob:
-                            tensors[nid] = torch.flip(inp, dims=[flip_axis])
-                        else:
-                            tensors[nid] = inp
-                    else:
-                        # Unknown transform fallthrough — also clear so
-                        # paired layers don't read a stale prior coin
-                        # (Codex round-3 P2).
-                        if seedlink and seedlink in self._aug_seed_registry:
-                            del self._aug_seed_registry[seedlink]
-                        tensors[nid] = inp
+                            cur = torch.flip(cur, dims=[axis])
+                    tensors[nid] = cur
                 elif t == "augment_bbox":
-                    # Paired bbox augment — reads coin from registry.
+                    # #182: multi-transform paired bbox augment. Reads
+                    # per-key coins from seedLink registry; composes
+                    # enabled transforms in fixed order (hflip, vflip).
                     if not self.training:
                         tensors[nid] = inp
                         continue
-                    transform = getattr(self, f"aug_transform_{nid}", "horizontal_flip")
-                    prob = float(getattr(self, f"aug_probability_{nid}", 0.5))
+                    hflip_prob = float(getattr(self, f"aug_hflipprob_{nid}", 0.0))
+                    vflip_prob = float(getattr(self, f"aug_vflipprob_{nid}", 0.0))
                     seedlink = getattr(self, f"aug_seedlink_{nid}", "")
-                    # #147 Layer 1: bbox shape signature [B,4] or [B,N,4].
-                    # Wrong shape = wiring mistake → fail loud. Identity /
-                    # p=0 stay as legitimate config-driven passthroughs.
                     if inp.dim() not in (2, 3) or inp.shape[-1] != 4:
                         raise RuntimeError(
                             f"augment_bbox (node {nid}) requires a 2D [B,4] or "
@@ -1967,93 +1920,66 @@ def build_model_from_graph(graph, feature_size, target_size, num_classes=0):
                             f"{tuple(inp.shape)}. Wire it to a bbox tensor "
                             f"(e.g. target_source(targetKey='bbox') -> augment_bbox)."
                         )
-                    if transform == "identity" or prob <= 0.0:
+                    if hflip_prob <= 0.0 and vflip_prob <= 0.0:
                         tensors[nid] = inp
                         continue
-                    # Read shared coin from upstream augment_image with
-                    # same seedLink. Codex round-6 P1: if seedlink is set
-                    # but no coin published yet (upstream image augment
-                    # ran later in topo order, or doesn't exist), the
-                    # silent own-RNG fallback hides a desync bug. Now:
-                    # only fall back to own RNG when seedlink is empty
-                    # (genuinely unpaired). Otherwise warn loudly.
                     if not hasattr(self, "_aug_seed_registry"):
                         self._aug_seed_registry = {}
-                    if seedlink:
-                        coin = self._aug_seed_registry.get(seedlink)
-                        if coin is None:
-                            sys.stderr.write(
-                                f"[augment_bbox] node {nid}: seedLink='{seedlink}' "
-                                f"set but no upstream augment_image published a coin "
-                                f"for it in this forward pass. Skipping augmentation "
-                                f"to avoid desync. Check graph topology.\n"
-                            )
-                            tensors[nid] = inp
-                            continue
-                    else:
-                        coin = float(torch.rand(()).item())
-                    if coin >= prob:
-                        tensors[nid] = inp
-                        continue
                     img_w = float(getattr(self, f"aug_imgw_{nid}", 1.0))
                     img_h = float(getattr(self, f"aug_imgh_{nid}", 1.0))
                     fmt = getattr(self, f"aug_format_{nid}", "x0y0x1y1")
-                    a = inp[..., 0]; b = inp[..., 1]; c = inp[..., 2]; d = inp[..., 3]
-                    if transform == "horizontal_flip":
-                        if fmt == "xywh":
-                            # x_new = W - x - w; w/y/h unchanged
-                            na, nb, nc, nd = img_w - a - c, b, c, d
+                    cur = inp
+                    for key, prob in (("hflip", hflip_prob), ("vflip", vflip_prob)):
+                        if prob <= 0.0:
+                            continue
+                        if seedlink:
+                            entry = self._aug_seed_registry.get(seedlink)
+                            coin = entry.get(key) if isinstance(entry, dict) else None
+                            if coin is None:
+                                sys.stderr.write(
+                                    f"[augment_bbox] node {nid}: seedLink='{seedlink}' "
+                                    f"transform={key} has no upstream coin. "
+                                    f"Skipping to avoid desync.\n"
+                                )
+                                continue
                         else:
-                            # x0y0x1y1: swap about W
-                            na, nb, nc, nd = img_w - c, b, img_w - a, d
-                    elif transform == "vertical_flip":
-                        if fmt == "xywh":
-                            na, nb, nc, nd = a, img_h - b - d, c, d
-                        else:
-                            na, nb, nc, nd = a, img_h - d, c, img_h - b
-                    else:
-                        tensors[nid] = inp
-                        continue
-                    tensors[nid] = torch.stack([na, nb, nc, nd], dim=-1)
+                            coin = float(torch.rand(()).item())
+                        if coin >= prob:
+                            continue
+                        a = cur[..., 0]; b = cur[..., 1]; c = cur[..., 2]; d = cur[..., 3]
+                        if key == "hflip":
+                            if fmt == "xywh":
+                                na, nb, nc, nd = img_w - a - c, b, c, d
+                            else:
+                                na, nb, nc, nd = img_w - c, b, img_w - a, d
+                        else:  # vflip
+                            if fmt == "xywh":
+                                na, nb, nc, nd = a, img_h - b - d, c, d
+                            else:
+                                na, nb, nc, nd = a, img_h - d, c, img_h - b
+                        cur = torch.stack([na, nb, nc, nd], dim=-1)
+                    tensors[nid] = cur
                 elif t == "augment_mask":
                     if not self.training:
                         tensors[nid] = inp
                         continue
-                    transform = getattr(self, f"aug_transform_{nid}", "horizontal_flip")
-                    prob = float(getattr(self, f"aug_probability_{nid}", 0.5))
+                    hflip_prob = float(getattr(self, f"aug_hflipprob_{nid}", 0.0))
+                    vflip_prob = float(getattr(self, f"aug_vflipprob_{nid}", 0.0))
                     seedlink = getattr(self, f"aug_seedlink_{nid}", "")
-                    # #147 Layer 1: mask shape signature 3D [B,H,W] or 4D
-                    # [B,H,W,C]/[B,C,H,W]. Wrong rank = wiring mistake.
                     if inp.dim() not in (3, 4):
                         raise RuntimeError(
                             f"augment_mask (node {nid}) requires a 3D [B,H,W] or "
                             f"4D mask tensor; got rank {inp.dim()} shape "
                             f"{tuple(inp.shape)}. Wire it to a mask tensor."
                         )
-                    if transform == "identity" or prob <= 0.0:
+                    if hflip_prob <= 0.0 and vflip_prob <= 0.0:
                         tensors[nid] = inp
                         continue
-                    # Codex round-8 P2: support both rank-3 [B, H, W]
-                    # and rank-4 [B, H, W, C] / [B, C, H, W] masks.
-                    # 3D promotes to 4D NHWC ([B, H, W, 1]), flips,
-                    # then squeezes back.
                     orig_rank = inp.dim()
-                    if transform not in ("horizontal_flip", "vertical_flip"):
-                        tensors[nid] = inp
-                        continue
                     promoted = inp.unsqueeze(-1) if orig_rank == 3 else inp
-                    # Same NCHW auto-detect as augment_image (Codex
-                    # round-2 P1: "Mirror augment_image layout override
-                    # in augment_mask"). Otherwise paired image+mask
-                    # diverge after a `reshape → augment_image
-                    # → augment_mask` chain on server, where the image
-                    # gets axis -1 (after override) but mask gets axis
-                    # -2 (no override).
-                    layout = getattr(self, f"aug_layout_{nid}", "nhwc")
-                    # When promoted from rank-3, synthetic last dim is
-                    # always the channel slot (NHWC). Force NHWC for
-                    # that case (mirrors JS round-7 P2). For 4D, only
-                    # auto-detect when layout=="auto" (round-9 P2).
+                    # 3D promoted → synthetic last dim is channel (NHWC).
+                    # 4D → respect layout config (auto-detect under permute).
+                    layout = getattr(self, f"aug_layout_{nid}", "auto")
                     if orig_rank == 3:
                         layout = "nhwc"
                     elif layout == "auto":
@@ -2063,29 +1989,31 @@ def build_model_from_graph(graph, feature_size, target_size, num_classes=0):
                             layout = "nchw"
                         else:
                             layout = "nhwc"
-                    if layout == "nchw":
-                        flip_axis = -1 if transform == "horizontal_flip" else -2
-                    else:
-                        flip_axis = -2 if transform == "horizontal_flip" else -3
+                    hflip_axis = -1 if layout == "nchw" else -2
+                    vflip_axis = -2 if layout == "nchw" else -3
                     if not hasattr(self, "_aug_seed_registry"):
                         self._aug_seed_registry = {}
-                    if seedlink:
-                        coin = self._aug_seed_registry.get(seedlink)
-                        if coin is None:
-                            sys.stderr.write(
-                                f"[augment_mask] node {nid}: seedLink='{seedlink}' "
-                                f"set but no upstream augment_image published a coin. "
-                                f"Skipping to avoid desync.\n"
-                            )
-                            tensors[nid] = inp
+                    cur = promoted
+                    for key, prob, axis in (
+                        ("hflip", hflip_prob, hflip_axis),
+                        ("vflip", vflip_prob, vflip_axis),
+                    ):
+                        if prob <= 0.0:
                             continue
-                    else:
-                        coin = float(torch.rand(()).item())
-                    if coin < prob:
-                        flipped = torch.flip(promoted, dims=[flip_axis])
-                        tensors[nid] = flipped.squeeze(-1) if orig_rank == 3 else flipped
-                    else:
-                        tensors[nid] = inp
+                        if seedlink:
+                            entry = self._aug_seed_registry.get(seedlink)
+                            coin = entry.get(key) if isinstance(entry, dict) else None
+                            if coin is None:
+                                sys.stderr.write(
+                                    f"[augment_mask] node {nid}: seedLink='{seedlink}' "
+                                    f"transform={key} has no upstream coin. Skipping.\n"
+                                )
+                                continue
+                        else:
+                            coin = float(torch.rand(()).item())
+                        if coin < prob:
+                            cur = torch.flip(cur, dims=[axis])
+                    tensors[nid] = cur.squeeze(-1) if orig_rank == 3 else cur
                 elif t == "augment_label":
                     # Pure passthrough.
                     tensors[nid] = inp

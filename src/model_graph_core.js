@@ -1055,29 +1055,25 @@
         return spec;
       }
       // --- AugmentImage node ---
+      // #182: per-transform probability. 0 = disabled, >0 = enabled with that probability.
+      // Each enabled transform rolls its own coin per batch and is composed in order
+      // (hflip, then vflip). Paired bbox/mask blocks read the same coins via seedLink
+      // and must use the same probability set (Layer 3 validation enforces this).
       if (node.name === "augment_image_layer") {
-        addField({ kind: "select", key: "transform", label: "Transform", value: String(d.transform || "horizontal_flip"), options: [
-          { value: "horizontal_flip", label: "Horizontal flip" },
-          { value: "vertical_flip", label: "Vertical flip" },
-          { value: "identity", label: "Identity (passthrough)" },
-        ] });
-        addField({ kind: "number", key: "probability", label: "Probability", value: Number(d.probability != null ? d.probability : 0.5), min: 0, max: 1, step: 0.05 });
-        addField({ kind: "select", key: "layout", label: "Tensor layout", value: String(d.layout || "nhwc"), options: [
+        addField({ kind: "number", key: "hflipProb", label: "Horizontal flip probability", value: Number(d.hflipProb != null ? d.hflipProb : 0.5), min: 0, max: 1, step: 0.05 });
+        addField({ kind: "number", key: "vflipProb", label: "Vertical flip probability",   value: Number(d.vflipProb != null ? d.vflipProb : 0),   min: 0, max: 1, step: 0.05 });
+        addField({ kind: "select", key: "layout", label: "Tensor layout", value: String(d.layout || "auto"), options: [
+          { value: "auto", label: "Auto-detect (recommended)" },
           { value: "nhwc", label: "NHWC ([B, H, W, C])" },
           { value: "nchw", label: "NCHW ([B, C, H, W])" },
-          { value: "auto", label: "Auto-detect (server only)" },
         ] });
         addField({ kind: "text", key: "seedLink", label: "Seed link (for paired augments)", value: String(d.seedLink || ""), placeholder: "e.g. aug1 (links image with bbox/mask/label)" });
         return spec;
       }
       // --- AugmentBbox node ---
       if (node.name === "augment_bbox_layer") {
-        addField({ kind: "select", key: "transform", label: "Transform", value: String(d.transform || "horizontal_flip"), options: [
-          { value: "horizontal_flip", label: "Horizontal flip (mirror x)" },
-          { value: "vertical_flip", label: "Vertical flip (mirror y)" },
-          { value: "identity", label: "Identity (passthrough)" },
-        ] });
-        addField({ kind: "number", key: "probability", label: "Probability", value: Number(d.probability != null ? d.probability : 0.5), min: 0, max: 1, step: 0.05 });
+        addField({ kind: "number", key: "hflipProb", label: "Horizontal flip probability (mirror x)", value: Number(d.hflipProb != null ? d.hflipProb : 0.5), min: 0, max: 1, step: 0.05 });
+        addField({ kind: "number", key: "vflipProb", label: "Vertical flip probability (mirror y)",   value: Number(d.vflipProb != null ? d.vflipProb : 0),   min: 0, max: 1, step: 0.05 });
         addField({ kind: "select", key: "format", label: "Bbox format", value: String(d.format || "x0y0x1y1"), options: [
           { value: "x0y0x1y1", label: "x0,y0,x1,y1 (corners)" },
           { value: "xywh", label: "x,y,w,h (top-left + size)" },
@@ -1089,16 +1085,12 @@
       }
       // --- AugmentMask node ---
       if (node.name === "augment_mask_layer") {
-        addField({ kind: "select", key: "transform", label: "Transform", value: String(d.transform || "horizontal_flip"), options: [
-          { value: "horizontal_flip", label: "Horizontal flip" },
-          { value: "vertical_flip", label: "Vertical flip" },
-          { value: "identity", label: "Identity (passthrough)" },
-        ] });
-        addField({ kind: "number", key: "probability", label: "Probability", value: Number(d.probability != null ? d.probability : 0.5), min: 0, max: 1, step: 0.05 });
-        addField({ kind: "select", key: "layout", label: "Tensor layout", value: String(d.layout || "nhwc"), options: [
+        addField({ kind: "number", key: "hflipProb", label: "Horizontal flip probability", value: Number(d.hflipProb != null ? d.hflipProb : 0.5), min: 0, max: 1, step: 0.05 });
+        addField({ kind: "number", key: "vflipProb", label: "Vertical flip probability",   value: Number(d.vflipProb != null ? d.vflipProb : 0),   min: 0, max: 1, step: 0.05 });
+        addField({ kind: "select", key: "layout", label: "Tensor layout", value: String(d.layout || "auto"), options: [
+          { value: "auto", label: "Auto-detect (recommended)" },
           { value: "nhwc", label: "NHWC ([B, H, W, C])" },
           { value: "nchw", label: "NCHW ([B, C, H, W])" },
-          { value: "auto", label: "Auto-detect (server only)" },
         ] });
         addField({ kind: "text", key: "seedLink", label: "Seed link (must match image augment)", value: String(d.seedLink || ""), placeholder: "e.g. aug1" });
         return spec;

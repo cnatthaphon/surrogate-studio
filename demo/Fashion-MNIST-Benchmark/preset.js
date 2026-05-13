@@ -83,7 +83,7 @@
     _nid = 100; var d = {};
     var a = N(d, "image_source", { sourceKey: "pixel_values", featureSize: 784, imageShape: [28,28,1] }, 60, 80);
     var b = N(d, "reshape", { targetShape: "28,28,1" }, 200, 80);
-    var aug = N(d, "augment_image", { transform: "horizontal_flip", probability: 0.5, seedLink: "", layout: "auto" }, 320, 80);
+    var aug = N(d, "augment_image", { hflipProb: 0.5, vflipProb: 0, seedLink: "", layout: "auto" }, 320, 80);
     var c = N(d, "conv2d", { filters: 32, kernelSize: 5, strides: 1, padding: "same", activation: "relu" }, 460, 80);
     var e = N(d, "maxpool2d", { poolSize: 2, strides: 2 }, 600, 80);
     var f = N(d, "conv2d", { filters: 64, kernelSize: 5, strides: 1, padding: "same", activation: "relu" }, 740, 80);
