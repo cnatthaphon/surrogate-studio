@@ -291,6 +291,26 @@ var MBC = require(path.join(__dirname, "..", "src/model_builder_core.js"));
     });
   }, /targetKey.*mask|targetKey="mask"|bbox.*coord/);
 
+  // #179 (P1 from PR #76 round-5): builder defaults missing data.targetKey
+  // to "bbox" (model_builder_core.js:752). Layer 2 must match that default
+  // so older graphs that predate the explicit targetKey field don't break.
+  console.log("Test 9d: target_source with UNSET targetKey -> augment_bbox must BUILD (defaults to bbox) (#179)");
+  var unsetKey = { drawflow: { Home: { data: {
+    "1": { id:1, name:"target_source_layer", data:{ featureSize:4 }, class:"target_source_layer", html:"", typenode:false,
+           inputs:{}, outputs:{ output_1:{ connections:[{ node:"2", input:"input_1" }] } }, pos_x:0, pos_y:0 },
+    "2": { id:2, name:"augment_bbox_layer", data:{ transform:"horizontal_flip", probability:0.5, seedLink:"", format:"x0y0x1y1", imageWidth:1, imageHeight:1 }, class:"augment_bbox_layer", html:"", typenode:false,
+           inputs:{ input_1:{ connections:[{ node:"1", output:"output_1" }] } }, outputs:{ output_1:{ connections:[{ node:"3", input:"input_1" }] } }, pos_x:100, pos_y:0 },
+    "3": { id:3, name:"output_layer", data:{ target:"bbox", targetType:"bbox", loss:"mse", units:4, headType:"regression" }, class:"output_layer", html:"", typenode:false,
+           inputs:{ input_1:{ connections:[{ node:"2", output:"output_1" }] } }, outputs:{}, pos_x:200, pos_y:0 },
+  } } } };
+  expectOk("target_source(targetKey unset) -> augment_bbox (default=bbox)", function () {
+    MBC.buildModelFromGraph(tf, unsetKey, {
+      mode: "direct", featureSize: 4,
+      allowedOutputKeys: [{ key: "bbox", featureSize: 4, headType: "regression" }],
+      defaultTarget: "bbox", numClasses: 1, targetSize: 4,
+    });
+  });
+
   console.log("Test 9c: target_source(targetKey='bbox') -> augment_bbox still builds (positive control)");
   var bboxKey = { drawflow: { Home: { data: {
     "1": { id:1, name:"target_source_layer", data:{ targetKey:"bbox", featureSize:4 }, class:"target_source_layer", html:"", typenode:false,

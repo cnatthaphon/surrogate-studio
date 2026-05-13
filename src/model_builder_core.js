@@ -705,12 +705,17 @@
           // would silently apply bbox flip math (x_new = W - x - w) to a label
           // or mask tensor, producing semantic garbage. Reviewer's framing:
           // inspect the root's declared target contract, not just its name.
+          //
+          // #179 P1: an UNSET targetKey defaults to "bbox" — match the builder
+          // default at line 752 (`(inode.data && inode.data.targetKey) || "bbox"`).
+          // Older valid graphs that predate the explicit targetKey field would
+          // otherwise fail this check.
           var badKey = null, badRootId = null;
           for (var _ri = 0; _ri < roots.length; _ri++) {
             var _rid = roots[_ri];
             var _rnode = moduleData[_rid];
-            var _key = String((_rnode && _rnode.data && _rnode.data.targetKey) || "").toLowerCase();
-            if (_key !== "bbox") { badKey = _key || "(unset)"; badRootId = _rid; break; }
+            var _key = String((_rnode && _rnode.data && _rnode.data.targetKey) || "bbox").toLowerCase();
+            if (_key !== "bbox") { badKey = _key; badRootId = _rid; break; }
           }
           if (badKey) {
             throw new Error(
