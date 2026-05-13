@@ -328,6 +328,39 @@ var MBC = require(path.join(__dirname, "..", "src/model_builder_core.js"));
     });
   });
 
+  // #180 (P2 from PR #76 round-6): a dangling unreachable parent must
+  // NOT contribute to the lineage walk. Tensor construction filters by
+  // reachable[] (model_builder_core.js:1994), so an unreachable dense
+  // wired into augment_bbox never supplies a real tensor — the lineage
+  // walk must mirror that filter.
+  //
+  // Reviewer's repro:
+  //   target_source -> augment_bbox  (real, reachable)
+  //   dense (no input) -> augment_bbox  (dangling, unreachable)
+  // Pre-fix: walker reports roots ["dense_layer","target_source_layer"]
+  // and rejects. Post-fix: dense is unreachable, dropped, only
+  // target_source remains, builds cleanly.
+  console.log("Test 10: dangling unreachable parent must NOT poison the lineage walk (#180)");
+  var danglingParent = { drawflow: { Home: { data: {
+    // Real flow:
+    "1": { id:1, name:"target_source_layer", data:{ targetKey:"bbox", featureSize:4 }, class:"target_source_layer", html:"", typenode:false,
+           inputs:{}, outputs:{ output_1:{ connections:[{ node:"3", input:"input_1" }] } }, pos_x:0, pos_y:0 },
+    // Dangling unreachable parent — no incoming, not a declared input node:
+    "2": { id:2, name:"dense_layer", data:{ units:4, activation:"linear" }, class:"dense_layer", html:"", typenode:false,
+           inputs:{}, outputs:{ output_1:{ connections:[{ node:"3", input:"input_1" }] } }, pos_x:0, pos_y:200 },
+    "3": { id:3, name:"augment_bbox_layer", data:{ transform:"horizontal_flip", probability:0.5, seedLink:"", format:"x0y0x1y1", imageWidth:1, imageHeight:1 }, class:"augment_bbox_layer", html:"", typenode:false,
+           inputs:{ input_1:{ connections:[{ node:"1", output:"output_1" }, { node:"2", output:"output_1" }] } }, outputs:{ output_1:{ connections:[{ node:"4", input:"input_1" }] } }, pos_x:200, pos_y:0 },
+    "4": { id:4, name:"output_layer", data:{ target:"bbox", targetType:"bbox", loss:"mse", units:4, headType:"regression" }, class:"output_layer", html:"", typenode:false,
+           inputs:{ input_1:{ connections:[{ node:"3", output:"output_1" }] } }, outputs:{}, pos_x:400, pos_y:0 },
+  } } } };
+  expectOk("target_source -> augment_bbox + dangling dense parent", function () {
+    MBC.buildModelFromGraph(tf, danglingParent, {
+      mode: "direct", featureSize: 4,
+      allowedOutputKeys: [{ key: "bbox", featureSize: 4, headType: "regression" }],
+      defaultTarget: "bbox", numClasses: 1, targetSize: 4,
+    });
+  });
+
   // Test 7: full SAR-Ship aug graph (image + target_source branches) still builds
   console.log("Test 7: full SAR-Ship aug graph still builds (regression)");
   require(path.join(__dirname, "..", "demo/SAR-Ship-Detection/preset.js"));

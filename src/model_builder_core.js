@@ -634,33 +634,32 @@
       // only parents), and otherwise keep walking — regardless of node
       // name. A declared source with a real tensor parent is acting as a
       // passthrough and must not shadow the upstream origin.
+      // #180 (P2 from PR #76): tensor construction filters by reachable[]
+      // (see line ~1994), so a dangling unreachable parent like
+      //   dense_layer (unreachable) -> augment_bbox
+      // never contributes a real tensor to the augment node. The lineage
+      // walk must apply the same reachable[] filter, otherwise a stale
+      // dangling edge poisons the root list and falsely rejects valid
+      // graphs.
+      function _realParents(nid) {
+        return getIncoming(nid).filter(function (e) {
+          var fromNode = moduleData[e.from];
+          if (!fromNode) return false;
+          if (featureBlockNames[fromNode.name]) return false;  // metadata edges
+          if (!reachable[e.from]) return false;                // unreachable dangles
+          return true;
+        });
+      }
       function rootsFor(startId) {
         var seen = {}, stack = [], roots = [];
         seen[startId] = true;
-        getIncoming(startId).forEach(function (e) {
-          var fromNode = moduleData[e.from];
-          if (fromNode && featureBlockNames[fromNode.name]) return;  // skip metadata edges
+        _realParents(startId).forEach(function (e) {
           if (!seen[e.from]) { seen[e.from] = true; stack.push(e.from); }
         });
-        // Also handle the case where augment node's only incoming was
-        // through feature-block edges (no real tensor parent at all) —
-        // shouldn't happen in valid graphs, but be defensive.
-        if (stack.length === 0) {
-          var startInc = getIncoming(startId).filter(function (e) {
-            var fn = moduleData[e.from];
-            return fn && !featureBlockNames[fn.name];
-          });
-          if (startInc.length === 0) return [];  // augment node has no real parents
-        }
+        if (stack.length === 0) return [];  // augment node has no real parents
         while (stack.length) {
           var cur = stack.pop();
-          var inc = getIncoming(cur);
-          // Drop feature-block parents (params_layer, hist_block, etc.) —
-          // they're visual metadata, not tensor flow.
-          var realInc = inc.filter(function (e) {
-            var fromNode = moduleData[e.from];
-            return fromNode && !featureBlockNames[fromNode.name];
-          });
+          var realInc = _realParents(cur);
           if (realInc.length === 0) { roots.push(cur); continue; }
           realInc.forEach(function (e) {
             if (!seen[e.from]) { seen[e.from] = true; stack.push(e.from); }
