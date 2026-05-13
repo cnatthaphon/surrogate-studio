@@ -1,6 +1,6 @@
 # Surrogate Studio
 
-[![CI](https://github.com/cnatthaphon/surrogate-studio/actions/workflows/ci.yml/badge.svg)](https://github.com/cnatthaphon/surrogate-studio/actions/workflows/ci.yml) ![Demos](https://img.shields.io/badge/demos-16-orange) ![Models](https://img.shields.io/badge/models-47-blue) ![Tests](https://img.shields.io/badge/E2E%20checks-297%20pass-brightgreen) ![Papers](https://img.shields.io/badge/papers%20cited-18-blueviolet) [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+[![CI](https://github.com/cnatthaphon/surrogate-studio/actions/workflows/ci.yml/badge.svg)](https://github.com/cnatthaphon/surrogate-studio/actions/workflows/ci.yml) ![Demos](https://img.shields.io/badge/demos-16-orange) ![Models](https://img.shields.io/badge/models-51-blue) ![Tests](https://img.shields.io/badge/E2E%20checks-297%20pass-brightgreen) ![Papers](https://img.shields.io/badge/papers%20cited-18-blueviolet) [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
 **A visual ML platform with 16 demos across published papers and custom data — trainable in the browser with no install.**
 

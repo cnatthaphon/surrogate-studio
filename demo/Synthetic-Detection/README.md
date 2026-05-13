@@ -8,7 +8,7 @@ Single-object detection on synthetic grayscale images. Demonstrates the `detecti
 
 - **Detection task recipe**: bounding box prediction driven by the `detection_single_box` recipe — no detection-specific logic in core tabs
 - **Multi-head output**: bbox regression + class label from the same model
-- **Anchor-free detection**: direct regression to [x, y, w, h] coordinates
+- **Anchor-free detection**: direct regression to [x0, y0, x1, y1] corner coordinates
 
 | Dataset | Model Graph | Trainer |
 |:---:|:---:|:---:|
@@ -16,7 +16,7 @@ Single-object detection on synthetic grayscale images. Demonstrates the `detecti
 
 ## Dataset
 
-Synthetically generated 32×32 grayscale images with one shape (square, wide box, or tall box) per image. Target: normalized bounding box [x, y, w, h] + class label.
+Synthetically generated 32×32 grayscale images with one shape (square, wide box, or tall box) per image. Target: normalized bounding box `[x0, y0, x1, y1]` (corners, 0-1 range) + class label.
 
 | Class | Shape |
 |-------|-------|
@@ -35,7 +35,7 @@ ImageSource → Reshape(32,32,1)
     └→ Dense(32,relu) → Output(label, CrossEntropy) [classification head]
 ```
 
-Two output heads from the same backbone: bbox regression predicts [x, y, w, h] coordinates, classification predicts shape class (square / wide box / tall box).
+Two output heads from the same backbone: bbox regression predicts `[x0, y0, x1, y1]` corner coordinates (the `format="x0y0x1y1"` used by `augment_bbox` in the +Aug variant matches the dataset), classification predicts shape class (square / wide box / tall box).
 
 ## Results & Interpretation
 
