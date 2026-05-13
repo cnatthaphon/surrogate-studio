@@ -687,7 +687,8 @@
             );
           }
         } else {
-          // augment_bbox must come from target_source. Allow target_source-only chains.
+          // augment_bbox must come from target_source AND that target_source
+          // must declare targetKey="bbox". Step 1: all roots are target_source.
           var allTarget = rootNames.every(function (n) { return n === "target_source_layer"; });
           if (!allTarget) {
             throw new Error(
@@ -696,6 +697,29 @@
               "bbox flip math operates on actual bbox coords, not image features that " +
               "happen to be rank-2 with last-dim=4). Wire " + name + " downstream of " +
               "target_source(targetKey=\"bbox\")."
+            );
+          }
+          // Step 2 (#178 P1): the target_source's declared targetKey must be
+          // "bbox". Without this, target_source(targetKey="label", featureSize=4)
+          // or target_source(targetKey="mask", featureSize=4) -> augment_bbox
+          // would silently apply bbox flip math (x_new = W - x - w) to a label
+          // or mask tensor, producing semantic garbage. Reviewer's framing:
+          // inspect the root's declared target contract, not just its name.
+          var badKey = null, badRootId = null;
+          for (var _ri = 0; _ri < roots.length; _ri++) {
+            var _rid = roots[_ri];
+            var _rnode = moduleData[_rid];
+            var _key = String((_rnode && _rnode.data && _rnode.data.targetKey) || "").toLowerCase();
+            if (_key !== "bbox") { badKey = _key || "(unset)"; badRootId = _rid; break; }
+          }
+          if (badKey) {
+            throw new Error(
+              name + " (node " + id + ") traces upstream to target_source " +
+              "(node " + badRootId + ") with targetKey=\"" + badKey + "\" — but " +
+              "bbox flip math (x_new = W - x - w) is only meaningful on actual " +
+              "bbox coordinates, not on labels or masks. Wire " + name + " " +
+              "downstream of target_source(targetKey=\"bbox\"), or use " +
+              "augment_mask / augment_label for those target kinds."
             );
           }
         }
