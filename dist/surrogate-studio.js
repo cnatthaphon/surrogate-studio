@@ -1,5 +1,5 @@
 // Surrogate Studio - concatenated bundle
-// Generated: 2026-05-12T10:03:45Z
+// Generated: 2026-05-13T09:05:54Z
 // Source files: 58
 
 
@@ -21500,6 +21500,142 @@
       tq.sort(function (a, b) { return Number(a) - Number(b); });
     }
     if (topo.length !== reachableIds.length) throw new Error("Graph contains cycle(s).");
+
+    // #172 Layer 2: graph-walk type validation for augment blocks. Each
+    // augment node must trace upstream to the right kind of source so we
+    // catch semantic mistakes that Layer 1 (shape validation) can't.
+    //
+    // Per-block lineage rule:
+    //   - augment_image: must NOT trace back to target_source (image data
+    //     only).
+    //   - augment_bbox: MUST trace exclusively to target_source (bbox flip
+    //     math only makes sense on actual coords).
+    //   - augment_mask: PERMISSIVE — masks legitimately flow from either
+    //     direction. Paired with augment_image via seedLink in joint
+    //     image+mask augmentation (mask on image-flow side), AND directly
+    //     from target_source(targetKey="mask") in segmentation graphs
+    //     (mask on target-flow side). Only Layer 1 shape check applies.
+    //     #175 fix: previously bucketed with augment_image and rejected
+    //     target_source roots, breaking the segmentation pattern.
+    //   - augment_label: PERMISSIVE — flip-invariant passthrough.
+    (function _checkAugmentTypeLineage() {
+      var imageAugTypes = { "augment_image_layer": 1 };  // image only
+      var targetAugTypes = { "augment_bbox_layer": 1 };  // target only (strict)
+      // #176 fix (P1 from PR #76 round-2): the walk must STOP at declared
+      // source/input nodes. Otherwise a graph like
+      //   params_layer -> target_source -> augment_bbox
+      // walks past target_source (because it has a feature-block parent)
+      // and reports params_layer as the root, which then makes the lineage
+      // rule reject augment_bbox even though target_source IS the actual
+      // tensor source. Mirrors the existing input-detection logic at
+      // model_builder_core.js:489-501 which treats feature blocks as
+      // declarative/visual and an input node as terminal regardless of
+      // feature-block parents.
+      // #176 round-2 fix went too far: stopping at every declared source
+      // node created a bypass when something was wired UPSTREAM of a
+      // source (e.g. image_source -> target_source -> augment_bbox would
+      // report target_source as the root and incorrectly accept the
+      // augment_bbox even though the real data is image-flow). Reviewer's
+      // recipe: compute realInc first (drop feature-block parents), stop
+      // only when realInc is empty (true root, or source with metadata-
+      // only parents), and otherwise keep walking — regardless of node
+      // name. A declared source with a real tensor parent is acting as a
+      // passthrough and must not shadow the upstream origin.
+      // #180 (P2 from PR #76): tensor construction filters by reachable[]
+      // (see line ~1994), so a dangling unreachable parent like
+      //   dense_layer (unreachable) -> augment_bbox
+      // never contributes a real tensor to the augment node. The lineage
+      // walk must apply the same reachable[] filter, otherwise a stale
+      // dangling edge poisons the root list and falsely rejects valid
+      // graphs.
+      function _realParents(nid) {
+        return getIncoming(nid).filter(function (e) {
+          var fromNode = moduleData[e.from];
+          if (!fromNode) return false;
+          if (featureBlockNames[fromNode.name]) return false;  // metadata edges
+          if (!reachable[e.from]) return false;                // unreachable dangles
+          return true;
+        });
+      }
+      function rootsFor(startId) {
+        var seen = {}, stack = [], roots = [];
+        seen[startId] = true;
+        _realParents(startId).forEach(function (e) {
+          if (!seen[e.from]) { seen[e.from] = true; stack.push(e.from); }
+        });
+        if (stack.length === 0) return [];  // augment node has no real parents
+        while (stack.length) {
+          var cur = stack.pop();
+          var realInc = _realParents(cur);
+          if (realInc.length === 0) { roots.push(cur); continue; }
+          realInc.forEach(function (e) {
+            if (!seen[e.from]) { seen[e.from] = true; stack.push(e.from); }
+          });
+        }
+        return roots;
+      }
+      topo.forEach(function (id) {
+        var node = moduleData[id]; if (!node) return;
+        var name = node.name;
+        if (!imageAugTypes[name] && !targetAugTypes[name]) return;
+        var roots = rootsFor(id);
+        if (!roots.length) return;  // no parents at all — Layer 1 will catch
+        var rootNames = roots.map(function (r) { return (moduleData[r] && moduleData[r].name) || "?"; });
+        if (imageAugTypes[name]) {
+          // Image augments must not trace back to target_source.
+          if (rootNames.indexOf("target_source_layer") >= 0) {
+            throw new Error(
+              name + " (node " + id + ") traces upstream to target_source — but this " +
+              "block expects image data. Wire " + name + " downstream of " +
+              "image_source (or an input(mode=image)), not target_source. If you intended " +
+              "to augment the bounding box, use augment_bbox instead. " +
+              "Upstream roots seen: " + JSON.stringify(rootNames) + "."
+            );
+          }
+        } else {
+          // augment_bbox must come from target_source AND that target_source
+          // must declare targetKey="bbox". Step 1: all roots are target_source.
+          var allTarget = rootNames.every(function (n) { return n === "target_source_layer"; });
+          if (!allTarget) {
+            throw new Error(
+              name + " (node " + id + ") traces upstream to root(s) " +
+              JSON.stringify(rootNames) + " — expected target_source_layer (so the " +
+              "bbox flip math operates on actual bbox coords, not image features that " +
+              "happen to be rank-2 with last-dim=4). Wire " + name + " downstream of " +
+              "target_source(targetKey=\"bbox\")."
+            );
+          }
+          // Step 2 (#178 P1): the target_source's declared targetKey must be
+          // "bbox". Without this, target_source(targetKey="label", featureSize=4)
+          // or target_source(targetKey="mask", featureSize=4) -> augment_bbox
+          // would silently apply bbox flip math (x_new = W - x - w) to a label
+          // or mask tensor, producing semantic garbage. Reviewer's framing:
+          // inspect the root's declared target contract, not just its name.
+          //
+          // #179 P1: an UNSET targetKey defaults to "bbox" — match the builder
+          // default at line 752 (`(inode.data && inode.data.targetKey) || "bbox"`).
+          // Older valid graphs that predate the explicit targetKey field would
+          // otherwise fail this check.
+          var badKey = null, badRootId = null;
+          for (var _ri = 0; _ri < roots.length; _ri++) {
+            var _rid = roots[_ri];
+            var _rnode = moduleData[_rid];
+            var _key = String((_rnode && _rnode.data && _rnode.data.targetKey) || "bbox").toLowerCase();
+            if (_key !== "bbox") { badKey = _key; badRootId = _rid; break; }
+          }
+          if (badKey) {
+            throw new Error(
+              name + " (node " + id + ") traces upstream to target_source " +
+              "(node " + badRootId + ") with targetKey=\"" + badKey + "\" — but " +
+              "bbox flip math (x_new = W - x - w) is only meaningful on actual " +
+              "bbox coordinates, not on labels or masks. Wire " + name + " " +
+              "downstream of target_source(targetKey=\"bbox\"), or use " +
+              "augment_mask / augment_label for those target kinds."
+            );
+          }
+        }
+      });
+    })();
 
     // build TF.js model — create input tensors for ALL input nodes
     var allInputTensors = []; // { id, tensor, name }
