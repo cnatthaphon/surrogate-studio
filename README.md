@@ -31,6 +31,7 @@ This is an independent portfolio project focused on ML systems architecture: sch
 | **5** | **Pretrained instant results** | Most demos ship with trained weights. Open the page, see loss curves and metrics immediately. Retrain or modify if you want. |
 | **6** | **Plugin architecture** | Each demo is self-contained. Adding a new paper reproduction = zero core code changes. |
 | **7** | **Custom data support** | Bring your own CSV — the platform auto-detects features, targets, and task type. Or define a full custom schema for any domain. |
+| **8** | **Paired image + label augmentation** | Drop in `augment_image` + `augment_bbox`/`augment_mask` + `target_source` blocks; a shared `seedLink` string keeps image and label flips in lockstep so the bounding box still matches the flipped ship. Shape and type validation fire at build time — wire `augment_bbox` to image data and the build throws a clear error instead of silently mis-augmenting. Identical behavior across TF.js (browser), PyTorch (server), and exported notebooks. |
 
 ---
 
@@ -84,7 +85,7 @@ Every demo runs live on [GitHub Pages](https://cnatthaphon.github.io/surrogate-s
 | **Cell Nuclei Segmentation** | Segmentation | Ronneberger '15 (DSB 2018) | [Open](https://cnatthaphon.github.io/surrogate-studio/demo/Cell-Nuclei-Segmentation/) |
 | **Synthetic Segmentation** | Segmentation | Ronneberger '15 | [Open](https://cnatthaphon.github.io/surrogate-studio/demo/Synthetic-Segmentation/) |
 | **Synthetic Detection** | Detection | Redmon '16 | [Open](https://cnatthaphon.github.io/surrogate-studio/demo/Synthetic-Detection/) |
-| **SAR Ship Detection** | Detection | Wei '20 (HRSID radar) | [Open](https://cnatthaphon.github.io/surrogate-studio/demo/SAR-Ship-Detection/) |
+| **SAR Ship Detection** | Detection | Wei '20 (HRSID radar) — CNN, CNN+Augmentation, MLP | [Open](https://cnatthaphon.github.io/surrogate-studio/demo/SAR-Ship-Detection/) |
 | **Text Sentiment** | NLP | Vaswani '17 (Transformer) | [Open](https://cnatthaphon.github.io/surrogate-studio/demo/Text-Sentiment-Transformer/) |
 | **Siamese Verification** | Metric Learning | Bromley '93 | [Open](https://cnatthaphon.github.io/surrogate-studio/demo/Siamese-Shape-Verification/) |
 | **Custom CSV Tutorial** | Tabular | Bring your own data (Iris sample) | [Open](https://cnatthaphon.github.io/surrogate-studio/demo/Custom-CSV-Tutorial/) |
