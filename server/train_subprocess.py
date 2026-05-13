@@ -131,6 +131,26 @@ def _clamp_prob(v):
         return 1.0
     return p
 
+def _resolve_aug_probs(cfg):
+    """#184: builder-level back-compat for legacy { transform, probability }
+    augment node data. Mirrors _resolveAugProbsFromData on the JS side.
+    Saved/exported graphs predating PR #79 still carry the old field shape
+    and bypass the editor factory — without this, server training silently
+    no-ops (hflipProb/vflipProb default to 0)."""
+    if cfg is None:
+        return 0.0, 0.0
+    # Prefer the new shape when present (even if values are 0).
+    if cfg.get("hflipProb") is not None or cfg.get("vflipProb") is not None:
+        return _clamp_prob(cfg.get("hflipProb", 0)), _clamp_prob(cfg.get("vflipProb", 0))
+    # Legacy translation: transform enum + single probability.
+    t = str(cfg.get("transform", "")).lower()
+    p = _clamp_prob(cfg.get("probability", 0))
+    if t == "horizontal_flip":
+        return p, 0.0
+    if t == "vertical_flip":
+        return 0.0, p
+    return 0.0, 0.0
+
 def main():
     global _STOP_REQUESTED
     _STOP_REQUESTED = False
@@ -1298,8 +1318,11 @@ def build_model_from_graph(graph, feature_size, target_size, num_classes=0):
                     # Each enabled transform rolls an independent coin per batch
                     # and is composed in fixed order (hflip then vflip).
                     # Mirrors AugmentImageLayer in src/model_builder_core.js.
-                    hp = _clamp_prob(c.get("hflipProb", 0))
-                    vp = _clamp_prob(c.get("vflipProb", 0))
+                    # #184: builder-level back-compat. _resolve_aug_probs
+                    # accepts both new {hflipProb,vflipProb} and legacy
+                    # {transform,probability} shapes so saved/exported
+                    # graphs don't silently no-op on the server.
+                    hp, vp = _resolve_aug_probs(c)
                     layout = str(c.get("layout", "auto")).lower()
                     if layout not in ("nhwc", "nchw", "auto"):
                         layout = "auto"
@@ -1311,8 +1334,11 @@ def build_model_from_graph(graph, feature_size, target_size, num_classes=0):
                 elif t == "augment_bbox":
                     # Paired bbox augment — reads per-transform coins from
                     # the seedLink registry (populated by upstream augment_image).
-                    hp = _clamp_prob(c.get("hflipProb", 0))
-                    vp = _clamp_prob(c.get("vflipProb", 0))
+                    # #184: builder-level back-compat. _resolve_aug_probs
+                    # accepts both new {hflipProb,vflipProb} and legacy
+                    # {transform,probability} shapes so saved/exported
+                    # graphs don't silently no-op on the server.
+                    hp, vp = _resolve_aug_probs(c)
                     setattr(self, f"aug_hflipprob_{nid}", hp)
                     setattr(self, f"aug_vflipprob_{nid}", vp)
                     setattr(self, f"aug_seedlink_{nid}", str(c.get("seedLink", "")))
@@ -1325,8 +1351,11 @@ def build_model_from_graph(graph, feature_size, target_size, num_classes=0):
                     setattr(self, f"aug_node_kind_{nid}", "bbox")
                     dim_map[nid] = in_dim
                 elif t == "augment_mask":
-                    hp = _clamp_prob(c.get("hflipProb", 0))
-                    vp = _clamp_prob(c.get("vflipProb", 0))
+                    # #184: builder-level back-compat. _resolve_aug_probs
+                    # accepts both new {hflipProb,vflipProb} and legacy
+                    # {transform,probability} shapes so saved/exported
+                    # graphs don't silently no-op on the server.
+                    hp, vp = _resolve_aug_probs(c)
                     layout = str(c.get("layout", "auto")).lower()
                     if layout not in ("nhwc", "nchw", "auto"):
                         layout = "auto"

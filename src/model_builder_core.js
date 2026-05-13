@@ -748,10 +748,12 @@
         if (!augTypes[node.name]) return;
         var sl = String((node.data && node.data.seedLink) || "");
         if (!sl) return;  // empty seedLink = unpaired, no sync required
-        var hp = _clampProb(node.data && node.data.hflipProb);
-        var vp = _clampProb(node.data && node.data.vflipProb);
+        // #184: use _resolveAugProbsFromData so legacy nodes participate
+        // in the sync check too (otherwise a legacy node + a new-shape
+        // node sharing a seedLink would silently pass with one side at 0).
+        var probs = _resolveAugProbsFromData(node.data);
         if (!bySeedLink[sl]) bySeedLink[sl] = [];
-        bySeedLink[sl].push({ id: id, name: node.name, hflipProb: hp, vflipProb: vp });
+        bySeedLink[sl].push({ id: id, name: node.name, hflipProb: probs.hflipProb, vflipProb: probs.vflipProb });
       });
       Object.keys(bySeedLink).forEach(function (sl) {
         var group = bySeedLink[sl];
@@ -1145,6 +1147,26 @@
       if (!isFinite(p) || p < 0) return 0;
       if (p > 1) return 1;
       return p;
+    }
+    // #184: builder-level back-compat for legacy { transform, probability }
+    // augment node data. Saved/exported graphs predating PR #79 still carry
+    // the old field shape; the factory translates new clicks but anything
+    // loaded from disk / preset.js / notebook export hits the builder
+    // directly. Without this, legacy graphs become silent no-ops at
+    // runtime (hflipProb/vflipProb default to 0 → all transforms disabled).
+    function _resolveAugProbsFromData(data) {
+      // Prefer the new shape when present (even if values are 0).
+      if (data && (data.hflipProb != null || data.vflipProb != null)) {
+        return { hflipProb: _clampProb(data.hflipProb), vflipProb: _clampProb(data.vflipProb) };
+      }
+      // Legacy translation: transform enum + single probability.
+      var t = String((data && data.transform) || "").toLowerCase();
+      var p = _clampProb(data && data.probability);
+      if (t === "horizontal_flip") return { hflipProb: p, vflipProb: 0 };
+      if (t === "vertical_flip")   return { hflipProb: 0, vflipProb: p };
+      // identity / unrecognized → both disabled (preserves the
+      // legacy passthrough semantics).
+      return { hflipProb: 0, vflipProb: 0 };
     }
 
     // ─── Image-augmentation layer (training-only transforms) ────────
@@ -1881,10 +1903,13 @@
         return _applyLayerMetadata(tf.layers.gaussianNoise({ stddev: noiseScale, name: _n }), node).apply(inTensor);
       }
       // AugmentImage: training-only image augmentation (per-transform probability).
+      // #184: _resolveAugProbsFromData accepts both new shape and legacy
+      // { transform, probability } so saved/exported graphs work.
       if (node.name === "augment_image_layer") {
+        var augProbs = _resolveAugProbsFromData(node.data);
         var augCfg = {
-          hflipProb: Number((node.data && node.data.hflipProb != null) ? node.data.hflipProb : 0),
-          vflipProb: Number((node.data && node.data.vflipProb != null) ? node.data.vflipProb : 0),
+          hflipProb: augProbs.hflipProb,
+          vflipProb: augProbs.vflipProb,
           seedLink: String((node.data && node.data.seedLink) || ""),
           layout: String((node.data && node.data.layout) || "auto"),
           name: _n,
@@ -1893,9 +1918,10 @@
       }
       // AugmentBbox: paired bbox augment — reads per-transform coins from seedLink registry.
       if (node.name === "augment_bbox_layer") {
+        var bboxProbs = _resolveAugProbsFromData(node.data);
         var bboxCfg = {
-          hflipProb: Number((node.data && node.data.hflipProb != null) ? node.data.hflipProb : 0),
-          vflipProb: Number((node.data && node.data.vflipProb != null) ? node.data.vflipProb : 0),
+          hflipProb: bboxProbs.hflipProb,
+          vflipProb: bboxProbs.vflipProb,
           seedLink: String((node.data && node.data.seedLink) || ""),
           imageWidth: Number((node.data && node.data.imageWidth) || 1),
           imageHeight: Number((node.data && node.data.imageHeight) || 1),
@@ -1906,9 +1932,10 @@
       }
       // AugmentMask: paired mask augment — reads per-transform coins from seedLink registry.
       if (node.name === "augment_mask_layer") {
+        var maskProbs = _resolveAugProbsFromData(node.data);
         var maskCfg = {
-          hflipProb: Number((node.data && node.data.hflipProb != null) ? node.data.hflipProb : 0),
-          vflipProb: Number((node.data && node.data.vflipProb != null) ? node.data.vflipProb : 0),
+          hflipProb: maskProbs.hflipProb,
+          vflipProb: maskProbs.vflipProb,
           seedLink: String((node.data && node.data.seedLink) || ""),
           layout: String((node.data && node.data.layout) || "auto"),
           name: _n,
