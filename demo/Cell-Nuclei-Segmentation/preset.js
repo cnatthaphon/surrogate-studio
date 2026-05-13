@@ -97,6 +97,65 @@
     return graph(d);
   }
 
+  // UNet + paired horizontal-flip augmentation. Image branch flows through
+  // augment_image; mask branch (via target_source) flows through augment_mask
+  // with the same seedLink="nuc_aug" so both flip together. layout="auto"
+  // so the PyTorch server's reshape-NCHW permute is detected correctly.
+  function buildNucleusUNetAug() {
+    _nid = 200;
+    var d = {};
+    // Image branch
+    var imgSrc  = N(d, "image_source", { sourceKey: "pixel_values", featureSize: IMAGE_SIZE, imageShape: [32,32,1] }, 50, 300);
+    var reshape = N(d, "reshape",      { targetShape: "32,32,1" },             200, 300);
+    var augImg  = N(d, "augment_image",{ transform: "horizontal_flip", probability: 0.5, seedLink: "nuc_aug", layout: "auto" }, 320, 300);
+
+    var enc1    = N(d, "conv2d",       { filters: 16, kernelSize: 3, strides: 1, padding: "same", activation: "relu" }, 480, 200);
+    var pool1   = N(d, "maxpool2d",    { poolSize: 2, strides: 2 },            640, 200);
+    var enc2    = N(d, "conv2d",       { filters: 32, kernelSize: 3, strides: 1, padding: "same", activation: "relu" }, 480, 400);
+    var pool2   = N(d, "maxpool2d",    { poolSize: 2, strides: 2 },            640, 400);
+    var bottle  = N(d, "conv2d",       { filters: 64, kernelSize: 3, strides: 1, padding: "same", activation: "relu" }, 640, 600);
+
+    var up2     = N(d, "upsample2d",   { size: 2 },                            810, 600);
+    var cat2    = NR(d, "concat_block", {},                                    810, 400);
+    var dec2    = N(d, "conv2d",       { filters: 32, kernelSize: 3, strides: 1, padding: "same", activation: "relu" }, 990, 400);
+    var up1     = N(d, "upsample2d",   { size: 2 },                            990, 200);
+    var cat1    = NR(d, "concat_block", {},                                    990, 100);
+    var dec1    = N(d, "conv2d",       { filters: 16, kernelSize: 3, strides: 1, padding: "same", activation: "relu" }, 1170, 100);
+
+    var conv1x1 = N(d, "conv2d",      { filters: 1, kernelSize: 1, strides: 1, padding: "same", activation: "sigmoid" }, 1170, 300);
+    var flat    = N(d, "flatten",      {},                                     1340, 300);
+    var out     = N(d, "output",       { target: "mask", targetType: "mask", loss: "bce", matchWeight: 1, headType: "segmentation" }, 1510, 300);
+
+    // Mask branch: target_source -> augment_mask -> flatten -> output.input_2.
+    // mask is rank-3 [B,32,32] for the flip; flattened back to [B,1024] so the
+    // BCE head compares against the also-flat prediction output[0].
+    var tgtSrc   = N(d, "target_source",{ targetKey: "mask", featureSize: IMAGE_SIZE, targetShape: [32, 32] }, 320, 550);
+    var augMask  = N(d, "augment_mask", { transform: "horizontal_flip", probability: 0.5, seedLink: "nuc_aug", layout: "auto" }, 1170, 550);
+    var maskFlat = N(d, "flatten",      {},                                                                   1340, 550);
+
+    C(d, imgSrc, reshape); C(d, reshape, augImg);
+    C(d, augImg, enc1); C(d, enc1, pool1);
+    C(d, pool1, enc2); C(d, enc2, pool2);
+    C(d, pool2, bottle);
+    C(d, bottle, up2);
+    C(d, up2, cat2, "output_1", "input_1");
+    C(d, enc2, cat2, "output_1", "input_2");
+    C(d, cat2, dec2);
+    C(d, dec2, up1);
+    C(d, up1, cat1, "output_1", "input_1");
+    C(d, enc1, cat1, "output_1", "input_2");
+    C(d, cat1, dec1);
+    C(d, dec1, conv1x1);
+    C(d, conv1x1, flat);
+    C(d, flat, out);
+
+    C(d, tgtSrc, augMask);
+    C(d, augMask, maskFlat);
+    C(d, maskFlat, out, "output_1", "input_2");
+
+    return graph(d);
+  }
+
   // MLP baseline — no spatial awareness. With only 256 hidden units the model
   // collapsed to "predict 0 everywhere" on imbalanced segmentation (5% positive).
   // Wider hidden + second layer breaks that trivial minimum so the baseline
@@ -133,12 +192,19 @@
     },
     models: [
       { id: "nuc_unet", name: "Nucleus UNet (skip connections)", schemaId: sid, graph: buildNucleusUNet(), createdAt: Date.now() },
+      { id: "nuc_unet_aug", name: "Nucleus UNet + Augmentation", schemaId: sid, graph: buildNucleusUNetAug(), createdAt: Date.now() },
       { id: "nuc_mlp", name: "MLP Baseline", schemaId: sid, graph: buildMlpSeg(), createdAt: Date.now() },
     ],
     trainers: [
       {
         id: "nuc_unet_trainer", name: "Nucleus UNet Trainer", schemaId: sid,
         datasetId: DS_ID, modelId: "nuc_unet",
+        runtime: "js_client", runtimeBackend: "auto", status: "draft",
+        trainCfg: { epochs: 50, batchSize: 16, learningRate: 0.001, optimizer: "adam", earlyStoppingPatience: 15 },
+      },
+      {
+        id: "nuc_unet_aug_trainer", name: "Nucleus UNet + Augmentation Trainer", schemaId: sid,
+        datasetId: DS_ID, modelId: "nuc_unet_aug",
         runtime: "js_client", runtimeBackend: "auto", status: "draft",
         trainCfg: { epochs: 50, batchSize: 16, learningRate: 0.001, optimizer: "adam", earlyStoppingPatience: 15 },
       },
@@ -157,6 +223,13 @@
         trainCfg: { epochs: 50, batchSize: 16, learningRate: 0.001, optimizer: "adam", earlyStoppingPatience: 15 },
       },
       {
+        id: "nuc_unet_aug_trainer-pre", name: "Nucleus UNet + Augmentation (pre-trained)", schemaId: sid,
+        datasetId: DS_ID, modelId: "nuc_unet_aug",
+        runtime: "js_client", runtimeBackend: "auto", status: "done",
+        _pretrainedVar: "NUCLEUS_UNET_AUGMENTATION_PRE_TRAINED_PRETRAINED_BIN_B64",
+        trainCfg: { epochs: 50, batchSize: 16, learningRate: 0.001, optimizer: "adam", earlyStoppingPatience: 15 },
+      },
+      {
         id: "nuc_mlp_trainer-pre", name: "MLP Baseline (pre-trained)", schemaId: sid,
         datasetId: DS_ID, modelId: "nuc_mlp",
         runtime: "js_client", runtimeBackend: "auto", status: "done",
@@ -167,8 +240,8 @@
     generations: [],
     evaluations: [
       {
-        id: "nuc_eval", name: "Nucleus Segmentation: UNet vs MLP", schemaId: sid, datasetId: DS_ID,
-        trainerIds: ["nuc_unet_trainer-pre", "nuc_mlp_trainer-pre"],
+        id: "nuc_eval", name: "Nucleus Segmentation: UNet vs UNet+Aug vs MLP", schemaId: sid, datasetId: DS_ID,
+        trainerIds: ["nuc_unet_trainer-pre", "nuc_unet_aug_trainer-pre", "nuc_mlp_trainer-pre"],
         evaluatorIds: ["mask_iou", "dice", "pixel_accuracy"],
         status: "draft", runs: [], createdAt: Date.now(),
       },

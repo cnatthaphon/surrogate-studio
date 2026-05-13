@@ -37,7 +37,20 @@ ImageSource -> Reshape(32,32,1)
   -> Conv(1,sigmoid) -> Flatten -> Output(mask, BCE)
 ```
 
-### 2. MLP Baseline
+### 2. Nucleus UNet + Augmentation
+Same backbone as #1 with paired horizontal-flip augmentation. The image branch flows through `augment_image`; the mask label (via `target_source`) flows through `augment_mask` with the same `seedLink="nuc_aug"`. Both blocks share one coin per batch — so any image flip is mirrored on the mask label, keeping segmentation supervision aligned.
+
+```
+ImageSource -> Reshape(32,32,1) -> AugmentImage(hflip, p=0.5, seedLink=nuc_aug)
+  -> UNet encoder-decoder -> Conv(1,sigmoid) -> Flatten -> Output.input_1
+
+TargetSource(mask, [32,32]) -> AugmentMask(hflip, p=0.5, seedLink=nuc_aug)
+  -> Flatten -> Output.input_2
+```
+
+The flatten on the mask branch reshapes the augmented `[B,32,32]` mask back to `[B,1024]` so it matches the prediction's flat shape for BCE.
+
+### 3. MLP Baseline
 ```
 ImageSource -> Dense(256,relu) -> Dense(1024,sigmoid) -> Output(mask, BCE)
 ```
@@ -68,6 +81,21 @@ The UNet, in contrast, achieves **0.48 IoU and 0.63 Dice** on real biomedical da
 **This is why segmentation is reported as IoU/Dice, never raw accuracy.** The MLP scoring 87% "accuracy" while producing zero useful segmentation is exactly the failure mode that pixel accuracy hides. IoU is the diagnostic.
 
 **What to look for in the Playground tab:** UNet predictions trace nucleus boundaries crisply. MLP predictions are uniformly black masks — it has given up. To improve the MLP you'd need orders-of-magnitude more training data to overcome the missing spatial prior; the UNet gets the same task done on 210 images.
+
+### Does augmentation help here?
+
+The third variant adds **paired horizontal-flip augmentation** to both the input microscopy patch and the binary mask label. With only 210 training images, regularization can matter; nuclei are roughly orientation-invariant (a flipped cell is still a cell), so hflip is a physically reasonable transform.
+
+Both UNet variants were trained at the same code rev, same seed, same 50-epoch budget on PyTorch CUDA — only difference is the augmentation block.
+
+| Model (from pretrained metadata) | best epoch | best val_loss | test MAE |
+|---|---|---|---|
+| Nucleus UNet | 48 | 0.1734 | 0.1140 |
+| **Nucleus UNet + Augmentation** | 49 | **0.1551** ↓10.5% | **0.1026** ↓10% |
+
+Aug helps modestly but reliably: ~10% lower val_loss and ~10% lower per-pixel MAE. The training curve also stays cleaner — the baseline plateaus around epoch 45 while the aug variant keeps improving to the last epoch, suggesting the regularization is still doing useful work at this budget.
+
+The blocks themselves (`augment_image` + `augment_mask` + `target_source` paired via `seedLink="nuc_aug"`) demonstrate the segmentation pattern Layer 2 type-validation was specifically designed around: image and mask must flip together. If you wire `augment_mask` to image data by mistake, the platform throws at build time with a clear message.
 
 ## How to Use
 

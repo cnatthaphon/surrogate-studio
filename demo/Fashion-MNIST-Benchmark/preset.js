@@ -76,6 +76,27 @@
   }
 
   // ────────────────────────────────────────────────────────
+  // 2b. CNN + horizontal-flip augmentation (image-only; labels are flip-invariant
+  //     for Fashion-MNIST classes — a shirt flipped is still a shirt).
+  // ────────────────────────────────────────────────────────
+  function _cnnAug() {
+    _nid = 100; var d = {};
+    var a = N(d, "image_source", { sourceKey: "pixel_values", featureSize: 784, imageShape: [28,28,1] }, 60, 80);
+    var b = N(d, "reshape", { targetShape: "28,28,1" }, 200, 80);
+    var aug = N(d, "augment_image", { transform: "horizontal_flip", probability: 0.5, seedLink: "", layout: "auto" }, 320, 80);
+    var c = N(d, "conv2d", { filters: 32, kernelSize: 5, strides: 1, padding: "same", activation: "relu" }, 460, 80);
+    var e = N(d, "maxpool2d", { poolSize: 2, strides: 2 }, 600, 80);
+    var f = N(d, "conv2d", { filters: 64, kernelSize: 5, strides: 1, padding: "same", activation: "relu" }, 740, 80);
+    var g = N(d, "maxpool2d", { poolSize: 2, strides: 2 }, 880, 80);
+    var h = N(d, "flatten", {}, 1020, 80);
+    var i = N(d, "dense", { units: 256, activation: "relu" }, 1160, 80);
+    var j = N(d, "dropout", { rate: 0.3 }, 1300, 80);
+    var k = N(d, "output", { target: "label", targetType: "label", loss: "categoricalCrossentropy", headType: "classification" }, 1440, 80);
+    C(d,a,b); C(d,b,aug); C(d,aug,c); C(d,c,e); C(d,e,f); C(d,f,g); C(d,g,h); C(d,h,i); C(d,i,j); C(d,j,k);
+    return graph(d);
+  }
+
+  // ────────────────────────────────────────────────────────
   // 3. Dense Autoencoder (Hinton 2006)
   // ────────────────────────────────────────────────────────
   function _ae() {
@@ -235,6 +256,7 @@
     models: [
       { id: "m-mlp",      name: "1. MLP Baseline",      schemaId: sid, graph: _mlp(),      createdAt: Date.now() },
       { id: "m-cnn",      name: "2. CNN (LeNet-5)",      schemaId: sid, graph: _cnn(),      createdAt: Date.now() },
+      { id: "m-cnn-aug",  name: "2b. CNN + Augmentation", schemaId: sid, graph: _cnnAug(),  createdAt: Date.now() },
       { id: "m-ae",       name: "3. Dense Autoencoder",  schemaId: sid, graph: _ae(),       createdAt: Date.now() },
       { id: "m-conv-ae",  name: "4. Conv Autoencoder",   schemaId: sid, graph: _convAe(),   createdAt: Date.now() },
       { id: "m-vae",      name: "5. VAE",                schemaId: sid, graph: _vae(),      createdAt: Date.now() },
@@ -246,6 +268,7 @@
     trainers: [
       { id: "t-mlp",      name: "MLP Trainer",        schemaId: sid, datasetId: DS_ID, modelId: "m-mlp",      status: "draft", config: { epochs: 20, batchSize: 128, learningRate: 0.001, optimizerType: "adam", useServer: true } },
       { id: "t-cnn",      name: "CNN Trainer",         schemaId: sid, datasetId: DS_ID, modelId: "m-cnn",      status: "draft", config: { epochs: 20, batchSize: 128, learningRate: 0.001, optimizerType: "adam", useServer: true } },
+      { id: "t-cnn-aug",  name: "CNN+Aug Trainer",     schemaId: sid, datasetId: DS_ID, modelId: "m-cnn-aug",  status: "draft", config: { epochs: 20, batchSize: 128, learningRate: 0.001, optimizerType: "adam", useServer: true } },
       { id: "t-ae",       name: "AE Trainer",          schemaId: sid, datasetId: DS_ID, modelId: "m-ae",       status: "draft", config: { epochs: 20, batchSize: 128, learningRate: 0.001, optimizerType: "adam", useServer: true } },
       { id: "t-conv-ae",  name: "Conv-AE Trainer",     schemaId: sid, datasetId: DS_ID, modelId: "m-conv-ae",  status: "draft", config: { epochs: 40, batchSize: 128, learningRate: 0.001, optimizerType: "adam", useServer: true } },
       { id: "t-vae",      name: "VAE Trainer",         schemaId: sid, datasetId: DS_ID, modelId: "m-vae",      status: "draft", config: { epochs: 20, batchSize: 128, learningRate: 0.0005, optimizerType: "adam", useServer: true } },
@@ -255,6 +278,7 @@
       // Pre-trained (TF.js CPU, 20 epochs)
       { id: "t-mlp-pre",      name: "MLP (pre-trained)",      schemaId: sid, datasetId: DS_ID, modelId: "m-mlp",      status: "done", _pretrainedVar: "M1_MLP_BASELINE_PRE_TRAINED_PRETRAINED_BIN_B64", config: { epochs: 20, batchSize: 128, learningRate: 0.001, optimizerType: "adam" } },
       { id: "t-cnn-pre",      name: "CNN (pre-trained)",      schemaId: sid, datasetId: DS_ID, modelId: "m-cnn",      status: "done", _pretrainedVar: "M2_CNN_LENET_5_PRE_TRAINED_PRETRAINED_BIN_B64", config: { epochs: 20, batchSize: 128, learningRate: 0.001, optimizerType: "adam" } },
+      { id: "t-cnn-aug-pre",  name: "CNN+Aug (pre-trained)",  schemaId: sid, datasetId: DS_ID, modelId: "m-cnn-aug",  status: "done", _pretrainedVar: "M2B_CNN_AUGMENTATION_PRE_TRAINED_PRETRAINED_BIN_B64", config: { epochs: 20, batchSize: 128, learningRate: 0.001, optimizerType: "adam" } },
       { id: "t-ae-pre",       name: "AE (pre-trained)",       schemaId: sid, datasetId: DS_ID, modelId: "m-ae",       status: "done", _pretrainedVar: "M3_DENSE_AUTOENCODER_PRE_TRAINED_PRETRAINED_BIN_B64", config: { epochs: 20, batchSize: 128, learningRate: 0.001, optimizerType: "adam" } },
       { id: "t-conv-ae-pre",  name: "Conv-AE (pre-trained)",  schemaId: sid, datasetId: DS_ID, modelId: "m-conv-ae",  status: "done", _pretrainedVar: "M4_CONV_AUTOENCODER_PRE_TRAINED_PRETRAINED_BIN_B64", config: { epochs: 40, batchSize: 128, learningRate: 0.001, optimizerType: "adam" } },
       { id: "t-vae-pre",      name: "VAE (pre-trained)",      schemaId: sid, datasetId: DS_ID, modelId: "m-vae",      status: "done", _pretrainedVar: "M5_VAE_PRE_TRAINED_PRETRAINED_BIN_B64", config: { epochs: 20, batchSize: 128, learningRate: 0.0005, optimizerType: "adam" } },

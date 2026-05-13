@@ -1612,7 +1612,29 @@ def build_model_from_graph(graph, feature_size, target_size, num_classes=0):
                     # falls through to feature input as a safe default
                     # (won't flip if bbox layer's shape guard rejects).
                     if hasattr(self, "_runtime_target") and self._runtime_target is not None:
-                        tensors[nid] = self._runtime_target
+                        _tgt = self._runtime_target
+                        # #181: honor declared targetShape so downstream
+                        # augment_mask sees the right rank. Dataset rows
+                        # are stored flat ([B, featureSize]), but a mask
+                        # target_source(targetShape=[32,32]) needs rank-3
+                        # [B,32,32] for augment_mask's 3D/4D guard. Reshape
+                        # here (server-side mirror of model_builder_core's
+                        # tf.input shape declaration on the JS side).
+                        _cfg = self.node_configs.get(nid, {}) or {}
+                        _ts = _cfg.get("targetShape")
+                        if isinstance(_ts, (list, tuple)) and len(_ts) >= 1:
+                            try:
+                                _dims = [int(d) for d in _ts]
+                                _expected = 1
+                                for _d in _dims:
+                                    _expected *= int(_d)
+                                # Only reshape if (a) current is flat
+                                # [B, featureSize] and (b) sizes match.
+                                if _tgt.dim() == 2 and int(_tgt.shape[1]) == _expected:
+                                    _tgt = _tgt.reshape([int(_tgt.shape[0])] + _dims)
+                            except (TypeError, ValueError):
+                                pass
+                        tensors[nid] = _tgt
                     else:
                         tensors[nid] = x
                     continue
