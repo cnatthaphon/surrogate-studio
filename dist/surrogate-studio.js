@@ -1,5 +1,5 @@
 // Surrogate Studio - concatenated bundle
-// Generated: 2026-05-12T17:56:13Z
+// Generated: 2026-05-13T04:11:37Z
 // Source files: 58
 
 
@@ -21531,23 +21531,39 @@
       // model_builder_core.js:489-501 which treats feature blocks as
       // declarative/visual and an input node as terminal regardless of
       // feature-block parents.
+      // #176 round-2 fix went too far: stopping at every declared source
+      // node created a bypass when something was wired UPSTREAM of a
+      // source (e.g. image_source -> target_source -> augment_bbox would
+      // report target_source as the root and incorrectly accept the
+      // augment_bbox even though the real data is image-flow). Reviewer's
+      // recipe: compute realInc first (drop feature-block parents), stop
+      // only when realInc is empty (true root, or source with metadata-
+      // only parents), and otherwise keep walking — regardless of node
+      // name. A declared source with a real tensor parent is acting as a
+      // passthrough and must not shadow the upstream origin.
       function rootsFor(startId) {
         var seen = {}, stack = [], roots = [];
         seen[startId] = true;
         getIncoming(startId).forEach(function (e) {
+          var fromNode = moduleData[e.from];
+          if (fromNode && featureBlockNames[fromNode.name]) return;  // skip metadata edges
           if (!seen[e.from]) { seen[e.from] = true; stack.push(e.from); }
         });
+        // Also handle the case where augment node's only incoming was
+        // through feature-block edges (no real tensor parent at all) —
+        // shouldn't happen in valid graphs, but be defensive.
+        if (stack.length === 0) {
+          var startInc = getIncoming(startId).filter(function (e) {
+            var fn = moduleData[e.from];
+            return fn && !featureBlockNames[fn.name];
+          });
+          if (startInc.length === 0) return [];  // augment node has no real parents
+        }
         while (stack.length) {
           var cur = stack.pop();
-          var curNode = moduleData[cur];
-          var curName = curNode && curNode.name;
-          // Declared source/input nodes are terminal — they represent the
-          // actual tensor origin regardless of any feature-block parents.
-          if (curName && inputNodeNames[curName]) { roots.push(cur); continue; }
           var inc = getIncoming(cur);
-          // Only follow non-feature-block edges. Feature blocks (params,
-          // hist, etc.) are visual metadata, not tensor flow — they
-          // shouldn't shadow the real source.
+          // Drop feature-block parents (params_layer, hist_block, etc.) —
+          // they're visual metadata, not tensor flow.
           var realInc = inc.filter(function (e) {
             var fromNode = moduleData[e.from];
             return fromNode && !featureBlockNames[fromNode.name];

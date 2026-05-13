@@ -208,6 +208,51 @@ var MBC = require(path.join(__dirname, "..", "src/model_builder_core.js"));
     });
   }, /augment_image.*target_source|image data/);
 
+  // #177 (P1 from PR #76 round-3): a declared source with a REAL tensor
+  // parent (not feature-metadata) must NOT terminate the walk. The
+  // reviewer reproduced two bypasses where target_source acted as a
+  // passthrough for image-side data and incorrectly satisfied the
+  // bbox-needs-target-root rule:
+  //   - image_source -> target_source -> augment_bbox built OK (should reject)
+  //   - input_layer  -> target_source -> augment_bbox built OK (should reject)
+  console.log("Test 8a: image_source -> target_source -> augment_bbox must THROW (#177)");
+  var imgPassthroughBbox = { drawflow: { Home: { data: {
+    "1": { id:1, name:"image_source_layer", data:{ sourceKey:"pixel_values", featureSize:4, imageShape:[1,1,4] }, class:"image_source_layer", html:"", typenode:false,
+           inputs:{}, outputs:{ output_1:{ connections:[{ node:"2", input:"input_1" }] } }, pos_x:0, pos_y:0 },
+    "2": { id:2, name:"target_source_layer", data:{ targetKey:"bbox", featureSize:4 }, class:"target_source_layer", html:"", typenode:false,
+           inputs:{ input_1:{ connections:[{ node:"1", output:"output_1" }] } }, outputs:{ output_1:{ connections:[{ node:"3", input:"input_1" }] } }, pos_x:100, pos_y:0 },
+    "3": { id:3, name:"augment_bbox_layer", data:{ transform:"horizontal_flip", probability:0.5, seedLink:"", format:"x0y0x1y1", imageWidth:1, imageHeight:1 }, class:"augment_bbox_layer", html:"", typenode:false,
+           inputs:{ input_1:{ connections:[{ node:"2", output:"output_1" }] } }, outputs:{ output_1:{ connections:[{ node:"4", input:"input_1" }] } }, pos_x:200, pos_y:0 },
+    "4": { id:4, name:"output_layer", data:{ target:"bbox", targetType:"bbox", loss:"mse", units:4, headType:"regression" }, class:"output_layer", html:"", typenode:false,
+           inputs:{ input_1:{ connections:[{ node:"3", output:"output_1" }] } }, outputs:{}, pos_x:300, pos_y:0 },
+  } } } };
+  expectThrow("image_source -> target_source -> augment_bbox", function () {
+    MBC.buildModelFromGraph(tf, imgPassthroughBbox, {
+      mode: "direct", featureSize: 4, imageShape: [1, 1, 4],
+      allowedOutputKeys: [{ key: "bbox", featureSize: 4, headType: "regression" }],
+      defaultTarget: "bbox", numClasses: 1, targetSize: 4,
+    });
+  }, /augment_bbox.*target_source|image_source/);
+
+  console.log("Test 8b: input_layer -> target_source -> augment_bbox must THROW (#177)");
+  var inputPassthroughBbox = { drawflow: { Home: { data: {
+    "1": { id:1, name:"input_layer", data:{ mode:"flat", featureSize:4 }, class:"input_layer", html:"", typenode:false,
+           inputs:{}, outputs:{ output_1:{ connections:[{ node:"2", input:"input_1" }] } }, pos_x:0, pos_y:0 },
+    "2": { id:2, name:"target_source_layer", data:{ targetKey:"bbox", featureSize:4 }, class:"target_source_layer", html:"", typenode:false,
+           inputs:{ input_1:{ connections:[{ node:"1", output:"output_1" }] } }, outputs:{ output_1:{ connections:[{ node:"3", input:"input_1" }] } }, pos_x:100, pos_y:0 },
+    "3": { id:3, name:"augment_bbox_layer", data:{ transform:"horizontal_flip", probability:0.5, seedLink:"", format:"x0y0x1y1", imageWidth:1, imageHeight:1 }, class:"augment_bbox_layer", html:"", typenode:false,
+           inputs:{ input_1:{ connections:[{ node:"2", output:"output_1" }] } }, outputs:{ output_1:{ connections:[{ node:"4", input:"input_1" }] } }, pos_x:200, pos_y:0 },
+    "4": { id:4, name:"output_layer", data:{ target:"bbox", targetType:"bbox", loss:"mse", units:4, headType:"regression" }, class:"output_layer", html:"", typenode:false,
+           inputs:{ input_1:{ connections:[{ node:"3", output:"output_1" }] } }, outputs:{}, pos_x:300, pos_y:0 },
+  } } } };
+  expectThrow("input_layer -> target_source -> augment_bbox", function () {
+    MBC.buildModelFromGraph(tf, inputPassthroughBbox, {
+      mode: "direct", featureSize: 4,
+      allowedOutputKeys: [{ key: "bbox", featureSize: 4, headType: "regression" }],
+      defaultTarget: "bbox", numClasses: 1, targetSize: 4,
+    });
+  }, /augment_bbox.*target_source|input_layer/);
+
   // Test 7: full SAR-Ship aug graph (image + target_source branches) still builds
   console.log("Test 7: full SAR-Ship aug graph still builds (regression)");
   require(path.join(__dirname, "..", "demo/SAR-Ship-Detection/preset.js"));
