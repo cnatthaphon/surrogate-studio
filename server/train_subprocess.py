@@ -852,11 +852,42 @@ def main():
         for hc in (head_configs or [])
     )
 
+    # #181 helper: pick the right output for metrics when the model has
+    # multiple heads and/or captured graph-label outputs (target_source +
+    # augment_*). The previous "pred_val = raw_val[0]" grabs whatever head
+    # happened to be output[0], which breaks for detection graphs whose
+    # output[0] is the classification head but y_val carries bbox truth.
+    # Strategy:
+    #   1. Drop any outputs at indices used as graphLabelOutputIdx — those
+    #      are augmented label tensors, not real predictions.
+    #   2. From the remaining "real" preds, prefer the one whose shape
+    #      matches y_val. Falls back to the first if nothing matches.
+    def _pick_eval_pred(raw, truth_shape, head_cfgs):
+        preds = raw if isinstance(raw, list) else [raw]
+        gl_indices = set()
+        for hc in (head_cfgs or []):
+            try:
+                gli = int(hc.get("graphLabelOutputIdx", -1)) if hc else -1
+            except (TypeError, ValueError):
+                gli = -1
+            if gli >= 0:
+                gl_indices.add(gli)
+        real_idxs = [i for i in range(len(preds)) if i not in gl_indices]
+        if not real_idxs:
+            return preds[0].cpu().numpy()
+        # First, look for an exact shape match.
+        for i in real_idxs:
+            arr = preds[i].cpu().numpy()
+            if arr.shape == truth_shape:
+                return arr
+        # No exact match — fall back to the first real prediction.
+        return preds[real_idxs[0]].cpu().numpy()
+
     with torch.no_grad():
         if x_val.size > 0:
             x_val_t = torch.tensor(x_val).to(device)
             raw_val = model(x_val_t)
-            pred_val = (raw_val[0] if isinstance(raw_val, list) else raw_val).cpu().numpy()
+            pred_val = _pick_eval_pred(raw_val, y_val.shape, head_configs)
             if is_classification:
                 pred_labels = pred_val.argmax(axis=1)
                 true_labels = y_val.flatten().astype(int)
@@ -865,8 +896,15 @@ def main():
             else:
                 # Reconstruction heads compare prediction against input (x), not labels (y)
                 _truth_val = x_val if (_is_recon_head and pred_val.shape == x_val.shape) else y_val
-                mae = float(np.mean(np.abs(pred_val - _truth_val)))
-                mse = float(np.mean((pred_val - _truth_val) ** 2))
+                if pred_val.shape != _truth_val.shape:
+                    # Last-line defense: skip mae/mse if we still can't match
+                    # shapes (rare; would indicate a head_configs / graph
+                    # mismatch the script can't reconcile).
+                    print(f"[warn] eval pred shape {pred_val.shape} != truth {_truth_val.shape}; skipping mae/mse")
+                    mae = float("nan"); mse = float("nan")
+                else:
+                    mae = float(np.mean(np.abs(pred_val - _truth_val)))
+                    mse = float(np.mean((pred_val - _truth_val) ** 2))
 
         # Test metrics (if test data provided)
         x_test_raw = ds.get("xTest", [])
@@ -878,10 +916,15 @@ def main():
             # batch prediction to avoid OOM on large test sets
             batch_sz = 512
             pred_chunks = []
+            # #181: pick the prediction output that matches y_test's shape and
+            # skip captured graph-label outputs (same _pick_eval_pred used for
+            # val above). Without this, multi-head models would aggregate the
+            # wrong head into pred_chunks.
             for bi in range(0, len(x_test), batch_sz):
                 chunk = torch.tensor(x_test[bi:bi+batch_sz]).to(device)
                 raw = model(chunk)
-                pred_chunks.append((raw[0] if isinstance(raw, list) else raw).cpu().numpy())
+                y_chunk_shape = (chunk.shape[0],) + tuple(y_test.shape[1:])
+                pred_chunks.append(_pick_eval_pred(raw, y_chunk_shape, head_configs))
             pred_test = np.concatenate(pred_chunks, axis=0)
             # Reconstruction heads compare prediction against input (x), not
             # labels (y) — same logic as the val block above. _is_recon_head is
@@ -1612,7 +1655,29 @@ def build_model_from_graph(graph, feature_size, target_size, num_classes=0):
                     # falls through to feature input as a safe default
                     # (won't flip if bbox layer's shape guard rejects).
                     if hasattr(self, "_runtime_target") and self._runtime_target is not None:
-                        tensors[nid] = self._runtime_target
+                        _tgt = self._runtime_target
+                        # #181: honor declared targetShape so downstream
+                        # augment_mask sees the right rank. Dataset rows
+                        # are stored flat ([B, featureSize]), but a mask
+                        # target_source(targetShape=[32,32]) needs rank-3
+                        # [B,32,32] for augment_mask's 3D/4D guard. Reshape
+                        # here (server-side mirror of model_builder_core's
+                        # tf.input shape declaration on the JS side).
+                        _cfg = self.node_configs.get(nid, {}) or {}
+                        _ts = _cfg.get("targetShape")
+                        if isinstance(_ts, (list, tuple)) and len(_ts) >= 1:
+                            try:
+                                _dims = [int(d) for d in _ts]
+                                _expected = 1
+                                for _d in _dims:
+                                    _expected *= int(_d)
+                                # Only reshape if (a) current is flat
+                                # [B, featureSize] and (b) sizes match.
+                                if _tgt.dim() == 2 and int(_tgt.shape[1]) == _expected:
+                                    _tgt = _tgt.reshape([int(_tgt.shape[0])] + _dims)
+                            except (TypeError, ValueError):
+                                pass
+                        tensors[nid] = _tgt
                     else:
                         tensors[nid] = x
                     continue
