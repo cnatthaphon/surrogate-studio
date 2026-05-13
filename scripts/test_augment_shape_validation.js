@@ -37,7 +37,7 @@ var MBC = require(path.join(__dirname, "..", "src/model_builder_core.js"));
   console.log("Test 1: augment_image rejects non-4D upstream");
   var graph1 = { drawflow: { Home: { data: {
     "1": { id: 1, name: "input_layer", data: { mode: "flat", featureSize: 16 }, class: "input_layer", html: "", typenode: false, inputs: {}, outputs: { output_1: { connections: [{ node: "2", input: "input_1" }] } }, pos_x: 0, pos_y: 0 },
-    "2": { id: 2, name: "augment_image_layer", data: { transform: "horizontal_flip", probability: 0.5, seedLink: "", layout: "nhwc" }, class: "augment_image_layer", html: "", typenode: false, inputs: { input_1: { connections: [{ node: "1", output: "output_1" }] } }, outputs: { output_1: { connections: [{ node: "3", input: "input_1" }] } }, pos_x: 100, pos_y: 0 },
+    "2": { id: 2, name: "augment_image_layer", data: { hflipProb: 0.5, vflipProb: 0, seedLink: "", layout: "nhwc" }, class: "augment_image_layer", html: "", typenode: false, inputs: { input_1: { connections: [{ node: "1", output: "output_1" }] } }, outputs: { output_1: { connections: [{ node: "3", input: "input_1" }] } }, pos_x: 100, pos_y: 0 },
     "3": { id: 3, name: "output_layer", data: { target: "x", targetType: "x", loss: "mse", units: 16, headType: "regression" }, class: "output_layer", html: "", typenode: false, inputs: { input_1: { connections: [{ node: "2", output: "output_1" }] } }, outputs: {}, pos_x: 200, pos_y: 0 },
   } } } };
   expectThrow("augment_image on rank-2 input", function () {
@@ -48,7 +48,7 @@ var MBC = require(path.join(__dirname, "..", "src/model_builder_core.js"));
   console.log("Test 2: augment_bbox rejects last-dim != 4");
   var graph2 = { drawflow: { Home: { data: {
     "1": { id: 1, name: "input_layer", data: { mode: "flat", featureSize: 16 }, class: "input_layer", html: "", typenode: false, inputs: {}, outputs: { output_1: { connections: [{ node: "2", input: "input_1" }] } }, pos_x: 0, pos_y: 0 },
-    "2": { id: 2, name: "augment_bbox_layer", data: { transform: "horizontal_flip", probability: 0.5, seedLink: "", format: "x0y0x1y1", imageWidth: 1, imageHeight: 1 }, class: "augment_bbox_layer", html: "", typenode: false, inputs: { input_1: { connections: [{ node: "1", output: "output_1" }] } }, outputs: { output_1: { connections: [{ node: "3", input: "input_1" }] } }, pos_x: 100, pos_y: 0 },
+    "2": { id: 2, name: "augment_bbox_layer", data: { hflipProb: 0.5, vflipProb: 0, seedLink: "", format: "x0y0x1y1", imageWidth: 1, imageHeight: 1 }, class: "augment_bbox_layer", html: "", typenode: false, inputs: { input_1: { connections: [{ node: "1", output: "output_1" }] } }, outputs: { output_1: { connections: [{ node: "3", input: "input_1" }] } }, pos_x: 100, pos_y: 0 },
     "3": { id: 3, name: "output_layer", data: { target: "x", targetType: "x", loss: "mse", units: 16, headType: "regression" }, class: "output_layer", html: "", typenode: false, inputs: { input_1: { connections: [{ node: "2", output: "output_1" }] } }, outputs: {}, pos_x: 200, pos_y: 0 },
   } } } };
   expectThrow("augment_bbox on featureSize=16", function () {
@@ -59,7 +59,7 @@ var MBC = require(path.join(__dirname, "..", "src/model_builder_core.js"));
   console.log("Test 3: augment_mask rejects rank-2 input");
   var graph3 = { drawflow: { Home: { data: {
     "1": { id: 1, name: "input_layer", data: { mode: "flat", featureSize: 16 }, class: "input_layer", html: "", typenode: false, inputs: {}, outputs: { output_1: { connections: [{ node: "2", input: "input_1" }] } }, pos_x: 0, pos_y: 0 },
-    "2": { id: 2, name: "augment_mask_layer", data: { transform: "horizontal_flip", probability: 0.5, seedLink: "", layout: "nhwc" }, class: "augment_mask_layer", html: "", typenode: false, inputs: { input_1: { connections: [{ node: "1", output: "output_1" }] } }, outputs: { output_1: { connections: [{ node: "3", input: "input_1" }] } }, pos_x: 100, pos_y: 0 },
+    "2": { id: 2, name: "augment_mask_layer", data: { hflipProb: 0.5, vflipProb: 0, seedLink: "", layout: "nhwc" }, class: "augment_mask_layer", html: "", typenode: false, inputs: { input_1: { connections: [{ node: "1", output: "output_1" }] } }, outputs: { output_1: { connections: [{ node: "3", input: "input_1" }] } }, pos_x: 100, pos_y: 0 },
     "3": { id: 3, name: "output_layer", data: { target: "x", targetType: "x", loss: "mse", units: 16, headType: "regression" }, class: "output_layer", html: "", typenode: false, inputs: { input_1: { connections: [{ node: "2", output: "output_1" }] } }, outputs: {}, pos_x: 200, pos_y: 0 },
   } } } };
   expectThrow("augment_mask on rank-2", function () {
@@ -71,7 +71,7 @@ var MBC = require(path.join(__dirname, "..", "src/model_builder_core.js"));
   var graph4 = { drawflow: { Home: { data: {
     "1": { id: 1, name: "image_source_layer", data: { sourceKey: "pixel_values", featureSize: 16, imageShape: [4, 4, 1] }, class: "image_source_layer", html: "", typenode: false, inputs: {}, outputs: { output_1: { connections: [{ node: "2", input: "input_1" }] } }, pos_x: 0, pos_y: 0 },
     "2": { id: 2, name: "reshape_layer", data: { targetShape: "4,4,1" }, class: "reshape_layer", html: "", typenode: false, inputs: { input_1: { connections: [{ node: "1", output: "output_1" }] } }, outputs: { output_1: { connections: [{ node: "3", input: "input_1" }] } }, pos_x: 100, pos_y: 0 },
-    "3": { id: 3, name: "augment_image_layer", data: { transform: "horizontal_flip", probability: 0.5, seedLink: "", layout: "nhwc" }, class: "augment_image_layer", html: "", typenode: false, inputs: { input_1: { connections: [{ node: "2", output: "output_1" }] } }, outputs: { output_1: { connections: [{ node: "4", input: "input_1" }] } }, pos_x: 200, pos_y: 0 },
+    "3": { id: 3, name: "augment_image_layer", data: { hflipProb: 0.5, vflipProb: 0, seedLink: "", layout: "nhwc" }, class: "augment_image_layer", html: "", typenode: false, inputs: { input_1: { connections: [{ node: "2", output: "output_1" }] } }, outputs: { output_1: { connections: [{ node: "4", input: "input_1" }] } }, pos_x: 200, pos_y: 0 },
     "4": { id: 4, name: "flatten_layer", data: {}, class: "flatten_layer", html: "", typenode: false, inputs: { input_1: { connections: [{ node: "3", output: "output_1" }] } }, outputs: { output_1: { connections: [{ node: "5", input: "input_1" }] } }, pos_x: 300, pos_y: 0 },
     "5": { id: 5, name: "output_layer", data: { target: "x", targetType: "x", loss: "mse", units: 16, headType: "regression" }, class: "output_layer", html: "", typenode: false, inputs: { input_1: { connections: [{ node: "4", output: "output_1" }] } }, outputs: {}, pos_x: 400, pos_y: 0 },
   } } } };
@@ -85,12 +85,12 @@ var MBC = require(path.join(__dirname, "..", "src/model_builder_core.js"));
   // -- Test 5: palette default for layout is "auto" --
   console.log("Test 5: palette default for augment_image layout is 'auto'");
   var schemaSrc = require("fs").readFileSync(path.join(__dirname, "..", "src/schema_definitions_builtin.js"), "utf8");
-  if (schemaSrc.indexOf('"augment_image", "AugmentImage", "Augment", { transform: "horizontal_flip", probability: 0.5, seedLink: "", layout: "auto"') < 0) {
+  if (schemaSrc.indexOf('"augment_image", "AugmentImage", "Augment", { hflipProb: 0.5, vflipProb: 0, seedLink: "", layout: "auto"') < 0) {
     fail("schema_definitions_builtin.js: augment_image palette default should be layout: \"auto\"");
   } else {
     console.log("  ✓ augment_image palette default is layout=\"auto\"");
   }
-  if (schemaSrc.indexOf('"augment_mask", "AugmentMask", "Augment", { transform: "horizontal_flip", probability: 0.5, seedLink: "", layout: "auto"') < 0) {
+  if (schemaSrc.indexOf('"augment_mask", "AugmentMask", "Augment", { hflipProb: 0.5, vflipProb: 0, seedLink: "", layout: "auto"') < 0) {
     fail("schema_definitions_builtin.js: augment_mask palette default should be layout: \"auto\"");
   } else {
     console.log("  ✓ augment_mask palette default is layout=\"auto\"");

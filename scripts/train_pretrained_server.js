@@ -429,7 +429,11 @@ async function trainOneModel(modelDef, dataset, trainerDef) {
   var featureSize = dataset.featureSize || (dataset.xTrain[0] && dataset.xTrain[0].length) || 1;
   var tc = trainerDef.trainCfg || trainerDef.config || {};
 
-  // Build headConfigs from graph — same contract as browser/worker
+  // Build headConfigs from graph — same contract as browser/worker.
+  // #183 P2: the build is also where Layer 1 / 2 / 3 validation runs (shape,
+  // type lineage, paired-config sync). A build failure here means the graph
+  // is invalid; sending it to the server would either reproduce the same
+  // failure or silently produce a mis-augmented training run. Abort fast.
   var graphHeadConfigs = [];
   try {
     var tf = { layers: {}, sequential: function(){}, model: function(){} };  // stub — only need headConfigs, not actual model
@@ -440,7 +444,10 @@ async function trainOneModel(modelDef, dataset, trainerDef) {
     });
     graphHeadConfigs = buildInfo.headConfigs || [];
     if (buildInfo.model) try { buildInfo.model.dispose(); } catch (_) {}
-  } catch (e) { console.warn("  Could not extract headConfigs from graph:", e.message); }
+  } catch (e) {
+    console.error("  Graph build failed (Layer 1/2/3 validation or compile): " + e.message);
+    throw e;  // abort retrain instead of warning and continuing
+  }
 
   // Build payload for server.
   // Spread the entire trainer config first so the server receives every field the user

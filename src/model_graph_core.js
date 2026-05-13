@@ -402,28 +402,51 @@
       return editor.addNode("noise_injection_layer", 1, 1, x, y, "noise_injection_layer", { scale: scale, schedule: schedule }, html);
     }
 
-    function addAugmentImageNode(editor, x, y, cfg) {
-      var transform = String((cfg && cfg.transform) || "horizontal_flip").toLowerCase();
-      var pRaw = (cfg && cfg.probability != null) ? Number(cfg.probability) : 0.5;
-      // Match the layer's clamp: invalid/NaN/negative → 0 (safely disabled),
-      // values > 1 → 1. Keeps editor display in sync with TF.js + PyTorch.
-      var probability = (isFinite(pRaw) && pRaw >= 0) ? Math.min(pRaw, 1) : 0;
-      var seedLink = String((cfg && cfg.seedLink) || "");
-      var layout = String((cfg && cfg.layout) || "nhwc").toLowerCase();
-      if (layout !== "nhwc" && layout !== "nchw" && layout !== "auto") layout = "nhwc";
-      var html =
-        "<div><div style='font-weight:700'>AugmentImage</div>" +
-        "<div class='node-summary' style='font-size:11px;color:#94a3b8;'>" + transform + ", p=" + probability + ", " + layout + (seedLink ? ", link=" + seedLink : "") + "</div></div>";
-      return editor.addNode(
-        "augment_image_layer", 1, 1, x, y, "augment_image_layer",
-        { transform: transform, probability: probability, seedLink: seedLink, layout: layout },
-        html
-      );
+    // #182: clamp augment-transform probability config to [0,1].
+    // Non-finite / negative → 0 (transform disabled). > 1 → 1.
+    // Defaults to 0 when missing — the user must opt in by setting a
+    // probability, matching what the runtime layer constructors do.
+    function _clampAugProb(raw) {
+      var p = (raw != null) ? Number(raw) : 0;
+      return (isFinite(p) && p >= 0) ? Math.min(p, 1) : 0;
+    }
+    // #183 P1: factories must produce node data with the new shape
+    // (hflipProb, vflipProb). For back-compat, if a caller passes the
+    // legacy { transform, probability } pair, translate it on the way in.
+    function _resolveAugProbs(cfg) {
+      // Prefer new fields when present.
+      if (cfg && (cfg.hflipProb != null || cfg.vflipProb != null)) {
+        return {
+          hflipProb: _clampAugProb(cfg.hflipProb),
+          vflipProb: _clampAugProb(cfg.vflipProb),
+        };
+      }
+      // Back-compat: old { transform, probability } → set the matching
+      // per-transform prob and leave the other at 0. Identity stays 0/0.
+      var p = _clampAugProb(cfg && cfg.probability);
+      var t = String((cfg && cfg.transform) || "").toLowerCase();
+      if (t === "horizontal_flip") return { hflipProb: p, vflipProb: 0 };
+      if (t === "vertical_flip")   return { hflipProb: 0, vflipProb: p };
+      // No legacy hint and no new fields → default to hflip-only at 0.5
+      // (matches the palette's intent and the SAR-Ship-style demo).
+      return { hflipProb: 0.5, vflipProb: 0 };
     }
 
-    function _clampAugProb(raw) {
-      var p = (raw != null) ? Number(raw) : 0.5;
-      return (isFinite(p) && p >= 0) ? Math.min(p, 1) : 0;
+    function addAugmentImageNode(editor, x, y, cfg) {
+      var probs = _resolveAugProbs(cfg);
+      var seedLink = String((cfg && cfg.seedLink) || "");
+      var layout = String((cfg && cfg.layout) || "auto").toLowerCase();
+      if (layout !== "nhwc" && layout !== "nchw" && layout !== "auto") layout = "auto";
+      var html =
+        "<div><div style='font-weight:700'>AugmentImage</div>" +
+        "<div class='node-summary' style='font-size:11px;color:#94a3b8;'>" +
+        "hflip=" + probs.hflipProb + ", vflip=" + probs.vflipProb +
+        ", " + layout + (seedLink ? ", link=" + seedLink : "") + "</div></div>";
+      return editor.addNode(
+        "augment_image_layer", 1, 1, x, y, "augment_image_layer",
+        { hflipProb: probs.hflipProb, vflipProb: probs.vflipProb, seedLink: seedLink, layout: layout },
+        html
+      );
     }
 
     function addTargetSourceNode(editor, x, y, cfg) {
@@ -440,8 +463,7 @@
     }
 
     function addAugmentBboxNode(editor, x, y, cfg) {
-      var transform = String((cfg && cfg.transform) || "horizontal_flip").toLowerCase();
-      var probability = _clampAugProb(cfg && cfg.probability);
+      var probs = _resolveAugProbs(cfg);
       var seedLink = String((cfg && cfg.seedLink) || "");
       var imageWidth = Math.max(1, Number((cfg && cfg.imageWidth) || 32));
       var imageHeight = Math.max(1, Number((cfg && cfg.imageHeight) || 32));
@@ -449,26 +471,30 @@
       if (format !== "x0y0x1y1" && format !== "xywh") format = "x0y0x1y1";
       var html =
         "<div><div style='font-weight:700'>AugmentBbox</div>" +
-        "<div class='node-summary' style='font-size:11px;color:#94a3b8;'>" + transform + ", p=" + probability + ", " + format + ", " + imageWidth + "×" + imageHeight + (seedLink ? ", link=" + seedLink : "") + "</div></div>";
+        "<div class='node-summary' style='font-size:11px;color:#94a3b8;'>" +
+        "hflip=" + probs.hflipProb + ", vflip=" + probs.vflipProb +
+        ", " + format + ", " + imageWidth + "×" + imageHeight +
+        (seedLink ? ", link=" + seedLink : "") + "</div></div>";
       return editor.addNode(
         "augment_bbox_layer", 1, 1, x, y, "augment_bbox_layer",
-        { transform: transform, probability: probability, seedLink: seedLink, imageWidth: imageWidth, imageHeight: imageHeight, format: format },
+        { hflipProb: probs.hflipProb, vflipProb: probs.vflipProb, seedLink: seedLink, imageWidth: imageWidth, imageHeight: imageHeight, format: format },
         html
       );
     }
 
     function addAugmentMaskNode(editor, x, y, cfg) {
-      var transform = String((cfg && cfg.transform) || "horizontal_flip").toLowerCase();
-      var probability = _clampAugProb(cfg && cfg.probability);
+      var probs = _resolveAugProbs(cfg);
       var seedLink = String((cfg && cfg.seedLink) || "");
-      var layout = String((cfg && cfg.layout) || "nhwc").toLowerCase();
-      if (layout !== "nhwc" && layout !== "nchw" && layout !== "auto") layout = "nhwc";
+      var layout = String((cfg && cfg.layout) || "auto").toLowerCase();
+      if (layout !== "nhwc" && layout !== "nchw" && layout !== "auto") layout = "auto";
       var html =
         "<div><div style='font-weight:700'>AugmentMask</div>" +
-        "<div class='node-summary' style='font-size:11px;color:#94a3b8;'>" + transform + ", p=" + probability + ", " + layout + (seedLink ? ", link=" + seedLink : "") + "</div></div>";
+        "<div class='node-summary' style='font-size:11px;color:#94a3b8;'>" +
+        "hflip=" + probs.hflipProb + ", vflip=" + probs.vflipProb +
+        ", " + layout + (seedLink ? ", link=" + seedLink : "") + "</div></div>";
       return editor.addNode(
         "augment_mask_layer", 1, 1, x, y, "augment_mask_layer",
-        { transform: transform, probability: probability, seedLink: seedLink, layout: layout },
+        { hflipProb: probs.hflipProb, vflipProb: probs.vflipProb, seedLink: seedLink, layout: layout },
         html
       );
     }
@@ -1055,29 +1081,25 @@
         return spec;
       }
       // --- AugmentImage node ---
+      // #182: per-transform probability. 0 = disabled, >0 = enabled with that probability.
+      // Each enabled transform rolls its own coin per batch and is composed in order
+      // (hflip, then vflip). Paired bbox/mask blocks read the same coins via seedLink
+      // and must use the same probability set (Layer 3 validation enforces this).
       if (node.name === "augment_image_layer") {
-        addField({ kind: "select", key: "transform", label: "Transform", value: String(d.transform || "horizontal_flip"), options: [
-          { value: "horizontal_flip", label: "Horizontal flip" },
-          { value: "vertical_flip", label: "Vertical flip" },
-          { value: "identity", label: "Identity (passthrough)" },
-        ] });
-        addField({ kind: "number", key: "probability", label: "Probability", value: Number(d.probability != null ? d.probability : 0.5), min: 0, max: 1, step: 0.05 });
-        addField({ kind: "select", key: "layout", label: "Tensor layout", value: String(d.layout || "nhwc"), options: [
+        addField({ kind: "number", key: "hflipProb", label: "Horizontal flip probability", value: Number(d.hflipProb != null ? d.hflipProb : 0.5), min: 0, max: 1, step: 0.05 });
+        addField({ kind: "number", key: "vflipProb", label: "Vertical flip probability",   value: Number(d.vflipProb != null ? d.vflipProb : 0),   min: 0, max: 1, step: 0.05 });
+        addField({ kind: "select", key: "layout", label: "Tensor layout", value: String(d.layout || "auto"), options: [
+          { value: "auto", label: "Auto (recommended) — NHWC in browser, NCHW-detect on server" },
           { value: "nhwc", label: "NHWC ([B, H, W, C])" },
           { value: "nchw", label: "NCHW ([B, C, H, W])" },
-          { value: "auto", label: "Auto-detect (server only)" },
         ] });
         addField({ kind: "text", key: "seedLink", label: "Seed link (for paired augments)", value: String(d.seedLink || ""), placeholder: "e.g. aug1 (links image with bbox/mask/label)" });
         return spec;
       }
       // --- AugmentBbox node ---
       if (node.name === "augment_bbox_layer") {
-        addField({ kind: "select", key: "transform", label: "Transform", value: String(d.transform || "horizontal_flip"), options: [
-          { value: "horizontal_flip", label: "Horizontal flip (mirror x)" },
-          { value: "vertical_flip", label: "Vertical flip (mirror y)" },
-          { value: "identity", label: "Identity (passthrough)" },
-        ] });
-        addField({ kind: "number", key: "probability", label: "Probability", value: Number(d.probability != null ? d.probability : 0.5), min: 0, max: 1, step: 0.05 });
+        addField({ kind: "number", key: "hflipProb", label: "Horizontal flip probability (mirror x)", value: Number(d.hflipProb != null ? d.hflipProb : 0.5), min: 0, max: 1, step: 0.05 });
+        addField({ kind: "number", key: "vflipProb", label: "Vertical flip probability (mirror y)",   value: Number(d.vflipProb != null ? d.vflipProb : 0),   min: 0, max: 1, step: 0.05 });
         addField({ kind: "select", key: "format", label: "Bbox format", value: String(d.format || "x0y0x1y1"), options: [
           { value: "x0y0x1y1", label: "x0,y0,x1,y1 (corners)" },
           { value: "xywh", label: "x,y,w,h (top-left + size)" },
@@ -1089,16 +1111,12 @@
       }
       // --- AugmentMask node ---
       if (node.name === "augment_mask_layer") {
-        addField({ kind: "select", key: "transform", label: "Transform", value: String(d.transform || "horizontal_flip"), options: [
-          { value: "horizontal_flip", label: "Horizontal flip" },
-          { value: "vertical_flip", label: "Vertical flip" },
-          { value: "identity", label: "Identity (passthrough)" },
-        ] });
-        addField({ kind: "number", key: "probability", label: "Probability", value: Number(d.probability != null ? d.probability : 0.5), min: 0, max: 1, step: 0.05 });
-        addField({ kind: "select", key: "layout", label: "Tensor layout", value: String(d.layout || "nhwc"), options: [
+        addField({ kind: "number", key: "hflipProb", label: "Horizontal flip probability", value: Number(d.hflipProb != null ? d.hflipProb : 0.5), min: 0, max: 1, step: 0.05 });
+        addField({ kind: "number", key: "vflipProb", label: "Vertical flip probability",   value: Number(d.vflipProb != null ? d.vflipProb : 0),   min: 0, max: 1, step: 0.05 });
+        addField({ kind: "select", key: "layout", label: "Tensor layout", value: String(d.layout || "auto"), options: [
+          { value: "auto", label: "Auto (recommended) — NHWC in browser, NCHW-detect on server" },
           { value: "nhwc", label: "NHWC ([B, H, W, C])" },
           { value: "nchw", label: "NCHW ([B, C, H, W])" },
-          { value: "auto", label: "Auto-detect (server only)" },
         ] });
         addField({ kind: "text", key: "seedLink", label: "Seed link (must match image augment)", value: String(d.seedLink || ""), placeholder: "e.g. aug1" });
         return spec;

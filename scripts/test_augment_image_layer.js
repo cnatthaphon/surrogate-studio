@@ -41,7 +41,7 @@ var MBC = require(path.join(__dirname, "..", "src/model_builder_core.js"));
   var smallImage = { drawflow: { Home: { data: {
     "1": { id:1, name:"input_layer", data:{mode:"image", featureSize:12, imageShape:[2,3,2]}, class:"input_layer", html:"", typenode:false, inputs:{}, outputs:{output_1:{connections:[{node:"2",input:"input_1"}]}}, pos_x:0, pos_y:0 },
     "2": { id:2, name:"reshape_layer", data:{targetShape:"2,3,2"}, class:"reshape_layer", html:"", typenode:false, inputs:{input_1:{connections:[{node:"1",output:"output_1"}]}}, outputs:{output_1:{connections:[{node:"3",input:"input_1"}]}}, pos_x:100, pos_y:0 },
-    "3": { id:3, name:"augment_image_layer", data:{transform:"horizontal_flip", probability:1.0, seedLink:""}, class:"augment_image_layer", html:"", typenode:false, inputs:{input_1:{connections:[{node:"2",output:"output_1"}]}}, outputs:{output_1:{connections:[{node:"4",input:"input_1"}]}}, pos_x:200, pos_y:0 },
+    "3": { id:3, name:"augment_image_layer", data:{hflipProb: 1.0, vflipProb: 0, seedLink:""}, class:"augment_image_layer", html:"", typenode:false, inputs:{input_1:{connections:[{node:"2",output:"output_1"}]}}, outputs:{output_1:{connections:[{node:"4",input:"input_1"}]}}, pos_x:200, pos_y:0 },
     "4": { id:4, name:"flatten_layer", data:{}, class:"flatten_layer", html:"", typenode:false, inputs:{input_1:{connections:[{node:"3",output:"output_1"}]}}, outputs:{output_1:{connections:[{node:"5",input:"input_1"}]}}, pos_x:300, pos_y:0 },
     "5": { id:5, name:"output_layer", data:{target:"pixel_values", targetType:"pixel_values", loss:"none", units:12}, class:"output_layer", html:"", typenode:false, inputs:{input_1:{connections:[{node:"4",output:"output_1"}]}}, outputs:{}, pos_x:400, pos_y:0 },
   } } } };
@@ -73,7 +73,7 @@ var MBC = require(path.join(__dirname, "..", "src/model_builder_core.js"));
 
   // ─── Test 1: probability=1.0 + training=true → flip happens ────
   console.log("Test 1: training=true, probability=1.0 → deterministic flip");
-  var layer1 = new Layer({ transform: "horizontal_flip", probability: 1.0 });
+  var layer1 = new Layer({ hflipProb: 1.0, vflipProb: 0 });
   // [B=1, H=2, W=3, C=2]: distinct values per W-position so a flip is detectable.
   var x = tf.tensor4d([
     [[[1, 2], [3, 4], [5, 6]],
@@ -92,7 +92,7 @@ var MBC = require(path.join(__dirname, "..", "src/model_builder_core.js"));
 
   // ─── Test 2: probability=0.0 + training=true → never flips ─────
   console.log("Test 2: training=true, probability=0.0 → never flips");
-  var layer0 = new Layer({ transform: "horizontal_flip", probability: 0.0 });
+  var layer0 = new Layer({ hflipProb: 0.0, vflipProb: 0 });
   for (var trial2 = 0; trial2 < 5; trial2++) {
     var y2 = layer0.apply(x, { training: true });
     var arr2 = y2.arraySync()[0];
@@ -104,7 +104,7 @@ var MBC = require(path.join(__dirname, "..", "src/model_builder_core.js"));
 
   // ─── Test 3: training=false → identity regardless of probability ──
   console.log("Test 3: training=false, probability=1.0 → identity (no flip)");
-  var layerEval = new Layer({ transform: "horizontal_flip", probability: 1.0 });
+  var layerEval = new Layer({ hflipProb: 1.0, vflipProb: 0 });
   for (var trial3 = 0; trial3 < 3; trial3++) {
     var y3 = layerEval.apply(x, { training: false });
     var arr3 = y3.arraySync()[0];
@@ -116,7 +116,7 @@ var MBC = require(path.join(__dirname, "..", "src/model_builder_core.js"));
 
   // ─── Test 4: identity transform passthrough ────────────────────
   console.log("Test 4: transform=\"identity\" → passthrough always");
-  var layerId = new Layer({ transform: "identity", probability: 1.0 });
+  var layerId = new Layer({ hflipProb: 0, vflipProb: 0 });
   var yId = layerId.apply(x, { training: true });
   var arrId = yId.arraySync()[0];
   assertClose("identity trans row0[0][0]", arrId[0][0][0], 1, 1e-6);
@@ -125,7 +125,7 @@ var MBC = require(path.join(__dirname, "..", "src/model_builder_core.js"));
 
   // ─── Test 4b: vertical_flip on NHWC — reverses H (axis -3) ────
   console.log("Test 4b: NHWC vertical_flip, p=1.0 → flips H axis (-3)");
-  var layerVF = new Layer({ transform: "vertical_flip", probability: 1.0, layout: "nhwc" });
+  var layerVF = new Layer({ hflipProb: 0, vflipProb: 1.0, layout: "nhwc" });
   for (var trialV = 0; trialV < 5; trialV++) {
     var yV = layerVF.apply(x, { training: true });
     var arrV = yV.arraySync()[0];
@@ -144,14 +144,14 @@ var MBC = require(path.join(__dirname, "..", "src/model_builder_core.js"));
     [[[1, 3, 5], [7, 9, 11]],   // channel 0
      [[2, 4, 6], [8, 10, 12]]]  // channel 1
   ]);
-  var layerHFNchw = new Layer({ transform: "horizontal_flip", probability: 1.0, layout: "nchw" });
+  var layerHFNchw = new Layer({ hflipProb: 1.0, vflipProb: 0, layout: "nchw" });
   var yHN = layerHFNchw.apply(xNchw, { training: true });
   var arrHN = yHN.arraySync()[0];
   // NCHW hflip: axis -1 (W) reversed. C=0 H=0 was [1,3,5] → [5,3,1].
   assertClose("NCHW hflip C=0 H=0 W[0]", arrHN[0][0][0], 5, 1e-6);
   assertClose("NCHW hflip C=0 H=0 W[2]", arrHN[0][0][2], 1, 1e-6);
   yHN.dispose();
-  var layerVFNchw = new Layer({ transform: "vertical_flip", probability: 1.0, layout: "nchw" });
+  var layerVFNchw = new Layer({ hflipProb: 0, vflipProb: 1.0, layout: "nchw" });
   var yVN = layerVFNchw.apply(xNchw, { training: true });
   var arrVN = yVN.arraySync()[0];
   // NCHW vflip: axis -2 (H) reversed. C=0 H=0 was [1,3,5], H=1 was [7,9,11] → swap.
@@ -166,7 +166,7 @@ var MBC = require(path.join(__dirname, "..", "src/model_builder_core.js"));
   // bugs (image-augment block wired to a flat dense output would never
   // augment, and training looked healthy). Now build/apply throws.
   console.log("Test 5: non-4D input → throws at apply time (was: silent passthrough)");
-  var layerFlat = new Layer({ transform: "horizontal_flip", probability: 1.0 });
+  var layerFlat = new Layer({ hflipProb: 1.0, vflipProb: 0 });
   var flat = tf.tensor2d([[1, 2, 3, 4], [5, 6, 7, 8]]);  // [B=2, F=4]
   var threw = false;
   try {
@@ -180,25 +180,25 @@ var MBC = require(path.join(__dirname, "..", "src/model_builder_core.js"));
   flat.dispose();
   console.log("  -> 2D [batch, features] correctly rejected with rank/4D error");
 
-  // ─── Test 6: invalid probability clamps to 0 (Codex round-1 P2) ──
-  console.log("Test 6: invalid probability (NaN, negative) clamps to 0");
-  var layerNeg = new Layer({ transform: "horizontal_flip", probability: -0.5 });
-  if (Math.abs(layerNeg.probability - 0) > 1e-9) fail("negative prob did not clamp to 0 (got " + layerNeg.probability + ")");
-  var layerNaN = new Layer({ transform: "horizontal_flip", probability: NaN });
-  if (Math.abs(layerNaN.probability - 0) > 1e-9) fail("NaN prob did not clamp to 0 (got " + layerNaN.probability + ")");
-  var layerOver = new Layer({ transform: "horizontal_flip", probability: 5 });
-  if (Math.abs(layerOver.probability - 1) > 1e-9) fail("p=5 did not clamp to 1 (got " + layerOver.probability + ")");
+  // ─── Test 6: invalid probability clamps (per-transform field) ──
+  console.log("Test 6: invalid probability (NaN, negative, >1) clamps to [0,1]");
+  var layerNeg = new Layer({ hflipProb: -0.5, vflipProb: 0 });
+  if (Math.abs(layerNeg.hflipProb - 0) > 1e-9) fail("negative hflipProb did not clamp to 0 (got " + layerNeg.hflipProb + ")");
+  var layerNaN = new Layer({ hflipProb: NaN, vflipProb: 0 });
+  if (Math.abs(layerNaN.hflipProb - 0) > 1e-9) fail("NaN hflipProb did not clamp to 0 (got " + layerNaN.hflipProb + ")");
+  var layerOver = new Layer({ hflipProb: 5, vflipProb: 0 });
+  if (Math.abs(layerOver.hflipProb - 1) > 1e-9) fail("hflipProb=5 did not clamp to 1 (got " + layerOver.hflipProb + ")");
   console.log("  -> invalid probabilities clamp to 0; >1 clamps to 1");
 
   // ─── Test 7: getConfig round-trip ──────────────────────────────
-  console.log("Test 7: getConfig captures transform/probability/seedLink/layout");
-  var layerCfg = new Layer({ transform: "horizontal_flip", probability: 0.7, seedLink: "shared_aug_42", layout: "nchw" });
+  console.log("Test 7: getConfig captures hflipProb/vflipProb/seedLink/layout");
+  var layerCfg = new Layer({ hflipProb: 0.7, vflipProb: 0.3, seedLink: "shared_aug_42", layout: "nchw" });
   var cfg = layerCfg.getConfig();
-  if (cfg.transform !== "horizontal_flip") fail("getConfig transform mismatch: " + cfg.transform);
-  if (Math.abs(cfg.probability - 0.7) > 1e-6) fail("getConfig probability mismatch: " + cfg.probability);
+  if (Math.abs(cfg.hflipProb - 0.7) > 1e-6) fail("getConfig hflipProb mismatch: " + cfg.hflipProb);
+  if (Math.abs(cfg.vflipProb - 0.3) > 1e-6) fail("getConfig vflipProb mismatch: " + cfg.vflipProb);
   if (cfg.seedLink !== "shared_aug_42") fail("getConfig seedLink mismatch: " + cfg.seedLink);
   if (cfg.layout !== "nchw") fail("getConfig layout mismatch: " + cfg.layout);
-  console.log("  -> config round-trips: " + JSON.stringify({ transform: cfg.transform, probability: cfg.probability, seedLink: cfg.seedLink, layout: cfg.layout }));
+  console.log("  -> config round-trips: " + JSON.stringify({ hflipProb: cfg.hflipProb, vflipProb: cfg.vflipProb, seedLink: cfg.seedLink, layout: cfg.layout }));
 
   if (ok) {
     console.log("\nPASS: AugmentImageLayer behaves correctly (flip/no-flip/eval/identity/graph/getConfig).");
