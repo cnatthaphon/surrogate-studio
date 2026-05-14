@@ -128,6 +128,8 @@ https://cnatthaphon.github.io/surrogate-studio/demo/Fashion-MNIST-Benchmark/
 ```
 The browser-only path runs Pretrained Generate, Test, and Evaluation in TF.js — no setup. **Run Notebook** (in-browser cell-by-cell training) needs the local server below: it spawns a Python kernel via `/api/notebook/start`, so a static GitHub Pages deploy can't serve it.
 
+To see the augmentation contract in action, try **[SAR Ship Detection](https://cnatthaphon.github.io/surrogate-studio/demo/SAR-Ship-Detection/)**: click "CNN Detector (pre-trained)" then "CNN+Aug Detector (pre-trained)" and compare. Same data, same hyperparameters, only the paired image+bbox horizontal-flip augmentation differs — val_loss drops ~33% with augmentation enabled. [Cell-Nuclei-Segmentation](https://cnatthaphon.github.io/surrogate-studio/demo/Cell-Nuclei-Segmentation/) and [Synthetic-Segmentation](https://cnatthaphon.github.io/surrogate-studio/demo/Synthetic-Segmentation/) show the same paired pattern with `augment_mask`.
+
 **Local server** — full platform with PyTorch training + Run Notebook:
 ```bash
 source ~/venv/bin/activate    # any venv with torch installed

@@ -30,13 +30,13 @@ ImageSource → Reshape(32,32,1) → Conv(16) → MaxPool
 ```
 
 ### 2. Seg-UNet + Augmentation
-Same backbone with paired horizontal-flip augmentation. The image branch flows through `augment_image`; the mask label flows through `target_source → augment_mask → flatten` with shared `seedLink="segshape_aug"` so the mask is flipped in lockstep with the image.
+Same backbone with paired horizontal + vertical flip augmentation. The image branch flows through `augment_image`; the mask label flows through `target_source → augment_mask → flatten` with shared `seedLink="segshape_aug"` so both flips happen on the mask in lockstep with the image. Both `hflipProb` and `vflipProb` are 0.5: synthetic shapes have no canonical orientation, so both axes are physically reasonable transforms.
 
 ```
-ImageSource → Reshape → AugmentImage(hflip, seedLink=segshape_aug)
+ImageSource → Reshape → AugmentImage(hflip+vflip, seedLink=segshape_aug)
   → UNet encoder-decoder → Conv(1,sigmoid) → Flatten → Output.input_1
 
-TargetSource(mask,[32,32]) → AugmentMask(hflip, seedLink=segshape_aug)
+TargetSource(mask,[32,32]) → AugmentMask(hflip+vflip, seedLink=segshape_aug)
   → Flatten → Output.input_2
 ```
 
@@ -72,14 +72,14 @@ The MLP can roughly localize each shape (its 0.81 Dice means it gets the right *
 
 This is why segmentation is always reported as IoU/Dice rather than raw accuracy: the trivial "all zero" baseline scores ~85% pixel accuracy on sparse masks but ~0 IoU.
 
-### Does augmentation help here? (paired image + mask hflip)
+### Does augmentation help here? (paired image + mask hflip + vflip)
 
 Both Seg-UNet variants retrained at the same code rev, same seed=42, 30 epochs PyTorch CUDA. The synthetic dataset is clean enough that both converge near the BCE floor — so the absolute val_loss numbers are tiny and the comparison is more about "does the pipeline work correctly" than "does augmentation rescue a hard task."
 
 | Variant (from pretrained metadata) | best epoch | best val_loss | MAE |
 |---|---|---|---|
 | Seg-UNet | 29 | 2.6e-5 | 2.1e-5 |
-| **Seg-UNet + Augmentation** | 30 | **2.1e-5** | **1.6e-5** |
+| **Seg-UNet + Augmentation** (hflip + vflip, p=0.5 each) | 30 | **2.0e-5** | **1.6e-5** |
 
 Aug helps ~19% in relative terms but at this absolute floor the difference is mostly numerical noise — both models effectively solve the task. The educational point here is the **multi-runtime pipeline**, not the headline number:
 
