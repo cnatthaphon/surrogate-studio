@@ -116,7 +116,7 @@ Browser (TF.js)                    Server (PyTorch)
 
 **SSE = Server-Sent Events**: the browser starts a PyTorch job over HTTP, then receives one-way live progress events from the server for status, epochs, losses, and completion. It is used for streaming training progress, not for trading or exchange connectivity.
 
-Full architecture details, file map, supported schemas (13), and node types (35+) in [DEMOS.md](DEMOS.md#architecture).
+Full architecture details, file map, supported schemas (13), and node types (45+) in [DEMOS.md](DEMOS.md#architecture).
 
 ---
 
