@@ -6,7 +6,7 @@
 
 ### [Start here: Fashion-MNIST GAN demo](https://cnatthaphon.github.io/surrogate-studio/demo/Fashion-MNIST-GAN/) — pretrained models, instant results
 
-![Demo Workflow](demo/Fashion-MNIST-Benchmark/images/demo_workflow.gif)
+![SAR Ship Detection workflow — Dataset, Model graph (with paired augment_image + augment_bbox via seedLink), Trainer, three-way Evaluation including the CNN+Augmentation variant](demo/SAR-Ship-Detection/images/demo_workflow.gif)
 
 ---
 
@@ -163,6 +163,10 @@ This is an independent portfolio project, but focused bug fixes, documentation i
 ## How This Was Built
 
 Surrogate Studio was architected and designed by a human (the schema-driven pipeline, plugin demo pattern, cross-runtime weight contract, and 3-runtime notebook export were all deliberate architectural decisions). Implementation was done with AI coding agents (Claude Code + Codex) acting as pair programmers — the human set the design constraints, the agents wrote the code, and a multi-round review cycle caught 10 bugs before launch. The value of this project is in the architecture, not in any single line of code.
+
+### Engineering retrospectives
+
+- [Augmentation contract retro](docs/augmentation-engineering-retro.md) — the 10-PR arc that added input-level data augmentation as a first-class graph contract: paired image+label sync via `seedLink`, three-layer build-time validation (shape / type lineage / config sync), multi-transform per block, cross-runtime parity. Documents the cross-runtime layout drift bug, the `tf.keep` tensor leak, the six rounds of Layer 2 type validation under adversarial review, and the deliberately documented negative results across the 5 demos that exercise it.
 
 ---
 
