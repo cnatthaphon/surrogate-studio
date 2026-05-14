@@ -21,7 +21,7 @@ var DEMOS = [
     presetVar: "SAR_SHIP_DETECTION_PRESET",
     augModelId: "sar_cnn_aug",
     pretrainedVar: "CNN_AUG_SHIP_DETECTOR_PRE_TRAINED_PRETRAINED_BIN_B64",
-    expectedInputs: 2, expectedOutputs: 2, expectGraphLabel: true,
+    expectedInputs: 2, expectedOutputs: 2, expectedGraphLabelOutputIdxs: [1],
     buildCfg: { featureSize: 64*64, imageShape: [64,64,1], allowedOutputKeys: [{ key: "bbox", featureSize: 4, headType: "regression" }], defaultTarget: "bbox", numClasses: 1, targetSize: 4 },
   },
   {
@@ -29,7 +29,7 @@ var DEMOS = [
     presetVar: "CELL_NUCLEI_SEGMENTATION_PRESET",
     augModelId: "nuc_unet_aug",
     pretrainedVar: "NUCLEUS_UNET_AUGMENTATION_PRE_TRAINED_PRETRAINED_BIN_B64",
-    expectedInputs: 2, expectedOutputs: 2, expectGraphLabel: true,
+    expectedInputs: 2, expectedOutputs: 2, expectedGraphLabelOutputIdxs: [1],
     buildCfg: { featureSize: 1024, imageShape: [32,32,1], allowedOutputKeys: [{ key: "mask", featureSize: 1024, headType: "segmentation" }], defaultTarget: "mask", numClasses: 2, targetSize: 1024 },
   },
   {
@@ -37,7 +37,7 @@ var DEMOS = [
     presetVar: "SYNTHETIC_DETECTION_PRESET",
     augModelId: "synthetic_detection_model_aug",
     pretrainedVar: "SINGLE_BOX_DETECTOR_AUGMENTATION_PRE_TRAINED_PRETRAINED_BIN_B64",
-    expectedInputs: 2, expectedOutputs: 3, expectGraphLabel: true,
+    expectedInputs: 2, expectedOutputs: 3, expectedGraphLabelOutputIdxs: [-1, 2],
     buildCfg: { featureSize: 1024, imageShape: [32,32,1], allowedOutputKeys: [{ key: "bbox", featureSize: 4, headType: "regression" }, { key: "label", featureSize: 3, headType: "classification" }], defaultTarget: "bbox", numClasses: 3, targetSize: 4 },
   },
   {
@@ -45,7 +45,7 @@ var DEMOS = [
     presetVar: "SYNTHETIC_SEGMENTATION_PRESET",
     augModelId: "seg_unet_aug",
     pretrainedVar: "SEG_UNET_AUGMENTATION_PRE_TRAINED_PRETRAINED_BIN_B64",
-    expectedInputs: 2, expectedOutputs: 2, expectGraphLabel: true,
+    expectedInputs: 2, expectedOutputs: 2, expectedGraphLabelOutputIdxs: [1],
     buildCfg: { featureSize: 1024, imageShape: [32,32,1], allowedOutputKeys: [{ key: "mask", featureSize: 1024, headType: "segmentation" }], defaultTarget: "mask", numClasses: 2, targetSize: 1024 },
   },
   {
@@ -53,7 +53,7 @@ var DEMOS = [
     presetVar: "FASHION_MNIST_BENCHMARK_PRESET",
     augModelId: "m-cnn-aug",
     pretrainedVar: "M2B_CNN_AUGMENTATION_PRE_TRAINED_PRETRAINED_BIN_B64",
-    expectedInputs: 1, expectedOutputs: 1, expectGraphLabel: false,
+    expectedInputs: 1, expectedOutputs: 1, expectedGraphLabelOutputIdxs: [-1],
     buildCfg: { featureSize: 784, imageShape: [28,28,1], allowedOutputKeys: [{ key: "label", featureSize: 10, headType: "classification" }], defaultTarget: "label", numClasses: 10, targetSize: 10 },
   },
 ];
@@ -120,9 +120,18 @@ var DEMOS = [
         var augModel = models.filter(function (m) { return m.id === cfg.augModelId; })[0];
         if (!augModel) return { ok: false, reason: "aug model " + cfg.augModelId + " missing" };
 
-        var pretrainedB64 = window[cfg.pretrainedVar];
+        var trainers = preset.trainers || [];
+        var pretrainedTrainer = trainers.filter(function (t) {
+          return t && t.modelId === cfg.augModelId && t.status === "done" && t._pretrainedVar;
+        })[0];
+        if (!pretrainedTrainer) return { ok: false, reason: "pretrained trainer for " + cfg.augModelId + " missing" };
+        if (pretrainedTrainer._pretrainedVar !== cfg.pretrainedVar) {
+          return { ok: false, reason: "trainer _pretrainedVar=" + pretrainedTrainer._pretrainedVar + " expected=" + cfg.pretrainedVar };
+        }
+
+        var pretrainedB64 = window[pretrainedTrainer._pretrainedVar];
         if (typeof pretrainedB64 !== "string" || pretrainedB64.length < 1000) {
-          return { ok: false, reason: "pretrained " + cfg.pretrainedVar + " missing or too small (" + (pretrainedB64 ? pretrainedB64.length : 0) + ")" };
+          return { ok: false, reason: "pretrained " + pretrainedTrainer._pretrainedVar + " missing or too small (" + (pretrainedB64 ? pretrainedB64.length : 0) + ")" };
         }
 
         // Build the aug graph in-browser via the model builder.
@@ -132,8 +141,7 @@ var DEMOS = [
             ok: true,
             inputs: built.model.inputs.length,
             outputs: built.model.outputs.length,
-            graphLabelOutputIdx: built.headConfigs && built.headConfigs[0] && built.headConfigs[0].graphLabelOutputIdx,
-            headConfigsCount: (built.headConfigs || []).length,
+            graphLabelOutputIdxs: (built.headConfigs || []).map(function (h) { return h && h.graphLabelOutputIdx; }),
           };
           try { built.model.dispose(); } catch (_) {}
           return result;
@@ -152,10 +160,13 @@ var DEMOS = [
         else detail.push("inputs=" + checks.inputs);
         if (checks.outputs !== demo.expectedOutputs) { console.error("  ✗ outputs=" + checks.outputs + " expected=" + demo.expectedOutputs); passed = false; }
         else detail.push("outputs=" + checks.outputs);
-        if (demo.expectGraphLabel) {
-          // For multi-head Synth-Detection the aug head is bbox at index 1 (cls is head 0).
-          // Just verify some head has a positive graphLabelOutputIdx.
-          var hasGL = checks.headConfigsCount > 0; // any head, real check below via page eval
+        var expectedGL = demo.expectedGraphLabelOutputIdxs || [];
+        var actualGL = checks.graphLabelOutputIdxs || [];
+        if (JSON.stringify(actualGL) !== JSON.stringify(expectedGL)) {
+          console.error("  ✗ graphLabelOutputIdxs=" + JSON.stringify(actualGL) + " expected=" + JSON.stringify(expectedGL));
+          passed = false;
+        } else {
+          detail.push("graphLabelOutputIdxs=" + JSON.stringify(actualGL));
         }
       }
 
