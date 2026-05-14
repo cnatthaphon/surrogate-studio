@@ -15,7 +15,7 @@ var BASE = "http://localhost:3777";
 // pretrained vars by reading the preset's trainers[]._pretrainedVar.
 var DEMOS = [
   { name: "Cell-Nuclei-Segmentation",                    presetVar: "CELL_NUCLEI_SEGMENTATION_PRESET" },
-  { name: "Custom-CSV-Tutorial",                          presetVar: null /* tutorial; no preset global expected */ },
+  { name: "Custom-CSV-Tutorial",                          presetVar: "CUSTOM_CSV_TUTORIAL_PRESET" },
   { name: "Fashion-MNIST-Benchmark",                      presetVar: "FASHION_MNIST_BENCHMARK_PRESET" },
   { name: "Fashion-MNIST-Conditional-Diffusion",          presetVar: "FASHION_MNIST_COND_DIFFUSION_PRESET" },
   { name: "Fashion-MNIST-Diffusion",                      presetVar: "FASHION_MNIST_DIFFUSION_PRESET" },
@@ -62,12 +62,19 @@ var DEMOS = [
 
       var consoleErrors = [];
       var bad404s = [];
+      var failedRequests = [];
       page.on("console", function (msg) { if (msg.type() === "error") consoleErrors.push(msg.text()); });
       page.on("pageerror", function (err) { consoleErrors.push(String(err)); });
       page.on("response", function (r) {
         if (r.status() >= 400 && !/favicon\.ico/i.test(r.url())) {
           bad404s.push(r.status() + " " + r.url());
         }
+      });
+      page.on("requestfailed", function (req) {
+        var u = req.url();
+        if (/favicon\.ico/i.test(u)) return;
+        var failure = req.failure && req.failure();
+        failedRequests.push((failure && failure.errorText ? failure.errorText + " " : "") + u);
       });
 
       var url = BASE + "/demo/" + demo.name + "/index.html";
@@ -108,7 +115,7 @@ var DEMOS = [
         return !/WebGL|webgl|getWebGLContext|Failed to initialize backend|tfjs.*backend|canvas\.addEventListener is not a function|Failed to load resource/i.test(e);
       });
 
-      var passed = checks.ok && realErrors.length === 0 && bad404s.length === 0 && (checks.missingPretrained || []).length === 0;
+      var passed = checks.ok && realErrors.length === 0 && bad404s.length === 0 && failedRequests.length === 0 && (checks.missingPretrained || []).length === 0;
       var detail = [];
       if (!checks.ok) detail.push("FAIL: " + checks.reason);
       else {
@@ -118,6 +125,7 @@ var DEMOS = [
         }
         if (realErrors.length) detail.push("JS errors=" + realErrors.length);
         if (bad404s.length) detail.push("bad HTTP=" + bad404s.length);
+        if (failedRequests.length) detail.push("failed requests=" + failedRequests.length);
       }
 
       if (passed) {
@@ -126,6 +134,7 @@ var DEMOS = [
         console.error("  ✗ " + detail.join(", "));
         if (realErrors.length) realErrors.slice(0, 2).forEach(function (e) { console.error("    JS: " + e.slice(0, 200)); });
         if (bad404s.length) bad404s.slice(0, 3).forEach(function (u) { console.error("    HTTP: " + u); });
+        if (failedRequests.length) failedRequests.slice(0, 3).forEach(function (u) { console.error("    requestfailed: " + u); });
         if ((checks.missingPretrained || []).length) checks.missingPretrained.forEach(function (p) { console.error("    pretrained: " + p); });
       }
       summary.push({ demo: demo.name, ok: passed });
