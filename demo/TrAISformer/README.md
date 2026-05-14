@@ -92,7 +92,7 @@ Pre-processed per the paper: min 36 steps, max 120 steps, normalized [0,1], no N
 
 ![Model Graph](images/model_graph.png)
 
-## Reference
+## References
 
 Nguyen, D., Vadaine, R., Hajduch, G., Garber, R., & Fablet, R. **"TrAISformer — A generative transformer for AIS trajectory prediction."** *arXiv:2109.03958*, 2021. [Paper](https://arxiv.org/abs/2109.03958)
 

@@ -107,7 +107,7 @@ The blocks themselves (`augment_image` + `augment_mask` + `target_source` paired
 4. **Trainer** tab — train on client (TF.js) or server (PyTorch)
 5. **Evaluation** tab — compare IoU/Dice between UNet and MLP
 
-## Reference
+## References
 
 Ronneberger, O., Fischer, P., & Brox, T. **"U-Net: Convolutional Networks for Biomedical Image Segmentation."** *MICCAI 2015.* [arXiv:1505.04597](https://arxiv.org/abs/1505.04597)
 

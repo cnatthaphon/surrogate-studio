@@ -6,7 +6,7 @@ All demos run live on [GitHub Pages](https://cnatthaphon.github.io/surrogate-stu
 
 ---
 
-## Fashion-MNIST Benchmark — 9 Architectures Compared
+## Fashion-MNIST Benchmark — 8 Architectures + Augmentation Variant
 
 [Live Demo](https://cnatthaphon.github.io/surrogate-studio/demo/Fashion-MNIST-Benchmark/) | [README](demo/Fashion-MNIST-Benchmark/README.md)
 
@@ -321,11 +321,12 @@ demo/<paper>/
 | **Transformer** | PatchEmbed, TransformerBlock, GlobalAvgPool1D |
 | **RNN** | SimpleRNN, GRU, LSTM, Conv1D, Concat |
 | **VAE** | Latent mu, Latent logvar, Reparameterize |
-| **GAN** | SampleZ, Detach |
+| **GAN** | SampleZ, Detach, ConcatBatch, PhaseSwitch, Constant |
 | **Diffusion** | AddNoise, NoiseSchedule, TimeEmbed, ClassEmbed |
 | **Augment** | AugmentImage, AugmentBbox, AugmentMask, AugmentLabel, TargetSource |
 | **NLP** | Embedding |
-| **Feature** | ImageSource, History, WindowHistory, Params, OneHot |
+| **Feature** | ImageSource, History, WindowHistory, Params, OneHot, TimeSec, TimeNorm, SinNorm, CosNorm |
+| **Activation** | ReLU, LeakyReLU |
 
 The **Augment** category lets you wire input-level augmentation directly into the graph: paired image + label flips coordinated via a shared `seedLink` string, with build-time validation for shape (Layer 1), type lineage (Layer 2), and paired-config sync (Layer 3). One block supports multiple transforms via per-transform probability (`hflipProb`, `vflipProb`); 0 disables, >0 enables independently. See SAR-Ship-Detection and Cell-Nuclei-Segmentation for the canonical paired-augment patterns.
 
