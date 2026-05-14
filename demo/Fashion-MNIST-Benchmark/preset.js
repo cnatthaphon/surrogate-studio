@@ -318,8 +318,8 @@
 
     evaluations: [
       {
-        id: "e-cls-bench", name: "Classification: MLP vs CNN (pre-trained)", schemaId: sid, datasetId: DS_ID,
-        trainerIds: ["t-mlp-pre", "t-cnn-pre"],
+        id: "e-cls-bench", name: "Classification: MLP vs CNN vs CNN+Aug (pre-trained)", schemaId: sid, datasetId: DS_ID,
+        trainerIds: ["t-mlp-pre", "t-cnn-pre", "t-cnn-aug-pre"],
         evaluatorIds: ["accuracy", "macro_f1"], status: "draft", runs: [], createdAt: Date.now(),
       },
       {

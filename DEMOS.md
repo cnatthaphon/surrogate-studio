@@ -6,7 +6,7 @@ All demos run live on [GitHub Pages](https://cnatthaphon.github.io/surrogate-stu
 
 ---
 
-## Fashion-MNIST Benchmark — 8 Architectures Compared
+## Fashion-MNIST Benchmark — 9 Architectures Compared
 
 [Live Demo](https://cnatthaphon.github.io/surrogate-studio/demo/Fashion-MNIST-Benchmark/) | [README](demo/Fashion-MNIST-Benchmark/README.md)
 
@@ -20,6 +20,7 @@ A visual survey of 35 years of neural network research, all trained and evaluate
 |---|---|---|---|
 | 1 | MLP Baseline | ~235K | Rumelhart et al. 1986 |
 | 2 | CNN (LeNet-5) | ~860K | LeCun et al. 1998 |
+| 2b | CNN + Augmentation | ~860K | LeCun 1998 + paired hflip augmentation block |
 | 3 | Dense Autoencoder | ~450K | Hinton & Salakhutdinov 2006 |
 | 4 | Conv Autoencoder | ~85K | Masci et al. 2011 |
 | 5 | VAE | ~414K | Kingma & Welling 2014 |
@@ -173,6 +174,8 @@ Reproduces the LSTM-VAE from Jadhav & Barati Farimani (2022) for ant trajectory 
 
 Binary segmentation of cell nuclei from real microscopy images (2018 Data Science Bowl). 300 samples, 32x32 grayscale, evaluated with IoU/Dice.
 
+Three models trained side-by-side: **Nucleus UNet** baseline, **Nucleus UNet + Augmentation** (paired image+mask hflip via shared `seedLink`), and MLP baseline. Aug variant improves best val_loss by ~10.5% on the 210-image training set — a clear small-data regularization win on the canonical task that UNet was designed for.
+
 | Dataset | Model Graph | Trainer |
 |:---:|:---:|:---:|
 | ![Dataset](demo/Cell-Nuclei-Segmentation/images/01_dataset.png) | ![Model](demo/Cell-Nuclei-Segmentation/images/02_model.png) | ![Trainer](demo/Cell-Nuclei-Segmentation/images/03_trainer.png) |
@@ -185,7 +188,7 @@ Binary segmentation of cell nuclei from real microscopy images (2018 Data Scienc
 
 [Live Demo](https://cnatthaphon.github.io/surrogate-studio/demo/Synthetic-Segmentation/) | [README](demo/Synthetic-Segmentation/README.md)
 
-Pixel-wise segmentation on synthetic shapes. UNet skip connections vs MLP baseline, evaluated with IoU, Dice, and pixel accuracy.
+Pixel-wise segmentation on synthetic shapes. **Seg-UNet** with skip connections, **Seg-UNet + Augmentation** (paired image+mask hflip), and MLP baseline. Both UNet variants converge near the BCE floor on this clean synthetic task; the demo exercises the augmentation pipeline cross-runtime (TF.js + PyTorch + notebook export) without making aug a headline metric.
 
 ---
 
@@ -193,7 +196,7 @@ Pixel-wise segmentation on synthetic shapes. UNet skip connections vs MLP baseli
 
 [Live Demo](https://cnatthaphon.github.io/surrogate-studio/demo/Synthetic-Detection/) | [README](demo/Synthetic-Detection/README.md)
 
-Multi-head CNN: bbox regression + class classification from a shared backbone on synthetic 32x32 images.
+Multi-head CNN: bbox regression + class classification from a shared backbone on synthetic 32x32 images. Two variants: **Single-Box Detector** baseline and **+Augmentation** with paired hflip on the image and the bbox (`format="x0y0x1y1"`, `seedLink="synthdet_aug"`). Aug reduces best val_loss by ~9% — small but consistent on the regression head.
 
 ---
 
@@ -202,6 +205,8 @@ Multi-head CNN: bbox regression + class classification from a shared backbone on
 [Live Demo](https://cnatthaphon.github.io/surrogate-studio/demo/SAR-Ship-Detection/) | [README](demo/SAR-Ship-Detection/README.md)
 
 Ship detection on real SAR images from the HRSID dataset (Gaofen-3, Sentinel-1). Bounding box regression on 64x64 radar patches.
+
+Three model variants: **CNN Ship Detector**, **CNN + Augmentation** (paired image+bbox hflip with `format="xywh"`), and an MLP baseline. The aug variant is the canonical example for the platform's augmentation contract: image flows through `augment_image` while the bbox label flows through `target_source → augment_bbox` with a shared `seedLink` so both flip together. The build chapter behind this demo includes the cross-runtime layout bug (server reshape silently permutes NHWC → NCHW) and the loss-routing fix (`graphLabelOutputIdx` → `_custom_labels`) — see the demo README's "Bug found while building this demo" section.
 
 | Dataset | Model Graph | Trainer |
 |:---:|:---:|:---:|
