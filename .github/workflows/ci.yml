@@ -36,6 +36,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Several Python parity tests spawn `node scripts/*.js` subprocesses
+      # that require `@tensorflow/tfjs` (e.g. test_lstm_gate_parity.py,
+      # test_gru_cross_runtime_parity.py, test_convae_runtime_fix.py,
+      # test_convtranspose_*_parity.py). Jobs are isolated, so we have to
+      # install Node deps in this job even though the JS contract job
+      # already did the same install — they don't share artifacts.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
