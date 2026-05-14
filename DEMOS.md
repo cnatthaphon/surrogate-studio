@@ -141,12 +141,12 @@ Reproduces the LSTM-VAE from Jadhav & Barati Farimani (2022) for ant trajectory 
 |:---:|:---:|
 | ![Training](demo/LSTM-VAE-for-dominant-motion-extraction/images/training.gif) | ![Generation](demo/LSTM-VAE-for-dominant-motion-extraction/images/generation.gif) |
 
-| Model | Params | Test MAE | Test MSE |
-|-------|:------:|:-------:|:---------:|
-| LSTM-VAE | 77,100 | **0.0165** | 4.48e-4 |
-| MLP-AE (baseline) | 19,312 | 0.0319 | 1.74e-3 |
+| Model | Params | Test MAE | Test RMSE | Test R² |
+|-------|:------:|:-------:|:---------:|:------:|
+| **LSTM-VAE** | 77K | **0.0356** | **0.0469** | **0.9756** |
+| MLP-AE (baseline) | 19K | 0.0416 | 0.0557 | 0.9655 |
 
-*Pretrained weights shipped (PyTorch CUDA, 50 epochs). MAE on MinMax-normalized [0,1] ant trajectories.*
+*In-app evaluation on the held-out 1040-timestep ant test split (MinMax [0,1] normalized). Both models reconstruct at R² ≈ 0.97 — the LSTM-VAE wins narrowly across MAE, RMSE, R², worst-ant MAE, and MDE after the May 2026 retrain.*
 
 > Jadhav & Barati Farimani, *"LSTM-VAE for dominant motion extraction"*, 2022. [arXiv:2104.12722](https://arxiv.org/abs/2104.12722)
 
@@ -158,13 +158,15 @@ Reproduces the LSTM-VAE from Jadhav & Barati Farimani (2022) for ant trajectory 
 
 5 model architectures on RK4-simulated physics trajectories (spring, pendulum, bouncing ball). Full platform showcase: training, generation (reconstruct, random, classifier-guided, Langevin), and evaluation.
 
-| Model | Params | Test MAE | Test R² |
-|-------|:------:|:--------:|:-------:|
-| Direct-MLP | 4,962 | 0.0282 | 0.963 |
-| AR-GRU | 22,882 | 0.0277 | 0.966 |
-| VAE (8-dim latent) | 2,362 | 0.0278 | 0.949 |
-| **VAE+Classifier** | 8,605 | **0.0251** | **0.970** |
-| Denoising AE | 7,138 | 0.0420 | 0.944 |
+| Model | Params | Test MAE | Test RMSE | Test R² |
+|-------|:------:|:--------:|:---------:|:-------:|
+| Direct-MLP | 4.9K | 0.0962 | 0.1938 | 0.9342 |
+| **AR-GRU** | 22.9K | **3.89e-3** | **0.0194** | **0.9993** |
+| VAE (8-dim latent) | 2.4K | 0.1156 | 0.2387 | 0.9002 |
+| VAE+Classifier | 8.6K | 0.1020 | 0.2064 | 0.9253 |
+| Denoising AE | 7.1K | 0.1671 | 0.2646 | 0.8773 |
+
+*AR-GRU dominates after the May 2026 retrain (R² = 0.9993). Direct-MLP, VAE, VAE+Classifier cluster at R² ≈ 0.90–0.93; Denoiser trails at 0.88. See demo README for the architectural breakdown.*
 
 ---
 
@@ -369,6 +371,7 @@ No core files need to change. All demos are plugins.
 
 These are deliberate scope decisions, not undiscovered bugs. They're documented here so contributors and reviewers can find them without reading the code.
 
+- **LSTM classifier embedding-weight transfer bug (Text-Sentiment-Transformer).** The LSTM Classifier card in Text-Sentiment-Transformer trains correctly on PyTorch CUDA (`best_val_loss=0.0016`) but fails in-browser TF.js inference (~45% accuracy on a binary task). Root cause: the converter writes the `Embedding` weight as `[embed_dim, vocab_size]` (PyTorch-style transposed) and the positional loader assigns it into the TF.js `Embedding` layer's `[vocab_size, embed_dim]` slot byte-flat, leaving the rows transposed. The `Embedding → LSTM` combination is unique to this demo card — Transformer and MLP baselines in the same demo are unaffected. Fix lives in `src/weight_converter.js`'s `pytorchToTfjs` (needs an embedding-case transposition before the loader runs).
 - **Augmentation currently covers paired horizontal/vertical flip only.** The graph supports input-level augmentation as first-class nodes (`augment_image`, `augment_bbox`, `augment_mask`, `augment_label`, `target_source`) with per-transform probability, paired-flip sync via `seedLink`, and build-time validation across three layers (shape / type lineage / config sync). What's shipped is `hflipProb` and `vflipProb` per block. Random crop, rotation, color jitter, and elastic deformation aren't in the contract yet — they were scoped out because rotation needs bilinear interpolation + non-axis-aligned bbox math, random crop changes output shape (breaks the platform's shape-preserving invariant), and color jitter is grayscale-no-op for most current demos. The extension point is the per-block transform loop in `_applyTransform` (JS) and the matching dispatch in `train_subprocess.py` — adding a new transform is one keyed entry per runtime plus tests.
 - **Image-shape inference fallback.** `getSchemaImageSourceDefs` in `src/app.js` falls back to a 28×28 / 784-feature shape when an image schema doesn't declare `metadata.featureNodes.imageSource`. Today every shipped image schema declares it, so the fallback is unreached, but the cleaner contract would be to require the declaration or derive from the dataset's declared shape and refuse to guess.
 - **Notebook export feature-dimension lookup.** The exported notebook reconstructs feature-block dimensions in `_feature_dim()` (in `src/notebook_bundle_core.js`) by string-matching block names like `time_sec_block` / `params_block` / `hist_block`. The contract-clean version is to embed each block's actual feature dimension into the notebook's config object at export time so the cell never has to look up by name.

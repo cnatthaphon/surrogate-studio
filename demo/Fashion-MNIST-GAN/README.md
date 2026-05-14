@@ -22,17 +22,23 @@ Run via the Evaluation tab using the `Generative Quality` recipe — samples 75 
 
 ![Generative quality comparison](images/04_test.png)
 
-| Model | MMD ↓ | Mean Gap ↓ | Std Gap ↓ | NN Coverage ↑ | Diversity ↑ |
-|---|---|---|---|---|---|
-| MLP-GAN | 0.051 | 0.092 | 0.086 | 0.217 | 0.009 |
-| **DCGAN** | **0.001** | 0.109 | **0.074** | 0.218 | **0.091** |
-| MLP-WGAN | — | — | — | — | — |
+| Model | MMD ↓ | Mean Gap ↓ | Std Gap ↓ | NN Precision ↑ | NN Coverage ↑ | Diversity Gap ↓ | Diversity ↑ |
+|---|---|---|---|---|---|---|---|
+| MLP-GAN | 0.0586 | 0.0618 | 0.0557 | 0.1904 | 0.2181 | 0.0421 | 0.3503 |
+| DCGAN | 0.0546 | 0.0776 | 0.0809 | **0.2575** | **0.2295** | 0.0493 | **0.3575** |
+| **MLP-WGAN** | **0.0157** | **0.0325** | **0.0295** | 0.1620 | 0.1843 | **6.97e-3** | 0.3152 |
 
-(MLP-WGAN row is left as `—` in this snapshot because the table reflects the eval-tab capture that pre-dates the WGAN restoration; rerun the in-app `Generative Quality` evaluation to populate it. Numbers will be of similar magnitude to MLP-GAN since the architectures share the same generator backbone.)
+(Eval recipe: `Generative Quality (pre-trained)` against the 6000-image T-shirt training reference. Generation is stochastic — re-running the recipe produces metric values within ~run-to-run noise of these.)
 
-**DCGAN dramatically outperforms MLP-GAN on MMD (0.001 vs 0.051 — about 50x better distribution matching) and on diversity (0.091 vs 0.009 — 10x higher sample diversity).** This is the architectural inductive-bias story playing out cleanly: DCGAN's convolutional generator/discriminator pair has the right priors for image synthesis (translation equivariance, local feature composition), while the MLP-GAN treats every pixel as an independent feature and produces samples that, while T-shirt-shaped, cluster in a narrow region of the data manifold (low diversity).
+**The headline split is non-obvious.** MLP-WGAN wins on the *distribution-matching* metrics — MMD (0.0157, 3-4× tighter than the BCE GANs) and the mean/std/diversity gaps — but DCGAN wins on *individual-sample quality* (highest NN Precision = 0.2575) and *coverage* (highest NN Coverage = 0.2295, plus the highest absolute Diversity). MLP-GAN sits in the middle.
 
-The two MLP/conv models tie within noise on Mean Gap, Std Gap, and NN Coverage — they both produce in-distribution garments at roughly the same pixel statistics. The decisive metrics are MMD (which sees the full distribution geometry, not just per-pixel moments) and Diversity (which counts unique modes in the generation set).
+This is the classic Wasserstein-vs-BCE-GAN tradeoff playing out cleanly:
+
+- **MLP-WGAN's Wasserstein objective directly minimizes a transport distance** between generator and reference distributions, so the bulk of the generated sample mass lines up with the data manifold mass — giving low MMD/gaps. But the clipped critic produces blurrier per-sample outputs, hence lower NN Precision.
+- **DCGAN's convolutional inductive bias** gives the sharpest individual samples (translation equivariance, local feature composition) and the highest coverage of the data distribution — but its BCE saturation can let the generator concentrate on a subset of modes, so MMD trails MLP-WGAN.
+- **MLP-GAN** has neither inductive bias and lands in between.
+
+The educational point is **all three architectures train and generate correctly through the same graph editor**, and the metric divergence is exactly what theory predicts from the training objective and architecture combination.
 
 The demo intentionally includes two kinds of trainer cards per architecture:
 - `MLP-GAN (pre-trained)`, `DCGAN (pre-trained)`, `MLP-WGAN (pre-trained)` — already have weights and are ready for Generation immediately
