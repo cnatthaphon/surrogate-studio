@@ -86,10 +86,8 @@ The Per-Class Generation evaluation will report MMD against the real distributio
 
 ## References
 
-1. Ho, Jain, Abbeel. **"Denoising Diffusion Probabilistic Models."** *NeurIPS 2020*. [arXiv:2006.11239](https://arxiv.org/abs/2006.11239) — Foundation for DDPM reverse process.
+- Ho, J., Jain, A., & Abbeel, P. **"Denoising Diffusion Probabilistic Models."** *NeurIPS 2020.* [arXiv:2006.11239](https://arxiv.org/abs/2006.11239) — Foundation for the DDPM reverse process.
+- Dhariwal, P., & Nichol, A. **"Diffusion Models Beat GANs on Image Synthesis."** *NeurIPS 2021.* [arXiv:2105.05233](https://arxiv.org/abs/2105.05233) — Classifier-free guidance and class conditioning.
+- Ho, J., & Salimans, T. **"Classifier-Free Diffusion Guidance."** *arXiv preprint, 2022.* [arXiv:2207.12598](https://arxiv.org/abs/2207.12598) — Direct class conditioning without a separate classifier.
 
-2. Dhariwal, Nichol. **"Diffusion Models Beat GANs on Image Synthesis."** *NeurIPS 2021*. [arXiv:2105.05233](https://arxiv.org/abs/2105.05233) — Classifier-free guidance and class conditioning.
-
-3. Ho, Salimans. **"Classifier-Free Diffusion Guidance."** *arXiv preprint, 2022*. [arXiv:2207.12598](https://arxiv.org/abs/2207.12598) — Direct class conditioning without a separate classifier.
-
-Our approach embeds class labels as one-hot vectors concatenated with the noisy image (and timestep), following the label-concatenation conditioning strategy. This is simpler than classifier-free guidance but effective for small label sets.
+This demo embeds class labels as one-hot vectors concatenated with the noisy image (and timestep), following the label-concatenation conditioning strategy. This is simpler than classifier-free guidance but effective for small label sets.

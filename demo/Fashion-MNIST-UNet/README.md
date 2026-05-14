@@ -99,6 +99,6 @@ The fix is **VAEs** — they keep zdim large enough for sharp reconstruction but
 
 ## References
 
-Ronneberger, O., Fischer, P., & Brox, T. **"U-Net: Convolutional Networks for Biomedical Image Segmentation."** *MICCAI 2015.* [arXiv:1505.04597](https://arxiv.org/abs/1505.04597)
+- Ronneberger, O., Fischer, P., & Brox, T. **"U-Net: Convolutional Networks for Biomedical Image Segmentation."** *MICCAI 2015.* [arXiv:1505.04597](https://arxiv.org/abs/1505.04597)
 
 This demo adapts the UNet architecture (encoder + skip connections + decoder) for reconstruction rather than segmentation, to demonstrate skip connection support within the graph editor.

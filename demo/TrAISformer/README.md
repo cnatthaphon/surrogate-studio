@@ -94,6 +94,6 @@ Pre-processed per the paper: min 36 steps, max 120 steps, normalized [0,1], no N
 
 ## References
 
-Nguyen, D., Vadaine, R., Hajduch, G., Garber, R., & Fablet, R. **"TrAISformer — A generative transformer for AIS trajectory prediction."** *arXiv:2109.03958*, 2021. [Paper](https://arxiv.org/abs/2109.03958)
+- Nguyen, D., Vadaine, R., Hajduch, G., Garber, R., & Fablet, R. **"TrAISformer — A generative transformer for AIS trajectory prediction."** *arXiv preprint, 2021.* [arXiv:2109.03958](https://arxiv.org/abs/2109.03958)
 
 This demo reproduces a simplified version to validate the platform's transformer support. The original uses 8 layers, 768-dim, discrete tokenization (612 bins) — a fundamentally different modeling approach that requires significantly more compute.

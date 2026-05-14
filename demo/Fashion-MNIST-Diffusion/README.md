@@ -143,8 +143,6 @@ ImageSource → AddNoise(σ=0.5, cosine) + TimeEmbed(128) → Concat
 
 ## References
 
-1. Ho, Jain, Abbeel. **"Denoising Diffusion Probabilistic Models."** *NeurIPS 2020*. [arXiv:2006.11239](https://arxiv.org/abs/2006.11239)
-
-2. Song, Ermon. **"Generative Modeling by Estimating Gradients of the Data Distribution."** *NeurIPS 2019*. [arXiv:1907.05600](https://arxiv.org/abs/1907.05600)
-
-3. Song, Sohl-Dickstein, Kingma, Kumar, Ermon, Poole. **"Score-Based Generative Modeling through Stochastic Differential Equations."** *ICLR 2021*. [arXiv:2011.13456](https://arxiv.org/abs/2011.13456)
+- Ho, J., Jain, A., & Abbeel, P. **"Denoising Diffusion Probabilistic Models."** *NeurIPS 2020.* [arXiv:2006.11239](https://arxiv.org/abs/2006.11239)
+- Song, Y., & Ermon, S. **"Generative Modeling by Estimating Gradients of the Data Distribution."** *NeurIPS 2019.* [arXiv:1907.05600](https://arxiv.org/abs/1907.05600)
+- Song, Y., Sohl-Dickstein, J., Kingma, D., Kumar, A., Ermon, S., & Poole, B. **"Score-Based Generative Modeling through Stochastic Differential Equations."** *ICLR 2021.* [arXiv:2011.13456](https://arxiv.org/abs/2011.13456)

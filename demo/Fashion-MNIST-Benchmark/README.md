@@ -135,18 +135,11 @@ Learns to denoise → generation via iterative Langevin dynamics from pure noise
 
 ## References
 
-1. Rumelhart, Hinton, Williams. **"Learning representations by back-propagating errors."** *Nature* 323, 533–536 (1986). [doi:10.1038/323533a0](https://doi.org/10.1038/323533a0)
-
-2. LeCun, Bottou, Bengio, Haffner. **"Gradient-Based Learning Applied to Document Recognition."** *Proc. IEEE* 86(11), 2278–2324 (1998). [doi:10.1109/5.726791](https://doi.org/10.1109/5.726791)
-
-3. Hinton, Salakhutdinov. **"Reducing the Dimensionality of Data with Neural Networks."** *Science* 313(5786), 504–507 (2006). [doi:10.1126/science.1127647](https://doi.org/10.1126/science.1127647)
-
-4. Masci, Meier, Ciresan, Schmidhuber. **"Stacked Convolutional Auto-Encoders for Hierarchical Feature Extraction."** *ICANN 2011*. [doi:10.1007/978-3-642-21735-7_7](https://doi.org/10.1007/978-3-642-21735-7_7)
-
-5. Kingma, Welling. **"Auto-Encoding Variational Bayes."** *ICLR 2014*. [arXiv:1312.6114](https://arxiv.org/abs/1312.6114)
-
-6. Goodfellow et al. **"Generative Adversarial Nets."** *NeurIPS 2014*. [arXiv:1406.2661](https://arxiv.org/abs/1406.2661)
-
-7. Ho, Jain, Abbeel. **"Denoising Diffusion Probabilistic Models."** *NeurIPS 2020*. [arXiv:2006.11239](https://arxiv.org/abs/2006.11239)
-
-8. Xiao, Rasul, Vollgraf. **"Fashion-MNIST: a Novel Image Dataset for Benchmarking Machine Learning Algorithms."** 2017. [arXiv:1708.07747](https://arxiv.org/abs/1708.07747)
+- Rumelhart, D., Hinton, G., & Williams, R. **"Learning representations by back-propagating errors."** *Nature* 323, 533–536, 1986. [doi:10.1038/323533a0](https://doi.org/10.1038/323533a0)
+- LeCun, Y., Bottou, L., Bengio, Y., & Haffner, P. **"Gradient-Based Learning Applied to Document Recognition."** *Proc. IEEE* 86(11), 2278–2324, 1998. [doi:10.1109/5.726791](https://doi.org/10.1109/5.726791)
+- Hinton, G., & Salakhutdinov, R. **"Reducing the Dimensionality of Data with Neural Networks."** *Science* 313(5786), 504–507, 2006. [doi:10.1126/science.1127647](https://doi.org/10.1126/science.1127647)
+- Masci, J., Meier, U., Ciresan, D., & Schmidhuber, J. **"Stacked Convolutional Auto-Encoders for Hierarchical Feature Extraction."** *ICANN 2011.* [doi:10.1007/978-3-642-21735-7_7](https://doi.org/10.1007/978-3-642-21735-7_7)
+- Kingma, D., & Welling, M. **"Auto-Encoding Variational Bayes."** *ICLR 2014.* [arXiv:1312.6114](https://arxiv.org/abs/1312.6114)
+- Goodfellow, I., et al. **"Generative Adversarial Nets."** *NeurIPS 2014.* [arXiv:1406.2661](https://arxiv.org/abs/1406.2661)
+- Ho, J., Jain, A., & Abbeel, P. **"Denoising Diffusion Probabilistic Models."** *NeurIPS 2020.* [arXiv:2006.11239](https://arxiv.org/abs/2006.11239)
+- Xiao, H., Rasul, K., & Vollgraf, R. **"Fashion-MNIST: a Novel Image Dataset for Benchmarking Machine Learning Algorithms."** 2017. [arXiv:1708.07747](https://arxiv.org/abs/1708.07747)

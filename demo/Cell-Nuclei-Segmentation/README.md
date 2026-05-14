@@ -109,6 +109,6 @@ The blocks themselves (`augment_image` + `augment_mask` + `target_source` paired
 
 ## References
 
-Ronneberger, O., Fischer, P., & Brox, T. **"U-Net: Convolutional Networks for Biomedical Image Segmentation."** *MICCAI 2015.* [arXiv:1505.04597](https://arxiv.org/abs/1505.04597)
+- Ronneberger, O., Fischer, P., & Brox, T. **"U-Net: Convolutional Networks for Biomedical Image Segmentation."** *MICCAI 2015.* [arXiv:1505.04597](https://arxiv.org/abs/1505.04597)
 
 This demo uses real biomedical cell images from the 2018 Data Science Bowl — the same domain as the original UNet paper. The architecture is a simplified 2-level UNet adapted for 32x32 input resolution.

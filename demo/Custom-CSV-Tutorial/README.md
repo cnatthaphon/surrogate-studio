@@ -126,6 +126,6 @@ See `src/schema_definitions_builtin.js` for 12 real-world examples.
 
 ## References
 
-- Fisher, R.A. **"The Use of Multiple Measurements in Taxonomic Problems."** *Annals of Eugenics*, 1936. — The classic Iris dataset used as the built-in sample.
+- Fisher, R.A. **"The Use of Multiple Measurements in Taxonomic Problems."** *Annals of Eugenics,* 1936. — The classic Iris dataset used as the built-in sample.
 
 This demo serves as a starting point for integrating any tabular dataset into Surrogate Studio's visual ML pipeline.

@@ -75,6 +75,6 @@ Same backbone as Small ViT but with an MLP classification head instead of a sing
 
 ## References
 
-Dosovitskiy, A., Beyer, L., Kolesnikov, A., Weissenborn, D., Zhai, X., Unterthiner, T., ... & Houlsby, N. **"An Image is Worth 16x16 Words: Transformers for Image Recognition at Scale."** *ICLR 2021.* [Paper](https://arxiv.org/abs/2010.11929)
+- Dosovitskiy, A., Beyer, L., Kolesnikov, A., Weissenborn, D., Zhai, X., Unterthiner, T., et al. **"An Image is Worth 16x16 Words: Transformers for Image Recognition at Scale."** *ICLR 2021.* [arXiv:2010.11929](https://arxiv.org/abs/2010.11929)
 
 This demo reproduces a simplified ViT (2 layers, 64-dim, 7x7 patches on 28x28 images) to validate the platform's transformer and patch embedding support. The original uses 12+ layers, 768-dim, 16x16 patches on 224x224 images with massive pre-training.

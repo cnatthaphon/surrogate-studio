@@ -214,7 +214,10 @@ To reproduce additional results from the paper:
 
 ## References
 
-Original paper:
+- Jadhav, Y., & Barati Farimani, A. **"Dominant motion identification of multi-particle system using deep learning from video."** *Neural Computing and Applications* 34, 18183–18193, 2022. [doi:10.1007/s00521-022-07421-z](https://doi.org/10.1007/s00521-022-07421-z) | [arXiv:2104.12722](https://arxiv.org/abs/2104.12722)
+
+<details>
+<summary>BibTeX</summary>
 
 ```bibtex
 @article{jadhav2022dominant,
@@ -228,6 +231,8 @@ Original paper:
   doi={10.1007/s00521-022-07421-z}
 }
 ```
+
+</details>
 
 ---
 
