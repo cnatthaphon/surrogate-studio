@@ -210,9 +210,19 @@ def extract_pytorch_state(state_dict: Dict[str, Any]) -> tuple:
         # Conv2D / Conv2DTranspose: NCHW → NHWC
         if param.ndim == 4 and ".weight" in name and any(name.startswith(p) for p in ("conv2d_", "convt2d_", "pe_proj_")):
             param = np.transpose(param, (2, 3, 1, 0))
-        # Dense: [out, in] → [in, out]
         elif param.ndim == 2:
-            param = param.T
+            # Dense: [out, in] → [in, out].
+            # Embedding: PyTorch's nn.Embedding.weight is [vocab, embed_dim]
+            # and TF.js's Embedding layer uses the SAME [vocab, embed_dim]
+            # layout, so skip the transpose for embedding-source weights.
+            # Without this, the converter shipped [embed_dim, vocab] rows
+            # which the TF.js positional loader silently reshaped into the
+            # wrong slot — the model embedded `token_id` against the
+            # transposed table and returned garbage. Caught on the
+            # Text-Sentiment LSTM Classifier (Embedding → LSTM → Dense path).
+            is_embedding_weight = name.startswith("embed_") and name.endswith(".weight")
+            if not is_embedding_weight:
+                param = param.T
 
         flat = param.astype(np.float32).flatten()
         weight_specs.append({"name": f"tfjs_{name}", "shape": list(param.shape), "dtype": "float32", "offset": offset})

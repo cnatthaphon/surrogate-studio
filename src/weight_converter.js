@@ -430,11 +430,20 @@
         offset += size; i++; continue;
       }
 
-      // Dense/Linear: transpose 2D
+      // 2D weights: Dense/Linear transpose [out, in] → [in, out];
+      // Embedding stays [vocab, embed_dim] (PyTorch and TF.js agree on
+      // this layout — transposing it produced the Text-Sentiment LSTM
+      // regression where the model embedded the wrong row per token).
       if (shape.length === 2) {
-        var transposed = _transpose2D(new Float32Array(raw), shape[0], shape[1]);
-        outSpecs.push({ name: "tfjs_" + name, shape: [shape[1], shape[0]] });
-        outValues = outValues.concat(Array.from(transposed));
+        var isEmbeddingWeight = name.indexOf("embed_") === 0 && name.endsWith(".weight");
+        if (isEmbeddingWeight) {
+          outSpecs.push({ name: "tfjs_" + name, shape: shape.slice() });
+          outValues = outValues.concat(Array.from(raw));
+        } else {
+          var transposed = _transpose2D(new Float32Array(raw), shape[0], shape[1]);
+          outSpecs.push({ name: "tfjs_" + name, shape: [shape[1], shape[0]] });
+          outValues = outValues.concat(Array.from(transposed));
+        }
       } else {
         // 1D (bias, BN gamma/beta, LN gamma/beta)
         outSpecs.push({ name: "tfjs_" + name, shape: shape.slice() });

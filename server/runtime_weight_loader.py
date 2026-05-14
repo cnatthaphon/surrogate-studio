@@ -63,6 +63,28 @@ def _spec_size(shape: List[int]) -> int:
     return total
 
 
+def _is_embedding_weight(name: str) -> bool:
+    return str(name or "").startswith("embed_") and str(name or "").endswith(".weight")
+
+
+def _as_int_shape(shape: Any) -> List[int]:
+    return [int(x) for x in list(shape or [])]
+
+
+def _reshape_2d_values(vals: np.ndarray, param: Any, name: str, saved_shape: List[int]) -> np.ndarray:
+    param_shape = _as_int_shape(param.shape)
+    if _is_embedding_weight(name):
+        # Current format: embedding stays [vocab, embed_dim].
+        # Legacy pre-fix artifacts: embedding was incorrectly exported as
+        # [embed_dim, vocab] by the generic Dense transpose. Preserve those
+        # checkpoints by detecting the saved spec shape and applying the old
+        # inverse only for that legacy layout.
+        if len(saved_shape) == 2 and saved_shape == [param_shape[1], param_shape[0]]:
+            return vals.reshape(param_shape[1], param_shape[0]).T
+        return vals.reshape(param.shape)
+    return vals.reshape(param_shape[1], param_shape[0]).T
+
+
 def _build_saved_tensor_map(config: Any) -> Tuple[Dict[str, Dict[str, Any]], np.ndarray]:
     specs = extract_weight_specs(config)
     values = extract_weight_values(config)
@@ -110,7 +132,7 @@ def _load_named_checkpoint(model: Any, saved_map: Dict[str, Dict[str, Any]], fla
         matched_specs.add(key)
         # Reshape based on dimensionality (not name prefix) for general Conv/Dense support
         if param.dim() == 2:
-            new_state[name] = torch.tensor(vals.reshape(param.shape[1], param.shape[0]).T, dtype=torch.float32)
+            new_state[name] = torch.tensor(_reshape_2d_values(vals, param, name, _as_int_shape(saved.get("shape"))), dtype=torch.float32)
         elif param.dim() == 4:
             # Conv2D/ConvTranspose2D: TF.js (kH, kW, in_ch, out_ch) -> PyTorch (out_ch, in_ch, kH, kW)
             tf_shape = (param.shape[2], param.shape[3], param.shape[1], param.shape[0])
@@ -220,6 +242,7 @@ def load_weights_into_model(model: Any, config: Any) -> bool:
             continue
         gru_bias_shapes.append(list(s2.get("shape") or []))
     gru_bias_idx = 0
+    spec_cursor = 0
 
     bn_running = [k for k in state if "running_mean" in k or "running_var" in k]
     regular = [k for k in state if "num_batches_tracked" not in k and k not in bn_running]
@@ -257,6 +280,7 @@ def load_weights_into_model(model: Any, config: Any) -> bool:
                 new_state[keys[i + 1]] = torch.tensor(rec_t.T, dtype=torch.float32)
                 new_state[keys[i + 2]] = torch.tensor(bias_combined / 2, dtype=torch.float32)
                 new_state[keys[i + 3]] = torch.tensor(bias_combined / 2, dtype=torch.float32)
+                spec_cursor += 3
                 i += 4
                 continue
 
@@ -338,6 +362,7 @@ def load_weights_into_model(model: Any, config: Any) -> bool:
                 new_state[keys[i + 1]] = torch.tensor(weight_hh, dtype=torch.float32)
                 new_state[keys[i + 2]] = torch.tensor(bias_ih, dtype=torch.float32)
                 new_state[keys[i + 3]] = torch.tensor(bias_hh, dtype=torch.float32)
+                spec_cursor += 3
                 i += 4
                 continue
             # gate_ratio == 1 (simple RNN) or unrecognized: fall through
@@ -346,9 +371,10 @@ def load_weights_into_model(model: Any, config: Any) -> bool:
         size = param.numel()
         vals = flat[offset:offset + size]
         offset += size
+        saved_shape = _as_int_shape((spec_list[spec_cursor] or {}).get("shape") if spec_cursor < len(spec_list) else [])
         # Reshape based on dimensionality (not name prefix) for general Conv/Dense support
         if param.dim() == 2:
-            new_state[name] = torch.tensor(vals.reshape(param.shape[1], param.shape[0]).T, dtype=torch.float32)
+            new_state[name] = torch.tensor(_reshape_2d_values(vals, param, name, saved_shape), dtype=torch.float32)
         elif param.dim() == 4:
             tf_shape = (param.shape[2], param.shape[3], param.shape[1], param.shape[0])
             new_state[name] = torch.tensor(vals.reshape(tf_shape).transpose(3, 2, 0, 1), dtype=torch.float32)
@@ -357,6 +383,7 @@ def load_weights_into_model(model: Any, config: Any) -> bool:
             new_state[name] = torch.tensor(vals.reshape(tf_shape).transpose(2, 1, 0), dtype=torch.float32)
         else:
             new_state[name] = torch.tensor(vals.reshape(param.shape), dtype=torch.float32)
+        spec_cursor += 1
         i += 1
 
     model.load_state_dict(new_state)
