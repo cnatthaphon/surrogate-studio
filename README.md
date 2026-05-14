@@ -4,9 +4,9 @@
 
 **A visual ML platform with 16 demos across published papers and custom data — trainable in the browser with no install.**
 
-### [Start here: Fashion-MNIST GAN demo](https://cnatthaphon.github.io/surrogate-studio/demo/Fashion-MNIST-GAN/) — pretrained models, instant results
+### [Start here: SAR Ship Detection](https://cnatthaphon.github.io/surrogate-studio/demo/SAR-Ship-Detection/) — graph augmentation, pretrained comparison, instant results
 
-![Demo Workflow](demo/Fashion-MNIST-Benchmark/images/demo_workflow.gif)
+![SAR Ship Detection workflow — Dataset, Model graph (with paired augment_image + augment_bbox via seedLink), Trainer, three-way Evaluation including the CNN+Augmentation variant](demo/SAR-Ship-Detection/images/demo_workflow.gif)
 
 ---
 
@@ -124,9 +124,11 @@ Full architecture details, file map, supported schemas (13), and node types (35+
 
 **Browser** — open any demo on GitHub Pages, no install:
 ```
-https://cnatthaphon.github.io/surrogate-studio/demo/Fashion-MNIST-Benchmark/
+https://cnatthaphon.github.io/surrogate-studio/demo/SAR-Ship-Detection/
 ```
 The browser-only path runs Pretrained Generate, Test, and Evaluation in TF.js — no setup. **Run Notebook** (in-browser cell-by-cell training) needs the local server below: it spawns a Python kernel via `/api/notebook/start`, so a static GitHub Pages deploy can't serve it.
+
+To see the augmentation contract in action, try **[SAR Ship Detection](https://cnatthaphon.github.io/surrogate-studio/demo/SAR-Ship-Detection/)**: click "CNN Detector (pre-trained)" then "CNN+Aug Detector (pre-trained)" and compare. Same data, same hyperparameters, only the paired image+bbox horizontal-flip augmentation differs — val_loss drops ~33% with augmentation enabled. [Cell-Nuclei-Segmentation](https://cnatthaphon.github.io/surrogate-studio/demo/Cell-Nuclei-Segmentation/) and [Synthetic-Segmentation](https://cnatthaphon.github.io/surrogate-studio/demo/Synthetic-Segmentation/) show the same paired pattern with `augment_mask`.
 
 **Local server** — full platform with PyTorch training + Run Notebook:
 ```bash
@@ -163,6 +165,10 @@ This is an independent portfolio project, but focused bug fixes, documentation i
 ## How This Was Built
 
 Surrogate Studio was architected and designed by a human (the schema-driven pipeline, plugin demo pattern, cross-runtime weight contract, and 3-runtime notebook export were all deliberate architectural decisions). Implementation was done with AI coding agents (Claude Code + Codex) acting as pair programmers — the human set the design constraints, the agents wrote the code, and a multi-round review cycle caught 10 bugs before launch. The value of this project is in the architecture, not in any single line of code.
+
+### Engineering retrospectives
+
+- [Augmentation contract retro](docs/augmentation-engineering-retro.md) — the 10-PR arc that added input-level data augmentation as a first-class graph contract: paired image+label sync via `seedLink`, three-layer build-time validation (shape / type lineage / config sync), multi-transform per block, cross-runtime parity. Documents the cross-runtime layout drift bug, the `tf.keep` tensor leak, the six rounds of Layer 2 type validation under adversarial review, and the deliberately documented negative results across the 5 demos that exercise it.
 
 ---
 

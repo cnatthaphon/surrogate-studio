@@ -188,6 +188,20 @@ var DEMOS = [
       { tab: "Evaluation", wait: 1000, hold: 3 },
     ],
   },
+  {
+    // #185 follow-up: showcase the augmentation contract end-to-end.
+    // SAR-Ship is the canonical paired image+bbox augment demo.
+    name: "SAR-Ship-Detection",
+    path: "/demo/SAR-Ship-Detection/index.html",
+    output: "demo/SAR-Ship-Detection/images/demo_workflow.gif",
+    fps: 2,
+    steps: [
+      { tab: "Dataset", wait: 1500, hold: 4 },
+      { tab: "Model", wait: 1500, hold: 4 },
+      { tab: "Trainer", wait: 1500, hold: 4 },
+      { tab: "Evaluation", wait: 1500, hold: 5 },
+    ],
+  },
 ];
 
 async function recordDemo(browser, demo) {
@@ -236,8 +250,17 @@ async function main() {
     args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"],
   });
 
-  for (var i = 0; i < DEMOS.length; i++) {
-    await recordDemo(browser, DEMOS[i]);
+  // Optional --only <demo-name> filter so we can re-record a single demo
+  // without rebuilding all of them.
+  var only = process.argv[2];
+  var demos = only ? DEMOS.filter(function (d) { return d.name === only; }) : DEMOS;
+  if (only && demos.length === 0) {
+    console.error("No demo named: " + only);
+    console.error("Available: " + DEMOS.map(function (d) { return d.name; }).join(", "));
+    process.exit(1);
+  }
+  for (var i = 0; i < demos.length; i++) {
+    await recordDemo(browser, demos[i]);
   }
 
   await browser.close();

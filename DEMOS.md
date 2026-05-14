@@ -6,7 +6,7 @@ All demos run live on [GitHub Pages](https://cnatthaphon.github.io/surrogate-stu
 
 ---
 
-## Fashion-MNIST Benchmark — 8 Architectures Compared
+## Fashion-MNIST Benchmark — 9 Architectures Compared
 
 [Live Demo](https://cnatthaphon.github.io/surrogate-studio/demo/Fashion-MNIST-Benchmark/) | [README](demo/Fashion-MNIST-Benchmark/README.md)
 
@@ -20,6 +20,7 @@ A visual survey of 35 years of neural network research, all trained and evaluate
 |---|---|---|---|
 | 1 | MLP Baseline | ~235K | Rumelhart et al. 1986 |
 | 2 | CNN (LeNet-5) | ~860K | LeCun et al. 1998 |
+| 2b | CNN + Augmentation | ~860K | LeCun 1998 + paired hflip augmentation block |
 | 3 | Dense Autoencoder | ~450K | Hinton & Salakhutdinov 2006 |
 | 4 | Conv Autoencoder | ~85K | Masci et al. 2011 |
 | 5 | VAE | ~414K | Kingma & Welling 2014 |
@@ -173,6 +174,8 @@ Reproduces the LSTM-VAE from Jadhav & Barati Farimani (2022) for ant trajectory 
 
 Binary segmentation of cell nuclei from real microscopy images (2018 Data Science Bowl). 300 samples, 32x32 grayscale, evaluated with IoU/Dice.
 
+Three models trained side-by-side: **Nucleus UNet** baseline, **Nucleus UNet + Augmentation** (paired image+mask hflip+vflip via shared `seedLink`), and MLP baseline. The current augmented pretrained artifact improves best val_loss by ~6.5% on the 210-image training set; an earlier hflip-only retrain reached ~10.5%, which the demo README records as a useful transform-intensity comparison.
+
 | Dataset | Model Graph | Trainer |
 |:---:|:---:|:---:|
 | ![Dataset](demo/Cell-Nuclei-Segmentation/images/01_dataset.png) | ![Model](demo/Cell-Nuclei-Segmentation/images/02_model.png) | ![Trainer](demo/Cell-Nuclei-Segmentation/images/03_trainer.png) |
@@ -185,7 +188,7 @@ Binary segmentation of cell nuclei from real microscopy images (2018 Data Scienc
 
 [Live Demo](https://cnatthaphon.github.io/surrogate-studio/demo/Synthetic-Segmentation/) | [README](demo/Synthetic-Segmentation/README.md)
 
-Pixel-wise segmentation on synthetic shapes. UNet skip connections vs MLP baseline, evaluated with IoU, Dice, and pixel accuracy.
+Pixel-wise segmentation on synthetic shapes. **Seg-UNet** with skip connections, **Seg-UNet + Augmentation** (paired image+mask hflip+vflip), and MLP baseline. Both UNet variants converge near the BCE floor on this clean synthetic task; the demo exercises the augmentation pipeline cross-runtime (TF.js + PyTorch + notebook export) without making aug a headline metric.
 
 ---
 
@@ -193,7 +196,7 @@ Pixel-wise segmentation on synthetic shapes. UNet skip connections vs MLP baseli
 
 [Live Demo](https://cnatthaphon.github.io/surrogate-studio/demo/Synthetic-Detection/) | [README](demo/Synthetic-Detection/README.md)
 
-Multi-head CNN: bbox regression + class classification from a shared backbone on synthetic 32x32 images.
+Multi-head CNN: bbox regression + class classification from a shared backbone on synthetic 32x32 images. Two variants: **Single-Box Detector** baseline and **+Augmentation** with paired hflip on the image and the bbox (`format="x0y0x1y1"`, `seedLink="synthdet_aug"`). Aug reduces best val_loss by ~9% — small but consistent on the regression head.
 
 ---
 
@@ -202,6 +205,8 @@ Multi-head CNN: bbox regression + class classification from a shared backbone on
 [Live Demo](https://cnatthaphon.github.io/surrogate-studio/demo/SAR-Ship-Detection/) | [README](demo/SAR-Ship-Detection/README.md)
 
 Ship detection on real SAR images from the HRSID dataset (Gaofen-3, Sentinel-1). Bounding box regression on 64x64 radar patches.
+
+Three model variants: **CNN Ship Detector**, **CNN + Augmentation** (paired image+bbox hflip with `format="xywh"`), and an MLP baseline. The aug variant is the canonical example for the platform's augmentation contract: image flows through `augment_image` while the bbox label flows through `target_source → augment_bbox` with a shared `seedLink` so both flip together. The build chapter behind this demo includes the cross-runtime layout bug (server reshape silently permutes NHWC → NCHW) and the loss-routing fix (`graphLabelOutputIdx` → `_custom_labels`) — see the demo README's "Bug found while building this demo" section.
 
 | Dataset | Model Graph | Trainer |
 |:---:|:---:|:---:|
@@ -305,7 +310,7 @@ demo/<paper>/
 | `ant_trajectory` | Trajectory | 20 ants x (x,y), 40 features | Demo plugin |
 | `custom_csv` | Tabular | User CSV with f*/t* columns, auto-detect task | Built-in + file upload |
 
-## Node Types (35+)
+## Node Types (45+)
 
 | Category | Nodes |
 |----------|-------|
@@ -316,8 +321,11 @@ demo/<paper>/
 | **VAE** | Latent mu, Latent logvar, Reparameterize |
 | **GAN** | SampleZ, Detach |
 | **Diffusion** | AddNoise, NoiseSchedule, TimeEmbed, ClassEmbed |
+| **Augment** | AugmentImage, AugmentBbox, AugmentMask, AugmentLabel, TargetSource |
 | **NLP** | Embedding |
 | **Feature** | ImageSource, History, WindowHistory, Params, OneHot |
+
+The **Augment** category lets you wire input-level augmentation directly into the graph: paired image + label flips coordinated via a shared `seedLink` string, with build-time validation for shape (Layer 1), type lineage (Layer 2), and paired-config sync (Layer 3). One block supports multiple transforms via per-transform probability (`hflipProb`, `vflipProb`); 0 disables, >0 enables independently. See SAR-Ship-Detection and Cell-Nuclei-Segmentation for the canonical paired-augment patterns.
 
 ## Papers Cited
 
@@ -361,7 +369,7 @@ No core files need to change. All demos are plugins.
 
 These are deliberate scope decisions, not undiscovered bugs. They're documented here so contributors and reviewers can find them without reading the code.
 
-- **No input-level data augmentation.** The graph supports layer-level dropout but not random flip/crop/rotate/jitter on inputs. The demos ship with pretrained weights at the accuracies the architecture supports without augmentation; this is a portfolio piece focused on platform architecture, not per-paper SOTA. The cleanest extension point is the dataset-module layer (`src/dataset_modules/*.js` preprocessing hook) — same place `image_source_block` already normalizes pixel values. Adding it as a graph node would couple training-time data behavior to architecture, which the contract avoids.
+- **Augmentation currently covers paired horizontal/vertical flip only.** The graph supports input-level augmentation as first-class nodes (`augment_image`, `augment_bbox`, `augment_mask`, `augment_label`, `target_source`) with per-transform probability, paired-flip sync via `seedLink`, and build-time validation across three layers (shape / type lineage / config sync). What's shipped is `hflipProb` and `vflipProb` per block. Random crop, rotation, color jitter, and elastic deformation aren't in the contract yet — they were scoped out because rotation needs bilinear interpolation + non-axis-aligned bbox math, random crop changes output shape (breaks the platform's shape-preserving invariant), and color jitter is grayscale-no-op for most current demos. The extension point is the per-block transform loop in `_applyTransform` (JS) and the matching dispatch in `train_subprocess.py` — adding a new transform is one keyed entry per runtime plus tests.
 - **Image-shape inference fallback.** `getSchemaImageSourceDefs` in `src/app.js` falls back to a 28×28 / 784-feature shape when an image schema doesn't declare `metadata.featureNodes.imageSource`. Today every shipped image schema declares it, so the fallback is unreached, but the cleaner contract would be to require the declaration or derive from the dataset's declared shape and refuse to guess.
 - **Notebook export feature-dimension lookup.** The exported notebook reconstructs feature-block dimensions in `_feature_dim()` (in `src/notebook_bundle_core.js`) by string-matching block names like `time_sec_block` / `params_block` / `hist_block`. The contract-clean version is to embed each block's actual feature dimension into the notebook's config object at export time so the cell never has to look up by name.
 - **Generation modes not at full parity.** DDPM and Langevin generation are browser-only (`generate_subprocess.py` implements `random` and `reconstruct`). This is acceptable specialization — those modes are exploratory/interactive and the pretrained demos don't depend on the server path for them.

@@ -84,16 +84,18 @@ The UNet, in contrast, achieves **0.48 IoU and 0.63 Dice** on real biomedical da
 
 ### Does augmentation help here?
 
-The third variant adds **paired horizontal-flip augmentation** to both the input microscopy patch and the binary mask label. With only 210 training images, regularization can matter; nuclei are roughly orientation-invariant (a flipped cell is still a cell), so hflip is a physically reasonable transform.
+The third variant adds **paired horizontal + vertical flip augmentation** to both the input microscopy patch and the binary mask label. With only 210 training images, regularization can matter; nuclei are roughly orientation-invariant (a flipped cell is still a cell, a rotated cell is still a cell), so both flip axes are physically reasonable transforms.
 
 Both UNet variants were trained at the same code rev, same seed, same 50-epoch budget on PyTorch CUDA — only difference is the augmentation block.
 
 | Model (from pretrained metadata) | best epoch | best val_loss | test MAE |
 |---|---|---|---|
 | Nucleus UNet | 48 | 0.1734 | 0.1140 |
-| **Nucleus UNet + Augmentation** | 49 | **0.1551** ↓10.5% | **0.1026** ↓10% |
+| **Nucleus UNet + Augmentation** (hflip + vflip, p=0.5 each) | 50 | **0.1620** ↓6.5% | **0.1055** ↓7.5% |
 
-Aug helps modestly but reliably: ~10% lower val_loss and ~10% lower per-pixel MAE. The training curve also stays cleaner — the baseline plateaus around epoch 45 while the aug variant keeps improving to the last epoch, suggesting the regularization is still doing useful work at this budget.
+Aug helps modestly: ~6.5% lower val_loss and ~7.5% lower per-pixel MAE. The training curve also stays cleaner — the baseline plateaus around epoch 45 while the aug variant keeps improving to the last epoch, suggesting the regularization is still doing useful work at this budget.
+
+**Footnote on transform intensity.** An earlier hflip-only retrain of this exact variant (same seed, same epochs) hit val_loss 0.1551 (-10.5% vs baseline), which beat the current hflip+vflip configuration. The platform's multi-transform-per-block contract from PR #79 made it trivial to compare: setting `vflipProb` from 0 → 0.5 in the preset is one line, then retrain. The empirical takeaway is that on 210 microscopy patches with 50-epoch budget, hflip alone is the sweet spot; adding vflip is a stronger regularizer than the dataset rewards. The preset ships with both enabled because the reviewer's design brief called for both (cells have no canonical orientation, so both transforms are physically reasonable); the data shows that "physically reasonable" and "empirically optimal" are not the same thing on a tight training budget. Either configuration is a clear win over no augmentation.
 
 The blocks themselves (`augment_image` + `augment_mask` + `target_source` paired via `seedLink="nuc_aug"`) demonstrate the segmentation pattern Layer 2 type-validation was specifically designed around: image and mask must flip together. If you wire `augment_mask` to image data by mistake, the platform throws at build time with a clear message.
 

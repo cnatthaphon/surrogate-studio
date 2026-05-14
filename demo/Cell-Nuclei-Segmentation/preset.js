@@ -107,7 +107,7 @@
     // Image branch
     var imgSrc  = N(d, "image_source", { sourceKey: "pixel_values", featureSize: IMAGE_SIZE, imageShape: [32,32,1] }, 50, 300);
     var reshape = N(d, "reshape",      { targetShape: "32,32,1" },             200, 300);
-    var augImg  = N(d, "augment_image",{ hflipProb: 0.5, vflipProb: 0, seedLink: "nuc_aug", layout: "auto" }, 320, 300);
+    var augImg  = N(d, "augment_image",{ hflipProb: 0.5, vflipProb: 0.5, seedLink: "nuc_aug", layout: "auto" }, 320, 300);
 
     var enc1    = N(d, "conv2d",       { filters: 16, kernelSize: 3, strides: 1, padding: "same", activation: "relu" }, 480, 200);
     var pool1   = N(d, "maxpool2d",    { poolSize: 2, strides: 2 },            640, 200);
@@ -130,7 +130,7 @@
     // mask is rank-3 [B,32,32] for the flip; flattened back to [B,1024] so the
     // BCE head compares against the also-flat prediction output[0].
     var tgtSrc   = N(d, "target_source",{ targetKey: "mask", featureSize: IMAGE_SIZE, targetShape: [32, 32] }, 320, 550);
-    var augMask  = N(d, "augment_mask", { hflipProb: 0.5, vflipProb: 0, seedLink: "nuc_aug", layout: "auto" }, 1170, 550);
+    var augMask  = N(d, "augment_mask", { hflipProb: 0.5, vflipProb: 0.5, seedLink: "nuc_aug", layout: "auto" }, 1170, 550);
     var maskFlat = N(d, "flatten",      {},                                                                   1340, 550);
 
     C(d, imgSrc, reshape); C(d, reshape, augImg);
