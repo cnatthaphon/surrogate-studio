@@ -90,6 +90,7 @@ var DEMOS = [
 
       var consoleErrors = [];
       var bad404s = [];
+      var failedRequests = [];
       page.on("console", function (msg) { if (msg.type() === "error") consoleErrors.push(msg.text()); });
       page.on("pageerror", function (err) { consoleErrors.push(String(err)); });
       page.on("response", function (r) {
@@ -100,6 +101,12 @@ var DEMOS = [
           if (/favicon\.ico/i.test(u)) return;
           bad404s.push(r.status() + " " + u);
         }
+      });
+      page.on("requestfailed", function (req) {
+        var u = req.url();
+        if (/favicon\.ico/i.test(u)) return;
+        var failure = req.failure && req.failure();
+        failedRequests.push((failure && failure.errorText ? failure.errorText + " " : "") + u);
       });
 
       var url = BASE + "/demo/" + demo.name + "/index.html";
@@ -189,8 +196,13 @@ var DEMOS = [
         bad404s.slice(0, 5).forEach(function (u) { console.error("    " + u); });
         passed = false;
       }
-      if (passed && realErrors.length === 0 && bad404s.length === 0) {
-        detail.push("0 JS errors, 0 bad HTTP");
+      if (failedRequests.length > 0) {
+        console.error("  ✗ non-favicon request failures: " + failedRequests.length);
+        failedRequests.slice(0, 5).forEach(function (u) { console.error("    " + u); });
+        passed = false;
+      }
+      if (passed && realErrors.length === 0 && bad404s.length === 0 && failedRequests.length === 0) {
+        detail.push("0 JS errors, 0 bad HTTP, 0 failed requests");
       }
 
       if (passed) {
