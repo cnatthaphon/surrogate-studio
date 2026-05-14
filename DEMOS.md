@@ -310,7 +310,7 @@ demo/<paper>/
 | `ant_trajectory` | Trajectory | 20 ants x (x,y), 40 features | Demo plugin |
 | `custom_csv` | Tabular | User CSV with f*/t* columns, auto-detect task | Built-in + file upload |
 
-## Node Types (35+)
+## Node Types (45+)
 
 | Category | Nodes |
 |----------|-------|
@@ -321,8 +321,11 @@ demo/<paper>/
 | **VAE** | Latent mu, Latent logvar, Reparameterize |
 | **GAN** | SampleZ, Detach |
 | **Diffusion** | AddNoise, NoiseSchedule, TimeEmbed, ClassEmbed |
+| **Augment** | AugmentImage, AugmentBbox, AugmentMask, AugmentLabel, TargetSource |
 | **NLP** | Embedding |
 | **Feature** | ImageSource, History, WindowHistory, Params, OneHot |
+
+The **Augment** category lets you wire input-level augmentation directly into the graph: paired image + label flips coordinated via a shared `seedLink` string, with build-time validation for shape (Layer 1), type lineage (Layer 2), and paired-config sync (Layer 3). One block supports multiple transforms via per-transform probability (`hflipProb`, `vflipProb`); 0 disables, >0 enables independently. See SAR-Ship-Detection and Cell-Nuclei-Segmentation for the canonical paired-augment patterns.
 
 ## Papers Cited
 
@@ -366,7 +369,7 @@ No core files need to change. All demos are plugins.
 
 These are deliberate scope decisions, not undiscovered bugs. They're documented here so contributors and reviewers can find them without reading the code.
 
-- **No input-level data augmentation.** The graph supports layer-level dropout but not random flip/crop/rotate/jitter on inputs. The demos ship with pretrained weights at the accuracies the architecture supports without augmentation; this is a portfolio piece focused on platform architecture, not per-paper SOTA. The cleanest extension point is the dataset-module layer (`src/dataset_modules/*.js` preprocessing hook) — same place `image_source_block` already normalizes pixel values. Adding it as a graph node would couple training-time data behavior to architecture, which the contract avoids.
+- **Augmentation currently covers paired horizontal/vertical flip only.** The graph supports input-level augmentation as first-class nodes (`augment_image`, `augment_bbox`, `augment_mask`, `augment_label`, `target_source`) with per-transform probability, paired-flip sync via `seedLink`, and build-time validation across three layers (shape / type lineage / config sync). What's shipped is `hflipProb` and `vflipProb` per block. Random crop, rotation, color jitter, and elastic deformation aren't in the contract yet — they were scoped out because rotation needs bilinear interpolation + non-axis-aligned bbox math, random crop changes output shape (breaks the platform's shape-preserving invariant), and color jitter is grayscale-no-op for most current demos. The extension point is the per-block transform loop in `_applyTransform` (JS) and the matching dispatch in `train_subprocess.py` — adding a new transform is one keyed entry per runtime plus tests.
 - **Image-shape inference fallback.** `getSchemaImageSourceDefs` in `src/app.js` falls back to a 28×28 / 784-feature shape when an image schema doesn't declare `metadata.featureNodes.imageSource`. Today every shipped image schema declares it, so the fallback is unreached, but the cleaner contract would be to require the declaration or derive from the dataset's declared shape and refuse to guess.
 - **Notebook export feature-dimension lookup.** The exported notebook reconstructs feature-block dimensions in `_feature_dim()` (in `src/notebook_bundle_core.js`) by string-matching block names like `time_sec_block` / `params_block` / `hist_block`. The contract-clean version is to embed each block's actual feature dimension into the notebook's config object at export time so the cell never has to look up by name.
 - **Generation modes not at full parity.** DDPM and Langevin generation are browser-only (`generate_subprocess.py` implements `random` and `reconstruct`). This is acceptable specialization — those modes are exploratory/interactive and the pretrained demos don't depend on the server path for them.
