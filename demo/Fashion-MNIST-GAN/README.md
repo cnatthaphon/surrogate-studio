@@ -156,8 +156,6 @@ Labels:
 
 ## References
 
-1. Goodfellow, Pouget-Abadie, Mirza, Xu, Warde-Farley, Ozair, Courville, Bengio. **"Generative Adversarial Nets."** *NeurIPS 2014*. [arXiv:1406.2661](https://arxiv.org/abs/1406.2661)
-
-2. Radford, Metz, Chintala. **"Unsupervised Representation Learning with Deep Convolutional Generative Adversarial Networks."** *ICLR 2016*. [arXiv:1511.06434](https://arxiv.org/abs/1511.06434)
-
-3. Arjovsky, Chintala, Bottou. **"Wasserstein Generative Adversarial Networks."** *ICML 2017*. [arXiv:1701.07875](https://arxiv.org/abs/1701.07875)
+- Goodfellow, I., Pouget-Abadie, J., Mirza, M., Xu, B., Warde-Farley, D., Ozair, S., Courville, A., & Bengio, Y. **"Generative Adversarial Nets."** *NeurIPS 2014.* [arXiv:1406.2661](https://arxiv.org/abs/1406.2661)
+- Radford, A., Metz, L., & Chintala, S. **"Unsupervised Representation Learning with Deep Convolutional Generative Adversarial Networks."** *ICLR 2016.* [arXiv:1511.06434](https://arxiv.org/abs/1511.06434)
+- Arjovsky, M., Chintala, S., & Bottou, L. **"Wasserstein Generative Adversarial Networks."** *ICML 2017.* [arXiv:1701.07875](https://arxiv.org/abs/1701.07875)

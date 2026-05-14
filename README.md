@@ -24,7 +24,7 @@ This is an independent portfolio project focused on ML systems architecture: sch
 
 | | Feature | What it means |
 |---|---------|--------------|
-| **1** | **Visual graph editor** | Design neural networks by dragging nodes — no model code needed. 35+ node types: MLP, CNN, RNN, VAE, GAN, Diffusion, Transformer, NLP. |
+| **1** | **Visual graph editor** | Design neural networks by dragging nodes — no model code needed. 45+ node types: MLP, CNN, RNN, VAE, GAN, Diffusion, Transformer, NLP. |
 | **2** | **3 runtimes, 1 graph** | Same visual graph trains in TF.js (browser), PyTorch (server with CUDA), or the built-in notebook runner (Pyodide / server kernel). Train anywhere, compare everywhere. |
 | **3** | **Cross-runtime weight transfer** | Weights trained in PyTorch load into TF.js and vice versa. Handles Dense transpose, LSTM gate reorder, Conv NCHW/NHWC shuffle, BatchNorm stats — per layer type. |
 | **4** | **Built-in + exported notebooks** | Run the generated notebook inside Surrogate Studio, or export `.ipynb` + `dataset.csv` + `model.graph.json` as a reproducible PyTorch training bundle for JupyterLab, Colab, or any PyTorch environment. Weights transfer back to the browser. |
@@ -102,7 +102,7 @@ Each demo has its own README with architecture diagrams, benchmark results, and 
 Browser (TF.js)                    Server (PyTorch)
 ┌──────────────────────┐          ┌─────────────────────┐
 │  Visual Graph Editor │          │  training_server.js  │
-│  (Drawflow, 35+ nodes)│  ──────>│  train_subprocess.py │
+│  (Drawflow, 45+ nodes)│  ──────>│  train_subprocess.py │
 │  Training Engine     │ HTTP/SSE │  generate_subprocess │
 │  Generation Engine   │  <────── │  predict_subprocess  │
 │  Evaluation / Export │          │  CUDA auto-detected  │
@@ -116,7 +116,7 @@ Browser (TF.js)                    Server (PyTorch)
 
 **SSE = Server-Sent Events**: the browser starts a PyTorch job over HTTP, then receives one-way live progress events from the server for status, epochs, losses, and completion. It is used for streaming training progress, not for trading or exchange connectivity.
 
-Full architecture details, file map, supported schemas (13), and node types (35+) in [DEMOS.md](DEMOS.md#architecture).
+Full architecture details, file map, supported schemas (13), and node types (45+) in [DEMOS.md](DEMOS.md#architecture).
 
 ---
 
@@ -150,9 +150,10 @@ docker build -t surrogate-studio . && docker run -p 3777:3777 surrogate-studio
 |-------|----------|
 | Contract tests | 31 scripts |
 | Multi-schema pipeline | 11 schemas (5 full train+eval, 6 module-verified) |
+| Python parity tests | 18 server-side scripts — LSTM/GRU/Embedding cross-runtime round-trip, ConvTranspose parity, augment server contract |
 | GitHub Pages E2E | 297 checks across all 16 demos |
 | Browser polish checks | Puppeteer spot-checks for mobile layout and Run Notebook preflight |
-| CI | Every push/PR via GitHub Actions |
+| CI | Every push/PR via GitHub Actions — both Node + Python jobs |
 
 ---
 

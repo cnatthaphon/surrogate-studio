@@ -115,5 +115,5 @@ The augmentation blocks (image, bbox, mask, label, target_source, seedLink RNG) 
 
 ## References
 
-- Wei, S., et al. **"HRSID: A High-Resolution SAR Images Dataset for Ship Detection and Instance Segmentation."** *IEEE Access*, 2020.
-- Kang, M., et al. **"A Survey on Deep Learning Based Ship Detection from Satellite Images."** *Remote Sensing*, 2021.
+- Wei, S., Zeng, X., Qu, Q., Wang, M., Su, H., & Shi, J. **"HRSID: A High-Resolution SAR Images Dataset for Ship Detection and Instance Segmentation."** *IEEE Access* 8, 120234–120254, 2020. [doi:10.1109/ACCESS.2020.3005861](https://doi.org/10.1109/ACCESS.2020.3005861)
+- Kang, M., et al. **"A Survey on Deep Learning Based Ship Detection from Satellite Images."** *Remote Sensing,* 2021.
