@@ -47,16 +47,18 @@ All three models trained 30 epochs on PyTorch CUDA on the same 12-token syntheti
 | Model | Params | Accuracy | Macro F1 |
 |---|---|---|---|
 | **Transformer Classifier** | ~24K | **1.0000** | **1.0000** |
-| **LSTM Classifier** | ~10K | **1.0000** | **1.0000** |
+| LSTM Classifier | ~10K | 0.4533* | 0.4390* |
 | MLP Baseline | ~6K | 0.9067 | 0.9056 |
 
-**Transformer and LSTM both hit 100%; MLP plateaus at ~91%.** This is the honest result on synthetic sentiment data and it tells the educational story directly:
+\* **LSTM regression:** the LSTM classifier currently fails in-browser TF.js inference (~45% accuracy, random for binary classification) due to a known embedding-weight-transfer bug. The CUDA training itself converges to `best_val_loss=0.0016` (effectively 100% accuracy), but cross-runtime weight transfer for the `Embedding → LSTM` combination loads the embedding matrix with transposed axes — `[embed_dim, vocab]` instead of `[vocab, embed_dim]` — so the TF.js inference graph reads the wrong rows. The Transformer and MLP do not use the embedding-layer path and are unaffected. Tracked as a follow-up — see "Known Limitations" in [DEMOS.md](../../DEMOS.md).
+
+**Transformer hits 100%; MLP plateaus at ~91%; LSTM is broken in TF.js inference.** Setting aside the LSTM regression, the educational story is unchanged:
 
 1. **Order matters → MLP loses.** Sentiment depends on which words appear and in this synthetic dataset sometimes on local word combinations. The MLP receives token IDs as a flat 12-dim vector with no embedding lookup — it can't learn that `token=42` means the same thing whether it's at position 1 or position 7. The 9-point gap is the cost of throwing away sequence information.
 
-2. **Transformer ≡ LSTM on this dataset.** Both architectures give the model a way to look across the sequence. Self-attention does it in parallel, LSTM does it sequentially. On synthetic 3-8 word sentences with single-keyword sentiment cues, both architectures find the cue cleanly and saturate at perfect accuracy. Transformers pull ahead on real text where context windows and long-range dependencies matter — that gap doesn't show up here because the dataset doesn't require it.
+2. **Transformer reaches 100% even on a tiny task.** Self-attention across 12 token positions cleanly identifies the sentiment-bearing word regardless of where it sits in the sentence. The PatchEmbed-style learned positional encoding plus the per-token query-key-value projections give it enough representational room on the 120-word vocabulary.
 
-The point of this demo is **NLP works in the same platform as vision and trajectory tasks** — same graph editor, same training engine, same evaluation contract. The number ratio (Transformer/LSTM tied at the ceiling, MLP lagging by ~9 points) is exactly what you'd predict from architectural priors, which is itself the validation that the platform isn't doing anything weird to NLP.
+The point of this demo is **NLP works in the same platform as vision and trajectory tasks** — same graph editor, same training engine, same evaluation contract. The Transformer/MLP gap is exactly what architectural priors predict; the LSTM gap is an infrastructure bug we are still tracking.
 
 ## How to Use
 
