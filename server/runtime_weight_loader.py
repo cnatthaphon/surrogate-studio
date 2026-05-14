@@ -110,7 +110,15 @@ def _load_named_checkpoint(model: Any, saved_map: Dict[str, Dict[str, Any]], fla
         matched_specs.add(key)
         # Reshape based on dimensionality (not name prefix) for general Conv/Dense support
         if param.dim() == 2:
-            new_state[name] = torch.tensor(vals.reshape(param.shape[1], param.shape[0]).T, dtype=torch.float32)
+            # Dense: TF.js [in, out] -> PyTorch [out, in] via transpose.
+            # Embedding: PyTorch and TF.js both use [vocab, embed_dim],
+            # so do NOT transpose. See checkpoint_format.py for the
+            # matching export-side carve-out.
+            is_embedding = name.startswith("embed_") and name.endswith(".weight")
+            if is_embedding:
+                new_state[name] = torch.tensor(vals.reshape(param.shape), dtype=torch.float32)
+            else:
+                new_state[name] = torch.tensor(vals.reshape(param.shape[1], param.shape[0]).T, dtype=torch.float32)
         elif param.dim() == 4:
             # Conv2D/ConvTranspose2D: TF.js (kH, kW, in_ch, out_ch) -> PyTorch (out_ch, in_ch, kH, kW)
             tf_shape = (param.shape[2], param.shape[3], param.shape[1], param.shape[0])
@@ -348,7 +356,12 @@ def load_weights_into_model(model: Any, config: Any) -> bool:
         offset += size
         # Reshape based on dimensionality (not name prefix) for general Conv/Dense support
         if param.dim() == 2:
-            new_state[name] = torch.tensor(vals.reshape(param.shape[1], param.shape[0]).T, dtype=torch.float32)
+            # Embedding stays [vocab, embed_dim]; everything else transposes.
+            is_embedding = name.startswith("embed_") and name.endswith(".weight")
+            if is_embedding:
+                new_state[name] = torch.tensor(vals.reshape(param.shape), dtype=torch.float32)
+            else:
+                new_state[name] = torch.tensor(vals.reshape(param.shape[1], param.shape[0]).T, dtype=torch.float32)
         elif param.dim() == 4:
             tf_shape = (param.shape[2], param.shape[3], param.shape[1], param.shape[0])
             new_state[name] = torch.tensor(vals.reshape(tf_shape).transpose(3, 2, 0, 1), dtype=torch.float32)
