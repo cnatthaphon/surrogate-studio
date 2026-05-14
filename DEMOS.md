@@ -174,7 +174,7 @@ Reproduces the LSTM-VAE from Jadhav & Barati Farimani (2022) for ant trajectory 
 
 Binary segmentation of cell nuclei from real microscopy images (2018 Data Science Bowl). 300 samples, 32x32 grayscale, evaluated with IoU/Dice.
 
-Three models trained side-by-side: **Nucleus UNet** baseline, **Nucleus UNet + Augmentation** (paired image+mask hflip via shared `seedLink`), and MLP baseline. Aug variant improves best val_loss by ~10.5% on the 210-image training set — a clear small-data regularization win on the canonical task that UNet was designed for.
+Three models trained side-by-side: **Nucleus UNet** baseline, **Nucleus UNet + Augmentation** (paired image+mask hflip+vflip via shared `seedLink`), and MLP baseline. The current augmented pretrained artifact improves best val_loss by ~6.5% on the 210-image training set; an earlier hflip-only retrain reached ~10.5%, which the demo README records as a useful transform-intensity comparison.
 
 | Dataset | Model Graph | Trainer |
 |:---:|:---:|:---:|
@@ -188,7 +188,7 @@ Three models trained side-by-side: **Nucleus UNet** baseline, **Nucleus UNet + A
 
 [Live Demo](https://cnatthaphon.github.io/surrogate-studio/demo/Synthetic-Segmentation/) | [README](demo/Synthetic-Segmentation/README.md)
 
-Pixel-wise segmentation on synthetic shapes. **Seg-UNet** with skip connections, **Seg-UNet + Augmentation** (paired image+mask hflip), and MLP baseline. Both UNet variants converge near the BCE floor on this clean synthetic task; the demo exercises the augmentation pipeline cross-runtime (TF.js + PyTorch + notebook export) without making aug a headline metric.
+Pixel-wise segmentation on synthetic shapes. **Seg-UNet** with skip connections, **Seg-UNet + Augmentation** (paired image+mask hflip+vflip), and MLP baseline. Both UNet variants converge near the BCE floor on this clean synthetic task; the demo exercises the augmentation pipeline cross-runtime (TF.js + PyTorch + notebook export) without making aug a headline metric.
 
 ---
 

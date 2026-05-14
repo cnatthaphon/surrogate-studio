@@ -133,7 +133,7 @@ After PR #79 / #80 merged:
 | Demo | Variants | Aug effect on best val_loss | Reading |
 |---|---|---|---|
 | SAR-Ship Detection | CNN / CNN+Aug / MLP | ↓33% (0.0040 → 0.0027) | Paired image+bbox hflip on 210 real radar patches. Clear win. |
-| Cell-Nuclei Segmentation | UNet / UNet+Aug / MLP | ↓10.5% (0.1734 → 0.1551) | Paired image+mask hflip on 210 microscopy images. The canonical UNet task. IoU: 0.4834 → 0.5292. |
+| Cell-Nuclei Segmentation | UNet / UNet+Aug / MLP | ↓6.5% current hflip+vflip artifact (0.1734 → 0.1620); ↓10.5% hflip-only retrain (0.1551) | Paired image+mask flips on 210 microscopy images. The canonical UNet task; the hflip-only result is a useful reminder that physically plausible transforms still need empirical checks. |
 | Synthetic Detection | Detector / Detector+Aug | ↓9% (0.00115 → 0.00105) | Paired image+bbox on 4200 synthetic shapes. Small consistent improvement. |
 | Synthetic Segmentation | Seg-UNet / Seg-UNet+Aug / MLP | floor-saturated | Both UNet variants hit ~2e-5 BCE on clean synthetic shapes. Aug pipeline works correctly but the dataset is too easy to show a headline win. |
 | FM-Benchmark CNN | CNN / CNN+Aug | ~equal (0.2692 → 0.2656) | 6000-sample FM-MNIST + saturated CNN. Aug effectively neutral. Documented honestly. |

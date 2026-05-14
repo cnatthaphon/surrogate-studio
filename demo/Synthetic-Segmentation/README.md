@@ -87,7 +87,7 @@ Aug helps ~19% in relative terms but at this absolute floor the difference is mo
 - The PyTorch server's `target_source` dispatch honors `targetShape` to reshape flat `[B,1024]` rows into `[B,32,32]` (parity with the TF.js `tf.input` shape declaration)
 - The `seedLink="segshape_aug"` registry guarantees image flip == mask flip every batch
 
-For datasets where segmentation is genuinely hard, the same blocks pay off more visibly — see Cell-Nuclei-Segmentation, where this exact pattern reduces val_loss by ~10% on a 210-image biomedical task.
+For datasets where segmentation is genuinely hard, the same blocks pay off more visibly — see Cell-Nuclei-Segmentation, where the current paired hflip+vflip artifact reduces val_loss by ~6.5% on a 210-image biomedical task, with an earlier hflip-only retrain reaching ~10.5%.
 
 ## How to Use
 

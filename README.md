@@ -4,7 +4,7 @@
 
 **A visual ML platform with 16 demos across published papers and custom data — trainable in the browser with no install.**
 
-### [Start here: Fashion-MNIST GAN demo](https://cnatthaphon.github.io/surrogate-studio/demo/Fashion-MNIST-GAN/) — pretrained models, instant results
+### [Start here: SAR Ship Detection](https://cnatthaphon.github.io/surrogate-studio/demo/SAR-Ship-Detection/) — graph augmentation, pretrained comparison, instant results
 
 ![SAR Ship Detection workflow — Dataset, Model graph (with paired augment_image + augment_bbox via seedLink), Trainer, three-way Evaluation including the CNN+Augmentation variant](demo/SAR-Ship-Detection/images/demo_workflow.gif)
 
@@ -124,7 +124,7 @@ Full architecture details, file map, supported schemas (13), and node types (35+
 
 **Browser** — open any demo on GitHub Pages, no install:
 ```
-https://cnatthaphon.github.io/surrogate-studio/demo/Fashion-MNIST-Benchmark/
+https://cnatthaphon.github.io/surrogate-studio/demo/SAR-Ship-Detection/
 ```
 The browser-only path runs Pretrained Generate, Test, and Evaluation in TF.js — no setup. **Run Notebook** (in-browser cell-by-cell training) needs the local server below: it spawns a Python kernel via `/api/notebook/start`, so a static GitHub Pages deploy can't serve it.
 
