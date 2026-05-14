@@ -88,6 +88,9 @@ function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
       return { source: "table", headers: headers, rows: rows };
     });
     console.log(JSON.stringify(dump, null, 2));
+    if (dump.source !== "table" || !Array.isArray(dump.rows) || dump.rows.length === 0) {
+      throw new Error("Evaluation table missing or empty for " + DEMO + " (source=" + dump.source + ")");
+    }
 
     if (SAVE_SCREENSHOT) {
       var imgDir = path.resolve(__dirname, "..", "demo", DEMO, "images");
