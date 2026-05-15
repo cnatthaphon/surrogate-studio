@@ -55,28 +55,29 @@ ImageSource → Dense(256) → Dense(64) → Output(bbox)
 
 ## Results & Interpretation
 
-Both models trained up to 50 epochs on PyTorch CUDA (with early-stopping at patience 15), predicting normalized [x, y, w, h] bounding boxes. Evaluated on the held-out 45-patch test split via the in-app `bbox_mae` / `bbox_rmse` / `bbox_bias` recipe.
+Both models trained up to 50 epochs on PyTorch CUDA (with early-stopping at patience 15), predicting normalized [x, y, w, h] bounding boxes. Evaluated on the held-out 45-patch test split via the in-app `iou_mean` / `bbox_mae` / `bbox_rmse` / `bbox_bias` recipe.
 
-> **Two MAE conventions appear in this README, and they're not directly comparable:**
-> - **In-app evaluator** (`bbox_mae`, the table directly below) — sums absolute error across all four bbox coordinates, then averages over the test set. Larger absolute number, but it's the one shown in the demo's Evaluation tab.
-> - **Per-coord MAE from pretrained metadata** (the augmentation comparison further down) — averages absolute error across coordinates *and* coords. Smaller absolute number; this is the standard regression MAE the trainer reports.
->
-> Both reflect the same models on the same test split, just normalized differently. The augmentation-vs-baseline comparison uses metadata MAE because it lets us read both numbers directly from the `.bin` checkpoint without re-running evaluation.
+### Mean IoU is the canonical metric for detection
+
+The Evaluation tab reports four metrics for this demo. **`iou_mean` is the one that matters**: Intersection-over-Union between the predicted bounding box and the ground-truth box, in `[0, 1]`. Per-coord MAE/RMSE/Bias are regression-style metrics on the four coordinate axes — they treat the bbox as four independent scalars and don't capture whether the boxes overlap at all. R² (not shown in the in-app recipe but visible in the Test tab) is even less useful: it asks *"does the model explain the variance better than predicting the mean?"* For 210 training patches with a strong centroid prior in the train set, the answer is no, and R² goes negative. That's R² doing its job correctly — flagging that the model adds no predictive value over a constant baseline — but it's the wrong question for "is this a detector?"
+
+The right question is "do the predicted boxes overlap real ships?" and that's what IoU answers.
 
 ![Evaluation results](images/04_test.png)
 
-| Model | Params | BBox MAE | BBox RMSE | BBox Bias |
-|---|---|---|---|---|
-| **CNN Ship Detector** | 548K | **0.2962** | **0.3274** | -0.2939 |
-| MLP Baseline | 1.07M | 0.3059 | 0.3366 | -0.1816 |
+| Model | Params | Mean IoU ↑ | BBox MAE ↓ | BBox RMSE ↓ | BBox Bias |
+|---|---|---|---|---|---|
+| CNN Ship Detector | 548K | **0.0000** | 0.3685 | 0.4002 | -0.3685 |
+| CNN + Augmentation | 548K | **0.0000** | 0.3709 | 0.4031 | -0.3709 |
+| MLP Baseline | 1.07M | **0.0000** | 0.3059 | 0.3366 | -0.1816 |
 
-**The honest result: both models are barely better than a center-of-image guess, and the CNN/MLP gap is small (~3% relative).** This is what makes SAR ship detection genuinely hard — and it's the lesson the demo was redesigned around.
+**The honest result: all three models fail to localize ships on the held-out test split. Mean IoU is 0.000 across the board.** This is what makes SAR ship detection genuinely hard — and it's the lesson the demo was redesigned around. The CNN/MLP/Aug comparison is academic because every variant produces degenerate predicted boxes.
 
-The training-time val MAE was much lower (~0.013) because the val split shares image statistics with training. The test split exposes the real generalization: HRSID patches are downsampled to 64×64 and contain wide variation in ship size, sea-state clutter, and contrast. With only 210 training patches, neither architecture has enough data to learn a sharp localization prior, and both regress toward predicting bounding boxes near the image centroid.
+**Why IoU = 0?** With normalized [x, y, w, h] and a systematic bias of `−0.37` on every coordinate, predicted `w` and `h` go negative (e.g. true `w=0.2` becomes predicted `−0.17`). The IoU implementation clamps coords to `[0, 1]`, which collapses negative-extent boxes to zero area, which makes the intersection zero, which makes IoU zero. The model isn't producing *bad* boxes; it's producing *empty* boxes.
 
-**The bias values reveal the failure mode.** CNN bias is -0.29, MLP bias is -0.18 — both models systematically under-predict box coordinates (predicting boxes too far up-and-left). The CNN over-fits this bias more strongly because its convolutional features pick up dataset-wide patterns (most ships in the train split happen to land in similar regions of the patch).
+**Where does the bias come from?** The training-time val MAE was much lower (~0.013) because the val split shares image statistics with training. The test split exposes the real generalization: HRSID patches are downsampled to 64×64 and contain wide variation in ship size, sea-state clutter, and contrast. With only 210 training patches, the network learns the trainset's overall coordinate distribution rather than per-image localization, and predictions collapse toward a single near-corner box that minimizes training loss. The CNN over-fits this collapse more strongly than the MLP because its convolutional features pick up dataset-wide patterns. R² < 0, IoU = 0, and `bias ≈ −0.37` are three views of the same failure mode.
 
-**Why ship the demo anyway?** Because the platform claim isn't "we win SAR detection." It's "the same platform handles real radar imagery with the standard detection recipe and produces honest test-time numbers" — including the negative result that 210 patches isn't enough data to beat baseline. To turn this into a real detector you'd need 3K+ patches with augmentation; the contract-driven evaluation pipeline doesn't change.
+**Why ship the demo anyway?** Because the platform claim isn't "we win SAR detection." It's "the same platform handles real radar imagery with the standard detection recipe and produces honest test-time numbers" — including the negative result that 210 patches isn't enough data to beat baseline, and including the right metric (IoU) to expose it. To turn this into a real detector you'd need 3K+ patches and a richer architecture; the contract-driven evaluation pipeline doesn't change.
 
 ### Does augmentation help? (CNN + paired hflip)
 

@@ -163,7 +163,7 @@
       {
         id: "sar_eval", name: "Ship Detection: CNN vs CNN+Aug vs MLP", schemaId: sid, datasetId: DS_ID,
         trainerIds: ["sar_cnn_trainer-pre", "sar_cnn_aug_trainer-pre", "sar_mlp_trainer-pre"],
-        evaluatorIds: ["bbox_mae", "bbox_rmse", "bbox_bias"],
+        evaluatorIds: ["iou_mean", "bbox_mae", "bbox_rmse", "bbox_bias"],
         status: "draft", runs: [], createdAt: Date.now(),
       },
     ],

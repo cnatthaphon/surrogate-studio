@@ -302,13 +302,69 @@
       data.count + " SAR patches available (" + IMAGE_W + "x" + IMAGE_H + "), bbox: [x,y,w,h] normalized"));
   }
 
+  // Mean IoU for bounding boxes in [x, y, w, h] normalized format. The
+  // synthetic-detection module exports an IoU implementation that consumes
+  // [x0, y0, x1, y1] corners; SAR-Ship's `format="xywh"` needs the corner
+  // conversion before the intersection math. Inputs may be flat arrays
+  // (4 floats per box) or nested [x, y, w, h] arrays.
+  function _coords(box) {
+    if (!box) return [0, 0, 0, 0];
+    var x = Number(box[0] || 0);
+    var y = Number(box[1] || 0);
+    var w = Number(box[2] || 0);
+    var h = Number(box[3] || 0);
+    return [x, y, x + w, y + h];
+  }
+  function _clamp01(v) { return Math.max(0, Math.min(1, Number(v) || 0)); }
+
+  function computeMeanIoUxywh(predictions, truth) {
+    if (!Array.isArray(predictions) || !Array.isArray(truth) || !predictions.length || !truth.length) return 0;
+    var n = Math.min(predictions.length, truth.length);
+    var sum = 0;
+    for (var i = 0; i < n; i++) {
+      var p = _coords(predictions[i]);
+      var t = _coords(truth[i]);
+      var px0 = _clamp01(p[0]), py0 = _clamp01(p[1]), px1 = _clamp01(p[2]), py1 = _clamp01(p[3]);
+      var tx0 = _clamp01(t[0]), ty0 = _clamp01(t[1]), tx1 = _clamp01(t[2]), ty1 = _clamp01(t[3]);
+      var ix0 = Math.max(px0, tx0);
+      var iy0 = Math.max(py0, ty0);
+      var ix1 = Math.min(px1, tx1);
+      var iy1 = Math.min(py1, ty1);
+      var iw = Math.max(0, ix1 - ix0);
+      var ih = Math.max(0, iy1 - iy0);
+      var inter = iw * ih;
+      var pa = Math.max(0, px1 - px0) * Math.max(0, py1 - py0);
+      var ta = Math.max(0, tx1 - tx0) * Math.max(0, ty1 - ty0);
+      var union = pa + ta - inter;
+      sum += union > 1e-9 ? (inter / union) : 0;
+    }
+    return sum / Math.max(1, n);
+  }
+
   var modules = [{
     id: "hrsid_ship",
     schemaId: "sar_ship_detection",
     label: "HRSID SAR Ships",
     build: buildDataset,
-    playgroundApi: { renderPlayground: renderPlayground },
+    playgroundApi: {
+      renderPlayground: renderPlayground,
+      getEvaluators: function () {
+        return [{
+          id: "iou_mean",
+          name: "Mean IoU",
+          mode: "test",
+          compute: function (context) {
+            return { value: computeMeanIoUxywh(context && context.predictions, context && context.truth) };
+          },
+        }];
+      },
+    },
   }];
 
-  return { modules: modules, buildDataset: buildDataset, decodeData: decodeData };
+  return {
+    modules: modules,
+    buildDataset: buildDataset,
+    decodeData: decodeData,
+    computeMeanIoUxywh: computeMeanIoUxywh,
+  };
 });
