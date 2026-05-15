@@ -190,29 +190,116 @@
     var coreRenderer = (typeof window !== "undefined" && window.OSCImageRenderCore) || null;
     if (!coreRenderer) return;
 
-    var grid = el("div", { style: "display:flex;flex-wrap:wrap;gap:8px;" });
-    var show = Math.min(12, data.count);
-    for (var i = 0; i < show; i++) {
-      var wrap = el("div", { style: "position:relative;width:80px;height:80px;" });
-      var canvas = document.createElement("canvas");
-      canvas.width = IMAGE_W; canvas.height = IMAGE_H;
-      canvas.style.cssText = "width:80px;height:80px;border:1px solid #334155;border-radius:3px;image-rendering:pixelated;";
-      coreRenderer.drawImageToCanvas(canvas.getContext("2d"), data.images[i], IMAGE_W, IMAGE_H);
-      wrap.appendChild(canvas);
-
-      // Draw bbox overlay
-      var bbox = data.bboxes[i];
-      var bDiv = el("div", {
-        style: "position:absolute;border:2px solid #f59e0b;pointer-events:none;border-radius:1px;" +
-          "left:" + (bbox[0] * 80) + "px;top:" + (bbox[1] * 80) + "px;" +
-          "width:" + (bbox[2] * 80) + "px;height:" + (bbox[3] * 80) + "px;"
-      });
-      wrap.appendChild(bDiv);
-      grid.appendChild(wrap);
+    // Resolve which sample pool(s) to show. When the Dataset tab passes a built
+    // dataset payload (deps.datasetData has xTrain/yTrain/...), split into
+    // Train/Val/Test pools and render each with its own Random button so the
+    // reviewer can re-sample each split independently. Otherwise (Playground
+    // tab) fall back to the full unsplit pool with one Random button.
+    var providedData = deps && deps.datasetData;
+    var splits;
+    if (providedData && Array.isArray(providedData.xTrain)) {
+      splits = [
+        { name: "Train", x: providedData.xTrain || [], y: providedData.yTrain || [] },
+        { name: "Val",   x: providedData.xVal || [],   y: providedData.yVal || [] },
+        { name: "Test",  x: providedData.xTest || [],  y: providedData.yTest || [] },
+      ].filter(function (s) { return s.x.length > 0; });
+    } else {
+      splits = [{ name: "Samples", x: data.images, y: data.bboxes }];
     }
-    mountEl.appendChild(grid);
+
+    var SHOW = 12;
+    var CELL = 80;
+    var BBOX_COLOR = "#f59e0b";
+    var allCells = [];
+
+    function drawCellInto(canvas, bboxOverlay, pixels, bbox) {
+      coreRenderer.drawImageToCanvas(canvas.getContext("2d"), pixels, IMAGE_W, IMAGE_H);
+      if (bbox && bboxOverlay) {
+        bboxOverlay.style.left   = (bbox[0] * CELL) + "px";
+        bboxOverlay.style.top    = (bbox[1] * CELL) + "px";
+        bboxOverlay.style.width  = (bbox[2] * CELL) + "px";
+        bboxOverlay.style.height = (bbox[3] * CELL) + "px";
+        bboxOverlay.style.display = "block";
+      } else if (bboxOverlay) {
+        bboxOverlay.style.display = "none";
+      }
+    }
+
+    function resample(cells, randomize) {
+      cells.forEach(function (cell, i) {
+        if (!cell.pool.length) return;
+        var idx = randomize
+          ? Math.floor(Math.random() * cell.pool.length)
+          : Math.min(i, cell.pool.length - 1);
+        var poolIdx = cell.pool[idx];
+        drawCellInto(cell.canvas, cell.bboxOverlay, cell.xData[poolIdx], cell.yData[poolIdx]);
+        if (cell.idxLabel) cell.idxLabel.textContent = "#" + poolIdx;
+      });
+    }
+
+    splits.forEach(function (split) {
+      if (!split.x.length) return;
+
+      var splitDiv = el("div", { style: "margin-bottom:14px;" });
+      splitDiv.appendChild(el("div", { style: "font-size:11px;color:#67e8f9;font-weight:600;margin-bottom:4px;" },
+        split.name + " (" + split.x.length + " patches)"));
+
+      var grid = el("div", { style: "display:flex;flex-wrap:wrap;gap:8px;" });
+      var n = Math.min(SHOW, split.x.length);
+      var poolIndices = [];
+      for (var p = 0; p < split.x.length; p++) poolIndices.push(p);
+
+      var splitCells = [];
+      for (var i = 0; i < n; i++) {
+        var wrap = el("div", { style: "position:relative;width:" + CELL + "px;" });
+        var canvas = document.createElement("canvas");
+        canvas.width = IMAGE_W; canvas.height = IMAGE_H;
+        canvas.style.cssText = "width:" + CELL + "px;height:" + CELL + "px;border:1px solid #334155;border-radius:3px;image-rendering:pixelated;display:block;";
+        wrap.appendChild(canvas);
+
+        var bboxOverlay = el("div", {
+          style: "position:absolute;border:2px solid " + BBOX_COLOR + ";pointer-events:none;border-radius:1px;left:0;top:0;width:0;height:0;display:none;"
+        });
+        wrap.appendChild(bboxOverlay);
+
+        var idxLabel = el("div", { style: "font-size:9px;color:#64748b;text-align:center;margin-top:2px;" }, "-");
+        wrap.appendChild(idxLabel);
+
+        grid.appendChild(wrap);
+        var cell = {
+          canvas: canvas, bboxOverlay: bboxOverlay, idxLabel: idxLabel,
+          xData: split.x, yData: split.y, pool: poolIndices,
+        };
+        splitCells.push(cell);
+        allCells.push(cell);
+      }
+
+      splitDiv.appendChild(grid);
+
+      // Per-split Random button (only when there are multiple splits).
+      if (splits.length > 1) {
+        var splitBtn = el("button", { style: "margin-top:6px;padding:2px 10px;font-size:10px;border-radius:4px;border:1px solid #475569;background:#1f2937;color:#cbd5e1;cursor:pointer;" }, "Random " + split.name);
+        (function (cells) {
+          splitBtn.addEventListener("click", function () { resample(cells, true); });
+        })(splitCells);
+        splitDiv.appendChild(splitBtn);
+      }
+
+      mountEl.appendChild(splitDiv);
+
+      // initial deterministic draw (first N samples) so the grid renders
+      // before the user clicks Random.
+      resample(splitCells, false);
+    });
+
+    // Master Random button: re-sample every visible cell across all splits.
+    var masterLabel = splits.length > 1 ? "Random All" : "Random";
+    var masterBtn = el("button", { style: "margin-top:4px;padding:5px 14px;font-size:11px;border-radius:6px;border:1px solid #0ea5e9;background:#0284c7;color:#fff;cursor:pointer;font-weight:600;" }, masterLabel);
+    masterBtn.addEventListener("click", function () { resample(allCells, true); });
+    mountEl.appendChild(masterBtn);
+
     mountEl.appendChild(el("div", { style: "font-size:11px;color:#64748b;margin-top:8px;" },
-      data.count + " SAR patches (" + IMAGE_W + "x" + IMAGE_H + "), bbox: [x,y,w,h] normalized"));
+      data.count + " SAR patches available (" + IMAGE_W + "x" + IMAGE_H + "), bbox: [x,y,w,h] normalized"));
   }
 
   var modules = [{
