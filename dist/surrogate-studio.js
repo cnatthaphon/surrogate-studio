@@ -1,5 +1,5 @@
 // Surrogate Studio - concatenated bundle
-// Generated: 2026-05-15T19:07:17Z
+// Generated: 2026-05-15T19:22:22Z
 // Source files: 58
 
 
@@ -15886,22 +15886,72 @@
       return spec;
     }
 
-    function applyNodeConfigValue(node, key, rawValue, schemaId) {
+    // applyNodeConfigValue accepts EITHER of two call shapes, because the
+    // active right-panel form in `src/tabs/model_tab.js` passes
+    // `(editor, nodeId, key, value)` while legacy direct callers pass
+    // `(node, key, rawValue, schemaId)`. We disambiguate by sniffing the
+    // first argument: if it looks like a Drawflow editor (has `export()`
+    // and `updateNodeDataFromId()`), we resolve the node from it and write
+    // the updated data back via Drawflow. Otherwise we treat the first arg
+    // as a plain node object and return the updated data for the caller.
+    //
+    // Without this dispatch, every onChange from the right panel coerced
+    // `key` to a numeric nodeId, fell through every branch, and silently
+    // did nothing — that's what was hiding the targetType bug (and the
+    // Custom-target second-input-port bug) the user just reported.
+    function applyNodeConfigValue(arg0, arg1, arg2, arg3, arg4) {
+      var editor = null;
+      var nodeId = null;
+      var node;
+      var key;
+      var rawValue;
+      var schemaIdArg;
+      if (arg0 && typeof arg0.export === "function" && typeof arg0.updateNodeDataFromId === "function") {
+        editor = arg0;
+        nodeId = arg1;
+        key = arg2;
+        rawValue = arg3;
+        schemaIdArg = arg4;
+        try {
+          var exported = editor.export();
+          var bag = exported && exported.drawflow && exported.drawflow.Home && exported.drawflow.Home.data;
+          node = bag ? bag[String(nodeId)] : null;
+        } catch (e) { node = null; }
+      } else {
+        node = arg0;
+        key = arg1;
+        rawValue = arg2;
+        schemaIdArg = arg3;
+      }
       if (!node) return { handled: false };
-      var sid = api.resolveSchemaId(schemaId || api.getCurrentSchemaId() || "oscillator");
+      var sid = api.resolveSchemaId(schemaIdArg || api.getCurrentSchemaId() || "oscillator");
       var data = Object.assign({}, node.data || {});
       var k = String(key || "");
       if (k === "target" || k === "targetType") {
-        var currentTarget = String(data.targetType || data.target || "");
-        var targets = api.normalizeOutputTargetsList(rawValue, currentTarget ? [currentTarget] : [], sid);
-        var target = String((targets && targets[0]) || currentTarget || "");
-        data.target = target;
-        data.targetType = target;
-        // auto-set headType from schema metadata
-        var _outKeys = (typeof api.getOutputKeys === "function") ? api.getOutputKeys(sid) : [];
-        var _matched = _outKeys.filter(function (ok) { return (ok.key || ok) === target; });
-        if (_matched.length && _matched[0].headType) {
-          data.headType = _matched[0].headType;
+        var rawTarget = String(rawValue || "").trim().toLowerCase();
+        // `custom` is a sentinel — the target tensor arrives via the node's
+        // second input port instead of from the schema's registered output
+        // keys, so it must NOT be filtered through
+        // `normalizeOutputTargetsList`, which would drop it as not-in-schema.
+        if (rawTarget === "custom") {
+          data.target = "custom";
+          data.targetType = "custom";
+          data.targets = ["custom"];
+          data.targetsCsv = "custom";
+        } else {
+          var currentTarget = String(data.targetType || data.target || "");
+          var targets = api.normalizeOutputTargetsList(rawValue, currentTarget ? [currentTarget] : [], sid);
+          var target = String((targets && targets[0]) || currentTarget || "");
+          data.target = target;
+          data.targetType = target;
+          data.targets = [target];
+          data.targetsCsv = target;
+          // auto-set headType from schema metadata
+          var _outKeys = (typeof api.getOutputKeys === "function") ? api.getOutputKeys(sid) : [];
+          var _matched = _outKeys.filter(function (ok) { return (ok.key || ok) === target; });
+          if (_matched.length && _matched[0].headType) {
+            data.headType = _matched[0].headType;
+          }
         }
       } else if (k === "paramsSelect") {
         data.paramsSelect = String(rawValue || "")
@@ -16025,7 +16075,47 @@
       } else {
         return { handled: false };
       }
+      // When the caller gave us a live Drawflow editor, commit the new data
+      // back via `updateNodeDataFromId` so the change actually persists in
+      // the graph (the legacy node-object call shape leaves that to the
+      // caller and just returns `{ handled, data }`).
+      if (editor) {
+        try { editor.updateNodeDataFromId(String(nodeId), data); }
+        catch (e) { node.data = data; }
+        // For `output_layer` with target `custom`, the node should expose a
+        // second input port (so the user can wire a target tensor in); any
+        // other target keeps it at one input. `addOutputNode` sets this at
+        // creation time, but mid-life target switches need an explicit
+        // resync via Drawflow's port API.
+        if ((k === "target" || k === "targetType") && node.name === "output_layer") {
+          syncOutputNodeInputCount(editor, nodeId, data.targetType);
+        }
+      } else {
+        node.data = data;
+      }
       return { handled: true, data: data };
+    }
+
+    function syncOutputNodeInputCount(editor, nodeId, targetValue) {
+      if (!editor || typeof editor.addNodeInput !== "function" || typeof editor.removeNodeInput !== "function") return false;
+      var bag = getGraphModuleData(editor);
+      var node = bag[String(nodeId)];
+      if (!node || node.name !== "output_layer") return false;
+      var want = (String(targetValue || "").toLowerCase() === "custom") ? 2 : 1;
+      var inputs = node.inputs || {};
+      var current = Object.keys(inputs).length || 1;
+      if (current === want) return true;
+      if (want > current) {
+        for (var i = current + 1; i <= want; i += 1) editor.addNodeInput(String(nodeId));
+      } else {
+        for (var j = current; j > want; j -= 1) {
+          var portKey = "input_" + String(j);
+          var conns = (inputs[portKey] && inputs[portKey].connections) || [];
+          if (conns.length) continue; // don't drop a wired port
+          editor.removeNodeInput(String(nodeId), portKey);
+        }
+      }
+      return true;
     }
 
     function getGraphModuleData(editor) {

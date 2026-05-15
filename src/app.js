@@ -2895,6 +2895,46 @@
     return { id: String(nodeId), node: moduleData[nodeId] };
   }
 
+  // When an output_layer's target switches between "custom" and a normal
+  // schema target, its input port count needs to flip between 2 (data + target)
+  // and 1 (data only) to mirror what `addOutputNode` originally built. Drawflow
+  // doesn't recompute ports on data change, so we have to call
+  // addNodeInput/removeNodeInput explicitly. Mirrors `setConcatInputCount`.
+  function syncOutputNodeInputCount(editor, nodeId, targetValue) {
+    const hit = getDrawflowNodeById(editor, nodeId);
+    if (!hit || !hit.node || hit.node.name !== "output_layer") return false;
+    const node = hit.node;
+    const want = (String(targetValue || "").toLowerCase() === "custom") ? 2 : 1;
+    const inputs = node.inputs || {};
+    const current = Object.keys(inputs).length || 1;
+    if (current === want) return true;
+    if (typeof editor.addNodeInput === "function" && typeof editor.removeNodeInput === "function") {
+      if (want > current) {
+        for (let i = current + 1; i <= want; i += 1) editor.addNodeInput(String(nodeId));
+      } else {
+        for (let i = current; i > want; i -= 1) {
+          const k = "input_" + String(i);
+          const conns = (inputs[k] && inputs[k].connections) || [];
+          if (conns.length) continue; // don't drop a connected port
+          editor.removeNodeInput(String(nodeId), k);
+        }
+      }
+    } else {
+      if (!node.inputs) node.inputs = {};
+      if (want > current) {
+        for (let i = current + 1; i <= want; i += 1) node.inputs["input_" + String(i)] = { connections: [] };
+      } else {
+        for (let i = current; i > want; i -= 1) {
+          const k = "input_" + String(i);
+          const conns = (node.inputs[k] && node.inputs[k].connections) || [];
+          if (conns.length) continue;
+          delete node.inputs[k];
+        }
+      }
+    }
+    return true;
+  }
+
   function setConcatInputCount(editor, nodeId, desiredCount) {
     const hit = getDrawflowNodeById(editor, nodeId);
     if (!hit || !hit.node || hit.node.name !== "concat_block") return false;
@@ -2955,10 +2995,23 @@
     const k = String(key || "");
 
     if (k === "target" || k === "targetType") {
-      const v = String(rawValue || "x");
-      const target = (v === "xv" || v === "v" || v === "params" || v === "traj") ? v : "x";
-      const updated = writeOutputTargetsToNodeData(data, [target], state && state.modelSchemaId);
-      Object.keys(updated).forEach(function (kk) { data[kk] = updated[kk]; });
+      const v = String(rawValue || "").trim().toLowerCase();
+      // "custom" is a sentinel — target tensor arrives via the node's
+      // second input port rather than from the schema-registered output
+      // keys. It must not be passed through `writeOutputTargetsToNodeData`,
+      // which would filter it out as not-in-schema and fall back to a
+      // default target. Also flip the input port count to 2 so the user
+      // actually has a port to wire the custom target into.
+      if (v === "custom") {
+        data.target = "custom";
+        data.targetType = "custom";
+        data.targets = ["custom"];
+        data.targetsCsv = "custom";
+      } else {
+        const updated = writeOutputTargetsToNodeData(data, [v], state && state.modelSchemaId);
+        Object.keys(updated).forEach(function (kk) { data[kk] = updated[kk]; });
+      }
+      syncOutputNodeInputCount(editor, hit.id, data.targetType);
     } else if (k === "targetsCsv") {
       const updated = writeOutputTargetsToNodeData(data, String(rawValue || ""), state && state.modelSchemaId);
       Object.keys(updated).forEach(function (kk) { data[kk] = updated[kk]; });
