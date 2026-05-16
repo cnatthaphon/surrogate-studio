@@ -33,7 +33,11 @@
   }
   function graph(d) { return { drawflow: { Home: { data: d } } }; }
 
-  // CNN detector: Conv features → flatten → Dense → bbox
+  // CNN detector: Conv features → Flatten → Dense → bbox head (sigmoid).
+  // The Output node's `activation: "sigmoid"` clamps predictions to [0,1]
+  // so the 4 normalized bbox coords can't collapse to negative values
+  // and produce degenerate boxes (which gave IoU = 0 across the board
+  // on the previous linear-output build).
   function buildCnnDetector() {
     _nid = 0;
     var d = {};
@@ -45,7 +49,7 @@
     var flat    = N(d, "flatten",      {},                                890, 300);
     var d1      = N(d, "dense",        { units: 128, activation: "relu" }, 1060, 300);
     var drop    = N(d, "dropout",      { rate: 0.3 },                    1230, 300);
-    var out     = N(d, "output",       { target: "bbox", targetType: "bbox", headType: "regression", matchWeight: 1 }, 1400, 300);
+    var out     = N(d, "output",       { target: "bbox", targetType: "bbox", headType: "regression", matchWeight: 1, activation: "sigmoid" }, 1400, 300);
 
     C(d, imgSrc, reshape); C(d, reshape, c1); C(d, c1, c2); C(d, c2, c3);
     C(d, c3, flat); C(d, flat, d1); C(d, d1, drop); C(d, drop, out);
@@ -60,20 +64,22 @@
   function buildCnnAugDetector() {
     _nid = 200;
     var d = {};
-    // Image path
+    // Same backbone as the baseline CNN, with paired hflip + vflip
+    // augmentation. Augmentation effectively 4×s the data (2 hflip × 2
+    // vflip choices). Sigmoid head clamps bbox coords to [0,1].
     var imgSrc  = N(d, "image_source",   { sourceKey: "pixel_values", featureSize: FEATURE_SIZE, imageShape: [64,64,1] }, 50, 200);
     var reshape = N(d, "reshape",         { targetShape: "64,64,1" },                                                     200, 200);
-    var augImg  = N(d, "augment_image",   { hflipProb: 0.5, vflipProb: 0, seedLink: "sar_aug", layout: "auto" }, 380, 200);
+    var augImg  = N(d, "augment_image",   { hflipProb: 0.5, vflipProb: 0.5, seedLink: "sar_aug", layout: "auto" }, 380, 200);
     var c1      = N(d, "conv2d",          { filters: 16, kernelSize: 3, strides: 2, padding: "same", activation: "relu" }, 560, 200);
     var c2      = N(d, "conv2d",          { filters: 32, kernelSize: 3, strides: 2, padding: "same", activation: "relu" }, 730, 200);
     var c3      = N(d, "conv2d",          { filters: 64, kernelSize: 3, strides: 2, padding: "same", activation: "relu" }, 900, 200);
     var flat    = N(d, "flatten",         {},                                                                              1070, 200);
     var d1      = N(d, "dense",           { units: 128, activation: "relu" },                                              1240, 200);
     var drop    = N(d, "dropout",         { rate: 0.3 },                                                                   1410, 200);
-    var out     = N(d, "output",          { target: "bbox", targetType: "bbox", headType: "regression", matchWeight: 1 }, 1580, 200);
+    var out     = N(d, "output",          { target: "bbox", targetType: "bbox", headType: "regression", matchWeight: 1, activation: "sigmoid" }, 1580, 200);
     // Target path: dataset bbox → augment_bbox → output.input_2
     var tgtSrc  = N(d, "target_source",   { targetKey: "bbox", featureSize: 4 },                                           380, 450);
-    var augBox  = N(d, "augment_bbox",    { hflipProb: 0.5, vflipProb: 0, seedLink: "sar_aug", format: "xywh", imageWidth: 1, imageHeight: 1 }, 1240, 450);
+    var augBox  = N(d, "augment_bbox",    { hflipProb: 0.5, vflipProb: 0.5, seedLink: "sar_aug", format: "xywh", imageWidth: 1, imageHeight: 1 }, 1240, 450);
 
     C(d, imgSrc, reshape); C(d, reshape, augImg); C(d, augImg, c1); C(d, c1, c2); C(d, c2, c3);
     C(d, c3, flat); C(d, flat, d1); C(d, d1, drop); C(d, drop, out);
@@ -88,7 +94,7 @@
     var imgSrc = N(d, "image_source", { sourceKey: "pixel_values", featureSize: FEATURE_SIZE, imageShape: [64,64,1] }, 50, 300);
     var d1     = N(d, "dense",        { units: 256, activation: "relu" },  250, 300);
     var d2     = N(d, "dense",        { units: 64, activation: "relu" },   450, 300);
-    var out    = N(d, "output",       { target: "bbox", targetType: "bbox", headType: "regression", matchWeight: 1 }, 650, 300);
+    var out    = N(d, "output",       { target: "bbox", targetType: "bbox", headType: "regression", matchWeight: 1, activation: "sigmoid" }, 650, 300);
     C(d, imgSrc, d1); C(d, d1, d2); C(d, d2, out);
     return graph(d);
   }
@@ -96,7 +102,7 @@
   window.SAR_SHIP_DETECTION_PRESET = {
     dataset: {
       id: DS_ID,
-      name: "HRSID SAR Ships (64x64, 300 patches)",
+      name: "HRSID SAR Ships (64x64, 3000 patches)",
       schemaId: sid,
       datasetModuleId: "hrsid_ship",
       taskRecipeId: "detection_single_box",

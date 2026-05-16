@@ -13,7 +13,7 @@
 
   /**
    * HRSID SAR Ship Detection — real SAR satellite imagery with ship bounding boxes.
-   * 300 patches (64x64 grayscale) extracted from HRSID dataset.
+   * 3000 patches (64x64 grayscale) extracted from HRSID dataset.
    * Binary format: [uint32 count][uint32 dim][uint8 pixels...][float32 bboxes (4 per sample)...]
    */
 

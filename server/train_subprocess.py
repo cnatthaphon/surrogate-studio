@@ -1605,6 +1605,23 @@ def build_model_from_graph(graph, feature_size, target_size, num_classes=0):
                         out_mod = nn.Linear(out_in, odim, bias=_cfg_bool(c.get("useBias", True), True))
                         _apply_module_initializers(out_mod, c, "dense")
                         setattr(self, f"out_{nid}", out_mod)
+                    # Optional per-Output activation override. Mirrors the
+                    # JS-side carve-out in src/model_builder_core.js. When the
+                    # preset declares `activation: "sigmoid"` on an Output
+                    # node, predictions get clamped to [0, 1] — required for
+                    # normalized bbox/mask regression so the network can't
+                    # collapse to negative coords and produce IoU = 0
+                    # (see SAR-Ship Detection failure mode).
+                    out_act_name = str(c.get("activation", "")).strip().lower()
+                    if out_act_name in ("sigmoid", "tanh", "relu", "softmax"):
+                        if out_act_name == "sigmoid":
+                            setattr(self, f"out_act_{nid}", nn.Sigmoid())
+                        elif out_act_name == "tanh":
+                            setattr(self, f"out_act_{nid}", nn.Tanh())
+                        elif out_act_name == "relu":
+                            setattr(self, f"out_act_{nid}", nn.ReLU())
+                        else:
+                            setattr(self, f"out_act_{nid}", nn.Softmax(dim=-1))
                     dim_map[nid] = odim
                     self.output_ids.append(nid)
                 else:
@@ -2221,7 +2238,10 @@ def build_model_from_graph(graph, feature_size, target_size, num_classes=0):
                 elif t == "output":
                     # flatten conv output if needed before linear using TF.js NHWC ordering
                     out_inp = _flatten_tf_layout(inp) if inp.dim() > 2 else inp
-                    tensors[nid] = getattr(self, f"out_{nid}")(out_inp)
+                    head_out = getattr(self, f"out_{nid}")(out_inp)
+                    if hasattr(self, f"out_act_{nid}"):
+                        head_out = getattr(self, f"out_act_{nid}")(head_out)
+                    tensors[nid] = head_out
                     # if target=custom, store input_2 as label (from PhaseSwitch/Constant)
                     if len(parents_sorted) >= 2:
                         label_parent = parents_sorted[1]["from"]

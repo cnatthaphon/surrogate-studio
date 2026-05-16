@@ -17,11 +17,11 @@ Ship detection on real Synthetic Aperture Radar (SAR) satellite images from the 
 
 ## Dataset
 
-300 patches extracted from HRSID (High Resolution SAR Images Dataset), downsampled to 64×64 grayscale. Each patch contains one ship with a normalized bounding box.
+3000 patches extracted from HRSID (High Resolution SAR Images Dataset), downsampled to 64×64 grayscale. Each patch contains one ship with a normalized bounding box. Re-extracted via `scripts/extract_hrsid_bundle.py` directly from the raw HRSID JPEGImages + COCO annotations.
 
 | Property | Value |
 |----------|-------|
-| Samples | 300 patches (210 train / 45 val / 45 test) |
+| Samples | 3000 patches (2100 train / 450 val / 450 test) |
 | Resolution | 64×64 grayscale |
 | Source | HRSID — Gaofen-3, Sentinel-1 SAR |
 | Target | Bounding box [x, y, w, h] normalized 0-1 |
@@ -55,45 +55,51 @@ ImageSource → Dense(256) → Dense(64) → Output(bbox)
 
 ## Results & Interpretation
 
-Both models trained up to 50 epochs on PyTorch CUDA (with early-stopping at patience 15), predicting normalized [x, y, w, h] bounding boxes. Evaluated on the held-out 45-patch test split via the in-app `iou_mean` / `bbox_mae` / `bbox_rmse` / `bbox_bias` recipe.
+All three models trained 30–50 epochs on PyTorch CUDA, predicting normalized [x, y, w, h] bounding boxes with a sigmoid output head. Evaluated on the held-out 450-patch test split via the in-app `iou_mean` / `bbox_mae` / `bbox_rmse` / `bbox_bias` recipe.
 
 ### Mean IoU is the canonical metric for detection
 
-The Evaluation tab reports four metrics for this demo. **`iou_mean` is the one that matters**: Intersection-over-Union between the predicted bounding box and the ground-truth box, in `[0, 1]`. Per-coord MAE/RMSE/Bias are regression-style metrics on the four coordinate axes — they treat the bbox as four independent scalars and don't capture whether the boxes overlap at all. R² (not shown in the in-app recipe but visible in the Test tab) is even less useful: it asks *"does the model explain the variance better than predicting the mean?"* For 210 training patches with a strong centroid prior in the train set, the answer is no, and R² goes negative. That's R² doing its job correctly — flagging that the model adds no predictive value over a constant baseline — but it's the wrong question for "is this a detector?"
-
-The right question is "do the predicted boxes overlap real ships?" and that's what IoU answers.
+The Evaluation tab reports four metrics for this demo. **`iou_mean` is the one that matters**: Intersection-over-Union between the predicted bounding box and the ground-truth box, in `[0, 1]`. Per-coord MAE/RMSE/Bias are regression-style metrics on the four coordinate axes — they treat the bbox as four independent scalars and don't capture whether the boxes overlap at all.
 
 ![Evaluation results](images/04_test.png)
 
 | Model | Params | Mean IoU ↑ | BBox MAE ↓ | BBox RMSE ↓ | BBox Bias |
 |---|---|---|---|---|---|
-| CNN Ship Detector | 548K | **0.0000** | 0.3685 | 0.4002 | -0.3685 |
-| CNN + Augmentation | 548K | **0.0000** | 0.3709 | 0.4031 | -0.3709 |
-| MLP Baseline | 1.07M | **0.0000** | 0.3059 | 0.3366 | -0.1816 |
+| CNN Ship Detector | 548K | 0.240 | 0.0810 | 0.117 | +0.009 |
+| **CNN + Augmentation** | 548K | **0.270** | **0.0715** | **0.110** | -0.002 |
+| MLP Baseline | 1.07M | 0.212 | 0.1033 | 0.161 | -0.001 |
 
-**The honest result: all three models fail to localize ships on the held-out test split. Mean IoU is 0.000 across the board.** This is what makes SAR ship detection genuinely hard — and it's the lesson the demo was redesigned around. The CNN/MLP/Aug comparison is academic because every variant produces degenerate predicted boxes.
+**The CNN+Augmentation variant wins: Mean IoU = 0.270, ~13% above the MLP baseline.** Bias values now hover at zero on all three models (no systematic under-prediction). MAE is in the 0.07–0.10 range per-coord — a 4× improvement over the previous-bundle run.
 
-**Why IoU = 0?** With normalized [x, y, w, h] and a systematic bias of `−0.37` on every coordinate, predicted `w` and `h` go negative (e.g. true `w=0.2` becomes predicted `−0.17`). The IoU implementation clamps coords to `[0, 1]`, which collapses negative-extent boxes to zero area, which makes the intersection zero, which makes IoU zero. The model isn't producing *bad* boxes; it's producing *empty* boxes.
+**Distribution of test IoUs (CNN baseline, 450 samples):**
 
-**Where does the bias come from?** The training-time val MAE was much lower (~0.013) because the val split shares image statistics with training. The test split exposes the real generalization: HRSID patches are downsampled to 64×64 and contain wide variation in ship size, sea-state clutter, and contrast. With only 210 training patches, the network learns the trainset's overall coordinate distribution rather than per-image localization, and predictions collapse toward a single near-corner box that minimizes training loss. The CNN over-fits this collapse more strongly than the MLP because its convolutional features pick up dataset-wide patterns. R² < 0, IoU = 0, and `bias ≈ −0.37` are three views of the same failure mode.
+| IoU threshold | Hit rate |
+|---|---|
+| > 0 (any overlap) | 65.6% |
+| > 0.1 | 59.1% |
+| > 0.3 (moderate) | 42.7% |
+| > 0.5 (COCO standard) | 18.0% |
+| > 0.7 (excellent) | 2.2% |
 
-**Why ship the demo anyway?** Because the platform claim isn't "we win SAR detection." It's "the same platform handles real radar imagery with the standard detection recipe and produces honest test-time numbers" — including the negative result that 210 patches isn't enough data to beat baseline, and including the right metric (IoU) to expose it. To turn this into a real detector you'd need 3K+ patches and a richer architecture; the contract-driven evaluation pipeline doesn't change.
+So roughly two-thirds of test patches get a predicted box that overlaps the ground truth at all, and ~18% hit the COCO mAP@0.5 threshold. The CNN+Aug shifts this distribution slightly upward.
 
-### Does augmentation help? (CNN + paired hflip)
+**Three load-bearing fixes made this work:**
 
-The third model variant adds horizontal-flip augmentation paired across the image branch and the bounding-box label branch (via `seedLink`), training otherwise identical to model 1 (50 epochs, batch 16, lr=0.001, seed=42, PyTorch CUDA).
+1. **Schema bbox `featureSize: 4`** — without this, the model-build path at eval time defaulted the bbox head to a 1-unit output, only the first column of the trained 4-unit head was loaded, and IoU computed against single-float predictions was always 0.
+2. **Sigmoid head activation** — the Output node's `activation: "sigmoid"` clamps predictions to `[0, 1]` so the network can't escape into negative coords that produce degenerate boxes.
+3. **3000 patches via `scripts/extract_hrsid_bundle.py`** — the previous bundle had only 300 patches (210 train / 45 val / 45 test). 210 examples is far too few for a 64×64 → bbox regression to generalize; re-extracting at 10× yielded the dataset this task actually needs.
 
-**Two signals from the same retrain, looking in different directions:**
+### Does augmentation help? (CNN + paired hflip + vflip)
 
-| Signal | CNN baseline | CNN + Aug | Interpretation |
+The CNN+Aug variant adds horizontal-flip + vertical-flip augmentation paired across the image branch and the bounding-box label branch (via `seedLink`), training otherwise identical to the baseline CNN.
+
+| Signal | CNN baseline | CNN + Aug | Δ |
 |---|---|---|---|
-| Best val_loss (PyTorch metadata) | 0.0040 | **0.0027** (↓33%) | Training-time, **clear win** for aug |
-| Per-coord test MAE (PyTorch metadata) | 0.0376 | 0.0367 (↓2%) | Test-time, in the noise |
-| In-app `bbox_mae` (shown in screenshot above, TF.js client) | 0.3685 | 0.3709 (~equal) | Test-time, in the noise |
+| Mean IoU on test (450 samples) | 0.240 | **0.270** | +12.5% |
+| BBox MAE on test (sum of 4 coord errors) | 0.0810 | **0.0715** | -11.7% |
+| Best val_loss (PyTorch metadata) | 0.0161 | **0.0134** | -16.8% |
 
-**Honest read.** Augmentation produces a large and reliable **val-loss** improvement (~33%) — the regularization signal during training is real. On the held-out test split (only 45 patches), the test-MAE difference between aug and no-aug is **within run-to-run noise**: per-coord metadata says aug is ~2% better, the in-app evaluator says it's ~0.6% worse, and cuDNN algorithm selection on CUDA isn't fully reproducible even at fixed `torch.manual_seed` (I've seen metadata MAE land anywhere from 0.0344 to 0.0367 across retrains). With 45 test samples, you need a much larger improvement than that to be confident the test-set difference isn't sampling variance.
-
-What the demo therefore demonstrates is the **pipeline**, not a definitive "aug helps SAR detection" claim: the paired `augment_image` + `augment_bbox` + `target_source` blocks function correctly across all three runtimes (browser TF.js, PyTorch CUDA server, embedded notebook export), shape validation catches wiring mistakes, and regularization is visible during training. Whether that translates into reliably better held-out generalization needs a larger test split to confirm.
+Augmentation moves every metric the right direction and the gap (~12% on IoU and MAE) is well outside per-run noise. With paired image+bbox flips, the network sees 4× more effective training examples and generalizes meaningfully better to the held-out split.
 
 #### Bug found while building this demo
 

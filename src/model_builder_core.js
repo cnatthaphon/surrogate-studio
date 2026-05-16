@@ -2154,6 +2154,15 @@
             act = (normalizedLoss === "wasserstein")
               ? "linear"
               : ((ht === "classification" && units > 1) ? "softmax" : "linear");
+            // Preset-level override: when an Output node declares an explicit
+            // activation (e.g. `sigmoid` for normalized [0,1] regression like
+            // bbox coords or 0/1 masks), use it. Without this, regression
+            // heads default to linear and predictions can collapse below 0
+            // for normalized targets — see SAR-Ship Detection, where linear
+            // output + 210 patches drove every bbox prediction toward
+            // (0, 0, neg, neg), producing zero-area boxes and IoU = 0.
+            var explicitAct = String(odata.activation || "").trim().toLowerCase();
+            if (explicitAct && explicitAct !== "auto") act = explicitAct;
             if (!hasExplicitUnits && upstreamUnits === units && act === "linear") {
               outTensors.push(inForHead);
               generated.push(inForHead);
