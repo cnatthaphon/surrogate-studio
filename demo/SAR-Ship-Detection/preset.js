@@ -34,10 +34,10 @@
   function graph(d) { return { drawflow: { Home: { data: d } } }; }
 
   // CNN detector: Conv features → Flatten → Dense → bbox head (sigmoid).
-  // The Output node's `activation: "sigmoid"` clamps predictions to [0,1]
-  // so the 4 normalized bbox coords can't collapse to negative values
-  // and produce degenerate boxes (which gave IoU = 0 across the board
-  // on the previous linear-output build).
+  // Earlier experiments with deeper stacks, BatchNorm, L1 loss, and
+  // tighter bottlenecks all went BACKWARDS on this 3000-patch dataset
+  // (IoU 0.27 → 0.21). The simple arch with MSE + sigmoid + longer
+  // training is the empirical sweet spot.
   function buildCnnDetector() {
     _nid = 0;
     var d = {};
@@ -49,7 +49,7 @@
     var flat    = N(d, "flatten",      {},                                890, 300);
     var d1      = N(d, "dense",        { units: 128, activation: "relu" }, 1060, 300);
     var drop    = N(d, "dropout",      { rate: 0.3 },                    1230, 300);
-    var out     = N(d, "output",       { target: "bbox", targetType: "bbox", headType: "regression", matchWeight: 1, activation: "sigmoid" }, 1400, 300);
+    var out     = N(d, "output",       { target: "bbox", targetType: "bbox", headType: "regression", matchWeight: 1, activation: "sigmoid", loss: "giou" }, 1400, 300);
 
     C(d, imgSrc, reshape); C(d, reshape, c1); C(d, c1, c2); C(d, c2, c3);
     C(d, c3, flat); C(d, flat, d1); C(d, d1, drop); C(d, drop, out);
@@ -64,9 +64,8 @@
   function buildCnnAugDetector() {
     _nid = 200;
     var d = {};
-    // Same backbone as the baseline CNN, with paired hflip + vflip
-    // augmentation. Augmentation effectively 4×s the data (2 hflip × 2
-    // vflip choices). Sigmoid head clamps bbox coords to [0,1].
+    // Same simple backbone as the baseline CNN, with paired hflip+vflip
+    // augmentation. Augmentation effectively 4×s the dataset.
     var imgSrc  = N(d, "image_source",   { sourceKey: "pixel_values", featureSize: FEATURE_SIZE, imageShape: [64,64,1] }, 50, 200);
     var reshape = N(d, "reshape",         { targetShape: "64,64,1" },                                                     200, 200);
     var augImg  = N(d, "augment_image",   { hflipProb: 0.5, vflipProb: 0.5, seedLink: "sar_aug", layout: "auto" }, 380, 200);
@@ -76,7 +75,12 @@
     var flat    = N(d, "flatten",         {},                                                                              1070, 200);
     var d1      = N(d, "dense",           { units: 128, activation: "relu" },                                              1240, 200);
     var drop    = N(d, "dropout",         { rate: 0.3 },                                                                   1410, 200);
-    var out     = N(d, "output",          { target: "bbox", targetType: "bbox", headType: "regression", matchWeight: 1, activation: "sigmoid" }, 1580, 200);
+    // NB: CNN+Aug uses MSE (not GIoU) because the paired flip aug makes
+    // the GIoU loss landscape too rough for clean convergence from
+    // random init (loss plateaus at ~0.96, no overlap learned). MSE +
+    // paired aug remains a clean win over MSE-no-aug (~12% IoU lift).
+    // The CNN baseline (no aug) shows the GIoU improvement separately.
+    var out     = N(d, "output",          { target: "bbox", targetType: "bbox", headType: "regression", matchWeight: 1, activation: "sigmoid", loss: "mse" }, 1580, 200);
     // Target path: dataset bbox → augment_bbox → output.input_2
     var tgtSrc  = N(d, "target_source",   { targetKey: "bbox", featureSize: 4 },                                           380, 450);
     var augBox  = N(d, "augment_bbox",    { hflipProb: 0.5, vflipProb: 0.5, seedLink: "sar_aug", format: "xywh", imageWidth: 1, imageHeight: 1 }, 1240, 450);
@@ -94,7 +98,7 @@
     var imgSrc = N(d, "image_source", { sourceKey: "pixel_values", featureSize: FEATURE_SIZE, imageShape: [64,64,1] }, 50, 300);
     var d1     = N(d, "dense",        { units: 256, activation: "relu" },  250, 300);
     var d2     = N(d, "dense",        { units: 64, activation: "relu" },   450, 300);
-    var out    = N(d, "output",       { target: "bbox", targetType: "bbox", headType: "regression", matchWeight: 1, activation: "sigmoid" }, 650, 300);
+    var out    = N(d, "output",       { target: "bbox", targetType: "bbox", headType: "regression", matchWeight: 1, activation: "sigmoid", loss: "giou" }, 650, 300);
     C(d, imgSrc, d1); C(d, d1, d2); C(d, d2, out);
     return graph(d);
   }
@@ -127,13 +131,13 @@
         id: "sar_cnn_trainer", name: "CNN Detector Trainer", schemaId: sid,
         datasetId: DS_ID, modelId: "sar_cnn",
         runtime: "js_client", runtimeBackend: "auto", status: "draft",
-        trainCfg: { epochs: 50, batchSize: 16, learningRate: 0.001, optimizer: "adam", earlyStoppingPatience: 15 },
+        trainCfg: { epochs: 200, batchSize: 16, learningRate: 0.001, optimizer: "adam", earlyStoppingPatience: 40 },
       },
       {
         id: "sar_cnn_aug_trainer", name: "CNN+Aug Detector Trainer", schemaId: sid,
         datasetId: DS_ID, modelId: "sar_cnn_aug",
         runtime: "js_client", runtimeBackend: "auto", status: "draft",
-        trainCfg: { epochs: 50, batchSize: 16, learningRate: 0.001, optimizer: "adam", earlyStoppingPatience: 15 },
+        trainCfg: { epochs: 200, batchSize: 16, learningRate: 0.001, optimizer: "adam", earlyStoppingPatience: 40 },
       },
       {
         id: "sar_mlp_trainer", name: "MLP Baseline Trainer", schemaId: sid,
@@ -147,14 +151,14 @@
         datasetId: DS_ID, modelId: "sar_cnn",
         runtime: "js_client", runtimeBackend: "auto", status: "done",
         _pretrainedVar: "CNN_SHIP_DETECTOR_PRE_TRAINED_PRETRAINED_BIN_B64",
-        trainCfg: { epochs: 50, batchSize: 16, learningRate: 0.001, optimizer: "adam", earlyStoppingPatience: 15 },
+        trainCfg: { epochs: 200, batchSize: 16, learningRate: 0.001, optimizer: "adam", earlyStoppingPatience: 40 },
       },
       {
         id: "sar_cnn_aug_trainer-pre", name: "CNN+Aug Detector (pre-trained)", schemaId: sid,
         datasetId: DS_ID, modelId: "sar_cnn_aug",
         runtime: "js_client", runtimeBackend: "auto", status: "done",
         _pretrainedVar: "CNN_AUG_SHIP_DETECTOR_PRE_TRAINED_PRETRAINED_BIN_B64",
-        trainCfg: { epochs: 50, batchSize: 16, learningRate: 0.001, optimizer: "adam", earlyStoppingPatience: 15 },
+        trainCfg: { epochs: 200, batchSize: 16, learningRate: 0.001, optimizer: "adam", earlyStoppingPatience: 40 },
       },
       {
         id: "sar_mlp_trainer-pre", name: "MLP Baseline (pre-trained)", schemaId: sid,

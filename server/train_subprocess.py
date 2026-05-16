@@ -379,6 +379,36 @@ def main():
             head_losses.append({"fn": nn.CrossEntropyLoss(), "weight": hw, "phase": hp, "cls": True})
         elif hl == "mae":
             head_losses.append({"fn": nn.L1Loss(), "weight": hw, "phase": hp, "cls": False})
+        elif hl in ("iou", "giou"):
+            # GIoU loss for [B, 4] bbox regression in xywh, normalized
+            # [0, 1] coords. Mirrors `_giouLoss` in
+            # src/training_engine_core.js. Direct surrogate for the IoU
+            # metric the Evaluation tab reports; preserves a useful
+            # gradient even when boxes don't overlap (where per-coord
+            # MSE goes flat). Standard loss in YOLOv5+/DETR/RetinaNet.
+            def _giou_loss(p, t):
+                eps = 1e-7
+                px = p[:, 0:1]; py = p[:, 1:2]; pw = p[:, 2:3]; ph = p[:, 3:4]
+                tx = t[:, 0:1]; ty = t[:, 1:2]; tw = t[:, 2:3]; th = t[:, 3:4]
+                px2 = px + pw; py2 = py + ph
+                tx2 = tx + tw; ty2 = ty + th
+                ix0 = torch.maximum(px, tx); iy0 = torch.maximum(py, ty)
+                ix1 = torch.minimum(px2, tx2); iy1 = torch.minimum(py2, ty2)
+                iw = torch.clamp(ix1 - ix0, min=0.0)
+                ih = torch.clamp(iy1 - iy0, min=0.0)
+                inter = iw * ih
+                pred_area = torch.clamp(pw, min=0.0) * torch.clamp(ph, min=0.0)
+                true_area = torch.clamp(tw, min=0.0) * torch.clamp(th, min=0.0)
+                union = pred_area + true_area - inter + eps
+                iou = inter / union
+                cx0 = torch.minimum(px, tx); cy0 = torch.minimum(py, ty)
+                cx1 = torch.maximum(px2, tx2); cy1 = torch.maximum(py2, ty2)
+                cw = torch.clamp(cx1 - cx0, min=0.0)
+                ch = torch.clamp(cy1 - cy0, min=0.0)
+                c_area = cw * ch + eps
+                giou = iou - (c_area - union) / c_area
+                return (1.0 - giou).mean()
+            head_losses.append({"fn": _giou_loss, "weight": hw, "phase": hp, "cls": False})
         elif htype == "classification":
             head_losses.append({"fn": nn.CrossEntropyLoss(), "weight": hw, "phase": hp, "cls": True})
         else:

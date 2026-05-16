@@ -83,13 +83,70 @@
     if (v === "huber") return "huberLoss";
     if (v === "bce" || v === "binarycrossentropy") return "binaryCrossentropy";
     if (v === "wasserstein" || v === "wgan") return "wasserstein";
+    if (v === "iou" || v === "giou") return "giouLoss";
     if (v === "none") return "none";
     if (v === "use_global") return String(resolvedGlobal || "meanSquaredError");
     return String(resolvedGlobal || "meanSquaredError");
   }
 
+  // GIoU loss for bounding-box regression. Operates on tensors shaped
+  // [B, 4] interpreted as (x, y, w, h) in normalized [0, 1] coords:
+  //
+  //   GIoU = IoU - (C - U) / C
+  //
+  // where C is the area of the smallest enclosing axis-aligned box and
+  // U is the union of the predicted and true boxes. Loss = 1 - GIoU,
+  // averaged across the batch. Unlike per-coord MSE, GIoU is a direct
+  // surrogate for the IoU metric the demo's Evaluation tab reports —
+  // when boxes don't overlap the (C - U)/C term still produces a useful
+  // gradient pulling them toward each other, instead of MSE's vanishing
+  // gradient on the per-coord deltas. This is the standard loss in
+  // YOLOv5+/DETR/RetinaNet for the same reason.
+  function _giouLoss(tf, pred, truth) {
+    return tf.tidy(function () {
+      var EPS = 1e-7;
+      var px = pred.slice([0, 0], [-1, 1]);
+      var py = pred.slice([0, 1], [-1, 1]);
+      var pw = pred.slice([0, 2], [-1, 1]);
+      var ph = pred.slice([0, 3], [-1, 1]);
+      var tx = truth.slice([0, 0], [-1, 1]);
+      var ty = truth.slice([0, 1], [-1, 1]);
+      var tw = truth.slice([0, 2], [-1, 1]);
+      var th = truth.slice([0, 3], [-1, 1]);
+      // Convert xywh → corner form, allowing non-clamped values so the
+      // gradient through w/h stays smooth even when the network predicts
+      // tiny boxes.
+      var px2 = tf.add(px, pw);
+      var py2 = tf.add(py, ph);
+      var tx2 = tf.add(tx, tw);
+      var ty2 = tf.add(ty, th);
+      var ix0 = tf.maximum(px, tx);
+      var iy0 = tf.maximum(py, ty);
+      var ix1 = tf.minimum(px2, tx2);
+      var iy1 = tf.minimum(py2, ty2);
+      var iw = tf.relu(tf.sub(ix1, ix0));
+      var ih = tf.relu(tf.sub(iy1, iy0));
+      var inter = tf.mul(iw, ih);
+      var predArea = tf.mul(tf.relu(pw), tf.relu(ph));
+      var truthArea = tf.mul(tf.relu(tw), tf.relu(th));
+      var union = tf.add(tf.sub(tf.add(predArea, truthArea), inter), EPS);
+      var iou = tf.div(inter, union);
+      // Smallest enclosing axis-aligned box around both
+      var cx0 = tf.minimum(px, tx);
+      var cy0 = tf.minimum(py, ty);
+      var cx1 = tf.maximum(px2, tx2);
+      var cy1 = tf.maximum(py2, ty2);
+      var cw = tf.relu(tf.sub(cx1, cx0));
+      var ch = tf.relu(tf.sub(cy1, cy0));
+      var cArea = tf.add(tf.mul(cw, ch), EPS);
+      var giou = tf.sub(iou, tf.div(tf.sub(cArea, union), cArea));
+      return tf.mean(tf.sub(tf.scalar(1), giou));
+    });
+  }
+
   function scalarLossByType(tf, pred, truth, type) {
     if (type === "meanAbsoluteError") return tf.mean(tf.abs(tf.sub(pred, truth)));
+    if (type === "giouLoss") return _giouLoss(tf, pred, truth);
     // Wasserstein: loss = -mean(truth * pred). truth=1 for real, truth=-1 for fake
     // D wants to maximize mean(D(real)) - mean(D(fake)) → minimize -mean(truth * pred)
     // G wants to minimize -mean(D(fake)) → truth=1 for G step

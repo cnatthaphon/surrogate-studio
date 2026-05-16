@@ -1523,7 +1523,7 @@
           .replace(/^,|,$/g, "");
       } else if (k === "loss") {
         var vLoss = String(rawValue || "mse");
-        var validLosses = ["mse", "mae", "huber", "bce", "wasserstein", "categoricalCrossentropy", "sparseCategoricalCrossentropy", "cross_entropy", "none"];
+        var validLosses = ["mse", "mae", "huber", "bce", "wasserstein", "giou", "iou", "categoricalCrossentropy", "sparseCategoricalCrossentropy", "cross_entropy", "none"];
         data.loss = validLosses.indexOf(vLoss) >= 0 ? vLoss : "mse";
       } else if (k === "phase") {
         data.phase = String(rawValue || "").trim();
