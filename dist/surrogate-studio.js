@@ -1,5 +1,5 @@
 // Surrogate Studio - concatenated bundle
-// Generated: 2026-05-15T19:22:22Z
+// Generated: 2026-05-16T09:40:43Z
 // Source files: 58
 
 
@@ -28756,6 +28756,24 @@
     var _graphRuntime = null;
     var _selectedNodeId = null;
 
+    // After a right-panel edit commits to node.data, the rendered node
+    // summary in the editor body keeps showing the old value until
+    // something else triggers a Drawflow re-render. This helper walks
+    // every node and rewrites its `.node-summary` text from the live data,
+    // so users see their edits reflected immediately.
+    function _refreshNodeSummariesFromData() {
+      if (!_editor || typeof _editor.export !== "function") return;
+      if (!_graphRuntime || typeof _graphRuntime.getNodeSummary !== "function") return;
+      try {
+        var bag = _editor.export().drawflow.Home.data || {};
+        Object.keys(bag).forEach(function (id) {
+          var node = bag[id];
+          var el = document.querySelector("#node-" + id + " .node-summary");
+          if (el) el.textContent = _graphRuntime.getNodeSummary(node, id, bag) || "";
+        });
+      } catch (e) { /* best-effort UI refresh */ }
+    }
+
     function _normalizePresetNodeType(rawName) {
       var type = String(rawName || "");
       if (/_layer$/.test(type)) type = type.replace(/_layer$/, "");
@@ -29358,6 +29376,12 @@
                 Object.keys(nextConfig || {}).forEach(function (k) {
                   _graphRuntime.applyNodeConfigValue(_editor, _selectedNodeId, k, nextConfig[k]);
                 });
+                // Re-render the .node-summary text of every node from the
+                // fresh data. Without this the right-panel edit commits to
+                // node.data (Drawflow store) but the summary text in the
+                // node body keeps showing the old value until the user
+                // clicks something that re-runs the editor's change event.
+                _refreshNodeSummariesFromData();
               }
             },
           });

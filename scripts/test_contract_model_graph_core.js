@@ -148,41 +148,39 @@ function main() {
   assert.strictEqual(concatUpdate.handled, true, "concat update should be handled");
   assert(concatUpdate.operation && concatUpdate.operation.type === "set_concat_inputs", "concat update should emit special operation");
 
-  const fakeEditor = {
-    export() {
-      return {
-        drawflow: {
-          Home: {
-            data: {
-              "1": {
-                name: "window_hist_block",
-                data: { windowSize: 12, stride: 2, lagMode: "exact", lagCsv: "1,3,5", padMode: "edge" },
-                inputs: {},
-                outputs: { output_1: { connections: [{ node: "2", output: "output_1" }] } },
-              },
-              "2": {
-                name: "input_layer",
-                data: { mode: "auto" },
-                inputs: { input_1: { connections: [{ node: "1", output: "output_1" }] } },
-                outputs: { output_1: { connections: [{ node: "3", output: "output_1" }] } },
-              },
-              "3": {
-                name: "dense_layer",
-                data: { units: 32, activation: "relu" },
-                inputs: { input_1: { connections: [{ node: "2", output: "output_1" }] } },
-                outputs: { output_1: { connections: [{ node: "4", output: "output_1" }] } },
-              },
-              "4": {
-                name: "output_layer",
-                data: { target: "label", targetType: "label", loss: "cross_entropy", wx: 1, wv: 1 },
-                inputs: { input_1: { connections: [{ node: "3", output: "output_1" }] } },
-                outputs: {},
-              },
-            },
-          },
-        },
-      };
+  // Stash the data object so mutations from addNodeInput / removeNodeInput
+  // / updateNodeDataFromId persist across export() calls. The previous
+  // version of this mock returned a fresh object literal per export, so
+  // mutations evaporated between calls — that hid a real assertion about
+  // port-count syncing across consecutive target switches.
+  const fakeGraphData = {
+    "1": {
+      name: "window_hist_block",
+      data: { windowSize: 12, stride: 2, lagMode: "exact", lagCsv: "1,3,5", padMode: "edge" },
+      inputs: {},
+      outputs: { output_1: { connections: [{ node: "2", output: "output_1" }] } },
     },
+    "2": {
+      name: "input_layer",
+      data: { mode: "auto" },
+      inputs: { input_1: { connections: [{ node: "1", output: "output_1" }] } },
+      outputs: { output_1: { connections: [{ node: "3", output: "output_1" }] } },
+    },
+    "3": {
+      name: "dense_layer",
+      data: { units: 32, activation: "relu" },
+      inputs: { input_1: { connections: [{ node: "2", output: "output_1" }] } },
+      outputs: { output_1: { connections: [{ node: "4", output: "output_1" }] } },
+    },
+    "4": {
+      name: "output_layer",
+      data: { target: "label", targetType: "label", loss: "cross_entropy", wx: 1, wv: 1 },
+      inputs: { input_1: { connections: [{ node: "3", output: "output_1" }] } },
+      outputs: {},
+    },
+  };
+  const fakeEditor = {
+    export() { return { drawflow: { Home: { data: fakeGraphData } } }; },
   };
 
   assert.strictEqual(runtime.inferGraphMode(fakeEditor, "direct"), "autoregressive", "window history should infer autoregressive mode");
@@ -193,6 +191,66 @@ function main() {
   assert(Array.isArray(heads) && heads.length === 1, "output head inference should detect one head");
   assert.strictEqual(heads[0].target, "label", "output head inference should keep schema-valid classification target");
   assert.strictEqual(runtime.inferTargetMode(fakeEditor, "x"), "x", "target mode remains x-compatible for non-trajectory heads");
+
+  // Editor-shape dispatch (the call shape used by the right-panel form in
+  // src/tabs/model_tab.js). Before the dispatch fix, this call coerced the
+  // editor object onto `node`, the nodeId onto `key`, and every onChange
+  // silently did nothing. Now applyNodeConfigValue sniffs arg0 for the
+  // Drawflow API surface and (a) resolves the node from editor.export(),
+  // (b) commits via editor.updateNodeDataFromId, (c) flips the output_layer
+  // input port count when target == "custom" via addNodeInput/removeNodeInput.
+  let editorWriteCalls = 0;
+  let lastWrite = null;
+  let portOps = [];
+  const editorWithApi = {
+    export: fakeEditor.export,
+    updateNodeDataFromId(id, data) {
+      editorWriteCalls += 1;
+      lastWrite = { id: String(id), data: data };
+      const bag = fakeEditor.export().drawflow.Home.data;
+      if (bag[String(id)]) bag[String(id)].data = data;
+    },
+    addNodeInput(id) {
+      portOps.push({ op: "add", id: String(id) });
+      const bag = fakeEditor.export().drawflow.Home.data;
+      const node = bag[String(id)];
+      if (!node) return;
+      const inputs = node.inputs || (node.inputs = {});
+      const idx = Object.keys(inputs).length + 1;
+      inputs["input_" + idx] = { connections: [] };
+    },
+    removeNodeInput(id, key) {
+      portOps.push({ op: "remove", id: String(id), key: key });
+      const bag = fakeEditor.export().drawflow.Home.data;
+      const node = bag[String(id)];
+      if (node && node.inputs) delete node.inputs[key];
+    },
+  };
+
+  // Plain field edit (units on dense) — verify the dispatch picks the right
+  // branch and commits.
+  const denseRes = runtime.applyNodeConfigValue(editorWithApi, "3", "units", 77, "mnist");
+  assert.strictEqual(denseRes.handled, true, "editor-shape dense units should be handled");
+  assert.strictEqual(editorWriteCalls, 1, "editor.updateNodeDataFromId should be called once after dense update");
+  assert.strictEqual(lastWrite && lastWrite.data && lastWrite.data.units, 77, "dense units should be written");
+
+  // Custom target switch — verify (a) data.targetType == 'custom', (b) the
+  // input port grows from 1 to 2.
+  portOps = [];
+  const customRes = runtime.applyNodeConfigValue(editorWithApi, "4", "targetType", "custom", "mnist");
+  assert.strictEqual(customRes.handled, true, "editor-shape custom target should be handled");
+  assert.strictEqual(customRes.data && customRes.data.targetType, "custom", "custom should not be filtered out by normalize step");
+  const addOps = portOps.filter((o) => o.op === "add");
+  assert(addOps.length === 1, "switching to custom should add exactly 1 input port (added " + addOps.length + ")");
+
+  // Switch back to a normal schema target — second input port should be
+  // removed (port has no connections in our fake editor).
+  portOps = [];
+  const revertRes = runtime.applyNodeConfigValue(editorWithApi, "4", "targetType", "label", "mnist");
+  assert.strictEqual(revertRes.handled, true, "revert target should be handled");
+  assert.strictEqual(revertRes.data && revertRes.data.targetType, "label", "schema target should round-trip");
+  const removeOps = portOps.filter((o) => o.op === "remove");
+  assert(removeOps.length === 1, "switching back from custom should remove the extra input port (removed " + removeOps.length + ")");
 
   console.log("PASS test_contract_model_graph_core");
 }
