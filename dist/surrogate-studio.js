@@ -1,5 +1,5 @@
 // Surrogate Studio - concatenated bundle
-// Generated: 2026-05-17T10:48:33Z
+// Generated: 2026-05-17T11:19:39Z
 // Source files: 58
 
 
@@ -9485,11 +9485,21 @@
       var tmp = indices[si]; indices[si] = indices[sj]; indices[sj] = tmp;
     }
 
-    var trainFrac = Number(c.trainFrac) || 0.7;
-    var valFrac = Number(c.valFrac) || 0.15;
+    var trainFrac = Math.max(0, Math.min(1, Number(c.trainFrac) || 0.7));
+    var valFrac   = Math.max(0, Math.min(1, Number(c.valFrac)   || 0.15));
+    // Normalize when the two configured fractions overflow the pool: e.g.
+    // trainFrac=0.99, valFrac=0.99 over-allocates and leaves a negative
+    // test count. Clamp to leave at least one test sample.
+    if (trainFrac + valFrac > 0.99) {
+      var s = trainFrac + valFrac;
+      trainFrac = trainFrac / s * 0.99;
+      valFrac   = valFrac   / s * 0.99;
+    }
     var nTrain = Math.max(1, Math.round(data.count * trainFrac));
-    var nVal = Math.max(1, Math.round(data.count * valFrac));
-    var nTest = Math.max(1, data.count - nTrain - nVal);
+    var nVal   = Math.max(1, Math.round(data.count * valFrac));
+    if (nTrain + nVal >= data.count) nVal = Math.max(1, data.count - nTrain - 1);
+    if (nTrain + nVal >= data.count) nTrain = Math.max(1, data.count - nVal - 1);
+    var nTest  = Math.max(1, data.count - nTrain - nVal);
 
     var xTrain = [], yTrain = [], xVal = [], yVal = [], xTest = [], yTest = [];
     for (var ti = 0; ti < nTrain; ti++) { xTrain.push(data.images[indices[ti]]); yTrain.push(data.bboxes[indices[ti]]); }
@@ -15500,6 +15510,8 @@
             { value: "huber", label: "Huber" },
             { value: "bce", label: "Binary Cross-Entropy" },
             { value: "wasserstein", label: "Wasserstein" },
+            { value: "giou", label: "GIoU (bbox)" },
+            { value: "giou_mse", label: "GIoU + MSE hybrid (bbox)" },
             { value: "categoricalCrossentropy", label: "Categorical Cross-Entropy" },
             { value: "sparseCategoricalCrossentropy", label: "Sparse Cat. CE" }
           ]
@@ -16125,7 +16137,17 @@
         for (var j = current; j > want; j -= 1) {
           var portKey = "input_" + String(j);
           var conns = (inputs[portKey] && inputs[portKey].connections) || [];
-          if (conns.length) continue; // don't drop a wired port
+          // Leaving custom: tear down any wired connection on the port we're
+          // about to drop. Otherwise the input lingers, gets routed back into
+          // the model builder as a label tensor, and silently corrupts the
+          // head wiring after the user thinks they've switched targets.
+          if (conns.length && typeof editor.removeSingleConnection === "function") {
+            conns.slice().forEach(function (c) {
+              try {
+                editor.removeSingleConnection(String(c.node), String(nodeId), String(c.output || "output_1"), portKey);
+              } catch (e) { /* ignore */ }
+            });
+          }
           editor.removeNodeInput(String(nodeId), portKey);
         }
       }
@@ -23270,7 +23292,13 @@
           _phaseSwitchConfigs.push({ nodeId: id, activePhase: String((node.data && node.data.activePhase) || "") });
         }
         if (node.name === "output_layer") {
-          // Output can have 2 inputs: data (input_1) + label source (input_2)
+          // Output can have 2 inputs: data (input_1) + label source (input_2).
+          // input_2 is legitimately used by paired augmentation
+          // (target_source → augment_bbox/mask/label → output.input_2) on
+          // schema targets, not just "custom". The UI is responsible for
+          // tearing down a stale input_2 connection when the user leaves
+          // the custom target — see syncOutputNodeInputCount in
+          // src/app.js and src/model_graph_core.js.
           inTensor = incomingTensors[0];
           if (incomingTensors.length > 1 && incomingTensors[1]) {
             _headLabelTensors[String(id)] = incomingTensors[1];

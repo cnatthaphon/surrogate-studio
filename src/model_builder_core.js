@@ -2098,7 +2098,13 @@
           _phaseSwitchConfigs.push({ nodeId: id, activePhase: String((node.data && node.data.activePhase) || "") });
         }
         if (node.name === "output_layer") {
-          // Output can have 2 inputs: data (input_1) + label source (input_2)
+          // Output can have 2 inputs: data (input_1) + label source (input_2).
+          // input_2 is legitimately used by paired augmentation
+          // (target_source → augment_bbox/mask/label → output.input_2) on
+          // schema targets, not just "custom". The UI is responsible for
+          // tearing down a stale input_2 connection when the user leaves
+          // the custom target — see syncOutputNodeInputCount in
+          // src/app.js and src/model_graph_core.js.
           inTensor = incomingTensors[0];
           if (incomingTensors.length > 1 && incomingTensors[1]) {
             _headLabelTensors[String(id)] = incomingTensors[1];

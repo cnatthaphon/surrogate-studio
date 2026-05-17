@@ -75,7 +75,7 @@ The Evaluation tab reports four metrics for this demo. **`iou_mean` is the one t
 
 1. **Schema bbox `featureSize: 4`** — without this, the model-build path at eval time defaulted the bbox head to a 1-unit output, only the first column of the trained 4-unit head got loaded, and IoU computed against single-float predictions was always 0.
 2. **Sigmoid head activation override (`activation: "sigmoid"` on the Output node)** — clamps predictions to `[0, 1]` so the network can't escape into negative coords that produce degenerate boxes.
-3. **GIoU loss as a first-class loss type (`loss: "giou"`)** — direct surrogate for the IoU metric, with a useful gradient even when boxes don't overlap (where MSE's gradient vanishes on the per-coord deltas). Added to both `src/training_engine_core.js` (JS path) and `server/train_subprocess.py` (PyTorch path). Standard in YOLOv5+/DETR/RetinaNet for the same reason.
+3. **GIoU loss as a first-class loss type (`loss: "giou"`)** — direct surrogate for the IoU metric. MSE still has a coordinate gradient for non-overlapping boxes, but it optimizes per-axis error rather than box overlap, and on a noisy 64×64 SAR backbone that gap matters: minimizing per-coord MSE lets the model settle into a "small box near the center" minimum that scores well on MAE while still missing the ship. GIoU pulls predictions toward the IoU metric directly. Added to both `src/training_engine_core.js` (JS path) and `server/train_subprocess.py` (PyTorch path). Standard in YOLOv5+/DETR/RetinaNet for the same reason.
 
 Plus the data unblock — **3000 patches via `scripts/extract_hrsid_bundle.py`** instead of the original 300 — gave the model enough variety to actually generalize.
 

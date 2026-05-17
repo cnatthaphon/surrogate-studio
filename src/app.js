@@ -2914,8 +2914,18 @@
       } else {
         for (let i = current; i > want; i -= 1) {
           const k = "input_" + String(i);
+          // Leaving custom: force-disconnect any wired input. Keeping the
+          // connection around routes a stale target tensor into the model
+          // builder, which then treats it as graph labels even though the
+          // node is now on a normal schema target.
           const conns = (inputs[k] && inputs[k].connections) || [];
-          if (conns.length) continue; // don't drop a connected port
+          if (conns.length && typeof editor.removeSingleConnection === "function") {
+            conns.slice().forEach((c) => {
+              try {
+                editor.removeSingleConnection(String(c.node), String(nodeId), String(c.output || "output_1"), k);
+              } catch (e) { /* ignore */ }
+            });
+          }
           editor.removeNodeInput(String(nodeId), k);
         }
       }
@@ -2926,8 +2936,27 @@
       } else {
         for (let i = current; i > want; i -= 1) {
           const k = "input_" + String(i);
+          // Mirror the editor branch: also clear the back-references on the
+          // upstream node so a follow-up export doesn't leak the stale edge.
           const conns = (node.inputs[k] && node.inputs[k].connections) || [];
-          if (conns.length) continue;
+          conns.slice().forEach((c) => {
+            const upstream = c && c.node != null ? node.inputs ? null : null : null;
+            // Drawflow-shape graphs store the mirror under outputs[output_1].connections
+            // on the upstream node. Without the editor instance we look it up via the
+            // exported moduleData if available.
+            try {
+              const exported = (typeof editor.export === "function") ? editor.export() : null;
+              const md = exported && exported.drawflow && exported.drawflow.Home && exported.drawflow.Home.data;
+              const upNode = md && c && md[String(c.node)];
+              const port = String(c.output || "output_1");
+              const outConns = upNode && upNode.outputs && upNode.outputs[port] && upNode.outputs[port].connections;
+              if (outConns && outConns.length) {
+                upNode.outputs[port].connections = outConns.filter(function (oc) {
+                  return !(String(oc.node) === String(nodeId) && String(oc.input) === k);
+                });
+              }
+            } catch (e) { /* ignore */ }
+          });
           delete node.inputs[k];
         }
       }

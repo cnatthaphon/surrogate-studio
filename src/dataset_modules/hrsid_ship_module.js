@@ -144,11 +144,21 @@
       var tmp = indices[si]; indices[si] = indices[sj]; indices[sj] = tmp;
     }
 
-    var trainFrac = Number(c.trainFrac) || 0.7;
-    var valFrac = Number(c.valFrac) || 0.15;
+    var trainFrac = Math.max(0, Math.min(1, Number(c.trainFrac) || 0.7));
+    var valFrac   = Math.max(0, Math.min(1, Number(c.valFrac)   || 0.15));
+    // Normalize when the two configured fractions overflow the pool: e.g.
+    // trainFrac=0.99, valFrac=0.99 over-allocates and leaves a negative
+    // test count. Clamp to leave at least one test sample.
+    if (trainFrac + valFrac > 0.99) {
+      var s = trainFrac + valFrac;
+      trainFrac = trainFrac / s * 0.99;
+      valFrac   = valFrac   / s * 0.99;
+    }
     var nTrain = Math.max(1, Math.round(data.count * trainFrac));
-    var nVal = Math.max(1, Math.round(data.count * valFrac));
-    var nTest = Math.max(1, data.count - nTrain - nVal);
+    var nVal   = Math.max(1, Math.round(data.count * valFrac));
+    if (nTrain + nVal >= data.count) nVal = Math.max(1, data.count - nTrain - 1);
+    if (nTrain + nVal >= data.count) nTrain = Math.max(1, data.count - nVal - 1);
+    var nTest  = Math.max(1, data.count - nTrain - nVal);
 
     var xTrain = [], yTrain = [], xVal = [], yVal = [], xTest = [], yTest = [];
     for (var ti = 0; ti < nTrain; ti++) { xTrain.push(data.images[indices[ti]]); yTrain.push(data.bboxes[indices[ti]]); }

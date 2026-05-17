@@ -1048,6 +1048,8 @@
             { value: "huber", label: "Huber" },
             { value: "bce", label: "Binary Cross-Entropy" },
             { value: "wasserstein", label: "Wasserstein" },
+            { value: "giou", label: "GIoU (bbox)" },
+            { value: "giou_mse", label: "GIoU + MSE hybrid (bbox)" },
             { value: "categoricalCrossentropy", label: "Categorical Cross-Entropy" },
             { value: "sparseCategoricalCrossentropy", label: "Sparse Cat. CE" }
           ]
@@ -1673,7 +1675,17 @@
         for (var j = current; j > want; j -= 1) {
           var portKey = "input_" + String(j);
           var conns = (inputs[portKey] && inputs[portKey].connections) || [];
-          if (conns.length) continue; // don't drop a wired port
+          // Leaving custom: tear down any wired connection on the port we're
+          // about to drop. Otherwise the input lingers, gets routed back into
+          // the model builder as a label tensor, and silently corrupts the
+          // head wiring after the user thinks they've switched targets.
+          if (conns.length && typeof editor.removeSingleConnection === "function") {
+            conns.slice().forEach(function (c) {
+              try {
+                editor.removeSingleConnection(String(c.node), String(nodeId), String(c.output || "output_1"), portKey);
+              } catch (e) { /* ignore */ }
+            });
+          }
           editor.removeNodeInput(String(nodeId), portKey);
         }
       }
