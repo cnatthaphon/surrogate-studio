@@ -1,5 +1,5 @@
 // Surrogate Studio - concatenated bundle
-// Generated: 2026-05-17T18:35:45Z
+// Generated: 2026-05-17T18:51:18Z
 // Source files: 58
 
 
@@ -7795,8 +7795,17 @@
     var totalCount = clampInt(config.totalCount || config.totalExamples || 1400, 30, 60000);
     var seed = clampInt(config.seed || 42, 1, 2147483647);
     var splitMode = String(config.splitMode || "stratified_label");
-    var trainFrac = Number(config.trainFrac || 0.8);
-    var valFrac = Number(config.valFrac || 0.1);
+    var trainFrac = Math.max(0, Math.min(1, Number(config.trainFrac || 0.8)));
+    var valFrac   = Math.max(0, Math.min(1, Number(config.valFrac   || 0.1)));
+    // Same split clamp pattern as hrsid_ship_module: pathological
+    // configs (trainFrac+valFrac > 1) would make testFrac go negative
+    // and produce empty slices at testIdx. Clamp so the configured
+    // pair always leaves room for a non-empty test split.
+    if (trainFrac + valFrac > 0.99) {
+      var _ss = trainFrac + valFrac;
+      trainFrac = trainFrac / _ss * 0.99;
+      valFrac   = valFrac   / _ss * 0.99;
+    }
     var testFrac = Math.max(0.01, 1 - trainFrac - valFrac);
     var forceEqualClass = !!config.forceEqualClass;
 
@@ -7860,9 +7869,12 @@
         selectedIdx = allIdx.slice(0, actual);
       }
 
-      // split
+      // split — trainFrac+valFrac already clamped above, but defensive
+      // integer rounding can still overflow on tiny `actual` totals.
       var trainN = Math.max(1, Math.round(actual * trainFrac));
       var valN = Math.max(1, Math.round(actual * valFrac));
+      if (trainN + valN >= actual) valN = Math.max(1, actual - trainN - 1);
+      if (trainN + valN >= actual) trainN = Math.max(1, actual - valN - 1);
       var testN = Math.max(1, actual - trainN - valN);
       var trainIdx, valIdx, testIdx;
 
@@ -8839,10 +8851,21 @@
       var tmp = indices[si]; indices[si] = indices[sj]; indices[sj] = tmp;
     }
 
-    var trainFrac = Number(c.trainFrac) || 0.7;
-    var valFrac = Number(c.valFrac) || 0.15;
+    var trainFrac = Math.max(0, Math.min(1, Number(c.trainFrac) || 0.7));
+    var valFrac   = Math.max(0, Math.min(1, Number(c.valFrac)   || 0.15));
+    // Pathological configs (trainFrac+valFrac > 1) would over-allocate
+    // past the sample pool and slice undefined entries into xTest/yTest.
+    // Mirror the clamp from hrsid_ship_module so counts always sum to
+    // data.count and splitConfig.test never goes negative.
+    if (trainFrac + valFrac > 0.99) {
+      var s = trainFrac + valFrac;
+      trainFrac = trainFrac / s * 0.99;
+      valFrac   = valFrac   / s * 0.99;
+    }
     var nTrain = Math.max(1, Math.round(data.count * trainFrac));
-    var nVal = Math.max(1, Math.round(data.count * valFrac));
+    var nVal   = Math.max(1, Math.round(data.count * valFrac));
+    if (nTrain + nVal >= data.count) nVal = Math.max(1, data.count - nTrain - 1);
+    if (nTrain + nVal >= data.count) nTrain = Math.max(1, data.count - nVal - 1);
     var nTest = Math.max(1, data.count - nTrain - nVal);
 
     var xTrain = [], yTrain = [], xVal = [], yVal = [], xTest = [], yTest = [];
@@ -9029,10 +9052,21 @@
     var seed = clampInt(c.seed, 0, 2147483647) || 42;
     var rng = createRng(seed);
     var totalCount = clampInt(c.totalCount || c.sourceTotalExamples || 1000, 50, 20000);
-    var trainFrac = Number(c.trainFrac) || 0.7;
-    var valFrac = Number(c.valFrac) || 0.15;
+    var trainFrac = Math.max(0, Math.min(1, Number(c.trainFrac) || 0.7));
+    var valFrac   = Math.max(0, Math.min(1, Number(c.valFrac)   || 0.15));
+    // Same split clamp pattern as hrsid_ship_module: pathological
+    // configs (trainFrac+valFrac > 1) would make splitConfig.test go
+    // negative and over-allocate. Clamp so counts always sum to
+    // totalCount.
+    if (trainFrac + valFrac > 0.99) {
+      var s = trainFrac + valFrac;
+      trainFrac = trainFrac / s * 0.99;
+      valFrac   = valFrac   / s * 0.99;
+    }
     var nTrain = Math.max(1, Math.round(totalCount * trainFrac));
-    var nVal = Math.max(1, Math.round(totalCount * valFrac));
+    var nVal   = Math.max(1, Math.round(totalCount * valFrac));
+    if (nTrain + nVal >= totalCount) nVal = Math.max(1, totalCount - nTrain - 1);
+    if (nTrain + nVal >= totalCount) nTrain = Math.max(1, totalCount - nVal - 1);
     var nTest = Math.max(1, totalCount - nTrain - nVal);
 
     var xTrain = [], yTrain = [];
@@ -9232,10 +9266,21 @@
     var seed = clampInt(c.seed, 0, 2147483647) || 42;
     var rng = createRng(seed);
     var totalCount = clampInt(c.totalCount || c.sourceTotalExamples || 1000, 50, 20000);
-    var trainFrac = Number(c.trainFrac) || 0.7;
-    var valFrac = Number(c.valFrac) || 0.15;
+    var trainFrac = Math.max(0, Math.min(1, Number(c.trainFrac) || 0.7));
+    var valFrac   = Math.max(0, Math.min(1, Number(c.valFrac)   || 0.15));
+    // Same split clamp pattern as hrsid_ship_module: pathological
+    // configs (trainFrac+valFrac > 1) would make splitConfig.test go
+    // negative and over-allocate. Clamp so counts always sum to
+    // totalCount.
+    if (trainFrac + valFrac > 0.99) {
+      var s = trainFrac + valFrac;
+      trainFrac = trainFrac / s * 0.99;
+      valFrac   = valFrac   / s * 0.99;
+    }
     var nTrain = Math.max(1, Math.round(totalCount * trainFrac));
-    var nVal = Math.max(1, Math.round(totalCount * valFrac));
+    var nVal   = Math.max(1, Math.round(totalCount * valFrac));
+    if (nTrain + nVal >= totalCount) nVal = Math.max(1, totalCount - nTrain - 1);
+    if (nTrain + nVal >= totalCount) nTrain = Math.max(1, totalCount - nVal - 1);
     var nTest = Math.max(1, totalCount - nTrain - nVal);
 
     // Pre-generate a bank of images per class
@@ -15526,12 +15571,15 @@
           options: targetOptions
         });
         // headType is internal — used by engine, not shown to user.
-        // GIoU losses require a 4-unit regression head (xywh / xyxy
-        // bbox). Hide them on heads where they can't possibly work
-        // (classification, non-bbox regression) so the dropdown
-        // can't silently produce a runtime shape mismatch. Custom
-        // targets are user-defined, so leave the options visible
-        // there.
+        // GIoU losses require a 4-unit regression head with an
+        // explicit bboxFormat. Hide them on heads where the format
+        // can't be resolved: classification heads, non-bbox
+        // regression, and `custom` (which carries no schema entry
+        // and therefore no bboxFormat). Without an explicit format
+        // the browser-side loss would default to xywh while the
+        // server rejects the empty value — two runtimes diverging
+        // silently is exactly the bug the schema gate is meant to
+        // prevent.
         var _matchedOutKey = null;
         if (target && target !== "custom") {
           for (var _oki = 0; _oki < outputKeys.length; _oki += 1) {
@@ -15540,15 +15588,9 @@
           }
         }
         var _isBboxHead = (function () {
-          if (target === "custom") return true;
           if (!_matchedOutKey) return false;
           var ht = String(_matchedOutKey.headType || headType || "").toLowerCase();
           var fs = Number(_matchedOutKey.featureSize || 0);
-          // bboxFormat must be declared by the schema. Without it we
-          // can't tell whether the 4-vec is (x,y,w,h) or (x0,y0,x1,y1),
-          // and GIoU would silently optimize the wrong geometry — see
-          // PR #86 review where Synthetic Detection's xyxy bbox got
-          // mis-interpreted as xywh.
           var fmt = String(_matchedOutKey.bboxFormat || "").toLowerCase();
           var formatOk = (fmt === "xywh" || fmt === "xyxy");
           return ht === "regression" && fs === 4 && formatOk;
@@ -16022,6 +16064,18 @@
           data.targetType = "custom";
           data.targets = ["custom"];
           data.targetsCsv = "custom";
+          // Custom targets carry no schema entry, so there's no
+          // bboxFormat to attach. A stale GIoU loss from the previous
+          // (schema-declared) target would silently optimize wrong
+          // geometry on the browser side and crash with a clear error
+          // on the server — downgrade it to MSE to keep the two
+          // runtimes in agreement.
+          delete data.bboxFormat;
+          var _customLoss = String(data.loss || "").toLowerCase();
+          if (_customLoss === "giou" || _customLoss === "iou" ||
+              _customLoss === "giou_mse" || _customLoss === "mse_giou") {
+            data.loss = "mse";
+          }
         } else {
           var currentTarget = String(data.targetType || data.target || "");
           var targets = api.normalizeOutputTargetsList(rawValue, currentTarget ? [currentTarget] : [], sid);
@@ -23447,12 +23501,25 @@
             // Catching a misconfigured head here surfaces the bug at build
             // time instead of as an opaque shape mismatch inside the loss
             // tensor op. UI dropdown gating prevents this for new
-            // configs; this guard catches imported/legacy presets and the
-            // "custom" target where units are user-defined.
-            if ((normalizedLoss === "giou" || normalizedLoss === "iou" ||
-                 normalizedLoss === "giou_mse" || normalizedLoss === "mse_giou") &&
-                units !== 4) {
-              throw new Error("GIoU loss requires a 4-unit (xywh) regression head, but target '" + target + "' resolved to " + units + " units. Use 'mse' for non-bbox heads.");
+            // configs; this guard catches imported/legacy presets and
+            // hand-edited graphs.
+            if (normalizedLoss === "giou" || normalizedLoss === "iou" ||
+                normalizedLoss === "giou_mse" || normalizedLoss === "mse_giou") {
+              if (units !== 4) {
+                throw new Error("GIoU loss requires a 4-unit (xywh/xyxy) regression head, but target '" + target + "' resolved to " + units + " units. Use 'mse' for non-bbox heads.");
+              }
+              // bboxFormat must be explicit. Without it the JS-side
+              // loss defaults to xywh while the python server rejects
+              // the empty value — failing here keeps the two runtimes
+              // in agreement. Custom targets carry no schema entry
+              // and therefore no format, which is why they're hidden
+              // from the loss dropdown in model_graph_core.js.
+              var _odFmt = String(odata.bboxFormat || "").toLowerCase();
+              var _schemaFmt = _lookupBboxFormat(target, allowedOutputKeys);
+              var _resolvedFmt = (_odFmt === "xywh" || _odFmt === "xyxy") ? _odFmt : _schemaFmt;
+              if (_resolvedFmt !== "xywh" && _resolvedFmt !== "xyxy") {
+                throw new Error("GIoU loss requires bboxFormat 'xywh' or 'xyxy' on the head, but target '" + target + "' has no declared format. Set bboxFormat on the schema output (see sar_ship_detection / synthetic_detection), or pick a non-GIoU loss.");
+              }
             }
             act = (normalizedLoss === "wasserstein")
               ? "linear"

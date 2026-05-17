@@ -114,7 +114,12 @@ function lossValues(spec) {
   ok(values.indexOf("giou_mse") < 0, "1-unit regression head: 'giou_mse' option NOT offered");
 })();
 
-// --- Case 4: custom target still exposes GIoU (escape hatch for advanced users).
+// --- Case 4: custom target hides GIoU. Custom carries no schema entry
+// → no bboxFormat → the loss layout is ambiguous, so the dropdown
+// can't safely offer it. Without this gate the JS engine would
+// default to xywh while the server rejects empty bboxFormat — exactly
+// the kind of silent runtime divergence the schema gate is meant to
+// prevent.
 (function () {
   var runtime = makeRuntime("sar_ship_detection");
   var node = {
@@ -124,8 +129,30 @@ function lossValues(spec) {
   };
   var spec = runtime.getNodeConfigSpec(node, "sar_ship_detection");
   var values = lossValues(spec);
-  ok(values.indexOf("giou") >= 0, "custom target: 'giou' option offered");
-  ok(values.indexOf("giou_mse") >= 0, "custom target: 'giou_mse' option offered");
+  ok(values.indexOf("giou") < 0, "custom target: 'giou' option NOT offered");
+  ok(values.indexOf("giou_mse") < 0, "custom target: 'giou_mse' option NOT offered");
+})();
+
+// --- Case 4b: switching TO custom downgrades a stale GIoU loss to MSE
+// and clears bboxFormat, so the next build doesn't see ambiguity.
+(function () {
+  var bag = {
+    "30": {
+      id: 30, name: "output_layer",
+      data: { target: "bbox", targetType: "bbox", loss: "giou", headType: "regression", bboxFormat: "xywh" },
+      inputs: {}, outputs: {},
+    },
+  };
+  var editor = {
+    export: function () { return { drawflow: { Home: { data: bag } } }; },
+    updateNodeDataFromId: function (id, d) { bag[String(id)].data = d; },
+    addNodeInput: function () {}, removeNodeInput: function () {}, removeSingleConnection: function () {},
+  };
+  var rt = makeRuntime("sar_ship_detection");
+  rt.applyNodeConfigValue(editor, "30", "targetType", "custom", "sar_ship_detection");
+  ok(bag["30"].data.targetType === "custom", "switched to custom target");
+  ok(bag["30"].data.loss === "mse", "stale giou loss downgraded to mse on switch-to-custom (got '" + bag["30"].data.loss + "')");
+  ok(bag["30"].data.bboxFormat === undefined, "bboxFormat cleared on switch-to-custom");
 })();
 
 // --- Case 5: applyNodeConfigValue downgrades stale GIoU when target changes.

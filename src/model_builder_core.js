@@ -2172,12 +2172,25 @@
             // Catching a misconfigured head here surfaces the bug at build
             // time instead of as an opaque shape mismatch inside the loss
             // tensor op. UI dropdown gating prevents this for new
-            // configs; this guard catches imported/legacy presets and the
-            // "custom" target where units are user-defined.
-            if ((normalizedLoss === "giou" || normalizedLoss === "iou" ||
-                 normalizedLoss === "giou_mse" || normalizedLoss === "mse_giou") &&
-                units !== 4) {
-              throw new Error("GIoU loss requires a 4-unit (xywh) regression head, but target '" + target + "' resolved to " + units + " units. Use 'mse' for non-bbox heads.");
+            // configs; this guard catches imported/legacy presets and
+            // hand-edited graphs.
+            if (normalizedLoss === "giou" || normalizedLoss === "iou" ||
+                normalizedLoss === "giou_mse" || normalizedLoss === "mse_giou") {
+              if (units !== 4) {
+                throw new Error("GIoU loss requires a 4-unit (xywh/xyxy) regression head, but target '" + target + "' resolved to " + units + " units. Use 'mse' for non-bbox heads.");
+              }
+              // bboxFormat must be explicit. Without it the JS-side
+              // loss defaults to xywh while the python server rejects
+              // the empty value — failing here keeps the two runtimes
+              // in agreement. Custom targets carry no schema entry
+              // and therefore no format, which is why they're hidden
+              // from the loss dropdown in model_graph_core.js.
+              var _odFmt = String(odata.bboxFormat || "").toLowerCase();
+              var _schemaFmt = _lookupBboxFormat(target, allowedOutputKeys);
+              var _resolvedFmt = (_odFmt === "xywh" || _odFmt === "xyxy") ? _odFmt : _schemaFmt;
+              if (_resolvedFmt !== "xywh" && _resolvedFmt !== "xyxy") {
+                throw new Error("GIoU loss requires bboxFormat 'xywh' or 'xyxy' on the head, but target '" + target + "' has no declared format. Set bboxFormat on the schema output (see sar_ship_detection / synthetic_detection), or pick a non-GIoU loss.");
+              }
             }
             act = (normalizedLoss === "wasserstein")
               ? "linear"

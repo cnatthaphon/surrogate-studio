@@ -1036,12 +1036,15 @@
           options: targetOptions
         });
         // headType is internal — used by engine, not shown to user.
-        // GIoU losses require a 4-unit regression head (xywh / xyxy
-        // bbox). Hide them on heads where they can't possibly work
-        // (classification, non-bbox regression) so the dropdown
-        // can't silently produce a runtime shape mismatch. Custom
-        // targets are user-defined, so leave the options visible
-        // there.
+        // GIoU losses require a 4-unit regression head with an
+        // explicit bboxFormat. Hide them on heads where the format
+        // can't be resolved: classification heads, non-bbox
+        // regression, and `custom` (which carries no schema entry
+        // and therefore no bboxFormat). Without an explicit format
+        // the browser-side loss would default to xywh while the
+        // server rejects the empty value — two runtimes diverging
+        // silently is exactly the bug the schema gate is meant to
+        // prevent.
         var _matchedOutKey = null;
         if (target && target !== "custom") {
           for (var _oki = 0; _oki < outputKeys.length; _oki += 1) {
@@ -1050,15 +1053,9 @@
           }
         }
         var _isBboxHead = (function () {
-          if (target === "custom") return true;
           if (!_matchedOutKey) return false;
           var ht = String(_matchedOutKey.headType || headType || "").toLowerCase();
           var fs = Number(_matchedOutKey.featureSize || 0);
-          // bboxFormat must be declared by the schema. Without it we
-          // can't tell whether the 4-vec is (x,y,w,h) or (x0,y0,x1,y1),
-          // and GIoU would silently optimize the wrong geometry — see
-          // PR #86 review where Synthetic Detection's xyxy bbox got
-          // mis-interpreted as xywh.
           var fmt = String(_matchedOutKey.bboxFormat || "").toLowerCase();
           var formatOk = (fmt === "xywh" || fmt === "xyxy");
           return ht === "regression" && fs === 4 && formatOk;
@@ -1532,6 +1529,18 @@
           data.targetType = "custom";
           data.targets = ["custom"];
           data.targetsCsv = "custom";
+          // Custom targets carry no schema entry, so there's no
+          // bboxFormat to attach. A stale GIoU loss from the previous
+          // (schema-declared) target would silently optimize wrong
+          // geometry on the browser side and crash with a clear error
+          // on the server — downgrade it to MSE to keep the two
+          // runtimes in agreement.
+          delete data.bboxFormat;
+          var _customLoss = String(data.loss || "").toLowerCase();
+          if (_customLoss === "giou" || _customLoss === "iou" ||
+              _customLoss === "giou_mse" || _customLoss === "mse_giou") {
+            data.loss = "mse";
+          }
         } else {
           var currentTarget = String(data.targetType || data.target || "");
           var targets = api.normalizeOutputTargetsList(rawValue, currentTarget ? [currentTarget] : [], sid);
