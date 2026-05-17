@@ -151,6 +151,96 @@ def _resolve_aug_probs(cfg):
         return 0.0, p
     return 0.0, 0.0
 
+def _build_giou_head_loss(hc):
+    """Build the {fn, weight, phase, cls} entry for a GIoU/giou_mse head.
+
+    Mirrors the JS-side gating in `src/training_engine_core.js` (which
+    routes classification heads to softmax CE before they reach a
+    regression loss) and the schema-driven UI gate (which only offers
+    GIoU on heads where the schema declared a bboxFormat). The server
+    has no equivalent routing — it picks the loss off `hc["loss"]`
+    directly — so the gating has to live here. Otherwise a 4-unit
+    classification head with stale `loss="giou"` would silently train
+    with bbox math while the browser would route it correctly.
+
+    Raises ValueError on misconfiguration.
+    """
+    hl = str(hc.get("loss", "")).lower()
+    if hl not in ("iou", "giou", "giou_mse", "mse_giou"):
+        raise ValueError("_build_giou_head_loss called with non-GIoU loss '" + hl + "'")
+    head_id = str(hc.get("id") or hc.get("nodeId") or "?")
+    head_type = str(hc.get("headType", "regression") or "regression").strip().lower()
+    if head_type != "regression":
+        raise ValueError(
+            "GIoU loss is only valid on regression heads, but head '"
+            + head_id + "' has headType='" + head_type
+            + "'. Use 'mse' for non-bbox heads."
+        )
+    units = int(hc.get("units", 0) or 0)
+    if units and units != 4:
+        raise ValueError(
+            "GIoU loss requires a 4-unit (xywh/xyxy) regression head, but head '"
+            + head_id + "' resolved to " + str(units)
+            + " units. Use 'mse' for non-bbox heads."
+        )
+    bbox_format_raw = hc.get("bboxFormat", "")
+    bbox_format = str(bbox_format_raw or "").strip().lower()
+    if bbox_format not in ("xywh", "xyxy"):
+        raise ValueError(
+            "GIoU loss requires bboxFormat 'xywh' or 'xyxy', but head '"
+            + head_id + "' has bboxFormat='"
+            + str(bbox_format_raw) + "'. Declare bboxFormat on the schema "
+            "output (see sar_ship_detection / synthetic_detection)."
+        )
+    use_hybrid = hl in ("giou_mse", "mse_giou")
+    # `torch` is imported lazily inside main() so that subprocess
+    # startup stays fast in the common path where training isn't kicked
+    # off. The closure captures it explicitly so the helper stays
+    # callable from contract tests that load the module via importlib
+    # without running main().
+    import torch as _torch
+    def _giou_loss(p, t, _use_hybrid=use_hybrid, _fmt=bbox_format, _t=_torch):
+        eps = 1e-7
+        px = p[:, 0:1]; py = p[:, 1:2]; p2 = p[:, 2:3]; p3 = p[:, 3:4]
+        tx = t[:, 0:1]; ty = t[:, 1:2]; t2 = t[:, 2:3]; t3 = t[:, 3:4]
+        if _fmt == "xyxy":
+            px2 = p2; py2 = p3
+            tx2 = t2; ty2 = t3
+            pw = px2 - px; ph = py2 - py
+            tw = tx2 - tx; th = ty2 - ty
+        else:
+            pw = p2; ph = p3
+            tw = t2; th = t3
+            px2 = px + pw; py2 = py + ph
+            tx2 = tx + tw; ty2 = ty + th
+        ix0 = _t.maximum(px, tx); iy0 = _t.maximum(py, ty)
+        ix1 = _t.minimum(px2, tx2); iy1 = _t.minimum(py2, ty2)
+        iw = _t.clamp(ix1 - ix0, min=0.0)
+        ih = _t.clamp(iy1 - iy0, min=0.0)
+        inter = iw * ih
+        pred_area = _t.clamp(pw, min=0.0) * _t.clamp(ph, min=0.0)
+        true_area = _t.clamp(tw, min=0.0) * _t.clamp(th, min=0.0)
+        union = pred_area + true_area - inter + eps
+        iou = inter / union
+        cx0 = _t.minimum(px, tx); cy0 = _t.minimum(py, ty)
+        cx1 = _t.maximum(px2, tx2); cy1 = _t.maximum(py2, ty2)
+        cw = _t.clamp(cx1 - cx0, min=0.0)
+        ch = _t.clamp(cy1 - cy0, min=0.0)
+        c_area = cw * ch + eps
+        giou = iou - (c_area - union) / c_area
+        giou_loss_val = (1.0 - giou).mean()
+        if _use_hybrid:
+            mse = ((p - t) ** 2).mean()
+            return 0.5 * mse + 0.5 * giou_loss_val
+        return giou_loss_val
+    return {
+        "fn": _giou_loss,
+        "weight": float(hc.get("matchWeight", 1.0)),
+        "phase": str(hc.get("phase", "")).strip(),
+        "cls": False,
+    }
+
+
 def main():
     global _STOP_REQUESTED
     _STOP_REQUESTED = False
@@ -380,70 +470,17 @@ def main():
         elif hl == "mae":
             head_losses.append({"fn": nn.L1Loss(), "weight": hw, "phase": hp, "cls": False})
         elif hl in ("iou", "giou", "giou_mse", "mse_giou"):
-            # GIoU loss for [B, 4] bbox regression in xywh, normalized
-            # [0, 1] coords. Mirrors `_giouLoss` in
+            # GIoU loss for [B, 4] bbox regression. Mirrors `_giouLoss` in
             # src/training_engine_core.js. Direct surrogate for the IoU
             # metric the Evaluation tab reports; preserves a useful
             # gradient even when boxes don't overlap (where per-coord
             # MSE goes flat). Standard loss in YOLOv5+/DETR/RetinaNet.
-            #
-            # `giou_mse` (alias `mse_giou`) is a 50/50 hybrid: MSE
-            # provides a smooth gradient through the early no-overlap
-            # phase where pure GIoU is flat; GIoU takes over once boxes
-            # begin to overlap. Mirrors `_giouLoss` + `giouMseLoss` in
-            # training_engine_core.js.
-            _hu = int(hc.get("units", 0) or 0)
-            if _hu and _hu != 4:
-                raise ValueError(
-                    "GIoU loss requires a 4-unit (xywh) regression head, but head '"
-                    + str(hc.get("id") or hc.get("nodeId") or "?")
-                    + "' resolved to " + str(_hu) + " units. Use 'mse' for non-bbox heads."
-                )
-            # bboxFormat selects the layout of the [B,4] vec the loss
-            # consumes. The JS-side builder pushes this onto headConfigs
-            # from schema metadata (model_builder_core.js / model_graph_core.js).
-            # Default to xywh for backward compat with the SAR-Ship
-            # preset path. Without a format the GIoU loss could silently
-            # optimize the wrong geometry on xyxy schemas.
-            _bbox_format = str(hc.get("bboxFormat", "xywh") or "xywh").lower()
-            if _bbox_format not in ("xywh", "xyxy"):
-                _bbox_format = "xywh"
-            _use_hybrid = hl in ("giou_mse", "mse_giou")
-            def _giou_loss(p, t, _use_hybrid=_use_hybrid, _fmt=_bbox_format):
-                eps = 1e-7
-                px = p[:, 0:1]; py = p[:, 1:2]; p2 = p[:, 2:3]; p3 = p[:, 3:4]
-                tx = t[:, 0:1]; ty = t[:, 1:2]; t2 = t[:, 2:3]; t3 = t[:, 3:4]
-                if _fmt == "xyxy":
-                    px2 = p2; py2 = p3
-                    tx2 = t2; ty2 = t3
-                    pw = px2 - px; ph = py2 - py
-                    tw = tx2 - tx; th = ty2 - ty
-                else:
-                    pw = p2; ph = p3
-                    tw = t2; th = t3
-                    px2 = px + pw; py2 = py + ph
-                    tx2 = tx + tw; ty2 = ty + th
-                ix0 = torch.maximum(px, tx); iy0 = torch.maximum(py, ty)
-                ix1 = torch.minimum(px2, tx2); iy1 = torch.minimum(py2, ty2)
-                iw = torch.clamp(ix1 - ix0, min=0.0)
-                ih = torch.clamp(iy1 - iy0, min=0.0)
-                inter = iw * ih
-                pred_area = torch.clamp(pw, min=0.0) * torch.clamp(ph, min=0.0)
-                true_area = torch.clamp(tw, min=0.0) * torch.clamp(th, min=0.0)
-                union = pred_area + true_area - inter + eps
-                iou = inter / union
-                cx0 = torch.minimum(px, tx); cy0 = torch.minimum(py, ty)
-                cx1 = torch.maximum(px2, tx2); cy1 = torch.maximum(py2, ty2)
-                cw = torch.clamp(cx1 - cx0, min=0.0)
-                ch = torch.clamp(cy1 - cy0, min=0.0)
-                c_area = cw * ch + eps
-                giou = iou - (c_area - union) / c_area
-                giou_loss = (1.0 - giou).mean()
-                if _use_hybrid:
-                    mse = ((p - t) ** 2).mean()
-                    return 0.5 * mse + 0.5 * giou_loss
-                return giou_loss
-            head_losses.append({"fn": _giou_loss, "weight": hw, "phase": hp, "cls": False})
+            # `giou_mse` (alias `mse_giou`) is a 50/50 hybrid that adds
+            # MSE for a smooth gradient through the no-overlap regime.
+            # See _build_giou_head_loss above for the gating rules —
+            # they mirror the JS-side schema/UI gate and reject any
+            # head that would compute wrong geometry.
+            head_losses.append(_build_giou_head_loss(hc))
         elif htype == "classification":
             head_losses.append({"fn": nn.CrossEntropyLoss(), "weight": hw, "phase": hp, "cls": True})
         else:

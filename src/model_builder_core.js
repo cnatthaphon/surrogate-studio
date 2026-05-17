@@ -145,6 +145,17 @@
     return spec ? String(spec.headType || "regression") : "regression";
   }
 
+  // helper: look up bboxFormat for a target key from allowedOutputKeys.
+  // Only returns a value when the schema explicitly declared one ("xywh"
+  // or "xyxy") — anything else returns "" so the GIoU gate can refuse
+  // ambiguous heads instead of silently picking a default layout.
+  function _lookupBboxFormat(target, allowedOutputKeys) {
+    var spec = _lookupOutputSpec(target, allowedOutputKeys);
+    if (!spec || !spec.bboxFormat) return "";
+    var f = String(spec.bboxFormat).toLowerCase();
+    return (f === "xywh" || f === "xyxy") ? f : "";
+  }
+
   function outputTargetsFromNodeData(data, allowedKeys, fallbackTarget) {
     var d = data || {};
     // read single target from node — no multi-target, no CSV
@@ -2207,15 +2218,17 @@
             bboxFormat: (function () {
               // Bbox format is meaningful for GIoU-family losses only —
               // _giouLoss in training_engine_core and the python mirror
-              // need to know whether the 4-vec is xywh or xyxy. Default
-              // to xywh for the SAR-Ship-style preset path; the schema
-              // is authoritative when available.
+              // need to know whether the 4-vec is xywh or xyxy. Prefer
+              // the value already stored on the node (applyNodeConfigValue
+              // copies it from the schema when the user picks a target).
+              // Fall back to a schema lookup so static preset graphs that
+              // never went through the config panel still get the right
+              // format. The fallback is empty — never silently "xywh" —
+              // so the build/server-side guards can reject heads that
+              // don't have an explicit format.
               var _fmt = String(odata.bboxFormat || "").toLowerCase();
               if (_fmt === "xywh" || _fmt === "xyxy") return _fmt;
-              var _norm = String(lossName || "").toLowerCase();
-              if (_norm === "giou" || _norm === "iou" ||
-                  _norm === "giou_mse" || _norm === "mse_giou") return "xywh";
-              return "";
+              return _lookupBboxFormat(target, allowedOutputKeys);
             })(),
           });
         });
