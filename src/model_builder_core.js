@@ -2157,6 +2157,17 @@
             units = targetUnitsFromMode(target, paramsSelect, odata, ht, upstreamUnits);
             var normalizedLoss = String(lossName || "").trim().toLowerCase();
             if (normalizedLoss === "wgan") normalizedLoss = "wasserstein";
+            // GIoU losses operate on 4-vector bbox tensors (xywh / xyxy).
+            // Catching a misconfigured head here surfaces the bug at build
+            // time instead of as an opaque shape mismatch inside the loss
+            // tensor op. UI dropdown gating prevents this for new
+            // configs; this guard catches imported/legacy presets and the
+            // "custom" target where units are user-defined.
+            if ((normalizedLoss === "giou" || normalizedLoss === "iou" ||
+                 normalizedLoss === "giou_mse" || normalizedLoss === "mse_giou") &&
+                units !== 4) {
+              throw new Error("GIoU loss requires a 4-unit (xywh) regression head, but target '" + target + "' resolved to " + units + " units. Use 'mse' for non-bbox heads.");
+            }
             act = (normalizedLoss === "wasserstein")
               ? "linear"
               : ((ht === "classification" && units > 1) ? "softmax" : "linear");

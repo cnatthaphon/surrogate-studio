@@ -82,5 +82,28 @@ ok(Math.abs(good.trainCount - 140) <= 1, "0.7/0.15: trainCount ≈ 140 (got " + 
 ok(Math.abs(good.valCount - 30) <= 1, "0.7/0.15: valCount ≈ 30 (got " + good.valCount + ")");
 ok(Math.abs(good.testCount - 30) <= 1, "0.7/0.15: testCount ≈ 30 (got " + good.testCount + ")");
 
+// Case 4: empty-bundle fallback returns safe non-zero dims.
+// Pre-fix: when the bundle had count=0 (or was missing entirely), the
+// fallback payload reported imageShape:[0,0,1], featureSize:0 —
+// shape-of-zero would silently propagate into downstream model build
+// code on transient/headless load failure. The module is HRSID-64×64;
+// the fallback must mirror that.
+function assertSafeDims(p, label) {
+  ok(p && Array.isArray(p.imageShape) && p.imageShape[0] > 0 && p.imageShape[1] > 0,
+    label + ": imageShape has non-zero H/W (got " + JSON.stringify(p && p.imageShape) + ")");
+  ok(p && Number(p.featureSize) > 0,
+    label + ": featureSize > 0 (got " + (p && p.featureSize) + ")");
+}
+// Stub the global with an empty bundle (count=0, dim=0). buildDataset
+// takes the synchronous "present but empty/invalid payload" branch and
+// must still emit safe metadata.
+global.HRSID_SHIPS_DATA_B64 = makeBundleB64(0, 0);
+delete require.cache[require.resolve(path.join(__dirname, "..", "src/dataset_modules/hrsid_ship_module.js"))];
+var modEmpty = require(path.join(__dirname, "..", "src/dataset_modules/hrsid_ship_module.js"));
+var empty = modEmpty.buildDataset({});
+assertSafeDims(empty, "empty bundle");
+ok(empty.trainCount === 0 && empty.valCount === 0 && empty.testCount === 0,
+  "empty bundle: split counts all zero (got " + empty.trainCount + "/" + empty.valCount + "/" + empty.testCount + ")");
+
 console.log("\n  " + passed + " passed, " + failed + " failed");
 if (failed) process.exit(1);

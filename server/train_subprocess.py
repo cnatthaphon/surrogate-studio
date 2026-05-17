@@ -392,6 +392,13 @@ def main():
             # phase where pure GIoU is flat; GIoU takes over once boxes
             # begin to overlap. Mirrors `_giouLoss` + `giouMseLoss` in
             # training_engine_core.js.
+            _hu = int(hc.get("units", 0) or 0)
+            if _hu and _hu != 4:
+                raise ValueError(
+                    "GIoU loss requires a 4-unit (xywh) regression head, but head '"
+                    + str(hc.get("id") or hc.get("nodeId") or "?")
+                    + "' resolved to " + str(_hu) + " units. Use 'mse' for non-bbox heads."
+                )
             _use_hybrid = hl in ("giou_mse", "mse_giou")
             def _giou_loss(p, t, _use_hybrid=_use_hybrid):
                 eps = 1e-7

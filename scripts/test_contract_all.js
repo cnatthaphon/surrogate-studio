@@ -42,6 +42,8 @@ const baseSuite = [
   "test_branched_weight_loader.js",
   "test_hrsid_split_clamp.js",
   "test_output_custom_revert_disconnects_input2.js",
+  "test_giou_loss_gating.js",
+  "test_giou_loss_build_guard.js",
 ];
 
 function runOne(scriptName) {

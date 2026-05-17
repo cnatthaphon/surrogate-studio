@@ -1035,24 +1035,47 @@
           value: target,
           options: targetOptions
         });
-        // headType is internal — used by engine, not shown to user
+        // headType is internal — used by engine, not shown to user.
+        // GIoU losses require a 4-unit regression head (xywh / xyxy
+        // bbox). Hide them on heads where they can't possibly work
+        // (classification, non-bbox regression) so the dropdown
+        // can't silently produce a runtime shape mismatch. Custom
+        // targets are user-defined, so leave the options visible
+        // there.
+        var _matchedOutKey = null;
+        if (target && target !== "custom") {
+          for (var _oki = 0; _oki < outputKeys.length; _oki += 1) {
+            var _ok = outputKeys[_oki];
+            if ((_ok.key || _ok) === target) { _matchedOutKey = _ok; break; }
+          }
+        }
+        var _isBboxHead = (function () {
+          if (target === "custom") return true;
+          if (!_matchedOutKey) return false;
+          var ht = String(_matchedOutKey.headType || headType || "").toLowerCase();
+          var fs = Number(_matchedOutKey.featureSize || 0);
+          return ht === "regression" && fs === 4;
+        })();
+        var _lossOptions = [
+          { value: "none", label: "None (passthrough)" },
+          { value: "mse", label: "MSE" },
+          { value: "mae", label: "MAE" },
+          { value: "huber", label: "Huber" },
+          { value: "bce", label: "Binary Cross-Entropy" },
+          { value: "wasserstein", label: "Wasserstein" },
+        ];
+        if (_isBboxHead) {
+          _lossOptions.push({ value: "giou", label: "GIoU (bbox)" });
+          _lossOptions.push({ value: "giou_mse", label: "GIoU + MSE hybrid (bbox)" });
+        }
+        _lossOptions.push({ value: "categoricalCrossentropy", label: "Categorical Cross-Entropy" });
+        _lossOptions.push({ value: "sparseCategoricalCrossentropy", label: "Sparse Cat. CE" });
         addField({
           kind: "select",
           key: "loss",
           label: "Loss",
           value: loss,
-          options: [
-            { value: "none", label: "None (passthrough)" },
-            { value: "mse", label: "MSE" },
-            { value: "mae", label: "MAE" },
-            { value: "huber", label: "Huber" },
-            { value: "bce", label: "Binary Cross-Entropy" },
-            { value: "wasserstein", label: "Wasserstein" },
-            { value: "giou", label: "GIoU (bbox)" },
-            { value: "giou_mse", label: "GIoU + MSE hybrid (bbox)" },
-            { value: "categoricalCrossentropy", label: "Categorical Cross-Entropy" },
-            { value: "sparseCategoricalCrossentropy", label: "Sparse Cat. CE" }
-          ]
+          options: _lossOptions,
         });
         // informational hint based on headType (from schema, not target name)
         if (headType === "classification") {
@@ -1515,6 +1538,17 @@
           var _matched = _outKeys.filter(function (ok) { return (ok.key || ok) === target; });
           if (_matched.length && _matched[0].headType) {
             data.headType = _matched[0].headType;
+          }
+          // If the previous loss assumed a 4-unit bbox head (giou*) and the
+          // new target is not a 4-unit regression head, downgrade to MSE so
+          // a stale loss can't cause a shape mismatch at compile/train time.
+          var _curLoss = String(data.loss || "").toLowerCase();
+          if (_curLoss === "giou" || _curLoss === "iou" || _curLoss === "giou_mse" || _curLoss === "mse_giou") {
+            var _fs = _matched.length ? Number(_matched[0].featureSize || 0) : 0;
+            var _ht = _matched.length ? String(_matched[0].headType || "").toLowerCase() : "";
+            if (!(_ht === "regression" && _fs === 4)) {
+              data.loss = "mse";
+            }
           }
         }
       } else if (k === "paramsSelect") {

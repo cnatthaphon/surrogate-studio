@@ -19,13 +19,24 @@
 
   // Image dimensions are derived from the bundled binary at decode
   // time. The format header carries `dim = W * H`; patches are square,
-  // so W = H = sqrt(dim). No hardcoded image size: re-extracting the
-  // bundle at a different patch size (via env-controlled
+  // so W = H = sqrt(dim). No platform-level hardcoded image size:
+  // re-extracting the bundle at a different patch size (via env-controlled
   // `scripts/extract_hrsid_bundle.py`) propagates through the demo
   // automatically as long as the preset/schema refer to the same
   // featureSize the bundle reports.
+  //
+  // FALLBACK_*: when the bundle hasn't loaded yet (transient
+  // headless/CI failure, missing data script), the build path still
+  // returns a valid empty dataset payload. The fallback metadata
+  // must mirror the module's *intended* image dimensions —
+  // imageShape:[0,0,1]/featureSize:0 would silently propagate
+  // shape-of-zero into downstream model build code. Keep these aligned
+  // with the bundle this module ships against (currently 64x64).
+  var FALLBACK_W = 64;
+  var FALLBACK_H = 64;
+  var FALLBACK_FEATURE_SIZE = FALLBACK_W * FALLBACK_H;
   function _dimsFromBundle(data) {
-    if (!data) return { W: 0, H: 0, featureSize: 0 };
+    if (!data || !data.dim) return { W: FALLBACK_W, H: FALLBACK_H, featureSize: FALLBACK_FEATURE_SIZE };
     var d = Number(data.dim) || 0;
     var side = Math.max(1, Math.round(Math.sqrt(d)));
     return { W: side, H: side, featureSize: side * side };
