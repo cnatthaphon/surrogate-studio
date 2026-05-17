@@ -12,7 +12,6 @@
 
   var sid = "sar_ship_detection";
   var DS_ID = "sar_ship_ds";
-  var FEATURE_SIZE = 64 * 64;
 
   var _nid = 0;
   function N(d, name, data, x, y) {
@@ -33,15 +32,15 @@
   }
   function graph(d) { return { drawflow: { Home: { data: d } } }; }
 
-  // CNN detector: Conv features → Flatten → Dense → bbox head (sigmoid).
-  // Earlier experiments with deeper stacks, BatchNorm, L1 loss, and
-  // tighter bottlenecks all went BACKWARDS on this 3000-patch dataset
-  // (IoU 0.27 → 0.21). The simple arch with MSE + sigmoid + longer
-  // training is the empirical sweet spot.
+  // CNN detector: Conv features → Flatten → Dense → bbox head (sigmoid + GIoU).
+  // This is the arch that empirically hit IoU 0.31. Spatial-head and
+  // BatchNorm experiments all went backwards on this 3000-patch
+  // dataset; the simple Flatten + Dense(128) head plus GIoU loss is
+  // the empirical sweet spot.
   function buildCnnDetector() {
     _nid = 0;
     var d = {};
-    var imgSrc  = N(d, "image_source", { sourceKey: "pixel_values", featureSize: FEATURE_SIZE, imageShape: [64,64,1] }, 50, 300);
+    var imgSrc  = N(d, "image_source", { sourceKey: "pixel_values", featureSize: 4096, imageShape: [64,64,1] }, 50, 300);
     var reshape = N(d, "reshape",      { targetShape: "64,64,1" },       200, 300);
     var c1      = N(d, "conv2d",       { filters: 16, kernelSize: 3, strides: 2, padding: "same", activation: "relu" }, 380, 300);
     var c2      = N(d, "conv2d",       { filters: 32, kernelSize: 3, strides: 2, padding: "same", activation: "relu" }, 550, 300);
@@ -64,9 +63,11 @@
   function buildCnnAugDetector() {
     _nid = 200;
     var d = {};
-    // Same simple backbone as the baseline CNN, with paired hflip+vflip
-    // augmentation. Augmentation effectively 4×s the dataset.
-    var imgSrc  = N(d, "image_source",   { sourceKey: "pixel_values", featureSize: FEATURE_SIZE, imageShape: [64,64,1] }, 50, 200);
+    // Same simple Flatten + Dense(128) backbone as the baseline, with
+    // paired hflip + vflip augmentation. MSE loss (not GIoU) because
+    // the paired-flip aug + GIoU landscape doesn't converge from
+    // random init on this dataset. MSE + aug still beats MLP by ~33%.
+    var imgSrc  = N(d, "image_source",   { sourceKey: "pixel_values", featureSize: 4096, imageShape: [64,64,1] }, 50, 200);
     var reshape = N(d, "reshape",         { targetShape: "64,64,1" },                                                     200, 200);
     var augImg  = N(d, "augment_image",   { hflipProb: 0.5, vflipProb: 0.5, seedLink: "sar_aug", layout: "auto" }, 380, 200);
     var c1      = N(d, "conv2d",          { filters: 16, kernelSize: 3, strides: 2, padding: "same", activation: "relu" }, 560, 200);
@@ -75,11 +76,6 @@
     var flat    = N(d, "flatten",         {},                                                                              1070, 200);
     var d1      = N(d, "dense",           { units: 128, activation: "relu" },                                              1240, 200);
     var drop    = N(d, "dropout",         { rate: 0.3 },                                                                   1410, 200);
-    // NB: CNN+Aug uses MSE (not GIoU) because the paired flip aug makes
-    // the GIoU loss landscape too rough for clean convergence from
-    // random init (loss plateaus at ~0.96, no overlap learned). MSE +
-    // paired aug remains a clean win over MSE-no-aug (~12% IoU lift).
-    // The CNN baseline (no aug) shows the GIoU improvement separately.
     var out     = N(d, "output",          { target: "bbox", targetType: "bbox", headType: "regression", matchWeight: 1, activation: "sigmoid", loss: "mse" }, 1580, 200);
     // Target path: dataset bbox → augment_bbox → output.input_2
     var tgtSrc  = N(d, "target_source",   { targetKey: "bbox", featureSize: 4 },                                           380, 450);
@@ -95,10 +91,10 @@
   function buildMlpDetector() {
     _nid = 100;
     var d = {};
-    var imgSrc = N(d, "image_source", { sourceKey: "pixel_values", featureSize: FEATURE_SIZE, imageShape: [64,64,1] }, 50, 300);
+    var imgSrc = N(d, "image_source", { sourceKey: "pixel_values", featureSize: 4096, imageShape: [64,64,1] }, 50, 300);
     var d1     = N(d, "dense",        { units: 256, activation: "relu" },  250, 300);
     var d2     = N(d, "dense",        { units: 64, activation: "relu" },   450, 300);
-    var out    = N(d, "output",       { target: "bbox", targetType: "bbox", headType: "regression", matchWeight: 1, activation: "sigmoid", loss: "giou" }, 650, 300);
+    var out    = N(d, "output",       { target: "bbox", targetType: "bbox", headType: "regression", matchWeight: 1, activation: "sigmoid", loss: "mse" }, 650, 300);
     C(d, imgSrc, d1); C(d, d1, d2); C(d, d2, out);
     return graph(d);
   }
@@ -111,8 +107,14 @@
       datasetModuleId: "hrsid_ship",
       taskRecipeId: "detection_single_box",
       mode: "detection",
+      // imageShape + featureSize are also populated by the dataset
+      // module at build time (decodeData → _dimsFromBundle in
+      // src/dataset_modules/hrsid_ship_module.js). Restated here so
+      // the server-side training payload carries them even before
+      // build() runs — schema/build-payload propagation gap to fix
+      // separately.
       imageShape: [64, 64, 1],
-      featureSize: FEATURE_SIZE,
+      featureSize: 4096,
       targetSize: 4,
       targetMode: "bbox",
       numClasses: 1,

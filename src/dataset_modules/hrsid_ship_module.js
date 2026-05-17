@@ -17,9 +17,19 @@
    * Binary format: [uint32 count][uint32 dim][uint8 pixels...][float32 bboxes (4 per sample)...]
    */
 
-  var IMAGE_W = 64;
-  var IMAGE_H = 64;
-  var FEATURE_SIZE = IMAGE_W * IMAGE_H;
+  // Image dimensions are derived from the bundled binary at decode
+  // time. The format header carries `dim = W * H`; patches are square,
+  // so W = H = sqrt(dim). No hardcoded image size: re-extracting the
+  // bundle at a different patch size (via env-controlled
+  // `scripts/extract_hrsid_bundle.py`) propagates through the demo
+  // automatically as long as the preset/schema refer to the same
+  // featureSize the bundle reports.
+  function _dimsFromBundle(data) {
+    if (!data) return { W: 0, H: 0, featureSize: 0 };
+    var d = Number(data.dim) || 0;
+    var side = Math.max(1, Math.round(Math.sqrt(d)));
+    return { W: side, H: side, featureSize: side * side };
+  }
 
   function clampInt(v, lo, hi) {
     var n = Number(v);
@@ -96,6 +106,7 @@
 
     var W = typeof window !== "undefined" ? window : {};
     var data = decodeData();
+    var dims = _dimsFromBundle(data);
 
     // Missing script — try lazy load
     if (!data && !W.HRSID_SHIPS_DATA_B64) {
@@ -105,7 +116,7 @@
         return {
           schemaId: "sar_ship_detection", datasetModuleId: "hrsid_ship",
           taskRecipeId: "detection_single_box", mode: "detection",
-          imageShape: [IMAGE_H, IMAGE_W, 1], featureSize: FEATURE_SIZE, targetSize: 4,
+          imageShape: [dims.H, dims.W, 1], featureSize: dims.featureSize, targetSize: 4,
           targetMode: "bbox", numClasses: 1, classCount: 1, classNames: ["ship"],
           seed: seed, trainCount: 0, valCount: 0, testCount: 0,
           xTrain: [], yTrain: [], xVal: [], yVal: [], xTest: [], yTest: [],
@@ -118,7 +129,7 @@
       return {
         schemaId: "sar_ship_detection", datasetModuleId: "hrsid_ship",
         taskRecipeId: "detection_single_box", mode: "detection",
-        imageShape: [IMAGE_H, IMAGE_W, 1], featureSize: FEATURE_SIZE, targetSize: 4,
+        imageShape: [dims.H, dims.W, 1], featureSize: dims.featureSize, targetSize: 4,
         targetMode: "bbox", numClasses: 1, classCount: 1, classNames: ["ship"],
         seed: seed, trainCount: 0, valCount: 0, testCount: 0,
         xTrain: [], yTrain: [], xVal: [], yVal: [], xTest: [], yTest: [],
@@ -147,7 +158,7 @@
     return {
       schemaId: "sar_ship_detection", datasetModuleId: "hrsid_ship",
       taskRecipeId: "detection_single_box", mode: "detection",
-      imageShape: [IMAGE_H, IMAGE_W, 1], featureSize: FEATURE_SIZE, targetSize: 4,
+      imageShape: [dims.H, dims.W, 1], featureSize: dims.featureSize, targetSize: 4,
       targetMode: "bbox", numClasses: 1, classCount: 1, classNames: ["ship"],
       seed: seed, splitConfig: { mode: "random", train: trainFrac, val: valFrac, test: 1 - trainFrac - valFrac },
       trainCount: nTrain, valCount: nVal, testCount: nTest,
@@ -189,6 +200,9 @@
 
     var coreRenderer = (typeof window !== "undefined" && window.OSCImageRenderCore) || null;
     if (!coreRenderer) return;
+    var dims = _dimsFromBundle(data);
+    var imgW = dims.W;
+    var imgH = dims.H;
 
     // Resolve which sample pool(s) to show. When the Dataset tab passes a built
     // dataset payload (deps.datasetData has xTrain/yTrain/...), split into
@@ -213,7 +227,7 @@
     var allCells = [];
 
     function drawCellInto(canvas, bboxOverlay, pixels, bbox) {
-      coreRenderer.drawImageToCanvas(canvas.getContext("2d"), pixels, IMAGE_W, IMAGE_H);
+      coreRenderer.drawImageToCanvas(canvas.getContext("2d"), pixels, imgW, imgH);
       if (bbox && bboxOverlay) {
         bboxOverlay.style.left   = (bbox[0] * CELL) + "px";
         bboxOverlay.style.top    = (bbox[1] * CELL) + "px";
@@ -253,7 +267,7 @@
       for (var i = 0; i < n; i++) {
         var wrap = el("div", { style: "position:relative;width:" + CELL + "px;" });
         var canvas = document.createElement("canvas");
-        canvas.width = IMAGE_W; canvas.height = IMAGE_H;
+        canvas.width = imgW; canvas.height = imgH;
         canvas.style.cssText = "width:" + CELL + "px;height:" + CELL + "px;border:1px solid #334155;border-radius:3px;image-rendering:pixelated;display:block;";
         wrap.appendChild(canvas);
 
@@ -299,7 +313,7 @@
     mountEl.appendChild(masterBtn);
 
     mountEl.appendChild(el("div", { style: "font-size:11px;color:#64748b;margin-top:8px;" },
-      data.count + " SAR patches available (" + IMAGE_W + "x" + IMAGE_H + "), bbox: [x,y,w,h] normalized"));
+      data.count + " SAR patches available (" + imgW + "x" + imgH + "), bbox: [x,y,w,h] normalized"));
   }
 
   // Mean IoU for bounding boxes in [x, y, w, h] normalized format. The

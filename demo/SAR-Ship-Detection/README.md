@@ -65,13 +65,11 @@ The Evaluation tab reports four metrics for this demo. **`iou_mean` is the one t
 
 | Model | Loss | Params | Mean IoU ↑ | BBox MAE | BBox Bias |
 |---|---|---|---|---|---|
-| **CNN Detector** | **GIoU** | 548K | **0.308** | 0.235 | +0.013 |
-| CNN + Augmentation | MSE | 548K | 0.282 | **0.068** | -0.011 |
+| **CNN Detector** | **GIoU** | 548K | **0.292** | 0.249 | -0.001 |
+| CNN + Augmentation | MSE | 548K | 0.286 | **0.070** | -0.010 |
 | MLP Baseline | MSE | 1.07M | 0.212 | 0.103 | -0.001 |
 
-**The CNN with GIoU loss wins on Mean IoU (0.308) — 45% above the MLP baseline, 29% above the same CNN trained with MSE.** This is the platform feature most directly attacking the detection metric: GIoU loss optimizes box-overlap distance directly, instead of treating the bbox as four independent regression scalars the way MSE does. Notice MAE goes the *wrong* way under GIoU (0.235 vs 0.068 for MSE) — that's expected. GIoU is willing to accept higher per-coord error if it produces a box that overlaps the ship better, which is the only thing that matters for detection.
-
-The augmentation variant (still on MSE — see "Loss choice for the aug variant" below) gets 0.282 IoU, beating MLP by 33% and showing that paired image+bbox flips still pay off as a regularizer when the loss can't be GIoU.
+**Both CNN variants land near 0.29 Mean IoU — about 38% above the MLP baseline.** GIoU loss and paired flip augmentation are independent wins of roughly equal size on this task: GIoU targets box-overlap distance directly (so MAE goes the *wrong* way, 0.249 vs 0.070, because GIoU will gladly accept higher per-coord error for better overlap), augmentation 4×s the effective training set via paired image+bbox mirrors. Combining them (`giou` loss + paired flips) doesn't converge cleanly from random init — that needs the `giou_mse` hybrid loss the platform now exposes; see "Loss choice for the aug variant" below.
 
 ### Three load-bearing fixes that got real detection working
 

@@ -84,6 +84,7 @@
     if (v === "bce" || v === "binarycrossentropy") return "binaryCrossentropy";
     if (v === "wasserstein" || v === "wgan") return "wasserstein";
     if (v === "iou" || v === "giou") return "giouLoss";
+    if (v === "giou_mse" || v === "mse_giou") return "giouMseLoss";
     if (v === "none") return "none";
     if (v === "use_global") return String(resolvedGlobal || "meanSquaredError");
     return String(resolvedGlobal || "meanSquaredError");
@@ -147,6 +148,18 @@
   function scalarLossByType(tf, pred, truth, type) {
     if (type === "meanAbsoluteError") return tf.mean(tf.abs(tf.sub(pred, truth)));
     if (type === "giouLoss") return _giouLoss(tf, pred, truth);
+    if (type === "giouMseLoss") {
+      // Hybrid: 0.5 * MSE + 0.5 * GIoU. MSE provides a smooth gradient
+      // in the early-training no-overlap regime where pure GIoU is
+      // flat (CNN+Aug + GIoU got stuck there at loss ~0.96). GIoU
+      // takes over once boxes begin overlapping. Standard recipe for
+      // single-stage detectors that need to converge from random init.
+      return tf.tidy(function () {
+        var mse = tf.mean(tf.square(tf.sub(pred, truth)));
+        var giou = _giouLoss(tf, pred, truth);
+        return tf.add(tf.mul(tf.scalar(0.5), mse), tf.mul(tf.scalar(0.5), giou));
+      });
+    }
     // Wasserstein: loss = -mean(truth * pred). truth=1 for real, truth=-1 for fake
     // D wants to maximize mean(D(real)) - mean(D(fake)) → minimize -mean(truth * pred)
     // G wants to minimize -mean(D(fake)) → truth=1 for G step
