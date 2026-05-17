@@ -38,6 +38,15 @@
         // without inferring from upstream hidden width.
         if (o && Number(o.featureSize) > 0) entry.featureSize = Number(o.featureSize);
         if (o && Number(o.numClasses) > 0) entry.numClasses = Number(o.numClasses);
+        // Preserve bbox-format declarations. Bbox-shaped 4-vec heads
+        // need to tell GIoU-family losses how to interpret their slots
+        // (xywh vs xyxy); the Output dropdown uses this to gate the
+        // option list. Only accept recognized values so a bad string
+        // can't silently unlock the loss.
+        if (o && o.bboxFormat) {
+          var _bf = String(o.bboxFormat).trim().toLowerCase();
+          if (_bf === "xywh" || _bf === "xyxy") entry.bboxFormat = _bf;
+        }
         return entry;
       })
       .filter(Boolean);
@@ -267,6 +276,14 @@
       var out = { key: String(o.key), headType: String(o.headType || "regression") };
       if (Number(o.featureSize) > 0) out.featureSize = Number(o.featureSize);
       if (Number(o.numClasses) > 0) out.numClasses = Number(o.numClasses);
+      // bboxFormat is consumed by the Output config dropdown's GIoU gating
+      // and by the training engine's GIoU loss. Only pass it through when
+      // the schema declared a recognized value; an unknown string would
+      // silently unlock GIoU without telling the loss what layout to use.
+      if (o.bboxFormat) {
+        var _fmt = String(o.bboxFormat).toLowerCase();
+        if (_fmt === "xywh" || _fmt === "xyxy") out.bboxFormat = _fmt;
+      }
       return out;
     });
   }

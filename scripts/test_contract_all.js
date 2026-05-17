@@ -44,6 +44,7 @@ const baseSuite = [
   "test_output_custom_revert_disconnects_input2.js",
   "test_giou_loss_gating.js",
   "test_giou_loss_build_guard.js",
+  "test_giou_bbox_format.js",
 ];
 
 function runOne(scriptName) {

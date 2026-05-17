@@ -1054,7 +1054,14 @@
           if (!_matchedOutKey) return false;
           var ht = String(_matchedOutKey.headType || headType || "").toLowerCase();
           var fs = Number(_matchedOutKey.featureSize || 0);
-          return ht === "regression" && fs === 4;
+          // bboxFormat must be declared by the schema. Without it we
+          // can't tell whether the 4-vec is (x,y,w,h) or (x0,y0,x1,y1),
+          // and GIoU would silently optimize the wrong geometry — see
+          // PR #86 review where Synthetic Detection's xyxy bbox got
+          // mis-interpreted as xywh.
+          var fmt = String(_matchedOutKey.bboxFormat || "").toLowerCase();
+          var formatOk = (fmt === "xywh" || fmt === "xyxy");
+          return ht === "regression" && fs === 4 && formatOk;
         })();
         var _lossOptions = [
           { value: "none", label: "None (passthrough)" },
@@ -1539,14 +1546,26 @@
           if (_matched.length && _matched[0].headType) {
             data.headType = _matched[0].headType;
           }
-          // If the previous loss assumed a 4-unit bbox head (giou*) and the
-          // new target is not a 4-unit regression head, downgrade to MSE so
-          // a stale loss can't cause a shape mismatch at compile/train time.
+          // Carry bboxFormat onto the node so the builder + training
+          // engine can resolve it at compile/train time without round
+          // tripping through the schema again.
+          if (_matched.length && _matched[0].bboxFormat) {
+            data.bboxFormat = String(_matched[0].bboxFormat).toLowerCase();
+          } else {
+            // New target doesn't declare a bbox format; clear any stale value.
+            delete data.bboxFormat;
+          }
+          // If the previous loss assumed a bbox head (giou*) and the new
+          // target either isn't a 4-unit regression head or doesn't
+          // declare a bboxFormat, downgrade to MSE so a stale loss
+          // can't silently optimize the wrong geometry.
           var _curLoss = String(data.loss || "").toLowerCase();
           if (_curLoss === "giou" || _curLoss === "iou" || _curLoss === "giou_mse" || _curLoss === "mse_giou") {
             var _fs = _matched.length ? Number(_matched[0].featureSize || 0) : 0;
             var _ht = _matched.length ? String(_matched[0].headType || "").toLowerCase() : "";
-            if (!(_ht === "regression" && _fs === 4)) {
+            var _fmt = _matched.length ? String(_matched[0].bboxFormat || "").toLowerCase() : "";
+            var _fmtOk = (_fmt === "xywh" || _fmt === "xyxy");
+            if (!(_ht === "regression" && _fs === 4 && _fmtOk)) {
               data.loss = "mse";
             }
           }

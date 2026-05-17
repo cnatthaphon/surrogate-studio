@@ -2204,6 +2204,19 @@
             matchWeight: headMatchWeight,
             phase: String(odata.phase || ""),
             graphLabelOutputIdx: _labelIdx,
+            bboxFormat: (function () {
+              // Bbox format is meaningful for GIoU-family losses only —
+              // _giouLoss in training_engine_core and the python mirror
+              // need to know whether the 4-vec is xywh or xyxy. Default
+              // to xywh for the SAR-Ship-style preset path; the schema
+              // is authoritative when available.
+              var _fmt = String(odata.bboxFormat || "").toLowerCase();
+              if (_fmt === "xywh" || _fmt === "xyxy") return _fmt;
+              var _norm = String(lossName || "").toLowerCase();
+              if (_norm === "giou" || _norm === "iou" ||
+                  _norm === "giou_mse" || _norm === "mse_giou") return "xywh";
+              return "";
+            })(),
           });
         });
         tensorById[id] = generated[0];

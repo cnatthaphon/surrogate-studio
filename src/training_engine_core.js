@@ -91,7 +91,7 @@
   }
 
   // GIoU loss for bounding-box regression. Operates on tensors shaped
-  // [B, 4] interpreted as (x, y, w, h) in normalized [0, 1] coords:
+  // [B, 4] in normalized [0, 1] coords:
   //
   //   GIoU = IoU - (C - U) / C
   //
@@ -103,24 +103,43 @@
   // gradient pulling them toward each other, instead of MSE's vanishing
   // gradient on the per-coord deltas. This is the standard loss in
   // YOLOv5+/DETR/RetinaNet for the same reason.
-  function _giouLoss(tf, pred, truth) {
+  //
+  // `format` selects the 4-vec layout:
+  //   "xywh" — slices are (x, y, w, h), corners derived as x+w, y+h
+  //   "xyxy" — slices are (x0, y0, x1, y1), used as corners directly
+  // The default is xywh for backward compatibility with the SAR-Ship
+  // preset path, but the head config that ships into makeHeadLoss
+  // resolves the format from schema metadata so x0y0x1y1 schemas
+  // (e.g. synthetic_detection) compute correct geometry.
+  function _giouLoss(tf, pred, truth, format) {
     return tf.tidy(function () {
       var EPS = 1e-7;
+      var fmt = String(format || "xywh").toLowerCase();
       var px = pred.slice([0, 0], [-1, 1]);
       var py = pred.slice([0, 1], [-1, 1]);
-      var pw = pred.slice([0, 2], [-1, 1]);
-      var ph = pred.slice([0, 3], [-1, 1]);
+      var p2 = pred.slice([0, 2], [-1, 1]);
+      var p3 = pred.slice([0, 3], [-1, 1]);
       var tx = truth.slice([0, 0], [-1, 1]);
       var ty = truth.slice([0, 1], [-1, 1]);
-      var tw = truth.slice([0, 2], [-1, 1]);
-      var th = truth.slice([0, 3], [-1, 1]);
-      // Convert xywh → corner form, allowing non-clamped values so the
-      // gradient through w/h stays smooth even when the network predicts
-      // tiny boxes.
-      var px2 = tf.add(px, pw);
-      var py2 = tf.add(py, ph);
-      var tx2 = tf.add(tx, tw);
-      var ty2 = tf.add(ty, th);
+      var t2 = truth.slice([0, 2], [-1, 1]);
+      var t3 = truth.slice([0, 3], [-1, 1]);
+      var px2, py2, tx2, ty2, pw, ph, tw, th;
+      if (fmt === "xyxy") {
+        px2 = p2; py2 = p3;
+        tx2 = t2; ty2 = t3;
+        pw = tf.sub(px2, px); ph = tf.sub(py2, py);
+        tw = tf.sub(tx2, tx); th = tf.sub(ty2, ty);
+      } else {
+        // xywh — convert to corner form, allowing non-clamped values so
+        // the gradient through w/h stays smooth even when the network
+        // predicts tiny boxes.
+        pw = p2; ph = p3;
+        tw = t2; th = t3;
+        px2 = tf.add(px, pw);
+        py2 = tf.add(py, ph);
+        tx2 = tf.add(tx, tw);
+        ty2 = tf.add(ty, th);
+      }
       var ix0 = tf.maximum(px, tx);
       var iy0 = tf.maximum(py, ty);
       var ix1 = tf.minimum(px2, tx2);
@@ -145,9 +164,10 @@
     });
   }
 
-  function scalarLossByType(tf, pred, truth, type) {
+  function scalarLossByType(tf, pred, truth, type, opts) {
+    var bboxFormat = (opts && opts.bboxFormat) || "xywh";
     if (type === "meanAbsoluteError") return tf.mean(tf.abs(tf.sub(pred, truth)));
-    if (type === "giouLoss") return _giouLoss(tf, pred, truth);
+    if (type === "giouLoss") return _giouLoss(tf, pred, truth, bboxFormat);
     if (type === "giouMseLoss") {
       // Hybrid: 0.5 * MSE + 0.5 * GIoU. MSE provides a smooth gradient
       // in the early-training no-overlap regime where pure GIoU is
@@ -156,7 +176,7 @@
       // single-stage detectors that need to converge from random init.
       return tf.tidy(function () {
         var mse = tf.mean(tf.square(tf.sub(pred, truth)));
-        var giou = _giouLoss(tf, pred, truth);
+        var giou = _giouLoss(tf, pred, truth, bboxFormat);
         return tf.add(tf.mul(tf.scalar(0.5), mse), tf.mul(tf.scalar(0.5), giou));
       });
     }
@@ -185,6 +205,8 @@
     var headWeight = Math.max(0, Number(head && head.matchWeight != null ? head.matchWeight : 1));
     var klBeta = Math.max(0, Number((head && head.beta) || 1e-3));
     var ht = String((head && head.headType) || "regression");
+    var bboxFormat = String((head && head.bboxFormat) || "xywh").toLowerCase();
+    if (bboxFormat !== "xywh" && bboxFormat !== "xyxy") bboxFormat = "xywh";
     // loss=none → passthrough, zero loss
     if (type === "none" || String(head && head.loss || "").toLowerCase() === "none") {
       return function () { return tf.scalar(0); };
@@ -214,7 +236,7 @@
           return tf.mul(tf.scalar(headWeight), ce);
         }
         // generic MSE/loss on full output (works for any dimension)
-        var l = scalarLossByType(tf, yPred, yTrue, type);
+        var l = scalarLossByType(tf, yPred, yTrue, type, { bboxFormat: bboxFormat });
         return tf.mul(tf.scalar(headWeight), l);
       });
     };

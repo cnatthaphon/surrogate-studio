@@ -3562,7 +3562,7 @@
     },
     model: {
       outputs: [
-        { key: "bbox", label: "Bounding box (x0,y0,x1,y1)", headType: "regression", featureSize: 4 },
+        { key: "bbox", label: "Bounding box (x0,y0,x1,y1)", headType: "regression", featureSize: 4, bboxFormat: "xyxy" },
         { key: "label", label: "Object class", headType: "classification" }
       ],
       params: [],
@@ -3704,7 +3704,7 @@
       splitDefaults: { mode: "random", train: 0.70, val: 0.15, test: 0.15 },
     },
     model: {
-      outputs: [{ key: "bbox", label: "Ship bounding box (x,y,w,h)", headType: "regression", featureSize: 4 }],
+      outputs: [{ key: "bbox", label: "Ship bounding box (x,y,w,h)", headType: "regression", featureSize: 4, bboxFormat: "xywh" }],
       params: [], presets: [],
       metadata: { featureNodes: { imageSource: [{ key: "pixel_values", label: "SAR pixel values (64x64)", featureSize: 4096, shape: [64, 64, 1] }], policy: { allowHistory: false, allowWindowHistory: false, allowParams: false, allowOneHot: false, allowImageSource: true }, palette: { items: _imagePaletteItems() } } },
     },

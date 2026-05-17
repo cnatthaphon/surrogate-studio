@@ -50,7 +50,7 @@ function lossValues(spec) {
   var runtime = makeRuntime("sar_ship_detection");
   var node = {
     id: 1, name: "output_layer",
-    data: { target: "bbox", targetType: "bbox", loss: "giou", headType: "regression" },
+    data: { target: "bbox", targetType: "bbox", loss: "giou", headType: "regression", bboxFormat: "xywh" },
     inputs: {}, outputs: {},
   };
   var spec = runtime.getNodeConfigSpec(node, "sar_ship_detection");
@@ -188,8 +188,8 @@ function lossValues(spec) {
     getCurrentSchemaId: function () { return "fake_two_bbox"; },
     getOutputKeys: function () {
       return [
-        { key: "bbox_a", label: "A", headType: "regression", featureSize: 4 },
-        { key: "bbox_b", label: "B", headType: "regression", featureSize: 4 },
+        { key: "bbox_a", label: "A", headType: "regression", featureSize: 4, bboxFormat: "xywh" },
+        { key: "bbox_b", label: "B", headType: "regression", featureSize: 4, bboxFormat: "xywh" },
       ];
     },
     normalizeOutputTargetsList: function (raw, current) {

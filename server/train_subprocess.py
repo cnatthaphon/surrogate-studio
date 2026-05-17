@@ -399,13 +399,30 @@ def main():
                     + str(hc.get("id") or hc.get("nodeId") or "?")
                     + "' resolved to " + str(_hu) + " units. Use 'mse' for non-bbox heads."
                 )
+            # bboxFormat selects the layout of the [B,4] vec the loss
+            # consumes. The JS-side builder pushes this onto headConfigs
+            # from schema metadata (model_builder_core.js / model_graph_core.js).
+            # Default to xywh for backward compat with the SAR-Ship
+            # preset path. Without a format the GIoU loss could silently
+            # optimize the wrong geometry on xyxy schemas.
+            _bbox_format = str(hc.get("bboxFormat", "xywh") or "xywh").lower()
+            if _bbox_format not in ("xywh", "xyxy"):
+                _bbox_format = "xywh"
             _use_hybrid = hl in ("giou_mse", "mse_giou")
-            def _giou_loss(p, t, _use_hybrid=_use_hybrid):
+            def _giou_loss(p, t, _use_hybrid=_use_hybrid, _fmt=_bbox_format):
                 eps = 1e-7
-                px = p[:, 0:1]; py = p[:, 1:2]; pw = p[:, 2:3]; ph = p[:, 3:4]
-                tx = t[:, 0:1]; ty = t[:, 1:2]; tw = t[:, 2:3]; th = t[:, 3:4]
-                px2 = px + pw; py2 = py + ph
-                tx2 = tx + tw; ty2 = ty + th
+                px = p[:, 0:1]; py = p[:, 1:2]; p2 = p[:, 2:3]; p3 = p[:, 3:4]
+                tx = t[:, 0:1]; ty = t[:, 1:2]; t2 = t[:, 2:3]; t3 = t[:, 3:4]
+                if _fmt == "xyxy":
+                    px2 = p2; py2 = p3
+                    tx2 = t2; ty2 = t3
+                    pw = px2 - px; ph = py2 - py
+                    tw = tx2 - tx; th = ty2 - ty
+                else:
+                    pw = p2; ph = p3
+                    tw = t2; th = t3
+                    px2 = px + pw; py2 = py + ph
+                    tx2 = tx + tw; ty2 = ty + th
                 ix0 = torch.maximum(px, tx); iy0 = torch.maximum(py, ty)
                 ix1 = torch.minimum(px2, tx2); iy1 = torch.minimum(py2, ty2)
                 iw = torch.clamp(ix1 - ix0, min=0.0)
