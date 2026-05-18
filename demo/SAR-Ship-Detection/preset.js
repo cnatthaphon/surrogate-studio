@@ -48,7 +48,7 @@
     var flat    = N(d, "flatten",      {},                                890, 300);
     var d1      = N(d, "dense",        { units: 128, activation: "relu" }, 1060, 300);
     var drop    = N(d, "dropout",      { rate: 0.3 },                    1230, 300);
-    var out     = N(d, "output",       { target: "bbox", targetType: "bbox", headType: "regression", matchWeight: 1, activation: "sigmoid", loss: "giou" }, 1400, 300);
+    var out     = N(d, "output",       { target: "bbox", targetType: "bbox", headType: "regression", matchWeight: 1, activation: "sigmoid", loss: "giou", bboxFormat: "xywh" }, 1400, 300);
 
     C(d, imgSrc, reshape); C(d, reshape, c1); C(d, c1, c2); C(d, c2, c3);
     C(d, c3, flat); C(d, flat, d1); C(d, d1, drop); C(d, drop, out);
@@ -79,7 +79,7 @@
     var flat    = N(d, "flatten",         {},                                                                              1070, 200);
     var d1      = N(d, "dense",           { units: 128, activation: "relu" },                                              1240, 200);
     var drop    = N(d, "dropout",         { rate: 0.3 },                                                                   1410, 200);
-    var out     = N(d, "output",          { target: "bbox", targetType: "bbox", headType: "regression", matchWeight: 1, activation: "sigmoid", loss: "giou_mse" }, 1580, 200);
+    var out     = N(d, "output",          { target: "bbox", targetType: "bbox", headType: "regression", matchWeight: 1, activation: "sigmoid", loss: "giou_mse", bboxFormat: "xywh" }, 1580, 200);
     // Target path: dataset bbox → augment_bbox → output.input_2
     var tgtSrc  = N(d, "target_source",   { targetKey: "bbox", featureSize: 4 },                                           380, 450);
     var augBox  = N(d, "augment_bbox",    { hflipProb: 0.5, vflipProb: 0.5, seedLink: "sar_aug", format: "xywh", imageWidth: 1, imageHeight: 1 }, 1240, 450);
