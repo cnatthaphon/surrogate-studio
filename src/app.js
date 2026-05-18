@@ -2900,14 +2900,30 @@
   // and 1 (data only) to mirror what `addOutputNode` originally built. Drawflow
   // doesn't recompute ports on data change, so we have to call
   // addNodeInput/removeNodeInput explicitly. Mirrors `setConcatInputCount`.
-  function syncOutputNodeInputCount(editor, nodeId, targetValue) {
+  //
+  // prevTargetValue captures what the node carried before the target
+  // change; without it we can't distinguish "user actually changed
+  // target" from "form replayed every key on submit," and the latter
+  // would silently delete legitimately wired input_2 connections
+  // (augment_bbox / augment_mask / target_source) every time the
+  // user edits an unrelated field like loss or matchWeight.
+  function syncOutputNodeInputCount(editor, nodeId, prevTargetValue, newTargetValue) {
     const hit = getDrawflowNodeById(editor, nodeId);
     if (!hit || !hit.node || hit.node.name !== "output_layer") return false;
     const node = hit.node;
-    const want = (String(targetValue || "").toLowerCase() === "custom") ? 2 : 1;
+    const prev = String(prevTargetValue || "").toLowerCase();
+    const next = String(newTargetValue || "").toLowerCase();
+    if (prev === next) return true;
+    const want = (next === "custom") ? 2 : 1;
     const inputs = node.inputs || {};
     const current = Object.keys(inputs).length || 1;
     if (current === want) return true;
+    // Shrinking is only safe when we're leaving the custom sentinel —
+    // that's the only case where input_2 was defined to be a
+    // user-wired target tensor that should disappear with the target.
+    // For any other change (digit → bbox, bbox → label, etc.) a wired
+    // input_2 is part of the schema's augment flow and must survive.
+    if (want < current && prev !== "custom") return true;
     if (typeof editor.addNodeInput === "function" && typeof editor.removeNodeInput === "function") {
       if (want > current) {
         for (let i = current + 1; i <= want; i += 1) editor.addNodeInput(String(nodeId));
@@ -2940,7 +2956,6 @@
           // upstream node so a follow-up export doesn't leak the stale edge.
           const conns = (node.inputs[k] && node.inputs[k].connections) || [];
           conns.slice().forEach((c) => {
-            const upstream = c && c.node != null ? node.inputs ? null : null : null;
             // Drawflow-shape graphs store the mirror under outputs[output_1].connections
             // on the upstream node. Without the editor instance we look it up via the
             // exported moduleData if available.
@@ -3025,6 +3040,10 @@
 
     if (k === "target" || k === "targetType") {
       const v = String(rawValue || "").trim().toLowerCase();
+      // Snapshot the prior target before we mutate `data` so the
+      // resync helper can compare and skip when this is just a
+      // form-replay of the same target.
+      const prevTarget = String((node.data && (node.data.targetType || node.data.target)) || "");
       // "custom" is a sentinel — target tensor arrives via the node's
       // second input port rather than from the schema-registered output
       // keys. It must not be passed through `writeOutputTargetsToNodeData`,
@@ -3040,7 +3059,7 @@
         const updated = writeOutputTargetsToNodeData(data, [v], state && state.modelSchemaId);
         Object.keys(updated).forEach(function (kk) { data[kk] = updated[kk]; });
       }
-      syncOutputNodeInputCount(editor, hit.id, data.targetType);
+      syncOutputNodeInputCount(editor, hit.id, prevTarget, data.targetType);
     } else if (k === "targetsCsv") {
       const updated = writeOutputTargetsToNodeData(data, String(rawValue || ""), state && state.modelSchemaId);
       Object.keys(updated).forEach(function (kk) { data[kk] = updated[kk]; });

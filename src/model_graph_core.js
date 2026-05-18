@@ -1706,15 +1706,23 @@
       // the graph (the legacy node-object call shape leaves that to the
       // caller and just returns `{ handled, data }`).
       if (editor) {
+        // Capture the prior target BEFORE updateNodeDataFromId overwrites
+        // node.data — syncOutputNodeInputCount needs both old and new to
+        // decide whether a port resync is even warranted.
+        var prevTargetForSync = String((node.data && (node.data.targetType || node.data.target)) || "");
         try { editor.updateNodeDataFromId(String(nodeId), data); }
         catch (e) { node.data = data; }
         // For `output_layer` with target `custom`, the node should expose a
         // second input port (so the user can wire a target tensor in); any
         // other target keeps it at one input. `addOutputNode` sets this at
         // creation time, but mid-life target switches need an explicit
-        // resync via Drawflow's port API.
+        // resync via Drawflow's port API. Skip the resync entirely when
+        // the form replays an unchanged targetType — a stable schema
+        // target with a legitimately wired input_2 (e.g. paired
+        // target_source → augment_bbox → output.input_2) must survive an
+        // edit to loss/matchWeight that re-applies every config key.
         if ((k === "target" || k === "targetType") && node.name === "output_layer") {
-          syncOutputNodeInputCount(editor, nodeId, data.targetType);
+          syncOutputNodeInputCount(editor, nodeId, prevTargetForSync, data.targetType);
         }
       } else {
         node.data = data;
@@ -1722,18 +1730,33 @@
       return { handled: true, data: data };
     }
 
-    function syncOutputNodeInputCount(editor, nodeId, targetValue) {
+    function syncOutputNodeInputCount(editor, nodeId, prevTargetValue, newTargetValue) {
       if (!editor || typeof editor.addNodeInput !== "function" || typeof editor.removeNodeInput !== "function") return false;
       var bag = getGraphModuleData(editor);
       var node = bag[String(nodeId)];
       if (!node || node.name !== "output_layer") return false;
-      var want = (String(targetValue || "").toLowerCase() === "custom") ? 2 : 1;
+      var prev = String(prevTargetValue || "").toLowerCase();
+      var next = String(newTargetValue || "").toLowerCase();
+      // No-op when the target didn't actually change. Output config
+      // forms in model_tab.js reapply every key on submit, including
+      // an unchanged targetType — running the port resync there
+      // would tear down a legitimately wired input_2 (augment_bbox /
+      // augment_mask / target_source flows) that's part of the
+      // schema graph rather than a stale custom-target leftover.
+      if (prev === next) return true;
+      var want = (next === "custom") ? 2 : 1;
       var inputs = node.inputs || {};
       var current = Object.keys(inputs).length || 1;
       if (current === want) return true;
       if (want > current) {
         for (var i = current + 1; i <= want; i += 1) editor.addNodeInput(String(nodeId));
       } else {
+        // Shrinking the port count is only safe when we're leaving the
+        // custom sentinel — that's the only case where input_2 was
+        // *defined to be* the user-wired target tensor. For any other
+        // target change (digit → bbox, bbox → label, etc.) a wired
+        // input_2 belongs to a paired augment flow and must survive.
+        if (prev !== "custom") return true;
         for (var j = current; j > want; j -= 1) {
           var portKey = "input_" + String(j);
           var conns = (inputs[portKey] && inputs[portKey].connections) || [];

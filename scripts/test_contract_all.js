@@ -46,6 +46,7 @@ const baseSuite = [
   "test_giou_loss_build_guard.js",
   "test_giou_bbox_format.js",
   "test_dataset_module_split_clamp.js",
+  "test_output_target_replay_preserves_input2.js",
 ];
 
 function runOne(scriptName) {
