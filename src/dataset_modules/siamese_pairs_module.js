@@ -103,10 +103,21 @@
     var seed = clampInt(c.seed, 0, 2147483647) || 42;
     var rng = createRng(seed);
     var totalCount = clampInt(c.totalCount || c.sourceTotalExamples || 1000, 50, 20000);
-    var trainFrac = Number(c.trainFrac) || 0.7;
-    var valFrac = Number(c.valFrac) || 0.15;
+    var trainFrac = Math.max(0, Math.min(1, Number(c.trainFrac) || 0.7));
+    var valFrac   = Math.max(0, Math.min(1, Number(c.valFrac)   || 0.15));
+    // Same split clamp pattern as hrsid_ship_module: pathological
+    // configs (trainFrac+valFrac > 1) would make splitConfig.test go
+    // negative and over-allocate. Clamp so counts always sum to
+    // totalCount.
+    if (trainFrac + valFrac > 0.99) {
+      var s = trainFrac + valFrac;
+      trainFrac = trainFrac / s * 0.99;
+      valFrac   = valFrac   / s * 0.99;
+    }
     var nTrain = Math.max(1, Math.round(totalCount * trainFrac));
-    var nVal = Math.max(1, Math.round(totalCount * valFrac));
+    var nVal   = Math.max(1, Math.round(totalCount * valFrac));
+    if (nTrain + nVal >= totalCount) nVal = Math.max(1, totalCount - nTrain - 1);
+    if (nTrain + nVal >= totalCount) nTrain = Math.max(1, totalCount - nVal - 1);
     var nTest = Math.max(1, totalCount - nTrain - nVal);
 
     // Pre-generate a bank of images per class

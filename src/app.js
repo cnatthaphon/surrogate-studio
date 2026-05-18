@@ -2895,6 +2895,90 @@
     return { id: String(nodeId), node: moduleData[nodeId] };
   }
 
+  // When an output_layer's target switches between "custom" and a normal
+  // schema target, its input port count needs to flip between 2 (data + target)
+  // and 1 (data only) to mirror what `addOutputNode` originally built. Drawflow
+  // doesn't recompute ports on data change, so we have to call
+  // addNodeInput/removeNodeInput explicitly. Mirrors `setConcatInputCount`.
+  //
+  // prevTargetValue captures what the node carried before the target
+  // change; without it we can't distinguish "user actually changed
+  // target" from "form replayed every key on submit," and the latter
+  // would silently delete legitimately wired input_2 connections
+  // (augment_bbox / augment_mask / target_source) every time the
+  // user edits an unrelated field like loss or matchWeight.
+  function syncOutputNodeInputCount(editor, nodeId, prevTargetValue, newTargetValue) {
+    const hit = getDrawflowNodeById(editor, nodeId);
+    if (!hit || !hit.node || hit.node.name !== "output_layer") return false;
+    const node = hit.node;
+    const prev = String(prevTargetValue || "").toLowerCase();
+    const next = String(newTargetValue || "").toLowerCase();
+    if (prev === next) return true;
+    const want = (next === "custom") ? 2 : 1;
+    const inputs = node.inputs || {};
+    const current = Object.keys(inputs).length || 1;
+    if (current === want) return true;
+    // Shrinking is only safe when we're leaving the custom sentinel —
+    // that's the only case where input_2 was defined to be a
+    // user-wired target tensor that should disappear with the target.
+    // For any other change (digit → bbox, bbox → label, etc.) a wired
+    // input_2 is part of the schema's augment flow and must survive.
+    if (want < current && prev !== "custom") return true;
+    if (typeof editor.addNodeInput === "function" && typeof editor.removeNodeInput === "function") {
+      if (want > current) {
+        for (let i = current + 1; i <= want; i += 1) editor.addNodeInput(String(nodeId));
+      } else {
+        for (let i = current; i > want; i -= 1) {
+          const k = "input_" + String(i);
+          // Leaving custom: force-disconnect any wired input. Keeping the
+          // connection around routes a stale target tensor into the model
+          // builder, which then treats it as graph labels even though the
+          // node is now on a normal schema target.
+          const conns = (inputs[k] && inputs[k].connections) || [];
+          if (conns.length && typeof editor.removeSingleConnection === "function") {
+            conns.slice().forEach((c) => {
+              try {
+                editor.removeSingleConnection(String(c.node), String(nodeId), String(c.output || "output_1"), k);
+              } catch (e) { /* ignore */ }
+            });
+          }
+          editor.removeNodeInput(String(nodeId), k);
+        }
+      }
+    } else {
+      if (!node.inputs) node.inputs = {};
+      if (want > current) {
+        for (let i = current + 1; i <= want; i += 1) node.inputs["input_" + String(i)] = { connections: [] };
+      } else {
+        for (let i = current; i > want; i -= 1) {
+          const k = "input_" + String(i);
+          // Mirror the editor branch: also clear the back-references on the
+          // upstream node so a follow-up export doesn't leak the stale edge.
+          const conns = (node.inputs[k] && node.inputs[k].connections) || [];
+          conns.slice().forEach((c) => {
+            // Drawflow-shape graphs store the mirror under outputs[output_1].connections
+            // on the upstream node. Without the editor instance we look it up via the
+            // exported moduleData if available.
+            try {
+              const exported = (typeof editor.export === "function") ? editor.export() : null;
+              const md = exported && exported.drawflow && exported.drawflow.Home && exported.drawflow.Home.data;
+              const upNode = md && c && md[String(c.node)];
+              const port = String(c.output || "output_1");
+              const outConns = upNode && upNode.outputs && upNode.outputs[port] && upNode.outputs[port].connections;
+              if (outConns && outConns.length) {
+                upNode.outputs[port].connections = outConns.filter(function (oc) {
+                  return !(String(oc.node) === String(nodeId) && String(oc.input) === k);
+                });
+              }
+            } catch (e) { /* ignore */ }
+          });
+          delete node.inputs[k];
+        }
+      }
+    }
+    return true;
+  }
+
   function setConcatInputCount(editor, nodeId, desiredCount) {
     const hit = getDrawflowNodeById(editor, nodeId);
     if (!hit || !hit.node || hit.node.name !== "concat_block") return false;
@@ -2955,10 +3039,27 @@
     const k = String(key || "");
 
     if (k === "target" || k === "targetType") {
-      const v = String(rawValue || "x");
-      const target = (v === "xv" || v === "v" || v === "params" || v === "traj") ? v : "x";
-      const updated = writeOutputTargetsToNodeData(data, [target], state && state.modelSchemaId);
-      Object.keys(updated).forEach(function (kk) { data[kk] = updated[kk]; });
+      const v = String(rawValue || "").trim().toLowerCase();
+      // Snapshot the prior target before we mutate `data` so the
+      // resync helper can compare and skip when this is just a
+      // form-replay of the same target.
+      const prevTarget = String((node.data && (node.data.targetType || node.data.target)) || "");
+      // "custom" is a sentinel — target tensor arrives via the node's
+      // second input port rather than from the schema-registered output
+      // keys. It must not be passed through `writeOutputTargetsToNodeData`,
+      // which would filter it out as not-in-schema and fall back to a
+      // default target. Also flip the input port count to 2 so the user
+      // actually has a port to wire the custom target into.
+      if (v === "custom") {
+        data.target = "custom";
+        data.targetType = "custom";
+        data.targets = ["custom"];
+        data.targetsCsv = "custom";
+      } else {
+        const updated = writeOutputTargetsToNodeData(data, [v], state && state.modelSchemaId);
+        Object.keys(updated).forEach(function (kk) { data[kk] = updated[kk]; });
+      }
+      syncOutputNodeInputCount(editor, hit.id, prevTarget, data.targetType);
     } else if (k === "targetsCsv") {
       const updated = writeOutputTargetsToNodeData(data, String(rawValue || ""), state && state.modelSchemaId);
       Object.keys(updated).forEach(function (kk) { data[kk] = updated[kk]; });

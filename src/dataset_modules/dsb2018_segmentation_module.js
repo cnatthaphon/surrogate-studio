@@ -128,10 +128,21 @@
       var tmp = indices[si]; indices[si] = indices[sj]; indices[sj] = tmp;
     }
 
-    var trainFrac = Number(c.trainFrac) || 0.7;
-    var valFrac = Number(c.valFrac) || 0.15;
+    var trainFrac = Math.max(0, Math.min(1, Number(c.trainFrac) || 0.7));
+    var valFrac   = Math.max(0, Math.min(1, Number(c.valFrac)   || 0.15));
+    // Pathological configs (trainFrac+valFrac > 1) would over-allocate
+    // past the sample pool and slice undefined entries into xTest/yTest.
+    // Mirror the clamp from hrsid_ship_module so counts always sum to
+    // data.count and splitConfig.test never goes negative.
+    if (trainFrac + valFrac > 0.99) {
+      var s = trainFrac + valFrac;
+      trainFrac = trainFrac / s * 0.99;
+      valFrac   = valFrac   / s * 0.99;
+    }
     var nTrain = Math.max(1, Math.round(data.count * trainFrac));
-    var nVal = Math.max(1, Math.round(data.count * valFrac));
+    var nVal   = Math.max(1, Math.round(data.count * valFrac));
+    if (nTrain + nVal >= data.count) nVal = Math.max(1, data.count - nTrain - 1);
+    if (nTrain + nVal >= data.count) nTrain = Math.max(1, data.count - nVal - 1);
     var nTest = Math.max(1, data.count - nTrain - nVal);
 
     var xTrain = [], yTrain = [], xVal = [], yVal = [], xTest = [], yTest = [];

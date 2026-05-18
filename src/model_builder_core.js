@@ -145,6 +145,17 @@
     return spec ? String(spec.headType || "regression") : "regression";
   }
 
+  // helper: look up bboxFormat for a target key from allowedOutputKeys.
+  // Only returns a value when the schema explicitly declared one ("xywh"
+  // or "xyxy") — anything else returns "" so the GIoU gate can refuse
+  // ambiguous heads instead of silently picking a default layout.
+  function _lookupBboxFormat(target, allowedOutputKeys) {
+    var spec = _lookupOutputSpec(target, allowedOutputKeys);
+    if (!spec || !spec.bboxFormat) return "";
+    var f = String(spec.bboxFormat).toLowerCase();
+    return (f === "xywh" || f === "xyxy") ? f : "";
+  }
+
   function outputTargetsFromNodeData(data, allowedKeys, fallbackTarget) {
     var d = data || {};
     // read single target from node — no multi-target, no CSV
@@ -2098,7 +2109,13 @@
           _phaseSwitchConfigs.push({ nodeId: id, activePhase: String((node.data && node.data.activePhase) || "") });
         }
         if (node.name === "output_layer") {
-          // Output can have 2 inputs: data (input_1) + label source (input_2)
+          // Output can have 2 inputs: data (input_1) + label source (input_2).
+          // input_2 is legitimately used by paired augmentation
+          // (target_source → augment_bbox/mask/label → output.input_2) on
+          // schema targets, not just "custom". The UI is responsible for
+          // tearing down a stale input_2 connection when the user leaves
+          // the custom target — see syncOutputNodeInputCount in
+          // src/app.js and src/model_graph_core.js.
           inTensor = incomingTensors[0];
           if (incomingTensors.length > 1 && incomingTensors[1]) {
             _headLabelTensors[String(id)] = incomingTensors[1];
@@ -2151,9 +2168,42 @@
             units = targetUnitsFromMode(target, paramsSelect, odata, ht, upstreamUnits);
             var normalizedLoss = String(lossName || "").trim().toLowerCase();
             if (normalizedLoss === "wgan") normalizedLoss = "wasserstein";
+            // GIoU losses operate on 4-vector bbox tensors (xywh / xyxy).
+            // Catching a misconfigured head here surfaces the bug at build
+            // time instead of as an opaque shape mismatch inside the loss
+            // tensor op. UI dropdown gating prevents this for new
+            // configs; this guard catches imported/legacy presets and
+            // hand-edited graphs.
+            if (normalizedLoss === "giou" || normalizedLoss === "iou" ||
+                normalizedLoss === "giou_mse" || normalizedLoss === "mse_giou") {
+              if (units !== 4) {
+                throw new Error("GIoU loss requires a 4-unit (xywh/xyxy) regression head, but target '" + target + "' resolved to " + units + " units. Use 'mse' for non-bbox heads.");
+              }
+              // bboxFormat must be explicit. Without it the JS-side
+              // loss defaults to xywh while the python server rejects
+              // the empty value — failing here keeps the two runtimes
+              // in agreement. Custom targets carry no schema entry
+              // and therefore no format, which is why they're hidden
+              // from the loss dropdown in model_graph_core.js.
+              var _odFmt = String(odata.bboxFormat || "").toLowerCase();
+              var _schemaFmt = _lookupBboxFormat(target, allowedOutputKeys);
+              var _resolvedFmt = (_odFmt === "xywh" || _odFmt === "xyxy") ? _odFmt : _schemaFmt;
+              if (_resolvedFmt !== "xywh" && _resolvedFmt !== "xyxy") {
+                throw new Error("GIoU loss requires bboxFormat 'xywh' or 'xyxy' on the head, but target '" + target + "' has no declared format. Set bboxFormat on the schema output (see sar_ship_detection / synthetic_detection), or pick a non-GIoU loss.");
+              }
+            }
             act = (normalizedLoss === "wasserstein")
               ? "linear"
               : ((ht === "classification" && units > 1) ? "softmax" : "linear");
+            // Preset-level override: when an Output node declares an explicit
+            // activation (e.g. `sigmoid` for normalized [0,1] regression like
+            // bbox coords or 0/1 masks), use it. Without this, regression
+            // heads default to linear and predictions can collapse below 0
+            // for normalized targets — see SAR-Ship Detection, where linear
+            // output + 210 patches drove every bbox prediction toward
+            // (0, 0, neg, neg), producing zero-area boxes and IoU = 0.
+            var explicitAct = String(odata.activation || "").trim().toLowerCase();
+            if (explicitAct && explicitAct !== "auto") act = explicitAct;
             if (!hasExplicitUnits && upstreamUnits === units && act === "linear") {
               outTensors.push(inForHead);
               generated.push(inForHead);
@@ -2178,6 +2228,21 @@
             matchWeight: headMatchWeight,
             phase: String(odata.phase || ""),
             graphLabelOutputIdx: _labelIdx,
+            bboxFormat: (function () {
+              // Bbox format is meaningful for GIoU-family losses only —
+              // _giouLoss in training_engine_core and the python mirror
+              // need to know whether the 4-vec is xywh or xyxy. Prefer
+              // the value already stored on the node (applyNodeConfigValue
+              // copies it from the schema when the user picks a target).
+              // Fall back to a schema lookup so static preset graphs that
+              // never went through the config panel still get the right
+              // format. The fallback is empty — never silently "xywh" —
+              // so the build/server-side guards can reject heads that
+              // don't have an explicit format.
+              var _fmt = String(odata.bboxFormat || "").toLowerCase();
+              if (_fmt === "xywh" || _fmt === "xyxy") return _fmt;
+              return _lookupBboxFormat(target, allowedOutputKeys);
+            })(),
           });
         });
         tensorById[id] = generated[0];

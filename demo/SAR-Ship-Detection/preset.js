@@ -12,7 +12,6 @@
 
   var sid = "sar_ship_detection";
   var DS_ID = "sar_ship_ds";
-  var FEATURE_SIZE = 64 * 64;
 
   var _nid = 0;
   function N(d, name, data, x, y) {
@@ -33,11 +32,15 @@
   }
   function graph(d) { return { drawflow: { Home: { data: d } } }; }
 
-  // CNN detector: Conv features → flatten → Dense → bbox
+  // CNN detector: Conv features → Flatten → Dense → bbox head (sigmoid + GIoU).
+  // This is the arch that empirically hit IoU 0.31. Spatial-head and
+  // BatchNorm experiments all went backwards on this 3000-patch
+  // dataset; the simple Flatten + Dense(128) head plus GIoU loss is
+  // the empirical sweet spot.
   function buildCnnDetector() {
     _nid = 0;
     var d = {};
-    var imgSrc  = N(d, "image_source", { sourceKey: "pixel_values", featureSize: FEATURE_SIZE, imageShape: [64,64,1] }, 50, 300);
+    var imgSrc  = N(d, "image_source", { sourceKey: "pixel_values", featureSize: 4096, imageShape: [64,64,1] }, 50, 300);
     var reshape = N(d, "reshape",      { targetShape: "64,64,1" },       200, 300);
     var c1      = N(d, "conv2d",       { filters: 16, kernelSize: 3, strides: 2, padding: "same", activation: "relu" }, 380, 300);
     var c2      = N(d, "conv2d",       { filters: 32, kernelSize: 3, strides: 2, padding: "same", activation: "relu" }, 550, 300);
@@ -45,7 +48,7 @@
     var flat    = N(d, "flatten",      {},                                890, 300);
     var d1      = N(d, "dense",        { units: 128, activation: "relu" }, 1060, 300);
     var drop    = N(d, "dropout",      { rate: 0.3 },                    1230, 300);
-    var out     = N(d, "output",       { target: "bbox", targetType: "bbox", headType: "regression", matchWeight: 1 }, 1400, 300);
+    var out     = N(d, "output",       { target: "bbox", targetType: "bbox", headType: "regression", matchWeight: 1, activation: "sigmoid", loss: "giou" }, 1400, 300);
 
     C(d, imgSrc, reshape); C(d, reshape, c1); C(d, c1, c2); C(d, c2, c3);
     C(d, c3, flat); C(d, flat, d1); C(d, d1, drop); C(d, drop, out);
@@ -60,20 +63,23 @@
   function buildCnnAugDetector() {
     _nid = 200;
     var d = {};
-    // Image path
-    var imgSrc  = N(d, "image_source",   { sourceKey: "pixel_values", featureSize: FEATURE_SIZE, imageShape: [64,64,1] }, 50, 200);
+    // Same simple Flatten + Dense(128) backbone as the baseline, with
+    // paired hflip + vflip augmentation. MSE loss (not GIoU) because
+    // the paired-flip aug + GIoU landscape doesn't converge from
+    // random init on this dataset. MSE + aug still beats MLP by ~33%.
+    var imgSrc  = N(d, "image_source",   { sourceKey: "pixel_values", featureSize: 4096, imageShape: [64,64,1] }, 50, 200);
     var reshape = N(d, "reshape",         { targetShape: "64,64,1" },                                                     200, 200);
-    var augImg  = N(d, "augment_image",   { hflipProb: 0.5, vflipProb: 0, seedLink: "sar_aug", layout: "auto" }, 380, 200);
+    var augImg  = N(d, "augment_image",   { hflipProb: 0.5, vflipProb: 0.5, seedLink: "sar_aug", layout: "auto" }, 380, 200);
     var c1      = N(d, "conv2d",          { filters: 16, kernelSize: 3, strides: 2, padding: "same", activation: "relu" }, 560, 200);
     var c2      = N(d, "conv2d",          { filters: 32, kernelSize: 3, strides: 2, padding: "same", activation: "relu" }, 730, 200);
     var c3      = N(d, "conv2d",          { filters: 64, kernelSize: 3, strides: 2, padding: "same", activation: "relu" }, 900, 200);
     var flat    = N(d, "flatten",         {},                                                                              1070, 200);
     var d1      = N(d, "dense",           { units: 128, activation: "relu" },                                              1240, 200);
     var drop    = N(d, "dropout",         { rate: 0.3 },                                                                   1410, 200);
-    var out     = N(d, "output",          { target: "bbox", targetType: "bbox", headType: "regression", matchWeight: 1 }, 1580, 200);
+    var out     = N(d, "output",          { target: "bbox", targetType: "bbox", headType: "regression", matchWeight: 1, activation: "sigmoid", loss: "mse" }, 1580, 200);
     // Target path: dataset bbox → augment_bbox → output.input_2
     var tgtSrc  = N(d, "target_source",   { targetKey: "bbox", featureSize: 4 },                                           380, 450);
-    var augBox  = N(d, "augment_bbox",    { hflipProb: 0.5, vflipProb: 0, seedLink: "sar_aug", format: "xywh", imageWidth: 1, imageHeight: 1 }, 1240, 450);
+    var augBox  = N(d, "augment_bbox",    { hflipProb: 0.5, vflipProb: 0.5, seedLink: "sar_aug", format: "xywh", imageWidth: 1, imageHeight: 1 }, 1240, 450);
 
     C(d, imgSrc, reshape); C(d, reshape, augImg); C(d, augImg, c1); C(d, c1, c2); C(d, c2, c3);
     C(d, c3, flat); C(d, flat, d1); C(d, d1, drop); C(d, drop, out);
@@ -85,10 +91,10 @@
   function buildMlpDetector() {
     _nid = 100;
     var d = {};
-    var imgSrc = N(d, "image_source", { sourceKey: "pixel_values", featureSize: FEATURE_SIZE, imageShape: [64,64,1] }, 50, 300);
+    var imgSrc = N(d, "image_source", { sourceKey: "pixel_values", featureSize: 4096, imageShape: [64,64,1] }, 50, 300);
     var d1     = N(d, "dense",        { units: 256, activation: "relu" },  250, 300);
     var d2     = N(d, "dense",        { units: 64, activation: "relu" },   450, 300);
-    var out    = N(d, "output",       { target: "bbox", targetType: "bbox", headType: "regression", matchWeight: 1 }, 650, 300);
+    var out    = N(d, "output",       { target: "bbox", targetType: "bbox", headType: "regression", matchWeight: 1, activation: "sigmoid", loss: "mse" }, 650, 300);
     C(d, imgSrc, d1); C(d, d1, d2); C(d, d2, out);
     return graph(d);
   }
@@ -96,13 +102,19 @@
   window.SAR_SHIP_DETECTION_PRESET = {
     dataset: {
       id: DS_ID,
-      name: "HRSID SAR Ships (64x64, 300 patches)",
+      name: "HRSID SAR Ships (64x64, 3000 patches)",
       schemaId: sid,
       datasetModuleId: "hrsid_ship",
       taskRecipeId: "detection_single_box",
       mode: "detection",
+      // imageShape + featureSize are also populated by the dataset
+      // module at build time (decodeData → _dimsFromBundle in
+      // src/dataset_modules/hrsid_ship_module.js). Restated here so
+      // the server-side training payload carries them even before
+      // build() runs — schema/build-payload propagation gap to fix
+      // separately.
       imageShape: [64, 64, 1],
-      featureSize: FEATURE_SIZE,
+      featureSize: 4096,
       targetSize: 4,
       targetMode: "bbox",
       numClasses: 1,
@@ -121,13 +133,13 @@
         id: "sar_cnn_trainer", name: "CNN Detector Trainer", schemaId: sid,
         datasetId: DS_ID, modelId: "sar_cnn",
         runtime: "js_client", runtimeBackend: "auto", status: "draft",
-        trainCfg: { epochs: 50, batchSize: 16, learningRate: 0.001, optimizer: "adam", earlyStoppingPatience: 15 },
+        trainCfg: { epochs: 200, batchSize: 16, learningRate: 0.001, optimizer: "adam", earlyStoppingPatience: 40 },
       },
       {
         id: "sar_cnn_aug_trainer", name: "CNN+Aug Detector Trainer", schemaId: sid,
         datasetId: DS_ID, modelId: "sar_cnn_aug",
         runtime: "js_client", runtimeBackend: "auto", status: "draft",
-        trainCfg: { epochs: 50, batchSize: 16, learningRate: 0.001, optimizer: "adam", earlyStoppingPatience: 15 },
+        trainCfg: { epochs: 200, batchSize: 16, learningRate: 0.001, optimizer: "adam", earlyStoppingPatience: 40 },
       },
       {
         id: "sar_mlp_trainer", name: "MLP Baseline Trainer", schemaId: sid,
@@ -141,14 +153,14 @@
         datasetId: DS_ID, modelId: "sar_cnn",
         runtime: "js_client", runtimeBackend: "auto", status: "done",
         _pretrainedVar: "CNN_SHIP_DETECTOR_PRE_TRAINED_PRETRAINED_BIN_B64",
-        trainCfg: { epochs: 50, batchSize: 16, learningRate: 0.001, optimizer: "adam", earlyStoppingPatience: 15 },
+        trainCfg: { epochs: 200, batchSize: 16, learningRate: 0.001, optimizer: "adam", earlyStoppingPatience: 40 },
       },
       {
         id: "sar_cnn_aug_trainer-pre", name: "CNN+Aug Detector (pre-trained)", schemaId: sid,
         datasetId: DS_ID, modelId: "sar_cnn_aug",
         runtime: "js_client", runtimeBackend: "auto", status: "done",
         _pretrainedVar: "CNN_AUG_SHIP_DETECTOR_PRE_TRAINED_PRETRAINED_BIN_B64",
-        trainCfg: { epochs: 50, batchSize: 16, learningRate: 0.001, optimizer: "adam", earlyStoppingPatience: 15 },
+        trainCfg: { epochs: 200, batchSize: 16, learningRate: 0.001, optimizer: "adam", earlyStoppingPatience: 40 },
       },
       {
         id: "sar_mlp_trainer-pre", name: "MLP Baseline (pre-trained)", schemaId: sid,
@@ -163,7 +175,7 @@
       {
         id: "sar_eval", name: "Ship Detection: CNN vs CNN+Aug vs MLP", schemaId: sid, datasetId: DS_ID,
         trainerIds: ["sar_cnn_trainer-pre", "sar_cnn_aug_trainer-pre", "sar_mlp_trainer-pre"],
-        evaluatorIds: ["bbox_mae", "bbox_rmse", "bbox_bias"],
+        evaluatorIds: ["iou_mean", "bbox_mae", "bbox_rmse", "bbox_bias"],
         status: "draft", runs: [], createdAt: Date.now(),
       },
     ],

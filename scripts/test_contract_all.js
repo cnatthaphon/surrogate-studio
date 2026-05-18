@@ -40,6 +40,13 @@ const baseSuite = [
   "test_contract_segmentation_recipe.js",
   "test_extract_decoder.js",
   "test_branched_weight_loader.js",
+  "test_hrsid_split_clamp.js",
+  "test_output_custom_revert_disconnects_input2.js",
+  "test_giou_loss_gating.js",
+  "test_giou_loss_build_guard.js",
+  "test_giou_bbox_format.js",
+  "test_dataset_module_split_clamp.js",
+  "test_output_target_replay_preserves_input2.js",
 ];
 
 function runOne(scriptName) {

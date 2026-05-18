@@ -1035,22 +1035,51 @@
           value: target,
           options: targetOptions
         });
-        // headType is internal — used by engine, not shown to user
+        // headType is internal — used by engine, not shown to user.
+        // GIoU losses require a 4-unit regression head with an
+        // explicit bboxFormat. Hide them on heads where the format
+        // can't be resolved: classification heads, non-bbox
+        // regression, and `custom` (which carries no schema entry
+        // and therefore no bboxFormat). Without an explicit format
+        // the browser-side loss would default to xywh while the
+        // server rejects the empty value — two runtimes diverging
+        // silently is exactly the bug the schema gate is meant to
+        // prevent.
+        var _matchedOutKey = null;
+        if (target && target !== "custom") {
+          for (var _oki = 0; _oki < outputKeys.length; _oki += 1) {
+            var _ok = outputKeys[_oki];
+            if ((_ok.key || _ok) === target) { _matchedOutKey = _ok; break; }
+          }
+        }
+        var _isBboxHead = (function () {
+          if (!_matchedOutKey) return false;
+          var ht = String(_matchedOutKey.headType || headType || "").toLowerCase();
+          var fs = Number(_matchedOutKey.featureSize || 0);
+          var fmt = String(_matchedOutKey.bboxFormat || "").toLowerCase();
+          var formatOk = (fmt === "xywh" || fmt === "xyxy");
+          return ht === "regression" && fs === 4 && formatOk;
+        })();
+        var _lossOptions = [
+          { value: "none", label: "None (passthrough)" },
+          { value: "mse", label: "MSE" },
+          { value: "mae", label: "MAE" },
+          { value: "huber", label: "Huber" },
+          { value: "bce", label: "Binary Cross-Entropy" },
+          { value: "wasserstein", label: "Wasserstein" },
+        ];
+        if (_isBboxHead) {
+          _lossOptions.push({ value: "giou", label: "GIoU (bbox)" });
+          _lossOptions.push({ value: "giou_mse", label: "GIoU + MSE hybrid (bbox)" });
+        }
+        _lossOptions.push({ value: "categoricalCrossentropy", label: "Categorical Cross-Entropy" });
+        _lossOptions.push({ value: "sparseCategoricalCrossentropy", label: "Sparse Cat. CE" });
         addField({
           kind: "select",
           key: "loss",
           label: "Loss",
           value: loss,
-          options: [
-            { value: "none", label: "None (passthrough)" },
-            { value: "mse", label: "MSE" },
-            { value: "mae", label: "MAE" },
-            { value: "huber", label: "Huber" },
-            { value: "bce", label: "Binary Cross-Entropy" },
-            { value: "wasserstein", label: "Wasserstein" },
-            { value: "categoricalCrossentropy", label: "Categorical Cross-Entropy" },
-            { value: "sparseCategoricalCrossentropy", label: "Sparse Cat. CE" }
-          ]
+          options: _lossOptions,
         });
         // informational hint based on headType (from schema, not target name)
         if (headType === "classification") {
@@ -1448,22 +1477,107 @@
       return spec;
     }
 
-    function applyNodeConfigValue(node, key, rawValue, schemaId) {
+    // applyNodeConfigValue accepts EITHER of two call shapes, because the
+    // active right-panel form in `src/tabs/model_tab.js` passes
+    // `(editor, nodeId, key, value)` while legacy direct callers pass
+    // `(node, key, rawValue, schemaId)`. We disambiguate by sniffing the
+    // first argument: if it looks like a Drawflow editor (has `export()`
+    // and `updateNodeDataFromId()`), we resolve the node from it and write
+    // the updated data back via Drawflow. Otherwise we treat the first arg
+    // as a plain node object and return the updated data for the caller.
+    //
+    // Without this dispatch, every onChange from the right panel coerced
+    // `key` to a numeric nodeId, fell through every branch, and silently
+    // did nothing — that's what was hiding the targetType bug (and the
+    // Custom-target second-input-port bug) the user just reported.
+    function applyNodeConfigValue(arg0, arg1, arg2, arg3, arg4) {
+      var editor = null;
+      var nodeId = null;
+      var node;
+      var key;
+      var rawValue;
+      var schemaIdArg;
+      if (arg0 && typeof arg0.export === "function" && typeof arg0.updateNodeDataFromId === "function") {
+        editor = arg0;
+        nodeId = arg1;
+        key = arg2;
+        rawValue = arg3;
+        schemaIdArg = arg4;
+        try {
+          var exported = editor.export();
+          var bag = exported && exported.drawflow && exported.drawflow.Home && exported.drawflow.Home.data;
+          node = bag ? bag[String(nodeId)] : null;
+        } catch (e) { node = null; }
+      } else {
+        node = arg0;
+        key = arg1;
+        rawValue = arg2;
+        schemaIdArg = arg3;
+      }
       if (!node) return { handled: false };
-      var sid = api.resolveSchemaId(schemaId || api.getCurrentSchemaId() || "oscillator");
+      var sid = api.resolveSchemaId(schemaIdArg || api.getCurrentSchemaId() || "oscillator");
       var data = Object.assign({}, node.data || {});
       var k = String(key || "");
       if (k === "target" || k === "targetType") {
-        var currentTarget = String(data.targetType || data.target || "");
-        var targets = api.normalizeOutputTargetsList(rawValue, currentTarget ? [currentTarget] : [], sid);
-        var target = String((targets && targets[0]) || currentTarget || "");
-        data.target = target;
-        data.targetType = target;
-        // auto-set headType from schema metadata
-        var _outKeys = (typeof api.getOutputKeys === "function") ? api.getOutputKeys(sid) : [];
-        var _matched = _outKeys.filter(function (ok) { return (ok.key || ok) === target; });
-        if (_matched.length && _matched[0].headType) {
-          data.headType = _matched[0].headType;
+        var rawTarget = String(rawValue || "").trim().toLowerCase();
+        // `custom` is a sentinel — the target tensor arrives via the node's
+        // second input port instead of from the schema's registered output
+        // keys, so it must NOT be filtered through
+        // `normalizeOutputTargetsList`, which would drop it as not-in-schema.
+        if (rawTarget === "custom") {
+          data.target = "custom";
+          data.targetType = "custom";
+          data.targets = ["custom"];
+          data.targetsCsv = "custom";
+          // Custom targets carry no schema entry, so there's no
+          // bboxFormat to attach. A stale GIoU loss from the previous
+          // (schema-declared) target would silently optimize wrong
+          // geometry on the browser side and crash with a clear error
+          // on the server — downgrade it to MSE to keep the two
+          // runtimes in agreement.
+          delete data.bboxFormat;
+          var _customLoss = String(data.loss || "").toLowerCase();
+          if (_customLoss === "giou" || _customLoss === "iou" ||
+              _customLoss === "giou_mse" || _customLoss === "mse_giou") {
+            data.loss = "mse";
+          }
+        } else {
+          var currentTarget = String(data.targetType || data.target || "");
+          var targets = api.normalizeOutputTargetsList(rawValue, currentTarget ? [currentTarget] : [], sid);
+          var target = String((targets && targets[0]) || currentTarget || "");
+          data.target = target;
+          data.targetType = target;
+          data.targets = [target];
+          data.targetsCsv = target;
+          // auto-set headType from schema metadata
+          var _outKeys = (typeof api.getOutputKeys === "function") ? api.getOutputKeys(sid) : [];
+          var _matched = _outKeys.filter(function (ok) { return (ok.key || ok) === target; });
+          if (_matched.length && _matched[0].headType) {
+            data.headType = _matched[0].headType;
+          }
+          // Carry bboxFormat onto the node so the builder + training
+          // engine can resolve it at compile/train time without round
+          // tripping through the schema again.
+          if (_matched.length && _matched[0].bboxFormat) {
+            data.bboxFormat = String(_matched[0].bboxFormat).toLowerCase();
+          } else {
+            // New target doesn't declare a bbox format; clear any stale value.
+            delete data.bboxFormat;
+          }
+          // If the previous loss assumed a bbox head (giou*) and the new
+          // target either isn't a 4-unit regression head or doesn't
+          // declare a bboxFormat, downgrade to MSE so a stale loss
+          // can't silently optimize the wrong geometry.
+          var _curLoss = String(data.loss || "").toLowerCase();
+          if (_curLoss === "giou" || _curLoss === "iou" || _curLoss === "giou_mse" || _curLoss === "mse_giou") {
+            var _fs = _matched.length ? Number(_matched[0].featureSize || 0) : 0;
+            var _ht = _matched.length ? String(_matched[0].headType || "").toLowerCase() : "";
+            var _fmt = _matched.length ? String(_matched[0].bboxFormat || "").toLowerCase() : "";
+            var _fmtOk = (_fmt === "xywh" || _fmt === "xyxy");
+            if (!(_ht === "regression" && _fs === 4 && _fmtOk)) {
+              data.loss = "mse";
+            }
+          }
         }
       } else if (k === "paramsSelect") {
         data.paramsSelect = String(rawValue || "")
@@ -1473,7 +1587,7 @@
           .replace(/^,|,$/g, "");
       } else if (k === "loss") {
         var vLoss = String(rawValue || "mse");
-        var validLosses = ["mse", "mae", "huber", "bce", "wasserstein", "categoricalCrossentropy", "sparseCategoricalCrossentropy", "cross_entropy", "none"];
+        var validLosses = ["mse", "mae", "huber", "bce", "wasserstein", "giou", "iou", "giou_mse", "mse_giou", "categoricalCrossentropy", "sparseCategoricalCrossentropy", "cross_entropy", "none"];
         data.loss = validLosses.indexOf(vLoss) >= 0 ? vLoss : "mse";
       } else if (k === "phase") {
         data.phase = String(rawValue || "").trim();
@@ -1587,7 +1701,80 @@
       } else {
         return { handled: false };
       }
+      // When the caller gave us a live Drawflow editor, commit the new data
+      // back via `updateNodeDataFromId` so the change actually persists in
+      // the graph (the legacy node-object call shape leaves that to the
+      // caller and just returns `{ handled, data }`).
+      if (editor) {
+        // Capture the prior target BEFORE updateNodeDataFromId overwrites
+        // node.data — syncOutputNodeInputCount needs both old and new to
+        // decide whether a port resync is even warranted.
+        var prevTargetForSync = String((node.data && (node.data.targetType || node.data.target)) || "");
+        try { editor.updateNodeDataFromId(String(nodeId), data); }
+        catch (e) { node.data = data; }
+        // For `output_layer` with target `custom`, the node should expose a
+        // second input port (so the user can wire a target tensor in); any
+        // other target keeps it at one input. `addOutputNode` sets this at
+        // creation time, but mid-life target switches need an explicit
+        // resync via Drawflow's port API. Skip the resync entirely when
+        // the form replays an unchanged targetType — a stable schema
+        // target with a legitimately wired input_2 (e.g. paired
+        // target_source → augment_bbox → output.input_2) must survive an
+        // edit to loss/matchWeight that re-applies every config key.
+        if ((k === "target" || k === "targetType") && node.name === "output_layer") {
+          syncOutputNodeInputCount(editor, nodeId, prevTargetForSync, data.targetType);
+        }
+      } else {
+        node.data = data;
+      }
       return { handled: true, data: data };
+    }
+
+    function syncOutputNodeInputCount(editor, nodeId, prevTargetValue, newTargetValue) {
+      if (!editor || typeof editor.addNodeInput !== "function" || typeof editor.removeNodeInput !== "function") return false;
+      var bag = getGraphModuleData(editor);
+      var node = bag[String(nodeId)];
+      if (!node || node.name !== "output_layer") return false;
+      var prev = String(prevTargetValue || "").toLowerCase();
+      var next = String(newTargetValue || "").toLowerCase();
+      // No-op when the target didn't actually change. Output config
+      // forms in model_tab.js reapply every key on submit, including
+      // an unchanged targetType — running the port resync there
+      // would tear down a legitimately wired input_2 (augment_bbox /
+      // augment_mask / target_source flows) that's part of the
+      // schema graph rather than a stale custom-target leftover.
+      if (prev === next) return true;
+      var want = (next === "custom") ? 2 : 1;
+      var inputs = node.inputs || {};
+      var current = Object.keys(inputs).length || 1;
+      if (current === want) return true;
+      if (want > current) {
+        for (var i = current + 1; i <= want; i += 1) editor.addNodeInput(String(nodeId));
+      } else {
+        // Shrinking the port count is only safe when we're leaving the
+        // custom sentinel — that's the only case where input_2 was
+        // *defined to be* the user-wired target tensor. For any other
+        // target change (digit → bbox, bbox → label, etc.) a wired
+        // input_2 belongs to a paired augment flow and must survive.
+        if (prev !== "custom") return true;
+        for (var j = current; j > want; j -= 1) {
+          var portKey = "input_" + String(j);
+          var conns = (inputs[portKey] && inputs[portKey].connections) || [];
+          // Leaving custom: tear down any wired connection on the port we're
+          // about to drop. Otherwise the input lingers, gets routed back into
+          // the model builder as a label tensor, and silently corrupts the
+          // head wiring after the user thinks they've switched targets.
+          if (conns.length && typeof editor.removeSingleConnection === "function") {
+            conns.slice().forEach(function (c) {
+              try {
+                editor.removeSingleConnection(String(c.node), String(nodeId), String(c.output || "output_1"), portKey);
+              } catch (e) { /* ignore */ }
+            });
+          }
+          editor.removeNodeInput(String(nodeId), portKey);
+        }
+      }
+      return true;
     }
 
     function getGraphModuleData(editor) {

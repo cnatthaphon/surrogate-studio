@@ -83,13 +83,103 @@
     if (v === "huber") return "huberLoss";
     if (v === "bce" || v === "binarycrossentropy") return "binaryCrossentropy";
     if (v === "wasserstein" || v === "wgan") return "wasserstein";
+    if (v === "iou" || v === "giou") return "giouLoss";
+    if (v === "giou_mse" || v === "mse_giou") return "giouMseLoss";
     if (v === "none") return "none";
     if (v === "use_global") return String(resolvedGlobal || "meanSquaredError");
     return String(resolvedGlobal || "meanSquaredError");
   }
 
-  function scalarLossByType(tf, pred, truth, type) {
+  // GIoU loss for bounding-box regression. Operates on tensors shaped
+  // [B, 4] in normalized [0, 1] coords:
+  //
+  //   GIoU = IoU - (C - U) / C
+  //
+  // where C is the area of the smallest enclosing axis-aligned box and
+  // U is the union of the predicted and true boxes. Loss = 1 - GIoU,
+  // averaged across the batch. Unlike per-coord MSE, GIoU is a direct
+  // surrogate for the IoU metric the demo's Evaluation tab reports —
+  // when boxes don't overlap the (C - U)/C term still produces a useful
+  // gradient pulling them toward each other, instead of MSE's vanishing
+  // gradient on the per-coord deltas. This is the standard loss in
+  // YOLOv5+/DETR/RetinaNet for the same reason.
+  //
+  // `format` selects the 4-vec layout:
+  //   "xywh" — slices are (x, y, w, h), corners derived as x+w, y+h
+  //   "xyxy" — slices are (x0, y0, x1, y1), used as corners directly
+  // The default is xywh for backward compatibility with the SAR-Ship
+  // preset path, but the head config that ships into makeHeadLoss
+  // resolves the format from schema metadata so x0y0x1y1 schemas
+  // (e.g. synthetic_detection) compute correct geometry.
+  function _giouLoss(tf, pred, truth, format) {
+    return tf.tidy(function () {
+      var EPS = 1e-7;
+      var fmt = String(format || "xywh").toLowerCase();
+      var px = pred.slice([0, 0], [-1, 1]);
+      var py = pred.slice([0, 1], [-1, 1]);
+      var p2 = pred.slice([0, 2], [-1, 1]);
+      var p3 = pred.slice([0, 3], [-1, 1]);
+      var tx = truth.slice([0, 0], [-1, 1]);
+      var ty = truth.slice([0, 1], [-1, 1]);
+      var t2 = truth.slice([0, 2], [-1, 1]);
+      var t3 = truth.slice([0, 3], [-1, 1]);
+      var px2, py2, tx2, ty2, pw, ph, tw, th;
+      if (fmt === "xyxy") {
+        px2 = p2; py2 = p3;
+        tx2 = t2; ty2 = t3;
+        pw = tf.sub(px2, px); ph = tf.sub(py2, py);
+        tw = tf.sub(tx2, tx); th = tf.sub(ty2, ty);
+      } else {
+        // xywh — convert to corner form, allowing non-clamped values so
+        // the gradient through w/h stays smooth even when the network
+        // predicts tiny boxes.
+        pw = p2; ph = p3;
+        tw = t2; th = t3;
+        px2 = tf.add(px, pw);
+        py2 = tf.add(py, ph);
+        tx2 = tf.add(tx, tw);
+        ty2 = tf.add(ty, th);
+      }
+      var ix0 = tf.maximum(px, tx);
+      var iy0 = tf.maximum(py, ty);
+      var ix1 = tf.minimum(px2, tx2);
+      var iy1 = tf.minimum(py2, ty2);
+      var iw = tf.relu(tf.sub(ix1, ix0));
+      var ih = tf.relu(tf.sub(iy1, iy0));
+      var inter = tf.mul(iw, ih);
+      var predArea = tf.mul(tf.relu(pw), tf.relu(ph));
+      var truthArea = tf.mul(tf.relu(tw), tf.relu(th));
+      var union = tf.add(tf.sub(tf.add(predArea, truthArea), inter), EPS);
+      var iou = tf.div(inter, union);
+      // Smallest enclosing axis-aligned box around both
+      var cx0 = tf.minimum(px, tx);
+      var cy0 = tf.minimum(py, ty);
+      var cx1 = tf.maximum(px2, tx2);
+      var cy1 = tf.maximum(py2, ty2);
+      var cw = tf.relu(tf.sub(cx1, cx0));
+      var ch = tf.relu(tf.sub(cy1, cy0));
+      var cArea = tf.add(tf.mul(cw, ch), EPS);
+      var giou = tf.sub(iou, tf.div(tf.sub(cArea, union), cArea));
+      return tf.mean(tf.sub(tf.scalar(1), giou));
+    });
+  }
+
+  function scalarLossByType(tf, pred, truth, type, opts) {
+    var bboxFormat = (opts && opts.bboxFormat) || "xywh";
     if (type === "meanAbsoluteError") return tf.mean(tf.abs(tf.sub(pred, truth)));
+    if (type === "giouLoss") return _giouLoss(tf, pred, truth, bboxFormat);
+    if (type === "giouMseLoss") {
+      // Hybrid: 0.5 * MSE + 0.5 * GIoU. MSE provides a smooth gradient
+      // in the early-training no-overlap regime where pure GIoU is
+      // flat (CNN+Aug + GIoU got stuck there at loss ~0.96). GIoU
+      // takes over once boxes begin overlapping. Standard recipe for
+      // single-stage detectors that need to converge from random init.
+      return tf.tidy(function () {
+        var mse = tf.mean(tf.square(tf.sub(pred, truth)));
+        var giou = _giouLoss(tf, pred, truth, bboxFormat);
+        return tf.add(tf.mul(tf.scalar(0.5), mse), tf.mul(tf.scalar(0.5), giou));
+      });
+    }
     // Wasserstein: loss = -mean(truth * pred). truth=1 for real, truth=-1 for fake
     // D wants to maximize mean(D(real)) - mean(D(fake)) → minimize -mean(truth * pred)
     // G wants to minimize -mean(D(fake)) → truth=1 for G step
@@ -115,6 +205,8 @@
     var headWeight = Math.max(0, Number(head && head.matchWeight != null ? head.matchWeight : 1));
     var klBeta = Math.max(0, Number((head && head.beta) || 1e-3));
     var ht = String((head && head.headType) || "regression");
+    var bboxFormat = String((head && head.bboxFormat) || "xywh").toLowerCase();
+    if (bboxFormat !== "xywh" && bboxFormat !== "xyxy") bboxFormat = "xywh";
     // loss=none → passthrough, zero loss
     if (type === "none" || String(head && head.loss || "").toLowerCase() === "none") {
       return function () { return tf.scalar(0); };
@@ -144,7 +236,7 @@
           return tf.mul(tf.scalar(headWeight), ce);
         }
         // generic MSE/loss on full output (works for any dimension)
-        var l = scalarLossByType(tf, yPred, yTrue, type);
+        var l = scalarLossByType(tf, yPred, yTrue, type, { bboxFormat: bboxFormat });
         return tf.mul(tf.scalar(headWeight), l);
       });
     };

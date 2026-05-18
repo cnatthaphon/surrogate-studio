@@ -13,13 +13,34 @@
 
   /**
    * HRSID SAR Ship Detection — real SAR satellite imagery with ship bounding boxes.
-   * 300 patches (64x64 grayscale) extracted from HRSID dataset.
+   * 3000 patches (64x64 grayscale) extracted from HRSID dataset.
    * Binary format: [uint32 count][uint32 dim][uint8 pixels...][float32 bboxes (4 per sample)...]
    */
 
-  var IMAGE_W = 64;
-  var IMAGE_H = 64;
-  var FEATURE_SIZE = IMAGE_W * IMAGE_H;
+  // Image dimensions are derived from the bundled binary at decode
+  // time. The format header carries `dim = W * H`; patches are square,
+  // so W = H = sqrt(dim). No platform-level hardcoded image size:
+  // re-extracting the bundle at a different patch size (via env-controlled
+  // `scripts/extract_hrsid_bundle.py`) propagates through the demo
+  // automatically as long as the preset/schema refer to the same
+  // featureSize the bundle reports.
+  //
+  // FALLBACK_*: when the bundle hasn't loaded yet (transient
+  // headless/CI failure, missing data script), the build path still
+  // returns a valid empty dataset payload. The fallback metadata
+  // must mirror the module's *intended* image dimensions —
+  // imageShape:[0,0,1]/featureSize:0 would silently propagate
+  // shape-of-zero into downstream model build code. Keep these aligned
+  // with the bundle this module ships against (currently 64x64).
+  var FALLBACK_W = 64;
+  var FALLBACK_H = 64;
+  var FALLBACK_FEATURE_SIZE = FALLBACK_W * FALLBACK_H;
+  function _dimsFromBundle(data) {
+    if (!data || !data.dim) return { W: FALLBACK_W, H: FALLBACK_H, featureSize: FALLBACK_FEATURE_SIZE };
+    var d = Number(data.dim) || 0;
+    var side = Math.max(1, Math.round(Math.sqrt(d)));
+    return { W: side, H: side, featureSize: side * side };
+  }
 
   function clampInt(v, lo, hi) {
     var n = Number(v);
@@ -96,6 +117,7 @@
 
     var W = typeof window !== "undefined" ? window : {};
     var data = decodeData();
+    var dims = _dimsFromBundle(data);
 
     // Missing script — try lazy load
     if (!data && !W.HRSID_SHIPS_DATA_B64) {
@@ -105,7 +127,7 @@
         return {
           schemaId: "sar_ship_detection", datasetModuleId: "hrsid_ship",
           taskRecipeId: "detection_single_box", mode: "detection",
-          imageShape: [IMAGE_H, IMAGE_W, 1], featureSize: FEATURE_SIZE, targetSize: 4,
+          imageShape: [dims.H, dims.W, 1], featureSize: dims.featureSize, targetSize: 4,
           targetMode: "bbox", numClasses: 1, classCount: 1, classNames: ["ship"],
           seed: seed, trainCount: 0, valCount: 0, testCount: 0,
           xTrain: [], yTrain: [], xVal: [], yVal: [], xTest: [], yTest: [],
@@ -118,7 +140,7 @@
       return {
         schemaId: "sar_ship_detection", datasetModuleId: "hrsid_ship",
         taskRecipeId: "detection_single_box", mode: "detection",
-        imageShape: [IMAGE_H, IMAGE_W, 1], featureSize: FEATURE_SIZE, targetSize: 4,
+        imageShape: [dims.H, dims.W, 1], featureSize: dims.featureSize, targetSize: 4,
         targetMode: "bbox", numClasses: 1, classCount: 1, classNames: ["ship"],
         seed: seed, trainCount: 0, valCount: 0, testCount: 0,
         xTrain: [], yTrain: [], xVal: [], yVal: [], xTest: [], yTest: [],
@@ -133,11 +155,21 @@
       var tmp = indices[si]; indices[si] = indices[sj]; indices[sj] = tmp;
     }
 
-    var trainFrac = Number(c.trainFrac) || 0.7;
-    var valFrac = Number(c.valFrac) || 0.15;
+    var trainFrac = Math.max(0, Math.min(1, Number(c.trainFrac) || 0.7));
+    var valFrac   = Math.max(0, Math.min(1, Number(c.valFrac)   || 0.15));
+    // Normalize when the two configured fractions overflow the pool: e.g.
+    // trainFrac=0.99, valFrac=0.99 over-allocates and leaves a negative
+    // test count. Clamp to leave at least one test sample.
+    if (trainFrac + valFrac > 0.99) {
+      var s = trainFrac + valFrac;
+      trainFrac = trainFrac / s * 0.99;
+      valFrac   = valFrac   / s * 0.99;
+    }
     var nTrain = Math.max(1, Math.round(data.count * trainFrac));
-    var nVal = Math.max(1, Math.round(data.count * valFrac));
-    var nTest = Math.max(1, data.count - nTrain - nVal);
+    var nVal   = Math.max(1, Math.round(data.count * valFrac));
+    if (nTrain + nVal >= data.count) nVal = Math.max(1, data.count - nTrain - 1);
+    if (nTrain + nVal >= data.count) nTrain = Math.max(1, data.count - nVal - 1);
+    var nTest  = Math.max(1, data.count - nTrain - nVal);
 
     var xTrain = [], yTrain = [], xVal = [], yVal = [], xTest = [], yTest = [];
     for (var ti = 0; ti < nTrain; ti++) { xTrain.push(data.images[indices[ti]]); yTrain.push(data.bboxes[indices[ti]]); }
@@ -147,7 +179,7 @@
     return {
       schemaId: "sar_ship_detection", datasetModuleId: "hrsid_ship",
       taskRecipeId: "detection_single_box", mode: "detection",
-      imageShape: [IMAGE_H, IMAGE_W, 1], featureSize: FEATURE_SIZE, targetSize: 4,
+      imageShape: [dims.H, dims.W, 1], featureSize: dims.featureSize, targetSize: 4,
       targetMode: "bbox", numClasses: 1, classCount: 1, classNames: ["ship"],
       seed: seed, splitConfig: { mode: "random", train: trainFrac, val: valFrac, test: 1 - trainFrac - valFrac },
       trainCount: nTrain, valCount: nVal, testCount: nTest,
@@ -189,30 +221,159 @@
 
     var coreRenderer = (typeof window !== "undefined" && window.OSCImageRenderCore) || null;
     if (!coreRenderer) return;
+    var dims = _dimsFromBundle(data);
+    var imgW = dims.W;
+    var imgH = dims.H;
 
-    var grid = el("div", { style: "display:flex;flex-wrap:wrap;gap:8px;" });
-    var show = Math.min(12, data.count);
-    for (var i = 0; i < show; i++) {
-      var wrap = el("div", { style: "position:relative;width:80px;height:80px;" });
-      var canvas = document.createElement("canvas");
-      canvas.width = IMAGE_W; canvas.height = IMAGE_H;
-      canvas.style.cssText = "width:80px;height:80px;border:1px solid #334155;border-radius:3px;image-rendering:pixelated;";
-      coreRenderer.drawImageToCanvas(canvas.getContext("2d"), data.images[i], IMAGE_W, IMAGE_H);
-      wrap.appendChild(canvas);
-
-      // Draw bbox overlay
-      var bbox = data.bboxes[i];
-      var bDiv = el("div", {
-        style: "position:absolute;border:2px solid #f59e0b;pointer-events:none;border-radius:1px;" +
-          "left:" + (bbox[0] * 80) + "px;top:" + (bbox[1] * 80) + "px;" +
-          "width:" + (bbox[2] * 80) + "px;height:" + (bbox[3] * 80) + "px;"
-      });
-      wrap.appendChild(bDiv);
-      grid.appendChild(wrap);
+    // Resolve which sample pool(s) to show. When the Dataset tab passes a built
+    // dataset payload (deps.datasetData has xTrain/yTrain/...), split into
+    // Train/Val/Test pools and render each with its own Random button so the
+    // reviewer can re-sample each split independently. Otherwise (Playground
+    // tab) fall back to the full unsplit pool with one Random button.
+    var providedData = deps && deps.datasetData;
+    var splits;
+    if (providedData && Array.isArray(providedData.xTrain)) {
+      splits = [
+        { name: "Train", x: providedData.xTrain || [], y: providedData.yTrain || [] },
+        { name: "Val",   x: providedData.xVal || [],   y: providedData.yVal || [] },
+        { name: "Test",  x: providedData.xTest || [],  y: providedData.yTest || [] },
+      ].filter(function (s) { return s.x.length > 0; });
+    } else {
+      splits = [{ name: "Samples", x: data.images, y: data.bboxes }];
     }
-    mountEl.appendChild(grid);
+
+    var SHOW = 12;
+    var CELL = 80;
+    var BBOX_COLOR = "#f59e0b";
+    var allCells = [];
+
+    function drawCellInto(canvas, bboxOverlay, pixels, bbox) {
+      coreRenderer.drawImageToCanvas(canvas.getContext("2d"), pixels, imgW, imgH);
+      if (bbox && bboxOverlay) {
+        bboxOverlay.style.left   = (bbox[0] * CELL) + "px";
+        bboxOverlay.style.top    = (bbox[1] * CELL) + "px";
+        bboxOverlay.style.width  = (bbox[2] * CELL) + "px";
+        bboxOverlay.style.height = (bbox[3] * CELL) + "px";
+        bboxOverlay.style.display = "block";
+      } else if (bboxOverlay) {
+        bboxOverlay.style.display = "none";
+      }
+    }
+
+    function resample(cells, randomize) {
+      cells.forEach(function (cell, i) {
+        if (!cell.pool.length) return;
+        var idx = randomize
+          ? Math.floor(Math.random() * cell.pool.length)
+          : Math.min(i, cell.pool.length - 1);
+        var poolIdx = cell.pool[idx];
+        drawCellInto(cell.canvas, cell.bboxOverlay, cell.xData[poolIdx], cell.yData[poolIdx]);
+        if (cell.idxLabel) cell.idxLabel.textContent = "#" + poolIdx;
+      });
+    }
+
+    splits.forEach(function (split) {
+      if (!split.x.length) return;
+
+      var splitDiv = el("div", { style: "margin-bottom:14px;" });
+      splitDiv.appendChild(el("div", { style: "font-size:11px;color:#67e8f9;font-weight:600;margin-bottom:4px;" },
+        split.name + " (" + split.x.length + " patches)"));
+
+      var grid = el("div", { style: "display:flex;flex-wrap:wrap;gap:8px;" });
+      var n = Math.min(SHOW, split.x.length);
+      var poolIndices = [];
+      for (var p = 0; p < split.x.length; p++) poolIndices.push(p);
+
+      var splitCells = [];
+      for (var i = 0; i < n; i++) {
+        var wrap = el("div", { style: "position:relative;width:" + CELL + "px;" });
+        var canvas = document.createElement("canvas");
+        canvas.width = imgW; canvas.height = imgH;
+        canvas.style.cssText = "width:" + CELL + "px;height:" + CELL + "px;border:1px solid #334155;border-radius:3px;image-rendering:pixelated;display:block;";
+        wrap.appendChild(canvas);
+
+        var bboxOverlay = el("div", {
+          style: "position:absolute;border:2px solid " + BBOX_COLOR + ";pointer-events:none;border-radius:1px;left:0;top:0;width:0;height:0;display:none;"
+        });
+        wrap.appendChild(bboxOverlay);
+
+        var idxLabel = el("div", { style: "font-size:9px;color:#64748b;text-align:center;margin-top:2px;" }, "-");
+        wrap.appendChild(idxLabel);
+
+        grid.appendChild(wrap);
+        var cell = {
+          canvas: canvas, bboxOverlay: bboxOverlay, idxLabel: idxLabel,
+          xData: split.x, yData: split.y, pool: poolIndices,
+        };
+        splitCells.push(cell);
+        allCells.push(cell);
+      }
+
+      splitDiv.appendChild(grid);
+
+      // Per-split Random button (only when there are multiple splits).
+      if (splits.length > 1) {
+        var splitBtn = el("button", { style: "margin-top:6px;padding:2px 10px;font-size:10px;border-radius:4px;border:1px solid #475569;background:#1f2937;color:#cbd5e1;cursor:pointer;" }, "Random " + split.name);
+        (function (cells) {
+          splitBtn.addEventListener("click", function () { resample(cells, true); });
+        })(splitCells);
+        splitDiv.appendChild(splitBtn);
+      }
+
+      mountEl.appendChild(splitDiv);
+
+      // initial deterministic draw (first N samples) so the grid renders
+      // before the user clicks Random.
+      resample(splitCells, false);
+    });
+
+    // Master Random button: re-sample every visible cell across all splits.
+    var masterLabel = splits.length > 1 ? "Random All" : "Random";
+    var masterBtn = el("button", { style: "margin-top:4px;padding:5px 14px;font-size:11px;border-radius:6px;border:1px solid #0ea5e9;background:#0284c7;color:#fff;cursor:pointer;font-weight:600;" }, masterLabel);
+    masterBtn.addEventListener("click", function () { resample(allCells, true); });
+    mountEl.appendChild(masterBtn);
+
     mountEl.appendChild(el("div", { style: "font-size:11px;color:#64748b;margin-top:8px;" },
-      data.count + " SAR patches (" + IMAGE_W + "x" + IMAGE_H + "), bbox: [x,y,w,h] normalized"));
+      data.count + " SAR patches available (" + imgW + "x" + imgH + "), bbox: [x,y,w,h] normalized"));
+  }
+
+  // Mean IoU for bounding boxes in [x, y, w, h] normalized format. The
+  // synthetic-detection module exports an IoU implementation that consumes
+  // [x0, y0, x1, y1] corners; SAR-Ship's `format="xywh"` needs the corner
+  // conversion before the intersection math. Inputs may be flat arrays
+  // (4 floats per box) or nested [x, y, w, h] arrays.
+  function _coords(box) {
+    if (!box) return [0, 0, 0, 0];
+    var x = Number(box[0] || 0);
+    var y = Number(box[1] || 0);
+    var w = Number(box[2] || 0);
+    var h = Number(box[3] || 0);
+    return [x, y, x + w, y + h];
+  }
+  function _clamp01(v) { return Math.max(0, Math.min(1, Number(v) || 0)); }
+
+  function computeMeanIoUxywh(predictions, truth) {
+    if (!Array.isArray(predictions) || !Array.isArray(truth) || !predictions.length || !truth.length) return 0;
+    var n = Math.min(predictions.length, truth.length);
+    var sum = 0;
+    for (var i = 0; i < n; i++) {
+      var p = _coords(predictions[i]);
+      var t = _coords(truth[i]);
+      var px0 = _clamp01(p[0]), py0 = _clamp01(p[1]), px1 = _clamp01(p[2]), py1 = _clamp01(p[3]);
+      var tx0 = _clamp01(t[0]), ty0 = _clamp01(t[1]), tx1 = _clamp01(t[2]), ty1 = _clamp01(t[3]);
+      var ix0 = Math.max(px0, tx0);
+      var iy0 = Math.max(py0, ty0);
+      var ix1 = Math.min(px1, tx1);
+      var iy1 = Math.min(py1, ty1);
+      var iw = Math.max(0, ix1 - ix0);
+      var ih = Math.max(0, iy1 - iy0);
+      var inter = iw * ih;
+      var pa = Math.max(0, px1 - px0) * Math.max(0, py1 - py0);
+      var ta = Math.max(0, tx1 - tx0) * Math.max(0, ty1 - ty0);
+      var union = pa + ta - inter;
+      sum += union > 1e-9 ? (inter / union) : 0;
+    }
+    return sum / Math.max(1, n);
   }
 
   var modules = [{
@@ -220,8 +381,25 @@
     schemaId: "sar_ship_detection",
     label: "HRSID SAR Ships",
     build: buildDataset,
-    playgroundApi: { renderPlayground: renderPlayground },
+    playgroundApi: {
+      renderPlayground: renderPlayground,
+      getEvaluators: function () {
+        return [{
+          id: "iou_mean",
+          name: "Mean IoU",
+          mode: "test",
+          compute: function (context) {
+            return { value: computeMeanIoUxywh(context && context.predictions, context && context.truth) };
+          },
+        }];
+      },
+    },
   }];
 
-  return { modules: modules, buildDataset: buildDataset, decodeData: decodeData };
+  return {
+    modules: modules,
+    buildDataset: buildDataset,
+    decodeData: decodeData,
+    computeMeanIoUxywh: computeMeanIoUxywh,
+  };
 });

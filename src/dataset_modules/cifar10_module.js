@@ -46,8 +46,17 @@
     var totalCount = clampInt(config.totalCount || config.totalExamples || 1400, 30, 60000);
     var seed = clampInt(config.seed || 42, 1, 2147483647);
     var splitMode = String(config.splitMode || "stratified_label");
-    var trainFrac = Number(config.trainFrac || 0.8);
-    var valFrac = Number(config.valFrac || 0.1);
+    var trainFrac = Math.max(0, Math.min(1, Number(config.trainFrac || 0.8)));
+    var valFrac   = Math.max(0, Math.min(1, Number(config.valFrac   || 0.1)));
+    // Same split clamp pattern as hrsid_ship_module: pathological
+    // configs (trainFrac+valFrac > 1) would make testFrac go negative
+    // and produce empty slices at testIdx. Clamp so the configured
+    // pair always leaves room for a non-empty test split.
+    if (trainFrac + valFrac > 0.99) {
+      var _ss = trainFrac + valFrac;
+      trainFrac = trainFrac / _ss * 0.99;
+      valFrac   = valFrac   / _ss * 0.99;
+    }
     var testFrac = Math.max(0.01, 1 - trainFrac - valFrac);
     var forceEqualClass = !!config.forceEqualClass;
 
@@ -111,9 +120,12 @@
         selectedIdx = allIdx.slice(0, actual);
       }
 
-      // split
+      // split — trainFrac+valFrac already clamped above, but defensive
+      // integer rounding can still overflow on tiny `actual` totals.
       var trainN = Math.max(1, Math.round(actual * trainFrac));
       var valN = Math.max(1, Math.round(actual * valFrac));
+      if (trainN + valN >= actual) valN = Math.max(1, actual - trainN - 1);
+      if (trainN + valN >= actual) trainN = Math.max(1, actual - valN - 1);
       var testN = Math.max(1, actual - trainN - valN);
       var trainIdx, valIdx, testIdx;
 
