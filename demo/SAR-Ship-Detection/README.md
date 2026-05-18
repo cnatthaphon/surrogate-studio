@@ -92,7 +92,7 @@ Roughly 72% of test patches get a predicted box that overlaps the ground truth a
 
 ### Loss choice for the aug variant
 
-CNN+Aug stays on MSE rather than GIoU because the paired-flip aug + GIoU combination doesn't converge cleanly — loss plateaus at ~0.96 (no-overlap regime) regardless of learning rate, since the rough early-training landscape combines with GIoU's vanishing-gradient zone outside any overlap. Cleanly handling this would need either a warmup phase (start with MSE, switch to GIoU) or a hybrid `α·MSE + β·GIoU` combined loss. Both are clean platform extensions, deliberately deferred — the current two-config split (GIoU on baseline, MSE on aug) shows both platform wins independently.
+CNN+Aug stays on MSE rather than GIoU because the paired-flip aug + GIoU combination doesn't converge cleanly from random init — loss plateaus at ~0.96 (no-overlap regime) regardless of learning rate, since the rough early-training landscape combines with GIoU's vanishing-gradient zone outside any overlap. The platform now exposes `loss: "giou_mse"` (50/50 MSE + GIoU hybrid) for exactly this regime — MSE supplies a smooth gradient through the early no-overlap phase, GIoU takes over once boxes begin to overlap (standard recipe for single-stage detectors that need to converge from scratch). Retraining the CNN+Aug variant on `giou_mse` to verify convergence is a clean follow-up; the shipped pretrained checkpoints still reflect the two-config split (GIoU on baseline, MSE on aug), which already shows both platform wins independently.
 
 #### Bug found while building this demo
 
