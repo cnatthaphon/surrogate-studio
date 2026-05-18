@@ -43,7 +43,7 @@ The Single-Box Detector trained 18 epochs on PyTorch CUDA (early-stopped at epoc
 
 ![Evaluation results](images/04_test.png)
 
-| Metric | Value | What it means |
+| Metric (test split, in-app recipe) | Value | What it means |
 |---|---|---|
 | **BBox MAE** | **0.0464** | Mean absolute error on normalized 0-1 box coords (~1.5 pixels on 32×32) |
 | **Class Accuracy** | 0.6741 | Right shape category (square / wide / tall) on ~67% of test samples |
@@ -59,9 +59,9 @@ The Single-Box Detector trained 18 epochs on PyTorch CUDA (early-stopped at epoc
 
 The second variant **Single-Box Detector + Augmentation** adds `augment_image` on the image branch and `target_source(bbox) → augment_bbox(x0y0x1y1)` on the target branch — both sharing `seedLink="synthdet_aug"` so the bbox flips in lockstep with the image. The classification head doesn't need augmenting (a square stays a square when mirrored), so its supervision continues to use raw labels.
 
-Both variants retrained at the same code rev, same seed=42, 18 epochs on PyTorch CUDA:
+Both variants retrained at the same code rev, same seed=42, 18 epochs on PyTorch CUDA. The numbers below come from each pretrained checkpoint's *training metadata* — `best val_loss` is the validation loss at the checkpoint's best epoch, and `val bbox MAE` is the corresponding bbox MAE on the validation split at that same epoch. That's a different split + epoch from the headline test-set MAE above (0.0464); this table is the apples-to-apples training-side comparison that isolates the augmentation effect.
 
-| Variant (from pretrained metadata) | best epoch | best val_loss | bbox MAE |
+| Variant (val split at best epoch) | best epoch | best val_loss | val bbox MAE |
 |---|---|---|---|
 | Single-Box Detector | 17 | 0.00115 | 0.0220 |
 | **Single-Box Detector + Augmentation** | 18 | **0.00105** ↓8.7% | **0.0203** ↓7.9% |
