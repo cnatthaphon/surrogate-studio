@@ -17,7 +17,7 @@ Predict future vessel positions from historical AIS (Automatic Identification Sy
 
 ## Results
 
-Trained on 2,000 trajectories (89K training samples), 20 epochs, PyTorch CUDA:
+The shipped pretrained checkpoints were trained on a 2,000-trajectory subset (~89K windowed samples), 20 epochs, PyTorch CUDA, evaluated on the test slice of that subset. The dataset module exposes the full 12,126-trajectory pool (see [Data](#data)), so retraining from the Trainer tab uses ~6× more data — the relative ordering (MLP > simplified Transformer at this parameter scale) is not expected to flip, but absolute MAE / R² should improve.
 
 | Model | Params | Test MAE | Test RMSE | Test R² | Best Epoch |
 |-------|--------|----------|-----------|---------|------------|
@@ -82,6 +82,8 @@ Two stacked transformer blocks for deeper cross-timestep reasoning.
 | Test | 1,481 | ~97K |
 
 Pre-processed per the paper: min 36 steps, max 120 steps, normalized [0,1], no NaN.
+
+> **Pretrained vs. live retrain:** the shipped pretrained checkpoints used a 2,000-trajectory subset (~89K samples) to keep the eval table reproducible from a single 20-epoch PyTorch CUDA run in ~2 minutes. The trainers in the Trainer tab default to the full 12,126-trajectory dataset (~746K windowed samples) so a live retrain is the bigger run.
 
 ## How to Use
 

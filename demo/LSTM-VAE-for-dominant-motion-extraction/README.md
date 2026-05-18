@@ -90,11 +90,9 @@ Full 10,399 timesteps from the paper's `ant_dataset_gt.mat` are embedded (2.4MB 
 
 **MLP-AE baseline**: We include a plain autoencoder (Dense layers, no stochastic latent) for comparison — not in the original paper, but useful for demonstrating the value of the VAE latent structure.
 
-### Benchmark Results
+### Evaluation (in-app, on shipped pretrained weights)
 
-Headless benchmark: 50 epochs, batch=32, lr=5e-4, Adam, plateau scheduler, seed=42. Run via `node scripts/benchmark_ant_vae.js`.
-
-### In-app evaluation (Evaluation tab, on shipped pretrained weights)
+Pretrained weights were produced by `scripts/benchmark_ant_vae.js` (headless, 50 epochs, batch=32, lr=5e-4, Adam, plateau scheduler, seed=42) and shipped into the demo. The in-app Evaluation tab loads those weights and runs the test split through the platform's standard `mae` / `rmse` / `bias` / `r²` / `worst_ant_mae` / `mde` recipe — that's the canonical measurement shown here.
 
 ![In-app evaluation](images/04_test.png)
 
@@ -103,7 +101,7 @@ Headless benchmark: 50 epochs, batch=32, lr=5e-4, Adam, plateau scheduler, seed=
 | **LSTM-VAE** | 77K | **0.0356** | **0.0469** | **0.9756** | **0.0483** | **0.0560** |
 | MLP-AE | 19K | 0.0416 | 0.0557 | 0.9655 | 0.0548 | 0.0657 |
 
-**Both models reconstruct ant trajectories at R² ≈ 0.97; the LSTM-VAE wins narrowly across every metric.** Run on the held-out 1040-timestep ant test split via the in-app `mae` / `rmse` / `bias` / `r²` / `worst_ant_mae` / `mde` recipe.
+**Both models reconstruct ant trajectories at R² ≈ 0.97; the LSTM-VAE wins narrowly across every metric.** Test split: the held-out 1040-timestep slice from the seed=42 80/10/10 random split.
 
 **Why the LSTM-VAE pulls ahead:** the recurrent encoder captures the temporal correlation within each 1-timestep×40-feature input window (correlated coordinates across the 20 ants) better than the dense baseline; the KL-regularized 20-dim latent gives the decoder a smooth, structured intermediate representation; and the VAE's μ-only inference is well-behaved here because the KL term keeps μ close to the prior. The MAE gap is ~14% — small in absolute terms but consistent across MAE, RMSE, R², worst-ant MAE, and MDE.
 
