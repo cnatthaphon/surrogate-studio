@@ -64,9 +64,12 @@
     _nid = 200;
     var d = {};
     // Same simple Flatten + Dense(128) backbone as the baseline, with
-    // paired hflip + vflip augmentation. MSE loss (not GIoU) because
-    // the paired-flip aug + GIoU landscape doesn't converge from
-    // random init on this dataset. MSE + aug still beats MLP by ~33%.
+    // paired hflip + vflip augmentation. Loss is `giou_mse` (50/50
+    // MSE + GIoU hybrid): MSE supplies a smooth gradient through the
+    // early no-overlap phase where pure GIoU is flat, GIoU takes over
+    // once boxes begin to overlap. Standard recipe for single-stage
+    // detectors that need to converge from random init; resolves the
+    // pure-GIoU plateau the earlier configuration ran into.
     var imgSrc  = N(d, "image_source",   { sourceKey: "pixel_values", featureSize: 4096, imageShape: [64,64,1] }, 50, 200);
     var reshape = N(d, "reshape",         { targetShape: "64,64,1" },                                                     200, 200);
     var augImg  = N(d, "augment_image",   { hflipProb: 0.5, vflipProb: 0.5, seedLink: "sar_aug", layout: "auto" }, 380, 200);
@@ -76,7 +79,7 @@
     var flat    = N(d, "flatten",         {},                                                                              1070, 200);
     var d1      = N(d, "dense",           { units: 128, activation: "relu" },                                              1240, 200);
     var drop    = N(d, "dropout",         { rate: 0.3 },                                                                   1410, 200);
-    var out     = N(d, "output",          { target: "bbox", targetType: "bbox", headType: "regression", matchWeight: 1, activation: "sigmoid", loss: "mse" }, 1580, 200);
+    var out     = N(d, "output",          { target: "bbox", targetType: "bbox", headType: "regression", matchWeight: 1, activation: "sigmoid", loss: "giou_mse" }, 1580, 200);
     // Target path: dataset bbox → augment_bbox → output.input_2
     var tgtSrc  = N(d, "target_source",   { targetKey: "bbox", featureSize: 4 },                                           380, 450);
     var augBox  = N(d, "augment_bbox",    { hflipProb: 0.5, vflipProb: 0.5, seedLink: "sar_aug", format: "xywh", imageWidth: 1, imageHeight: 1 }, 1240, 450);
