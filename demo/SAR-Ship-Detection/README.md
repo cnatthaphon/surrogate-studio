@@ -81,16 +81,16 @@ Plus the data unblock — **3000 patches via `scripts/extract_hrsid_bundle.py`**
 
 ### Test-IoU distribution (450 samples)
 
-Per-threshold hit rate on the test split — all three pretrained models evaluated under the same in-app `iou_mean` recipe:
+Per-threshold hit rate on the test split — all three pretrained models evaluated under the same in-app `iou_mean` recipe. Raw counts shown alongside percentages so the ratios in the prose below are checkable:
 
 | IoU threshold | CNN + Aug (`giou_mse`) | CNN (`giou` baseline) | MLP Baseline |
 |---|---|---|---|
-| > 0 (any overlap) | 85% | 96% | 60% |
-| > 0.3 (moderate) | **51%** | 45% | 36% |
-| > 0.5 (COCO mAP standard) | **37%** | 31% | 14% |
-| > 0.7 (excellent) | **18%** | 11% | 2% |
+| > 0 (any overlap) | 382 / 450 (84.9%) | 430 / 450 (95.6%) | 268 / 450 (59.6%) |
+| > 0.3 (moderate) | **231 / 450 (51.3%)** | 202 / 450 (44.9%) | 162 / 450 (36.0%) |
+| > 0.5 (COCO mAP standard) | **167 / 450 (37.1%)** | 139 / 450 (30.9%) | 65 / 450 (14.4%) |
+| > 0.7 (excellent) | **79 / 450 (17.6%)** | 51 / 450 (11.3%) | 11 / 450 (2.4%) |
 
-CNN+Aug+`giou_mse` hits 37% at COCO mAP@0.5 vs. 23% for the previous pretrained config (MSE-only) — and 14× the MLP baseline at the excellent threshold (>0.7). SOTA SAR detectors (YOLOv5/v8 + pretrained backbones, 25M+ params) hit ~85% at IoU>0.5; this demo's single-stage from-scratch 548K-param CNN is in a different complexity class and produces credible, non-trivial detection. Note the inversion at IoU>0: the pure-GIoU baseline produces *some* overlap on 96% of test samples but rarely good overlap, while the hybrid is more confident — slightly fewer "any overlap" predictions but many more crossing the meaningful thresholds.
+CNN+Aug+`giou_mse` hits 37% at COCO mAP@0.5 vs. 23% for the previous pretrained config (MSE-only). At the excellent threshold (IoU > 0.7) it gets 79 patches right vs. 11 for the MLP — **7.2× the MLP**, and 1.5× the pure-GIoU baseline. SOTA SAR detectors (YOLOv5/v8 + pretrained backbones, 25M+ params) hit ~85% at IoU>0.5; this demo's single-stage from-scratch 548K-param CNN is in a different complexity class and produces credible, non-trivial detection. Note the inversion at IoU>0: the pure-GIoU baseline produces *some* overlap on 96% of test samples but rarely good overlap, while the hybrid is more confident — slightly fewer "any overlap" predictions but many more crossing the meaningful thresholds.
 
 ### Loss choice for the aug variant — why `giou_mse`
 
