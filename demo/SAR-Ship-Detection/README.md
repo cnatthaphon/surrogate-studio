@@ -63,11 +63,11 @@ The Evaluation tab reports four metrics for this demo. **`iou_mean` is the one t
 
 ![Evaluation results](images/04_test.png)
 
-| Model | Loss | Params | Mean IoU ↑ | BBox MAE | BBox Bias |
-|---|---|---|---|---|---|
-| **CNN + Augmentation** | **`giou_mse`** | 548K | **0.342** | 0.133 | -0.024 |
-| CNN Detector (baseline) | `giou` | 548K | 0.292 | 0.249 | -0.001 |
-| MLP Baseline | MSE | 1.07M | 0.212 | **0.103** | -0.001 |
+| Model | Loss | Params | Mean IoU ↑ | BBox MAE | BBox RMSE | BBox Bias |
+|---|---|---|---|---|---|---|
+| **CNN + Augmentation** | **`giou_mse`** | 548K | **0.342** | 0.133 | 0.197 | 0.040 |
+| CNN Detector (baseline) | `giou` | 548K | 0.292 | 0.249 | 0.378 | 0.080 |
+| MLP Baseline | MSE | 1.07M | 0.212 | **0.103** | **0.161** | **~0** |
 
 **CNN + Augmentation with the `giou_mse` hybrid loss wins on every overlap-style metric — 61% above the MLP baseline on Mean IoU, +17% over the pure-GIoU CNN baseline.** The hybrid combines both platform features that move the IoU needle: the `giou_mse` loss (50/50 MSE + GIoU) directly optimizes box overlap while MSE's smooth gradient keeps training healthy through the early no-overlap regime where pure GIoU is flat; paired image+bbox horizontal+vertical flips (via the `seedLink` augmentation contract) 4×s the effective training set without breaking the bbox label. Per-coord MAE goes up vs. the MLP (0.133 vs 0.103) because GIoU-family losses accept larger per-axis error in exchange for better overlap — that's the design, and the IoU jump is what shows it works.
 
