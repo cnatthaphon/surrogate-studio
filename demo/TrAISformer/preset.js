@@ -120,16 +120,19 @@
       { id: "m-small-trais",  name: "3. Small TrAISformer (2 blocks)", schemaId: sid, graph: _smallTransformer(), createdAt: Date.now() },
     ],
     trainers: [
+      // Live trainers and pretrained cards share the same hyperparameters
+      // (20 epochs, batch 256, full 12,126-trajectory dataset). Clicking
+      // "Train from scratch" reproduces the shipped pretrained eval.
       { id: "t-mlp-baseline", name: "MLP Baseline Trainer", schemaId: sid, datasetId: DS, modelId: "m-mlp-baseline", status: "draft",
-        config: { epochs: 30, batchSize: 64, learningRate: 0.001, optimizerType: "adam", useServer: true,
+        config: { epochs: 20, batchSize: 256, learningRate: 0.001, optimizerType: "adam", useServer: true,
                   earlyStoppingPatience: 10, lrSchedulerType: "plateau", lrPatience: 5, lrFactor: 0.5 } },
       { id: "t-tiny-trais", name: "Tiny TrAISformer Trainer", schemaId: sid, datasetId: DS, modelId: "m-tiny-trais", status: "draft",
-        config: { epochs: 30, batchSize: 64, learningRate: 0.001, optimizerType: "adam", useServer: true,
+        config: { epochs: 20, batchSize: 256, learningRate: 0.001, optimizerType: "adam", useServer: true,
                   earlyStoppingPatience: 10, lrSchedulerType: "plateau", lrPatience: 5, lrFactor: 0.5 } },
       { id: "t-small-trais", name: "Small TrAISformer Trainer", schemaId: sid, datasetId: DS, modelId: "m-small-trais", status: "draft",
-        config: { epochs: 30, batchSize: 64, learningRate: 0.001, optimizerType: "adam", useServer: true,
+        config: { epochs: 20, batchSize: 256, learningRate: 0.001, optimizerType: "adam", useServer: true,
                   earlyStoppingPatience: 10, lrSchedulerType: "plateau", lrPatience: 5, lrFactor: 0.5 } },
-      // Pre-trained (PyTorch CUDA, 20 epochs, 2000 trajectories)
+      // Pre-trained (PyTorch CUDA, 20 epochs, full 12,126 trajectories — same config as the live trainers above)
       { id: "t-mlp-baseline-pre", name: "MLP Baseline (pre-trained)", schemaId: sid, datasetId: DS, modelId: "m-mlp-baseline", status: "done",
         _pretrainedVar: "MLP_BASELINE_PRETRAINED_BIN_B64",
         config: { epochs: 20, batchSize: 256, learningRate: 0.001, optimizerType: "adam" } },
