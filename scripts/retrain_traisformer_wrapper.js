@@ -52,7 +52,15 @@ console.log("  set:", !!global._AIS_INLINE_DATA,
   global._AIS_INLINE_DATA && global._AIS_INLINE_DATA.test ? global._AIS_INLINE_DATA.test.length : "?");
 
 var modelIdx = process.argv[2];
-process.argv = [process.argv[0], path.join(ROOT, "scripts/train_pretrained_server.js"), "demo/TrAISformer"];
+// Both args must be absolute so the wrapper runs from anywhere — not just
+// the repo root. train_pretrained_server.js resolves demoDir relative to
+// CWD, so passing "demo/TrAISformer" from /tmp would print the usage line
+// and exit. (Reviewer caught this on PR #90.)
+process.argv = [
+  process.argv[0],
+  path.join(ROOT, "scripts/train_pretrained_server.js"),
+  path.join(ROOT, "demo/TrAISformer"),
+];
 if (modelIdx !== undefined) process.argv.push(String(modelIdx));
 
 // Skip train_pretrained_server.js's own respawn (we already bumped NODE_OPTIONS).
