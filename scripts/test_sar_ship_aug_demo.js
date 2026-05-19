@@ -37,7 +37,7 @@ if (!preset) { console.error("preset did not register"); process.exit(1); }
       mode: "direct",
       featureSize: 64 * 64,
       imageShape: [64, 64, 1],
-      allowedOutputKeys: [{ key: "bbox", label: "bbox", headType: "regression", featureSize: 4 }],
+      allowedOutputKeys: [{ key: "bbox", label: "bbox", headType: "regression", featureSize: 4, bboxFormat: "xywh" }],
       defaultTarget: "bbox",
       numClasses: 1,
       targetSize: 4,
