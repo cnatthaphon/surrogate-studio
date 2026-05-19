@@ -1,5 +1,5 @@
 // Surrogate Studio - concatenated bundle
-// Generated: 2026-05-18T05:02:42Z
+// Generated: 2026-05-19T17:25:12Z
 // Source files: 58
 
 
@@ -4528,7 +4528,7 @@
         { key: "trajectory_window", label: "trajectory window (lat,lon,sog,cog)" },
       ],
       outputs: [
-        { key: "position", label: "Next position (lat,lon,sog,cog)", headType: "regression" },
+        { key: "position", label: "Next position (lat,lon,sog,cog)", headType: "regression", featureSize: 4 },
       ],
       defaultPreset: null,
       metadata: {

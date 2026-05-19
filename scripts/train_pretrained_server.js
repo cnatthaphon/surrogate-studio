@@ -55,6 +55,13 @@ var SERVER_URL = new (require("url").URL)(SERVER);
 global.window = global;
 global.document = {
   createElement: function () { return { onload: null, onerror: null, style: {} }; },
+  // ais_module._resolveDataBase walks document.getElementsByTagName("script")
+  // at module-load time. Without this stub the require throws, safeRequire
+  // in dataset_modules.js swallows it, and `getModuleForSchema("ais_trajectory")`
+  // silently returns 0 matches — making it impossible to retrain TrAISformer
+  // through this script. Returning an empty NodeList-ish array lets
+  // _resolveDataBase fall through to its sensible "../../data/ais-dma/" default.
+  getElementsByTagName: function () { return []; },
   head: { appendChild: function () {} },
 };
 global.OSCDatasetModules = { registerModule: function () {} };

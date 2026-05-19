@@ -18,6 +18,12 @@ var path = require("path");
 global.window = global;
 global.document = {
   createElement: function () { return { onload: null, onerror: null, style: {} }; },
+  // ais_module._resolveDataBase walks document.getElementsByTagName("script")
+  // at module-load time; without this stub, safeRequire silently drops the
+  // AIS dataset module and `getModuleForSchema("ais_trajectory")` returns 0
+  // matches, making any TrAISformer retrain via this script silently
+  // unbuildable. Empty NodeList-ish keeps _resolveDataBase on its default.
+  getElementsByTagName: function () { return []; },
   head: { appendChild: function () {} },
 };
 global.OSCDatasetModules = { registerModule: function () {} };

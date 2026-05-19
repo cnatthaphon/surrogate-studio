@@ -17,13 +17,13 @@ Predict future vessel positions from historical AIS (Automatic Identification Sy
 
 ## Results
 
-The shipped pretrained checkpoints were trained on a 2,000-trajectory subset (~89K windowed samples), 20 epochs, PyTorch CUDA, evaluated on the test slice of that subset. The dataset module exposes the full 12,126-trajectory pool (see [Data](#data)), so retraining from the Trainer tab uses ~6× more data — the relative ordering (MLP > simplified Transformer at this parameter scale) is not expected to flip, but absolute MAE / R² should improve.
+Shipped pretrained checkpoints are trained on the full 12,126-trajectory DMA dataset (~566K windowed samples, 20 epochs, batch 256, PyTorch CUDA), then evaluated by the in-app Evaluation tab against the held-out test split. The live trainers in the demo use the same config — click "Train from scratch" and you reproduce these numbers (modulo seed variation).
 
 | Model | Params | Test MAE | Test RMSE | Test R² | Best Epoch |
 |-------|--------|----------|-----------|---------|------------|
-| **MLP Baseline** | 16,836 | **0.0225** | **0.0741** | **0.924** | 20 |
-| Tiny TrAISformer (1 block) | 10,884 | 0.0382 | 0.0884 | 0.891 | 18 |
-| Small TrAISformer (2 blocks) | 21,476 | 0.0400 | 0.0893 | 0.889 | 17 |
+| **MLP Baseline** | 16,836 | **0.0176** | **0.0592** | **0.946** | 20 |
+| Tiny TrAISformer (1 block) | 10,884 | 0.0325 | 0.0764 | 0.910 | 20 |
+| Small TrAISformer (2 blocks) | 21,476 | 0.0337 | 0.0763 | 0.915 | 20 |
 
 ![Pre-trained Trainer Metrics](images/trainer_pretrained.png)
 
@@ -35,8 +35,8 @@ The shipped pretrained checkpoints were trained on a 2,000-trajectory subset (~8
 | **Embedding dim** | 768 | 32 |
 | **Parameters** | ~47M | 10K-21K |
 | **Prediction type** | Discrete tokenization (250 lat bins x 270 lon bins = 612 tokens) | Continuous regression (4 floats: lat, lon, sog, cog) |
-| **Training data** | Full Danish Maritime Authority dataset | 2,000 trajectories subset |
-| **Training** | Multi-GPU, days | Single GPU, ~2 minutes |
+| **Training data** | Full Danish Maritime Authority dataset | Full Danish Maritime Authority dataset (12,126 trajectories, ~566K windowed samples) |
+| **Training** | Multi-GPU, days | Single GPU, ~5 minutes per model |
 | **Context window** | Variable-length with learned positional encoding | Fixed 16 timesteps |
 
 ### Why the MLP Baseline Wins Here
@@ -82,8 +82,6 @@ Two stacked transformer blocks for deeper cross-timestep reasoning.
 | Test | 1,481 | ~97K |
 
 Pre-processed per the paper: min 36 steps, max 120 steps, normalized [0,1], no NaN.
-
-> **Pretrained vs. live retrain:** the shipped pretrained checkpoints used a 2,000-trajectory subset (~89K samples) to keep the eval table reproducible from a single 20-epoch PyTorch CUDA run in ~2 minutes. The trainers in the Trainer tab default to the full 12,126-trajectory dataset (~746K windowed samples) so a live retrain is the bigger run.
 
 ## How to Use
 

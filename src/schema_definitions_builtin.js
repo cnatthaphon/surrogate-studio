@@ -3737,7 +3737,7 @@
         { key: "trajectory_window", label: "trajectory window (lat,lon,sog,cog)" },
       ],
       outputs: [
-        { key: "position", label: "Next position (lat,lon,sog,cog)", headType: "regression" },
+        { key: "position", label: "Next position (lat,lon,sog,cog)", headType: "regression", featureSize: 4 },
       ],
       defaultPreset: null,
       metadata: {
