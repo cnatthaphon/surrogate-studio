@@ -900,27 +900,14 @@
             var _prevTargetSize = Number(activeDs && activeDs.targetSize) || 0;
             var _yTestMapped = isClassification ? testSplit.y.map(function (l) { return typeof l === "number" ? oh(l, nCls) : l; })
               : isRecon3 ? testSplit.x : testSplit.y;
-            var _inferredTargetSize;
-            if (isClassification) {
-              _inferredTargetSize = nCls;
-            } else if (defaultHeadType === "reconstruction") {
-              // y = x for true reconstruction → target width = input width.
-              _inferredTargetSize = (testSplit.x && testSplit.x[0] && testSplit.x[0].length) || 0;
-            } else {
-              // Regression (incl. defaultHeadType === "regression"): the
-              // true target width is the raw y vec's length, NOT the
-              // mapped y (which may be substituted with x by isRecon3).
-              // Scalar regression labels (y[i] is a number like 0.42)
-              // have width 1, not 0 — Array#length would be undefined.
-              var _rawY0 = testSplit.y && testSplit.y[0];
-              if (Array.isArray(_rawY0)) {
-                _inferredTargetSize = _rawY0.length || 0;
-              } else if (typeof _rawY0 === "number" && Number.isFinite(_rawY0)) {
-                _inferredTargetSize = 1;
-              } else {
-                _inferredTargetSize = 0;
-              }
-            }
+            // Delegate to model_builder_core.inferTargetWidth so the
+            // zero-scalar-truthiness trap is handled in one place.
+            // The helper picks the first split with non-empty y/x via
+            // explicit array-length checks, NOT truthiness — so a
+            // valid `0` first label doesn't get skipped.
+            var _inferredTargetSize = modelBuilder.inferTargetWidth(
+              [{ x: testSplit.x, y: testSplit.y }], defaultHeadType, nCls
+            );
             activeDs = {
               xTest: testSplit.x,
               yTest: _yTestMapped,
@@ -2192,29 +2179,21 @@
         var _yTrainMapped = mapY(train);
         var _yValMapped = mapY(val);
         var _yTestMapped2 = mapY(test);
-        var _inferredTargetSize2;
-        if (isClassification2) {
-          _inferredTargetSize2 = nClasses;
-        } else if (defaultHeadType2 === "reconstruction") {
-          // y = x for true reconstruction → target width = input width.
-          var _rxFirst = (train.x && train.x[0]) || (val.x && val.x[0]) || (test.x && test.x[0]);
-          _inferredTargetSize2 = (_rxFirst && _rxFirst.length) || 0;
-        } else {
-          // Regression (or any non-classification head that ISN'T true
-          // reconstruction): read the raw y vector's length. mapY may
-          // have substituted x for y via isReconstruction2's broad
-          // "non-classification" predicate — that substitution is for
-          // training data, not target-width inference. Scalar labels
-          // (y[i] is a number like 0.42) have width 1, not 0.
-          var _ryFirst = (train.y && train.y[0]) || (val.y && val.y[0]) || (test.y && test.y[0]);
-          if (Array.isArray(_ryFirst)) {
-            _inferredTargetSize2 = _ryFirst.length || 0;
-          } else if (typeof _ryFirst === "number" && Number.isFinite(_ryFirst)) {
-            _inferredTargetSize2 = 1;
-          } else {
-            _inferredTargetSize2 = 0;
-          }
-        }
+        // Delegate to the shared inferTargetWidth helper. It picks the
+        // first split with a non-empty array via explicit length check,
+        // so valid zero labels (y=[0]) don't get falsy-skipped by an
+        // `||` truthiness chain. It also handles the reconstruction/
+        // regression split correctly without relying on mapY's
+        // y-substituted-with-x behavior.
+        var _inferredTargetSize2 = modelBuilder.inferTargetWidth(
+          [
+            { x: train.x, y: train.y },
+            { x: val.x, y: val.y },
+            { x: test.x, y: test.y },
+          ],
+          defaultHeadType2,
+          nClasses
+        );
         activeDs = {
           xTrain: train.x, yTrain: _yTrainMapped,
           xVal: val.x, yVal: _yValMapped,

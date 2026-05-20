@@ -375,6 +375,54 @@
     return fallback;
   }
 
+  // Resolve the target-head width from the dataset's actual y-data,
+  // for cases where the caller has neither schema featureSize nor an
+  // explicit node-units override. Returns 0 when no width can be
+  // determined (caller decides whether to throw or default).
+  //
+  // Used by both trainer_tab Test + Train rebuild paths so they
+  // can preserve targetSize across activeDs rebuilds without
+  // tripping the strict targetUnitsFromMode contract.
+  //
+  // splits: array of { x, y } per split (typically [train, val, test]).
+  // headType: "classification" | "reconstruction" | "regression" | ...
+  // numClasses: only used for classification.
+  //
+  // Edge cases handled:
+  //   - scalar regression labels (y[i] is a number like 0.42 OR 0)
+  //     → returns 1, NOT 0. The "0 || …" truthiness trap is avoided
+  //     by an explicit existence check on the row container, not on
+  //     its value.
+  //   - reconstruction → y = x, so width comes from x[0].
+  //   - empty splits → falls through to next split.
+  function inferTargetWidth(splits, headType, numClasses) {
+    var ht = String(headType || "regression").toLowerCase();
+    if (ht === "classification") return Math.max(0, Number(numClasses || 0));
+    if (ht === "reconstruction") {
+      for (var i = 0; i < splits.length; i += 1) {
+        var sx = splits[i] && splits[i].x;
+        if (Array.isArray(sx) && sx.length > 0) {
+          var x0 = sx[0];
+          if (Array.isArray(x0)) return x0.length || 0;
+          if (typeof x0 === "number" && Number.isFinite(x0)) return 1;
+          return 0;
+        }
+      }
+      return 0;
+    }
+    // regression (or any non-classification, non-reconstruction head)
+    for (var j = 0; j < splits.length; j += 1) {
+      var sy = splits[j] && splits[j].y;
+      if (Array.isArray(sy) && sy.length > 0) {
+        var y0 = sy[0];
+        if (Array.isArray(y0)) return y0.length || 0;
+        if (typeof y0 === "number" && Number.isFinite(y0)) return 1;
+        return 0;
+      }
+    }
+    return 0;
+  }
+
   function inferOutputHeads(graphData, allowedOutputKeys, fallbackTarget) {
     var data = extractGraphData(graphData);
     // fallback from caller (which gets it from schema), never hardcoded
@@ -2603,6 +2651,7 @@
     inferWindow: inferWindow,
     inferArHistoryConfig: inferArHistoryConfig,
     inferOutputHeads: inferOutputHeads,
+    inferTargetWidth: inferTargetWidth,
     inferDatasetTargetMode: inferDatasetTargetMode,
     inferFeatureSpec: inferFeatureSpec,
     buildModelFromGraph: buildModelFromGraph,

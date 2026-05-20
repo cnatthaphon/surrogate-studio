@@ -237,6 +237,25 @@ function makeGraph(outputData) {
   ok(/targetKey === "pixel_values"[\s\S]{0,500}Cannot resolve output width for target 'pixel_values'/.test(src),
     "pixel_values branch has the strict-throw guard in source");
 
+  // --- Case 10: inferTargetWidth helper handles the zero-scalar trap
+  // (the reviewer's specific finding: train.y[0] === 0 is valid for
+  // scalar regression, and the previous `||` truthiness chain skipped
+  // it. The helper now uses explicit array-length checks.)
+  ok(MBC.inferTargetWidth([{ x: [[1, 2, 3]], y: [0] }], "regression", 0) === 1,
+    "inferTargetWidth: scalar y=[0] (zero) regression → 1 (no falsy-skip)");
+  ok(MBC.inferTargetWidth([{ x: [[1, 2, 3]], y: [0.42] }], "regression", 0) === 1,
+    "inferTargetWidth: scalar y=[0.42] (nonzero) regression → 1");
+  ok(MBC.inferTargetWidth([{ x: [[1, 2, 3]], y: [[0.1, 0.2, 0.3, 0.4]] }], "regression", 0) === 4,
+    "inferTargetWidth: vector y=[[0.1,0.2,0.3,0.4]] regression → 4");
+  ok(MBC.inferTargetWidth([{ x: [[1, 2, 3]], y: [] }, { x: [[4, 5, 6]], y: [0] }], "regression", 0) === 1,
+    "inferTargetWidth: empty first split, next has y=[0] → 1 (still picks zero)");
+  ok(MBC.inferTargetWidth([{ x: [[1, 2, 3]], y: [[1, 2]] }], "reconstruction", 0) === 3,
+    "inferTargetWidth: reconstruction → uses x[0].length (3), not y");
+  ok(MBC.inferTargetWidth([{ x: [], y: [] }], "classification", 7) === 7,
+    "inferTargetWidth: classification → numClasses (7) regardless of data");
+  ok(MBC.inferTargetWidth([{ x: [], y: [] }], "regression", 0) === 0,
+    "inferTargetWidth: empty data → 0 (caller decides what to do)");
+
   console.log("\n  " + passed + " passed, " + failed + " failed");
   if (failed) process.exit(1);
 })();
