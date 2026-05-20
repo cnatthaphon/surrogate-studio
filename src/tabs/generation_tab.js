@@ -938,7 +938,15 @@
             weightValues: trainerArtifacts && trainerArtifacts.weightValues,
             weightSpecs: trainerArtifacts && trainerArtifacts.weightSpecs,
             featureSize: sResolvedFs,
-            targetSize: sResolvedFs, numClasses: dsData2.numClasses || dsData2.classCount || 0,
+            // Prefer the active variant's declared target width over
+            // the input-width fallback. Reconstruction targets
+            // legitimately have targetSize === featureSize (the
+            // original intent), but dynamic regression targets
+            // (Custom CSV target column, ais_trajectory.position)
+            // have a smaller y than x and would silently mis-shape the
+            // server-side head if we sent sResolvedFs.
+            targetSize: (activeDs2 && Number(activeDs2.targetSize)) || sResolvedFs,
+            numClasses: (activeDs2 && (activeDs2.numClasses || activeDs2.classCount)) || dsData2.numClasses || dsData2.classCount || 0,
             method: method,
             numSamples: config.numSamples || 16,
             steps: config.steps || 100,

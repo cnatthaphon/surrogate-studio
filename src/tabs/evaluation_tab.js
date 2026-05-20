@@ -1316,7 +1316,7 @@
       });
     }
 
-    function _runGenerativeEvaluation(tf, trainer, modelRec, dataset, artifacts, ev, meta, featureSize, nCls) {
+    function _runGenerativeEvaluation(tf, trainer, modelRec, dataset, artifacts, ev, meta, featureSize, nCls, targetSize) {
       var engine = getGenerationEngine();
       var serverAdapter = _getServerAdapter();
       if (!engine) return Promise.reject(new Error("Generation engine not available"));
@@ -1346,7 +1346,14 @@
           weightSpecs: artifacts && artifacts.weightSpecs,
           checkpoint: artifacts && artifacts.checkpoint,
           featureSize: featureSize,
-          targetSize: featureSize,
+          // Prefer the dataset's declared target width over the input
+          // width fallback. Reconstruction targets legitimately have
+          // targetSize === featureSize (the original code's intent),
+          // but dynamic regression targets (Custom CSV target column,
+          // ais_trajectory.position) have a smaller y than x, and
+          // sending featureSize as targetSize would silently mis-shape
+          // the head on the server.
+          targetSize: (targetSize && Number(targetSize)) || featureSize,
           numClasses: nCls,
           method: method,
           numSamples: numSamples,
@@ -1448,6 +1455,12 @@
           allowedOutputKeys: allowedOutputKeys,
           defaultTarget: defaultTarget,
           numClasses: nCls,
+          // Strict targetSize contract — same as the predictive eval
+          // path. Generative flows usually target pixel_values
+          // (reconstruction → upstream-width fallback), but dynamic
+          // regression generation needs the explicit hint to avoid
+          // the strict throw.
+          targetSize: (targetSize && Number(targetSize)) || undefined,
         });
         _loadWeights(tf, built.model, artifacts);
 
@@ -1601,7 +1614,7 @@
             _applyPredictionMetrics(pc, r, selectedIds, allPreds, testY, testLabels, testN, nCls, predictiveMode);
           }
           if (!runNeeds.generative) return null;
-          return _runGenerativeEvaluation(tf, trainer, modelRec, dataset, artifacts, ev, meta, featureSize, nCls);
+          return _runGenerativeEvaluation(tf, trainer, modelRec, dataset, artifacts, ev, meta, featureSize, nCls, targetSize);
         })
         .then(function (genResult) {
           generationResult = genResult;
