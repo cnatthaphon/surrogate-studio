@@ -893,13 +893,26 @@
             // Preserve targetSize across the rebuild — strict targetUnits
             // resolution requires it for dynamic-width regression targets
             // (Custom CSV target column, etc.). Fall back to inferring
-            // from the first y entry's width so synthetic/in-memory
-            // datasets that omit targetSize still resolve.
+            // from the *raw* split y so the inference doesn't get
+            // confused by mapY's regression-treated-as-reconstruction
+            // behavior (which substitutes x for y, giving a window-
+            // width number instead of the true target width).
             var _prevTargetSize = Number(activeDs && activeDs.targetSize) || 0;
             var _yTestMapped = isClassification ? testSplit.y.map(function (l) { return typeof l === "number" ? oh(l, nCls) : l; })
               : isRecon3 ? testSplit.x : testSplit.y;
-            var _firstY = _yTestMapped && _yTestMapped[0];
-            var _inferredTargetSize = (_firstY && _firstY.length) || 0;
+            var _inferredTargetSize;
+            if (isClassification) {
+              _inferredTargetSize = nCls;
+            } else if (defaultHeadType === "reconstruction") {
+              // y = x for true reconstruction → target width = input width.
+              _inferredTargetSize = (testSplit.x && testSplit.x[0] && testSplit.x[0].length) || 0;
+            } else {
+              // Regression (incl. defaultHeadType === "regression"): the
+              // true target width is the raw y vec's length, NOT the
+              // mapped y (which may be substituted with x by isRecon3).
+              var _rawY0 = testSplit.y && testSplit.y[0];
+              _inferredTargetSize = (_rawY0 && _rawY0.length) || 0;
+            }
             activeDs = {
               xTest: testSplit.x,
               yTest: _yTestMapped,
@@ -2162,15 +2175,31 @@
         var hasClsHead = _heads && _heads.some(function (h) { return h.headType === "classification"; });
         // Preserve targetSize across the rebuild — same reason as the
         // Test path above (and the inference rebuild at ~line 893).
-        // Falls back to inferring from the first mapped y entry so
-        // synthetic datasets that omit targetSize still resolve under
-        // the strict targetUnits contract.
+        // Falls back to inferring from the RAW split y, not from the
+        // mapped y: mapY's isReconstruction2 branch substitutes x for
+        // y for any non-classification head (including true regression
+        // like ais_trajectory.position), so the mapped y[0].length
+        // would be the input window width, not the target width.
         var _prevTargetSize2 = Number(activeDs && activeDs.targetSize) || 0;
         var _yTrainMapped = mapY(train);
         var _yValMapped = mapY(val);
         var _yTestMapped2 = mapY(test);
-        var _firstY2 = _yTrainMapped[0] || _yValMapped[0] || _yTestMapped2[0];
-        var _inferredTargetSize2 = (_firstY2 && _firstY2.length) || 0;
+        var _inferredTargetSize2;
+        if (isClassification2) {
+          _inferredTargetSize2 = nClasses;
+        } else if (defaultHeadType2 === "reconstruction") {
+          // y = x for true reconstruction → target width = input width.
+          var _rxFirst = (train.x && train.x[0]) || (val.x && val.x[0]) || (test.x && test.x[0]);
+          _inferredTargetSize2 = (_rxFirst && _rxFirst.length) || 0;
+        } else {
+          // Regression (or any non-classification head that ISN'T true
+          // reconstruction): read the raw y vector's length. mapY may
+          // have substituted x for y via isReconstruction2's broad
+          // "non-classification" predicate — that substitution is for
+          // training data, not target-width inference.
+          var _ryFirst = (train.y && train.y[0]) || (val.y && val.y[0]) || (test.y && test.y[0]);
+          _inferredTargetSize2 = (_ryFirst && _ryFirst.length) || 0;
+        }
         activeDs = {
           xTrain: train.x, yTrain: _yTrainMapped,
           xVal: val.x, yVal: _yValMapped,
