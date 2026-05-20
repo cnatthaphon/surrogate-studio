@@ -1668,11 +1668,22 @@
         return Math.max(1, Number(datasetMeta.targetSize));
       }
 
-      // 6. simple-regression default. Don't infer from upstream hidden width:
+      // 6. Refuse to silently default. Don't infer from upstream hidden width:
       // hidden width is incidental to the model architecture, not the target.
-      // Multi-output regression should declare width via output-node units,
-      // schema featureSize, or datasetMeta.targetSize.
-      return 1;
+      // Multi-output regression must declare width via one of:
+      //   - explicit `units` on the output node (`node.data.units`),
+      //   - schema-declared `featureSize` on the matching allowedOutputKeys entry, OR
+      //   - `datasetMeta.targetSize` passed by the caller.
+      // Returning `1` here used to be the silent fallback — that's exactly
+      // what masked the ais_trajectory.position bug (PR #90): trained 4-unit
+      // weights loaded into an auto-built 1-unit head, predictions emerged
+      // 1-dim, eval scored MAE 0.5 / R² -7 instead of throwing. Now it fails
+      // loudly at build time so the misconfig surfaces.
+      throw new Error(
+        "Cannot resolve output width for target '" + (targetKey || "<unknown>") + "' " +
+        "(headType=" + ht + "). Declare `featureSize` on the schema output, set " +
+        "`units` on the output node, or pass `datasetMeta.targetSize` from the caller."
+      );
     };
 
     var applyNodeOp = function (node, inTensor, laterHasRecurrent, nodeId) {

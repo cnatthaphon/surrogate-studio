@@ -906,6 +906,10 @@
           var rebuiltModel = modelBuilder.buildModelFromGraph(tf, modelRec.graph, {
             mode: graphMode, featureSize: featureSize, windowSize: 1, seqFeatureSize: featureSize,
             allowedOutputKeys: allowedOutputKeys, defaultTarget: defaultTarget, numClasses: activeDs.numClasses || nCls,
+            // Same strict-targetSize contract as the eval-time build:
+            // model_builder_core throws on unresolved widths instead of
+            // silently defaulting to 1 (was the ais_trajectory.position bug).
+            targetSize: (activeDs && Number(activeDs.targetSize)) || undefined,
           });
 
           // load saved weights
@@ -2175,6 +2179,8 @@
           windowSize: Number(activeDs.windowSize || 1),
           allowedOutputKeys: allowedOutputKeys, defaultTarget: defaultTarget,
           paramNames: activeDs.paramNames, paramSize: activeDs.paramSize, numClasses: activeDs.numClasses || activeDs.classCount || 10,
+          // Strict-targetSize contract (PR #91 follow-up to #90).
+          targetSize: (activeDs && Number(activeDs.targetSize)) || undefined,
         });
       } catch (err) { onStatus("Build error: " + err.message); return; }
 

@@ -1,5 +1,5 @@
 // Surrogate Studio - concatenated bundle
-// Generated: 2026-05-19T17:25:12Z
+// Generated: 2026-05-20T08:14:59Z
 // Source files: 58
 
 
@@ -23020,11 +23020,22 @@
         return Math.max(1, Number(datasetMeta.targetSize));
       }
 
-      // 6. simple-regression default. Don't infer from upstream hidden width:
+      // 6. Refuse to silently default. Don't infer from upstream hidden width:
       // hidden width is incidental to the model architecture, not the target.
-      // Multi-output regression should declare width via output-node units,
-      // schema featureSize, or datasetMeta.targetSize.
-      return 1;
+      // Multi-output regression must declare width via one of:
+      //   - explicit `units` on the output node (`node.data.units`),
+      //   - schema-declared `featureSize` on the matching allowedOutputKeys entry, OR
+      //   - `datasetMeta.targetSize` passed by the caller.
+      // Returning `1` here used to be the silent fallback — that's exactly
+      // what masked the ais_trajectory.position bug (PR #90): trained 4-unit
+      // weights loaded into an auto-built 1-unit head, predictions emerged
+      // 1-dim, eval scored MAE 0.5 / R² -7 instead of throwing. Now it fails
+      // loudly at build time so the misconfig surfaces.
+      throw new Error(
+        "Cannot resolve output width for target '" + (targetKey || "<unknown>") + "' " +
+        "(headType=" + ht + "). Declare `featureSize` on the schema output, set " +
+        "`units` on the output node, or pass `datasetMeta.targetSize` from the caller."
+      );
     };
 
     var applyNodeOp = function (node, inTensor, laterHasRecurrent, nodeId) {
@@ -30693,6 +30704,10 @@
           var rebuiltModel = modelBuilder.buildModelFromGraph(tf, modelRec.graph, {
             mode: graphMode, featureSize: featureSize, windowSize: 1, seqFeatureSize: featureSize,
             allowedOutputKeys: allowedOutputKeys, defaultTarget: defaultTarget, numClasses: activeDs.numClasses || nCls,
+            // Same strict-targetSize contract as the eval-time build:
+            // model_builder_core throws on unresolved widths instead of
+            // silently defaulting to 1 (was the ais_trajectory.position bug).
+            targetSize: (activeDs && Number(activeDs.targetSize)) || undefined,
           });
 
           // load saved weights
@@ -31962,6 +31977,8 @@
           windowSize: Number(activeDs.windowSize || 1),
           allowedOutputKeys: allowedOutputKeys, defaultTarget: defaultTarget,
           paramNames: activeDs.paramNames, paramSize: activeDs.paramSize, numClasses: activeDs.numClasses || activeDs.classCount || 10,
+          // Strict-targetSize contract (PR #91 follow-up to #90).
+          targetSize: (activeDs && Number(activeDs.targetSize)) || undefined,
         });
       } catch (err) { onStatus("Build error: " + err.message); return; }
 
@@ -35505,7 +35522,7 @@
       });
     }
 
-    function _runPredictiveEvaluation(tf, trainer, modelRec, artifacts, allowedOutputKeys, defaultTarget, nCls, featureSize, testX, useServer) {
+    function _runPredictiveEvaluation(tf, trainer, modelRec, artifacts, allowedOutputKeys, defaultTarget, nCls, featureSize, testX, useServer, targetSize) {
       var serverAdapter = _getServerAdapter();
       var inferredHeadConfigs = modelBuilder && typeof modelBuilder.inferOutputHeads === "function"
         ? modelBuilder.inferOutputHeads(modelRec.graph, allowedOutputKeys, defaultTarget)
@@ -35546,6 +35563,13 @@
           allowedOutputKeys: allowedOutputKeys,
           defaultTarget: defaultTarget,
           numClasses: nCls,
+          // Pull targetSize from the dataset record so dynamic-width
+          // targets (Custom CSV target column, etc.) resolve cleanly.
+          // model_builder_core.targetUnitsFromMode now throws instead
+          // of silently defaulting to 1 when no width hint exists,
+          // which would otherwise mis-build the head and produce
+          // garbage predictions (see PR #90: ais_trajectory.position).
+          targetSize: targetSize,
         });
         _loadWeights(tf, built.model, artifacts);
         var allPreds = [];
@@ -35822,6 +35846,7 @@
       var testY = predictiveMode === "reconstruction" ? testX : (testSplit.y || []);
       var testLabels = _resolveSplitLabels(dsData, testSplit.name || "");
       var featureSize = _resolveFeatureSize(dsData, testX) || 1;
+      var targetSize = (activeDs && Number(activeDs.targetSize)) || undefined;
       var testN = testX.length;
 
       if (predictiveMode === "classification" && testY.length && typeof testY[0] === "number") {
@@ -35849,12 +35874,12 @@
       return Promise.resolve()
         .then(function () {
           if (!runNeeds.predictive) return null;
-          return _runPredictiveEvaluation(tf, trainer, modelRec, artifacts, allowedOutputKeys, defaultTarget, nCls, featureSize, testX, useServerPredict);
+          return _runPredictiveEvaluation(tf, trainer, modelRec, artifacts, allowedOutputKeys, defaultTarget, nCls, featureSize, testX, useServerPredict, targetSize);
         })
         .then(function (allPreds) {
           predictiveResult = allPreds;
           if (runNeeds.predictive && allPreds == null) {
-            return _runPredictiveEvaluation(tf, trainer, modelRec, artifacts, allowedOutputKeys, defaultTarget, nCls, featureSize, testX, false);
+            return _runPredictiveEvaluation(tf, trainer, modelRec, artifacts, allowedOutputKeys, defaultTarget, nCls, featureSize, testX, false, targetSize);
           }
           return allPreds;
         })

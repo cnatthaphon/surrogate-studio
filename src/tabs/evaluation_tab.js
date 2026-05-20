@@ -1234,7 +1234,7 @@
       });
     }
 
-    function _runPredictiveEvaluation(tf, trainer, modelRec, artifacts, allowedOutputKeys, defaultTarget, nCls, featureSize, testX, useServer) {
+    function _runPredictiveEvaluation(tf, trainer, modelRec, artifacts, allowedOutputKeys, defaultTarget, nCls, featureSize, testX, useServer, targetSize) {
       var serverAdapter = _getServerAdapter();
       var inferredHeadConfigs = modelBuilder && typeof modelBuilder.inferOutputHeads === "function"
         ? modelBuilder.inferOutputHeads(modelRec.graph, allowedOutputKeys, defaultTarget)
@@ -1275,6 +1275,13 @@
           allowedOutputKeys: allowedOutputKeys,
           defaultTarget: defaultTarget,
           numClasses: nCls,
+          // Pull targetSize from the dataset record so dynamic-width
+          // targets (Custom CSV target column, etc.) resolve cleanly.
+          // model_builder_core.targetUnitsFromMode now throws instead
+          // of silently defaulting to 1 when no width hint exists,
+          // which would otherwise mis-build the head and produce
+          // garbage predictions (see PR #90: ais_trajectory.position).
+          targetSize: targetSize,
         });
         _loadWeights(tf, built.model, artifacts);
         var allPreds = [];
@@ -1551,6 +1558,7 @@
       var testY = predictiveMode === "reconstruction" ? testX : (testSplit.y || []);
       var testLabels = _resolveSplitLabels(dsData, testSplit.name || "");
       var featureSize = _resolveFeatureSize(dsData, testX) || 1;
+      var targetSize = (activeDs && Number(activeDs.targetSize)) || undefined;
       var testN = testX.length;
 
       if (predictiveMode === "classification" && testY.length && typeof testY[0] === "number") {
@@ -1578,12 +1586,12 @@
       return Promise.resolve()
         .then(function () {
           if (!runNeeds.predictive) return null;
-          return _runPredictiveEvaluation(tf, trainer, modelRec, artifacts, allowedOutputKeys, defaultTarget, nCls, featureSize, testX, useServerPredict);
+          return _runPredictiveEvaluation(tf, trainer, modelRec, artifacts, allowedOutputKeys, defaultTarget, nCls, featureSize, testX, useServerPredict, targetSize);
         })
         .then(function (allPreds) {
           predictiveResult = allPreds;
           if (runNeeds.predictive && allPreds == null) {
-            return _runPredictiveEvaluation(tf, trainer, modelRec, artifacts, allowedOutputKeys, defaultTarget, nCls, featureSize, testX, false);
+            return _runPredictiveEvaluation(tf, trainer, modelRec, artifacts, allowedOutputKeys, defaultTarget, nCls, featureSize, testX, false, targetSize);
           }
           return allPreds;
         })
