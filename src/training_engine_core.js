@@ -76,18 +76,51 @@
     return tf.train.adam(r, optCfg.beta1, optCfg.beta2, optCfg.epsilon);
   }
 
+  // Known loss names — anything outside this set is rejected with a
+  // clear error instead of silently substituted with MSE. The silent
+  // substitution masked typos like `loss: "huber" → "uber"` for months.
+  // Classification aliases live in this set even though makeHeadLoss
+  // routes them via the ht === "classification" branch (not through
+  // scalarLossByType) — they're still valid loss-name choices a
+  // schema can declare.
+  var KNOWN_LOSS_NAMES = (function () {
+    var s = Object.create(null);
+    [
+      "", "mse", "mae", "huber",
+      "bce", "binarycrossentropy", "binary_crossentropy",
+      "wasserstein", "wgan",
+      "iou", "giou", "giou_mse", "mse_giou",
+      "categoricalcrossentropy", "categorical_crossentropy",
+      "sparsecategoricalcrossentropy", "sparse_categorical_crossentropy",
+      "cross_entropy",
+      "none", "use_global",
+    ].forEach(function (n) { s[n] = true; });
+    return s;
+  })();
+
   function mapLossAlias(lossName, resolvedGlobal) {
-    var v = String(lossName || "mse").toLowerCase();
-    if (v === "mse") return "meanSquaredError";
+    var v = String(lossName || "").toLowerCase();
+    if (!KNOWN_LOSS_NAMES[v]) {
+      throw new Error(
+        "Unknown loss name '" + lossName + "'. Known losses: mse, mae, huber, " +
+        "bce, wasserstein, giou, giou_mse, categoricalCrossentropy, " +
+        "sparseCategoricalCrossentropy, cross_entropy, none, use_global. " +
+        "(A typo here used to silently fall back to MSE — fix the loss field on the Output node.)"
+      );
+    }
+    if (!v || v === "mse") return "meanSquaredError";
     if (v === "mae") return "meanAbsoluteError";
     if (v === "huber") return "huberLoss";
-    if (v === "bce" || v === "binarycrossentropy") return "binaryCrossentropy";
+    if (v === "bce" || v === "binarycrossentropy" || v === "binary_crossentropy") return "binaryCrossentropy";
     if (v === "wasserstein" || v === "wgan") return "wasserstein";
     if (v === "iou" || v === "giou") return "giouLoss";
     if (v === "giou_mse" || v === "mse_giou") return "giouMseLoss";
     if (v === "none") return "none";
     if (v === "use_global") return String(resolvedGlobal || "meanSquaredError");
-    return String(resolvedGlobal || "meanSquaredError");
+    // Classification aliases — makeHeadLoss's ht-based dispatch handles
+    // these via softmaxCrossEntropy regardless of the alias, so we just
+    // return a sentinel that scalarLossByType won't misinterpret.
+    return "classification";
   }
 
   // GIoU loss for bounding-box regression. Operates on tensors shaped

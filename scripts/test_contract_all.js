@@ -49,6 +49,7 @@ const baseSuite = [
   "test_output_target_replay_preserves_input2.js",
   "test_giou_headconfigs_propagation.js",
   "test_target_units_strict.js",
+  "test_strict_loss_validation.js",
 ];
 
 function runOne(scriptName) {

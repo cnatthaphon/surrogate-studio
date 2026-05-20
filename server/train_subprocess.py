@@ -457,6 +457,28 @@ def main():
         if htype == "latent_kl":
             head_losses.append({"fn": None, "weight": 0, "phase": hp, "cls": False, "skip": True})
             continue
+        # Strict loss-name validation. The pre-2026-05-20 behavior fell
+        # through to MSELoss for any unrecognized hl string, which masked
+        # typos (e.g. `loss: "uber"` silently trained with MSE). Mirror
+        # the JS-side KNOWN_LOSS_NAMES set in training_engine_core.
+        _KNOWN_LOSS_NAMES = {
+            "", "mse", "mae", "huber",
+            "bce", "binarycrossentropy", "binary_crossentropy",
+            "wasserstein", "wgan",
+            "iou", "giou", "giou_mse", "mse_giou",
+            "categoricalcrossentropy", "categorical_crossentropy",
+            "sparsecategoricalcrossentropy", "sparse_categorical_crossentropy",
+            "cross_entropy",
+            "none", "use_global",
+        }
+        if hl not in _KNOWN_LOSS_NAMES:
+            raise ValueError(
+                "Unknown loss name '" + str(hl) + "' on head '"
+                + str(hc.get("id") or hc.get("nodeId") or "?")
+                + "'. Known losses: mse, mae, huber, bce, wasserstein, giou, "
+                + "giou_mse, categoricalCrossentropy, sparseCategoricalCrossentropy, "
+                + "cross_entropy, none, use_global."
+            )
         # explicit loss field takes priority
         if hl == "none":
             head_losses.append({"fn": None, "weight": 0, "phase": hp, "cls": False, "skip": True})
