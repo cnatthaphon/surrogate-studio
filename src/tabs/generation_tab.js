@@ -1029,6 +1029,12 @@
         var built = modelBuilder.buildModelFromGraph(tf, modelRec.graph, {
           mode: graphMode, featureSize: featureSize, windowSize: 1, seqFeatureSize: featureSize,
           allowedOutputKeys: allowedOutputKeys, defaultTarget: defaultTarget, numClasses: dsData.numClasses || dsData.classCount || 10,
+          // Strict-targetSize contract (PR #91). Most generation flows
+          // output pixel_values (reconstruction → upstream-width fallback)
+          // or land on schema-declared featureSize, so a dynamic target
+          // is unusual here — but passing targetSize is cheap and
+          // keeps the contract consistent across the three call sites.
+          targetSize: (dsData && Number(dsData.targetSize)) || undefined,
         });
 
         // load weights — select based on config (last vs best)

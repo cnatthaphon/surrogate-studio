@@ -1,5 +1,5 @@
 // Surrogate Studio - concatenated bundle
-// Generated: 2026-05-20T08:37:17Z
+// Generated: 2026-05-20T08:47:24Z
 // Source files: 58
 
 
@@ -30723,13 +30723,23 @@
             }
             var resolvedFS = (srcReg2 && typeof srcReg2.getFeatureSize === "function") ? srcReg2.getFeatureSize(activeDs) : 0;
             if (!resolvedFS && testSplit.x.length) resolvedFS = testSplit.x[0].length;
+            // Preserve targetSize across the rebuild — strict targetUnits
+            // resolution requires it for dynamic-width regression targets
+            // (Custom CSV target column, etc.). Fall back to inferring
+            // from the first y entry's width so synthetic/in-memory
+            // datasets that omit targetSize still resolve.
+            var _prevTargetSize = Number(activeDs && activeDs.targetSize) || 0;
+            var _yTestMapped = isClassification ? testSplit.y.map(function (l) { return typeof l === "number" ? oh(l, nCls) : l; })
+              : isRecon3 ? testSplit.x : testSplit.y;
+            var _firstY = _yTestMapped && _yTestMapped[0];
+            var _inferredTargetSize = (_firstY && _firstY.length) || 0;
             activeDs = {
               xTest: testSplit.x,
-              yTest: isClassification ? testSplit.y.map(function (l) { return typeof l === "number" ? oh(l, nCls) : l; })
-                : isRecon3 ? testSplit.x : testSplit.y,
+              yTest: _yTestMapped,
               yTestRaw: testSplit.y,
               featureSize: resolvedFS || 1,
               numClasses: nCls,
+              targetSize: _prevTargetSize || _inferredTargetSize || undefined,
             };
           }
 
@@ -31983,13 +31993,25 @@
         if (!resolvedFeatureSize && train.x.length) resolvedFeatureSize = train.x[0].length;
         // for multi-head models (VAE+Classifier): provide labels separately
         var hasClsHead = _heads && _heads.some(function (h) { return h.headType === "classification"; });
+        // Preserve targetSize across the rebuild — same reason as the
+        // Test path above (and the inference rebuild at ~line 893).
+        // Falls back to inferring from the first mapped y entry so
+        // synthetic datasets that omit targetSize still resolve under
+        // the strict targetUnits contract.
+        var _prevTargetSize2 = Number(activeDs && activeDs.targetSize) || 0;
+        var _yTrainMapped = mapY(train);
+        var _yValMapped = mapY(val);
+        var _yTestMapped2 = mapY(test);
+        var _firstY2 = _yTrainMapped[0] || _yValMapped[0] || _yTestMapped2[0];
+        var _inferredTargetSize2 = (_firstY2 && _firstY2.length) || 0;
         activeDs = {
-          xTrain: train.x, yTrain: mapY(train),
-          xVal: val.x, yVal: mapY(val),
-          xTest: test.x, yTest: mapY(test),
+          xTrain: train.x, yTrain: _yTrainMapped,
+          xVal: val.x, yVal: _yValMapped,
+          xTest: test.x, yTest: _yTestMapped2,
           featureSize: resolvedFeatureSize || activeDs.featureSize || 1,
           numClasses: nClasses,
           targetMode: defaultTarget,
+          targetSize: _prevTargetSize2 || _inferredTargetSize2 || undefined,
         };
         // add raw labels for classification heads (before one-hot mapping)
         if (hasClsHead && !isClassification2) {
@@ -33951,6 +33973,12 @@
         var built = modelBuilder.buildModelFromGraph(tf, modelRec.graph, {
           mode: graphMode, featureSize: featureSize, windowSize: 1, seqFeatureSize: featureSize,
           allowedOutputKeys: allowedOutputKeys, defaultTarget: defaultTarget, numClasses: dsData.numClasses || dsData.classCount || 10,
+          // Strict-targetSize contract (PR #91). Most generation flows
+          // output pixel_values (reconstruction → upstream-width fallback)
+          // or land on schema-declared featureSize, so a dynamic target
+          // is unusual here — but passing targetSize is cheap and
+          // keeps the contract consistent across the three call sites.
+          targetSize: (dsData && Number(dsData.targetSize)) || undefined,
         });
 
         // load weights — select based on config (last vs best)
