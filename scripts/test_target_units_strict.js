@@ -159,6 +159,66 @@ function makeGraph(outputData) {
     "custom resolves to upstream dense units=16");
   if (built5b && built5b.model) built5b.model.dispose();
 
+  // --- Case 6: classification target missing numClasses → throws.
+  // (Used to silently default to upstream units or 1.)
+  var threw6 = null;
+  try {
+    MBC.buildModelFromGraph(tf, makeGraph({ target: "label", targetType: "label", headType: "classification", loss: "categoricalCrossentropy" }), {
+      mode: "direct",
+      featureSize: 8,
+      allowedOutputKeys: [{ key: "label", headType: "classification" }],
+      defaultTarget: "label",
+      // no numClasses
+    });
+  } catch (e) { threw6 = e; }
+  ok(threw6 != null, "classification with no numClasses throws");
+  ok(threw6 && /numClasses/.test(String(threw6.message || "")),
+    "classification error mentions numClasses (got: " + (threw6 && threw6.message) + ")");
+
+  // --- Case 7: params target with empty paramsSelect AND no paramSize → throws.
+  var threw7 = null;
+  try {
+    MBC.buildModelFromGraph(tf, makeGraph({ target: "params", targetType: "params", headType: "regression", loss: "mse" }), {
+      mode: "direct",
+      featureSize: 8,
+      allowedOutputKeys: [{ key: "params", headType: "regression" }],
+      defaultTarget: "params",
+      // no paramsSelect, no paramSize
+    });
+  } catch (e) { threw7 = e; }
+  ok(threw7 != null, "params with empty paramsSelect + no paramSize throws");
+  ok(threw7 && /paramsSelect|paramSize/.test(String(threw7.message || "")),
+    "params error mentions paramsSelect or paramSize");
+
+  // --- Case 8: params target with paramSize set → builds.
+  var built8;
+  try {
+    built8 = MBC.buildModelFromGraph(tf, makeGraph({ target: "params", targetType: "params", headType: "regression", loss: "mse" }), {
+      mode: "direct",
+      featureSize: 8,
+      allowedOutputKeys: [{ key: "params", headType: "regression" }],
+      defaultTarget: "params",
+      paramSize: 6,
+    });
+  } catch (e) { failed += 1; console.log("  ✗ params + paramSize=6 should build: " + e.message); }
+  ok(built8 && built8.headConfigs && built8.headConfigs[0] && built8.headConfigs[0].units === 6,
+    "params + paramSize=6 resolves to a 6-unit head");
+  if (built8 && built8.model) built8.model.dispose();
+
+  // --- Case 9: pixel_values throw is source-asserted only.
+  // Construct an end-to-end graph that exercises *only* the pixel_values
+  // 0/0 branch without something else short-circuiting the build is
+  // genuinely hard (image_source with featureSize=0 still synthesizes
+  // a non-empty input tensor downstream). The guard itself is verified
+  // by source inspection — the source pattern is identical to the
+  // classification + params branches, both of which ARE end-to-end
+  // tested above. We assert the guard exists in source so the throw
+  // can't be silently removed.
+  var src = require("fs").readFileSync(
+    path.join(__dirname, "..", "src/model_builder_core.js"), "utf8");
+  ok(/targetKey === "pixel_values"[\s\S]{0,500}Cannot resolve output width for target 'pixel_values'/.test(src),
+    "pixel_values branch has the strict-throw guard in source");
+
   console.log("\n  " + passed + " passed, " + failed + " failed");
   if (failed) process.exit(1);
 })();

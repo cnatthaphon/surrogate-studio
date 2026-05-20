@@ -1639,19 +1639,46 @@
 
       var targetKey = String(target || nd.targetType || nd.target || "").trim().toLowerCase();
 
-      // 3. universal target-key conventions
+      // 3. universal target-key conventions.
+      // Each branch throws if the relevant width source is missing —
+      // silent "fallback to 1" hides real misconfig (the pattern that
+      // masked the ais_trajectory.position bug, PR #90).
       if (targetKey === "label" || targetKey === "logits") {
-        return Math.max(1, Number(datasetMeta.numClasses || datasetMeta.classCount || 1));
+        var _nc = Number(datasetMeta.numClasses || datasetMeta.classCount || 0);
+        if (!_nc) {
+          throw new Error(
+            "Cannot resolve output width for target '" + targetKey +
+            "' — `datasetMeta.numClasses` is missing. Set it on the dataset module's build() output, " +
+            "or set `units` explicitly on the output node."
+          );
+        }
+        return Math.max(1, _nc);
       }
       if (targetKey === "params") {
         var raw = String(paramsSelectRaw || nd.paramsSelect || "");
         var picks = raw.split(",").map(function (s) { return String(s || "").trim(); }).filter(Boolean);
-        return Math.max(1, picks.length || Number(datasetMeta.paramSize || 1));
+        var _ps = picks.length || Number(datasetMeta.paramSize || 0);
+        if (!_ps) {
+          throw new Error(
+            "Cannot resolve output width for target 'params' — neither `paramsSelect` on the output " +
+            "node nor `datasetMeta.paramSize` resolved a non-zero width. Pick at least one param via " +
+            "the node's paramsSelect field, or populate paramSize on the dataset."
+          );
+        }
+        return Math.max(1, _ps);
       }
       if (targetKey === "pixel_values") {
         // reconstruction targets the input shape; falling back to upstream width is
-        // legitimate for autoencoders that already taper the bottleneck back up
-        return Math.max(1, Number(datasetMeta.featureSize || upstreamUnits || 1));
+        // legitimate for autoencoders that already taper the bottleneck back up.
+        var _fs = Number(datasetMeta.featureSize || upstreamUnits || 0);
+        if (!_fs) {
+          throw new Error(
+            "Cannot resolve output width for target 'pixel_values' — neither `datasetMeta.featureSize` " +
+            "nor the upstream tensor width is set. Pass featureSize from the dataset module, or wire " +
+            "the output to a layer with explicit units."
+          );
+        }
+        return Math.max(1, _fs);
       }
       if ((targetKey === "custom" || targetKey === "none") && Number(upstreamUnits) > 0) {
         return Math.max(1, Number(upstreamUnits));
@@ -1660,7 +1687,15 @@
       // 4. headType-driven
       var ht = String(headType || (spec && spec.headType) || "regression");
       if (ht === "classification") {
-        return Math.max(1, Number(datasetMeta.numClasses || datasetMeta.classCount || upstreamUnits || 1));
+        var _nc2 = Number(datasetMeta.numClasses || datasetMeta.classCount || 0);
+        if (!_nc2) {
+          throw new Error(
+            "Cannot resolve output width for classification target '" + targetKey + "' — " +
+            "`datasetMeta.numClasses` is missing. Set it on the dataset module's build() output, " +
+            "declare `featureSize` on the schema output, or set `units` explicitly on the output node."
+          );
+        }
+        return Math.max(1, _nc2);
       }
 
       // 5. dataset-side targetSize
