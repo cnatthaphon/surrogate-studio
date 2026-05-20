@@ -1026,15 +1026,21 @@
         var latentInfo = modelBuilder.extractLatentInfo ? modelBuilder.extractLatentInfo(modelRec.graph) : { latentDim: 16 };
         var latentDim = latentInfo.latentDim || 16;
 
+        // For dataset_bundle wrappers, the real numClasses/targetSize live
+        // on the active variant, not on the bundle wrapper. Same pattern
+        // used at lines 878 + 916 in this file. Without this resolution,
+        // PR #91's strict target-width contract throws on bundled dynamic
+        // regression generation (`targetSize` on the wrapper is
+        // undefined → builder can't resolve the head).
+        var _genActiveDs = dsData && dsData.kind === "dataset_bundle" && dsData.datasets
+          ? dsData.datasets[dsData.activeVariantId || Object.keys(dsData.datasets)[0]]
+          : dsData;
         var built = modelBuilder.buildModelFromGraph(tf, modelRec.graph, {
           mode: graphMode, featureSize: featureSize, windowSize: 1, seqFeatureSize: featureSize,
-          allowedOutputKeys: allowedOutputKeys, defaultTarget: defaultTarget, numClasses: dsData.numClasses || dsData.classCount || 10,
-          // Strict-targetSize contract (PR #91). Most generation flows
-          // output pixel_values (reconstruction → upstream-width fallback)
-          // or land on schema-declared featureSize, so a dynamic target
-          // is unusual here — but passing targetSize is cheap and
-          // keeps the contract consistent across the three call sites.
-          targetSize: (dsData && Number(dsData.targetSize)) || undefined,
+          allowedOutputKeys: allowedOutputKeys, defaultTarget: defaultTarget,
+          numClasses: (_genActiveDs && (_genActiveDs.numClasses || _genActiveDs.classCount)) ||
+            dsData.numClasses || dsData.classCount || 10,
+          targetSize: (_genActiveDs && Number(_genActiveDs.targetSize)) || undefined,
         });
 
         // load weights — select based on config (last vs best)
