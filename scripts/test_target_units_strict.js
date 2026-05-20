@@ -87,6 +87,24 @@ function makeGraph(outputData) {
   ok(threw && /trajectory/.test(String(threw.message || "")),
     "error names the offending target key");
 
+  // --- Case 2 setup: scalar-target regression — y is `0.42`, not [0.42].
+  // The trainer's rebuild path infers targetSize from y[0]; if y[0] is a
+  // number, the inferred width is 1 (scalar regression head). Verified
+  // here at the resolver level via datasetMeta.targetSize=1.
+  var built1b;
+  try {
+    built1b = MBC.buildModelFromGraph(tf, makeGraph({ target: "scalar", targetType: "scalar", headType: "regression", loss: "mse" }), {
+      mode: "direct",
+      featureSize: 8,
+      allowedOutputKeys: [{ key: "scalar", headType: "regression" }],
+      defaultTarget: "scalar",
+      targetSize: 1,
+    });
+  } catch (e) { failed += 1; console.log("  ✗ scalar regression with targetSize=1 should build: " + e.message); }
+  ok(built1b && built1b.headConfigs && built1b.headConfigs[0] && built1b.headConfigs[0].units === 1,
+    "scalar regression: targetSize=1 resolves to a 1-unit head (no fallback ambiguity)");
+  if (built1b && built1b.model) built1b.model.dispose();
+
   // --- Case 2: datasetMeta.targetSize satisfies the contract.
   var built2;
   try {

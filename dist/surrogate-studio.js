@@ -1,5 +1,5 @@
 // Surrogate Studio - concatenated bundle
-// Generated: 2026-05-20T10:32:20Z
+// Generated: 2026-05-20T10:52:47Z
 // Source files: 58
 
 
@@ -30743,8 +30743,16 @@
               // Regression (incl. defaultHeadType === "regression"): the
               // true target width is the raw y vec's length, NOT the
               // mapped y (which may be substituted with x by isRecon3).
+              // Scalar regression labels (y[i] is a number like 0.42)
+              // have width 1, not 0 — Array#length would be undefined.
               var _rawY0 = testSplit.y && testSplit.y[0];
-              _inferredTargetSize = (_rawY0 && _rawY0.length) || 0;
+              if (Array.isArray(_rawY0)) {
+                _inferredTargetSize = _rawY0.length || 0;
+              } else if (typeof _rawY0 === "number" && Number.isFinite(_rawY0)) {
+                _inferredTargetSize = 1;
+              } else {
+                _inferredTargetSize = 0;
+              }
             }
             activeDs = {
               xTest: testSplit.x,
@@ -32029,9 +32037,16 @@
           // reconstruction): read the raw y vector's length. mapY may
           // have substituted x for y via isReconstruction2's broad
           // "non-classification" predicate — that substitution is for
-          // training data, not target-width inference.
+          // training data, not target-width inference. Scalar labels
+          // (y[i] is a number like 0.42) have width 1, not 0.
           var _ryFirst = (train.y && train.y[0]) || (val.y && val.y[0]) || (test.y && test.y[0]);
-          _inferredTargetSize2 = (_ryFirst && _ryFirst.length) || 0;
+          if (Array.isArray(_ryFirst)) {
+            _inferredTargetSize2 = _ryFirst.length || 0;
+          } else if (typeof _ryFirst === "number" && Number.isFinite(_ryFirst)) {
+            _inferredTargetSize2 = 1;
+          } else {
+            _inferredTargetSize2 = 0;
+          }
         }
         activeDs = {
           xTrain: train.x, yTrain: _yTrainMapped,
@@ -35643,7 +35658,11 @@
             weightSpecs: artifacts && artifacts.weightSpecs,
             checkpoint: artifacts && artifacts.checkpoint,
             featureSize: featureSize,
-            targetSize: featureSize,
+            // Mirror the generative server-config rule: prefer the
+            // resolved targetSize (dynamic regression / Custom CSV)
+            // over the input-width fallback. featureSize is only the
+            // right answer for reconstruction targets where y === x.
+            targetSize: (targetSize && Number(targetSize)) || featureSize,
             numClasses: nCls,
             xInput: testX,
             headConfigs: inferredHeadConfigs,

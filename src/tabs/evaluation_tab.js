@@ -1249,7 +1249,11 @@
             weightSpecs: artifacts && artifacts.weightSpecs,
             checkpoint: artifacts && artifacts.checkpoint,
             featureSize: featureSize,
-            targetSize: featureSize,
+            // Mirror the generative server-config rule: prefer the
+            // resolved targetSize (dynamic regression / Custom CSV)
+            // over the input-width fallback. featureSize is only the
+            // right answer for reconstruction targets where y === x.
+            targetSize: (targetSize && Number(targetSize)) || featureSize,
             numClasses: nCls,
             xInput: testX,
             headConfigs: inferredHeadConfigs,
