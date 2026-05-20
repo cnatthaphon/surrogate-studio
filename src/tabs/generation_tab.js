@@ -938,7 +938,15 @@
             weightValues: trainerArtifacts && trainerArtifacts.weightValues,
             weightSpecs: trainerArtifacts && trainerArtifacts.weightSpecs,
             featureSize: sResolvedFs,
-            targetSize: sResolvedFs, numClasses: dsData2.numClasses || dsData2.classCount || 0,
+            // Prefer the active variant's declared target width over
+            // the input-width fallback. Reconstruction targets
+            // legitimately have targetSize === featureSize (the
+            // original intent), but dynamic regression targets
+            // (Custom CSV target column, ais_trajectory.position)
+            // have a smaller y than x and would silently mis-shape the
+            // server-side head if we sent sResolvedFs.
+            targetSize: (activeDs2 && Number(activeDs2.targetSize)) || sResolvedFs,
+            numClasses: (activeDs2 && (activeDs2.numClasses || activeDs2.classCount)) || dsData2.numClasses || dsData2.classCount || 0,
             method: method,
             numSamples: config.numSamples || 16,
             steps: config.steps || 100,
@@ -1026,9 +1034,21 @@
         var latentInfo = modelBuilder.extractLatentInfo ? modelBuilder.extractLatentInfo(modelRec.graph) : { latentDim: 16 };
         var latentDim = latentInfo.latentDim || 16;
 
+        // For dataset_bundle wrappers, the real numClasses/targetSize live
+        // on the active variant, not on the bundle wrapper. Same pattern
+        // used at lines 878 + 916 in this file. Without this resolution,
+        // PR #91's strict target-width contract throws on bundled dynamic
+        // regression generation (`targetSize` on the wrapper is
+        // undefined → builder can't resolve the head).
+        var _genActiveDs = dsData && dsData.kind === "dataset_bundle" && dsData.datasets
+          ? dsData.datasets[dsData.activeVariantId || Object.keys(dsData.datasets)[0]]
+          : dsData;
         var built = modelBuilder.buildModelFromGraph(tf, modelRec.graph, {
           mode: graphMode, featureSize: featureSize, windowSize: 1, seqFeatureSize: featureSize,
-          allowedOutputKeys: allowedOutputKeys, defaultTarget: defaultTarget, numClasses: dsData.numClasses || dsData.classCount || 10,
+          allowedOutputKeys: allowedOutputKeys, defaultTarget: defaultTarget,
+          numClasses: (_genActiveDs && (_genActiveDs.numClasses || _genActiveDs.classCount)) ||
+            dsData.numClasses || dsData.classCount || 10,
+          targetSize: (_genActiveDs && Number(_genActiveDs.targetSize)) || undefined,
         });
 
         // load weights — select based on config (last vs best)

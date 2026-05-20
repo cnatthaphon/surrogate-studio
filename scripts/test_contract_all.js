@@ -48,6 +48,7 @@ const baseSuite = [
   "test_dataset_module_split_clamp.js",
   "test_output_target_replay_preserves_input2.js",
   "test_giou_headconfigs_propagation.js",
+  "test_target_units_strict.js",
 ];
 
 function runOne(scriptName) {

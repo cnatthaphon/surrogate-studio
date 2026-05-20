@@ -890,13 +890,31 @@
             }
             var resolvedFS = (srcReg2 && typeof srcReg2.getFeatureSize === "function") ? srcReg2.getFeatureSize(activeDs) : 0;
             if (!resolvedFS && testSplit.x.length) resolvedFS = testSplit.x[0].length;
+            // Preserve targetSize across the rebuild — strict targetUnits
+            // resolution requires it for dynamic-width regression targets
+            // (Custom CSV target column, etc.). Fall back to inferring
+            // from the *raw* split y so the inference doesn't get
+            // confused by mapY's regression-treated-as-reconstruction
+            // behavior (which substitutes x for y, giving a window-
+            // width number instead of the true target width).
+            var _prevTargetSize = Number(activeDs && activeDs.targetSize) || 0;
+            var _yTestMapped = isClassification ? testSplit.y.map(function (l) { return typeof l === "number" ? oh(l, nCls) : l; })
+              : isRecon3 ? testSplit.x : testSplit.y;
+            // Delegate to model_builder_core.inferTargetWidth so the
+            // zero-scalar-truthiness trap is handled in one place.
+            // The helper picks the first split with non-empty y/x via
+            // explicit array-length checks, NOT truthiness — so a
+            // valid `0` first label doesn't get skipped.
+            var _inferredTargetSize = modelBuilder.inferTargetWidth(
+              [{ x: testSplit.x, y: testSplit.y }], defaultHeadType, nCls
+            );
             activeDs = {
               xTest: testSplit.x,
-              yTest: isClassification ? testSplit.y.map(function (l) { return typeof l === "number" ? oh(l, nCls) : l; })
-                : isRecon3 ? testSplit.x : testSplit.y,
+              yTest: _yTestMapped,
               yTestRaw: testSplit.y,
               featureSize: resolvedFS || 1,
               numClasses: nCls,
+              targetSize: _prevTargetSize || _inferredTargetSize || undefined,
             };
           }
 
@@ -906,6 +924,10 @@
           var rebuiltModel = modelBuilder.buildModelFromGraph(tf, modelRec.graph, {
             mode: graphMode, featureSize: featureSize, windowSize: 1, seqFeatureSize: featureSize,
             allowedOutputKeys: allowedOutputKeys, defaultTarget: defaultTarget, numClasses: activeDs.numClasses || nCls,
+            // Same strict-targetSize contract as the eval-time build:
+            // model_builder_core throws on unresolved widths instead of
+            // silently defaulting to 1 (was the ais_trajectory.position bug).
+            targetSize: (activeDs && Number(activeDs.targetSize)) || undefined,
           });
 
           // load saved weights
@@ -2146,13 +2168,40 @@
         if (!resolvedFeatureSize && train.x.length) resolvedFeatureSize = train.x[0].length;
         // for multi-head models (VAE+Classifier): provide labels separately
         var hasClsHead = _heads && _heads.some(function (h) { return h.headType === "classification"; });
+        // Preserve targetSize across the rebuild — same reason as the
+        // Test path above (and the inference rebuild at ~line 893).
+        // Falls back to inferring from the RAW split y, not from the
+        // mapped y: mapY's isReconstruction2 branch substitutes x for
+        // y for any non-classification head (including true regression
+        // like ais_trajectory.position), so the mapped y[0].length
+        // would be the input window width, not the target width.
+        var _prevTargetSize2 = Number(activeDs && activeDs.targetSize) || 0;
+        var _yTrainMapped = mapY(train);
+        var _yValMapped = mapY(val);
+        var _yTestMapped2 = mapY(test);
+        // Delegate to the shared inferTargetWidth helper. It picks the
+        // first split with a non-empty array via explicit length check,
+        // so valid zero labels (y=[0]) don't get falsy-skipped by an
+        // `||` truthiness chain. It also handles the reconstruction/
+        // regression split correctly without relying on mapY's
+        // y-substituted-with-x behavior.
+        var _inferredTargetSize2 = modelBuilder.inferTargetWidth(
+          [
+            { x: train.x, y: train.y },
+            { x: val.x, y: val.y },
+            { x: test.x, y: test.y },
+          ],
+          defaultHeadType2,
+          nClasses
+        );
         activeDs = {
-          xTrain: train.x, yTrain: mapY(train),
-          xVal: val.x, yVal: mapY(val),
-          xTest: test.x, yTest: mapY(test),
+          xTrain: train.x, yTrain: _yTrainMapped,
+          xVal: val.x, yVal: _yValMapped,
+          xTest: test.x, yTest: _yTestMapped2,
           featureSize: resolvedFeatureSize || activeDs.featureSize || 1,
           numClasses: nClasses,
           targetMode: defaultTarget,
+          targetSize: _prevTargetSize2 || _inferredTargetSize2 || undefined,
         };
         // add raw labels for classification heads (before one-hot mapping)
         if (hasClsHead && !isClassification2) {
@@ -2175,6 +2224,8 @@
           windowSize: Number(activeDs.windowSize || 1),
           allowedOutputKeys: allowedOutputKeys, defaultTarget: defaultTarget,
           paramNames: activeDs.paramNames, paramSize: activeDs.paramSize, numClasses: activeDs.numClasses || activeDs.classCount || 10,
+          // Strict-targetSize contract (PR #91 follow-up to #90).
+          targetSize: (activeDs && Number(activeDs.targetSize)) || undefined,
         });
       } catch (err) { onStatus("Build error: " + err.message); return; }
 

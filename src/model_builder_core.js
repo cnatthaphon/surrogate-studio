@@ -375,6 +375,54 @@
     return fallback;
   }
 
+  // Resolve the target-head width from the dataset's actual y-data,
+  // for cases where the caller has neither schema featureSize nor an
+  // explicit node-units override. Returns 0 when no width can be
+  // determined (caller decides whether to throw or default).
+  //
+  // Used by both trainer_tab Test + Train rebuild paths so they
+  // can preserve targetSize across activeDs rebuilds without
+  // tripping the strict targetUnitsFromMode contract.
+  //
+  // splits: array of { x, y } per split (typically [train, val, test]).
+  // headType: "classification" | "reconstruction" | "regression" | ...
+  // numClasses: only used for classification.
+  //
+  // Edge cases handled:
+  //   - scalar regression labels (y[i] is a number like 0.42 OR 0)
+  //     → returns 1, NOT 0. The "0 || …" truthiness trap is avoided
+  //     by an explicit existence check on the row container, not on
+  //     its value.
+  //   - reconstruction → y = x, so width comes from x[0].
+  //   - empty splits → falls through to next split.
+  function inferTargetWidth(splits, headType, numClasses) {
+    var ht = String(headType || "regression").toLowerCase();
+    if (ht === "classification") return Math.max(0, Number(numClasses || 0));
+    if (ht === "reconstruction") {
+      for (var i = 0; i < splits.length; i += 1) {
+        var sx = splits[i] && splits[i].x;
+        if (Array.isArray(sx) && sx.length > 0) {
+          var x0 = sx[0];
+          if (Array.isArray(x0)) return x0.length || 0;
+          if (typeof x0 === "number" && Number.isFinite(x0)) return 1;
+          return 0;
+        }
+      }
+      return 0;
+    }
+    // regression (or any non-classification, non-reconstruction head)
+    for (var j = 0; j < splits.length; j += 1) {
+      var sy = splits[j] && splits[j].y;
+      if (Array.isArray(sy) && sy.length > 0) {
+        var y0 = sy[0];
+        if (Array.isArray(y0)) return y0.length || 0;
+        if (typeof y0 === "number" && Number.isFinite(y0)) return 1;
+        return 0;
+      }
+    }
+    return 0;
+  }
+
   function inferOutputHeads(graphData, allowedOutputKeys, fallbackTarget) {
     var data = extractGraphData(graphData);
     // fallback from caller (which gets it from schema), never hardcoded
@@ -1639,19 +1687,46 @@
 
       var targetKey = String(target || nd.targetType || nd.target || "").trim().toLowerCase();
 
-      // 3. universal target-key conventions
+      // 3. universal target-key conventions.
+      // Each branch throws if the relevant width source is missing —
+      // silent "fallback to 1" hides real misconfig (the pattern that
+      // masked the ais_trajectory.position bug, PR #90).
       if (targetKey === "label" || targetKey === "logits") {
-        return Math.max(1, Number(datasetMeta.numClasses || datasetMeta.classCount || 1));
+        var _nc = Number(datasetMeta.numClasses || datasetMeta.classCount || 0);
+        if (!_nc) {
+          throw new Error(
+            "Cannot resolve output width for target '" + targetKey +
+            "' — `datasetMeta.numClasses` is missing. Set it on the dataset module's build() output, " +
+            "or set `units` explicitly on the output node."
+          );
+        }
+        return Math.max(1, _nc);
       }
       if (targetKey === "params") {
         var raw = String(paramsSelectRaw || nd.paramsSelect || "");
         var picks = raw.split(",").map(function (s) { return String(s || "").trim(); }).filter(Boolean);
-        return Math.max(1, picks.length || Number(datasetMeta.paramSize || 1));
+        var _ps = picks.length || Number(datasetMeta.paramSize || 0);
+        if (!_ps) {
+          throw new Error(
+            "Cannot resolve output width for target 'params' — neither `paramsSelect` on the output " +
+            "node nor `datasetMeta.paramSize` resolved a non-zero width. Pick at least one param via " +
+            "the node's paramsSelect field, or populate paramSize on the dataset."
+          );
+        }
+        return Math.max(1, _ps);
       }
       if (targetKey === "pixel_values") {
         // reconstruction targets the input shape; falling back to upstream width is
-        // legitimate for autoencoders that already taper the bottleneck back up
-        return Math.max(1, Number(datasetMeta.featureSize || upstreamUnits || 1));
+        // legitimate for autoencoders that already taper the bottleneck back up.
+        var _fs = Number(datasetMeta.featureSize || upstreamUnits || 0);
+        if (!_fs) {
+          throw new Error(
+            "Cannot resolve output width for target 'pixel_values' — neither `datasetMeta.featureSize` " +
+            "nor the upstream tensor width is set. Pass featureSize from the dataset module, or wire " +
+            "the output to a layer with explicit units."
+          );
+        }
+        return Math.max(1, _fs);
       }
       if ((targetKey === "custom" || targetKey === "none") && Number(upstreamUnits) > 0) {
         return Math.max(1, Number(upstreamUnits));
@@ -1660,7 +1735,15 @@
       // 4. headType-driven
       var ht = String(headType || (spec && spec.headType) || "regression");
       if (ht === "classification") {
-        return Math.max(1, Number(datasetMeta.numClasses || datasetMeta.classCount || upstreamUnits || 1));
+        var _nc2 = Number(datasetMeta.numClasses || datasetMeta.classCount || 0);
+        if (!_nc2) {
+          throw new Error(
+            "Cannot resolve output width for classification target '" + targetKey + "' — " +
+            "`datasetMeta.numClasses` is missing. Set it on the dataset module's build() output, " +
+            "declare `featureSize` on the schema output, or set `units` explicitly on the output node."
+          );
+        }
+        return Math.max(1, _nc2);
       }
 
       // 5. dataset-side targetSize
@@ -1668,11 +1751,22 @@
         return Math.max(1, Number(datasetMeta.targetSize));
       }
 
-      // 6. simple-regression default. Don't infer from upstream hidden width:
+      // 6. Refuse to silently default. Don't infer from upstream hidden width:
       // hidden width is incidental to the model architecture, not the target.
-      // Multi-output regression should declare width via output-node units,
-      // schema featureSize, or datasetMeta.targetSize.
-      return 1;
+      // Multi-output regression must declare width via one of:
+      //   - explicit `units` on the output node (`node.data.units`),
+      //   - schema-declared `featureSize` on the matching allowedOutputKeys entry, OR
+      //   - `datasetMeta.targetSize` passed by the caller.
+      // Returning `1` here used to be the silent fallback — that's exactly
+      // what masked the ais_trajectory.position bug (PR #90): trained 4-unit
+      // weights loaded into an auto-built 1-unit head, predictions emerged
+      // 1-dim, eval scored MAE 0.5 / R² -7 instead of throwing. Now it fails
+      // loudly at build time so the misconfig surfaces.
+      throw new Error(
+        "Cannot resolve output width for target '" + (targetKey || "<unknown>") + "' " +
+        "(headType=" + ht + "). Declare `featureSize` on the schema output, set " +
+        "`units` on the output node, or pass `datasetMeta.targetSize` from the caller."
+      );
     };
 
     var applyNodeOp = function (node, inTensor, laterHasRecurrent, nodeId) {
@@ -2557,6 +2651,7 @@
     inferWindow: inferWindow,
     inferArHistoryConfig: inferArHistoryConfig,
     inferOutputHeads: inferOutputHeads,
+    inferTargetWidth: inferTargetWidth,
     inferDatasetTargetMode: inferDatasetTargetMode,
     inferFeatureSpec: inferFeatureSpec,
     buildModelFromGraph: buildModelFromGraph,

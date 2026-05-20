@@ -1,5 +1,5 @@
 // Surrogate Studio - concatenated bundle
-// Generated: 2026-05-19T17:25:12Z
+// Generated: 2026-05-20T11:00:12Z
 // Source files: 58
 
 
@@ -21727,6 +21727,54 @@
     return fallback;
   }
 
+  // Resolve the target-head width from the dataset's actual y-data,
+  // for cases where the caller has neither schema featureSize nor an
+  // explicit node-units override. Returns 0 when no width can be
+  // determined (caller decides whether to throw or default).
+  //
+  // Used by both trainer_tab Test + Train rebuild paths so they
+  // can preserve targetSize across activeDs rebuilds without
+  // tripping the strict targetUnitsFromMode contract.
+  //
+  // splits: array of { x, y } per split (typically [train, val, test]).
+  // headType: "classification" | "reconstruction" | "regression" | ...
+  // numClasses: only used for classification.
+  //
+  // Edge cases handled:
+  //   - scalar regression labels (y[i] is a number like 0.42 OR 0)
+  //     → returns 1, NOT 0. The "0 || …" truthiness trap is avoided
+  //     by an explicit existence check on the row container, not on
+  //     its value.
+  //   - reconstruction → y = x, so width comes from x[0].
+  //   - empty splits → falls through to next split.
+  function inferTargetWidth(splits, headType, numClasses) {
+    var ht = String(headType || "regression").toLowerCase();
+    if (ht === "classification") return Math.max(0, Number(numClasses || 0));
+    if (ht === "reconstruction") {
+      for (var i = 0; i < splits.length; i += 1) {
+        var sx = splits[i] && splits[i].x;
+        if (Array.isArray(sx) && sx.length > 0) {
+          var x0 = sx[0];
+          if (Array.isArray(x0)) return x0.length || 0;
+          if (typeof x0 === "number" && Number.isFinite(x0)) return 1;
+          return 0;
+        }
+      }
+      return 0;
+    }
+    // regression (or any non-classification, non-reconstruction head)
+    for (var j = 0; j < splits.length; j += 1) {
+      var sy = splits[j] && splits[j].y;
+      if (Array.isArray(sy) && sy.length > 0) {
+        var y0 = sy[0];
+        if (Array.isArray(y0)) return y0.length || 0;
+        if (typeof y0 === "number" && Number.isFinite(y0)) return 1;
+        return 0;
+      }
+    }
+    return 0;
+  }
+
   function inferOutputHeads(graphData, allowedOutputKeys, fallbackTarget) {
     var data = extractGraphData(graphData);
     // fallback from caller (which gets it from schema), never hardcoded
@@ -22991,19 +23039,46 @@
 
       var targetKey = String(target || nd.targetType || nd.target || "").trim().toLowerCase();
 
-      // 3. universal target-key conventions
+      // 3. universal target-key conventions.
+      // Each branch throws if the relevant width source is missing —
+      // silent "fallback to 1" hides real misconfig (the pattern that
+      // masked the ais_trajectory.position bug, PR #90).
       if (targetKey === "label" || targetKey === "logits") {
-        return Math.max(1, Number(datasetMeta.numClasses || datasetMeta.classCount || 1));
+        var _nc = Number(datasetMeta.numClasses || datasetMeta.classCount || 0);
+        if (!_nc) {
+          throw new Error(
+            "Cannot resolve output width for target '" + targetKey +
+            "' — `datasetMeta.numClasses` is missing. Set it on the dataset module's build() output, " +
+            "or set `units` explicitly on the output node."
+          );
+        }
+        return Math.max(1, _nc);
       }
       if (targetKey === "params") {
         var raw = String(paramsSelectRaw || nd.paramsSelect || "");
         var picks = raw.split(",").map(function (s) { return String(s || "").trim(); }).filter(Boolean);
-        return Math.max(1, picks.length || Number(datasetMeta.paramSize || 1));
+        var _ps = picks.length || Number(datasetMeta.paramSize || 0);
+        if (!_ps) {
+          throw new Error(
+            "Cannot resolve output width for target 'params' — neither `paramsSelect` on the output " +
+            "node nor `datasetMeta.paramSize` resolved a non-zero width. Pick at least one param via " +
+            "the node's paramsSelect field, or populate paramSize on the dataset."
+          );
+        }
+        return Math.max(1, _ps);
       }
       if (targetKey === "pixel_values") {
         // reconstruction targets the input shape; falling back to upstream width is
-        // legitimate for autoencoders that already taper the bottleneck back up
-        return Math.max(1, Number(datasetMeta.featureSize || upstreamUnits || 1));
+        // legitimate for autoencoders that already taper the bottleneck back up.
+        var _fs = Number(datasetMeta.featureSize || upstreamUnits || 0);
+        if (!_fs) {
+          throw new Error(
+            "Cannot resolve output width for target 'pixel_values' — neither `datasetMeta.featureSize` " +
+            "nor the upstream tensor width is set. Pass featureSize from the dataset module, or wire " +
+            "the output to a layer with explicit units."
+          );
+        }
+        return Math.max(1, _fs);
       }
       if ((targetKey === "custom" || targetKey === "none") && Number(upstreamUnits) > 0) {
         return Math.max(1, Number(upstreamUnits));
@@ -23012,7 +23087,15 @@
       // 4. headType-driven
       var ht = String(headType || (spec && spec.headType) || "regression");
       if (ht === "classification") {
-        return Math.max(1, Number(datasetMeta.numClasses || datasetMeta.classCount || upstreamUnits || 1));
+        var _nc2 = Number(datasetMeta.numClasses || datasetMeta.classCount || 0);
+        if (!_nc2) {
+          throw new Error(
+            "Cannot resolve output width for classification target '" + targetKey + "' — " +
+            "`datasetMeta.numClasses` is missing. Set it on the dataset module's build() output, " +
+            "declare `featureSize` on the schema output, or set `units` explicitly on the output node."
+          );
+        }
+        return Math.max(1, _nc2);
       }
 
       // 5. dataset-side targetSize
@@ -23020,11 +23103,22 @@
         return Math.max(1, Number(datasetMeta.targetSize));
       }
 
-      // 6. simple-regression default. Don't infer from upstream hidden width:
+      // 6. Refuse to silently default. Don't infer from upstream hidden width:
       // hidden width is incidental to the model architecture, not the target.
-      // Multi-output regression should declare width via output-node units,
-      // schema featureSize, or datasetMeta.targetSize.
-      return 1;
+      // Multi-output regression must declare width via one of:
+      //   - explicit `units` on the output node (`node.data.units`),
+      //   - schema-declared `featureSize` on the matching allowedOutputKeys entry, OR
+      //   - `datasetMeta.targetSize` passed by the caller.
+      // Returning `1` here used to be the silent fallback — that's exactly
+      // what masked the ais_trajectory.position bug (PR #90): trained 4-unit
+      // weights loaded into an auto-built 1-unit head, predictions emerged
+      // 1-dim, eval scored MAE 0.5 / R² -7 instead of throwing. Now it fails
+      // loudly at build time so the misconfig surfaces.
+      throw new Error(
+        "Cannot resolve output width for target '" + (targetKey || "<unknown>") + "' " +
+        "(headType=" + ht + "). Declare `featureSize` on the schema output, set " +
+        "`units` on the output node, or pass `datasetMeta.targetSize` from the caller."
+      );
     };
 
     var applyNodeOp = function (node, inTensor, laterHasRecurrent, nodeId) {
@@ -23909,6 +24003,7 @@
     inferWindow: inferWindow,
     inferArHistoryConfig: inferArHistoryConfig,
     inferOutputHeads: inferOutputHeads,
+    inferTargetWidth: inferTargetWidth,
     inferDatasetTargetMode: inferDatasetTargetMode,
     inferFeatureSpec: inferFeatureSpec,
     buildModelFromGraph: buildModelFromGraph,
@@ -30677,13 +30772,31 @@
             }
             var resolvedFS = (srcReg2 && typeof srcReg2.getFeatureSize === "function") ? srcReg2.getFeatureSize(activeDs) : 0;
             if (!resolvedFS && testSplit.x.length) resolvedFS = testSplit.x[0].length;
+            // Preserve targetSize across the rebuild — strict targetUnits
+            // resolution requires it for dynamic-width regression targets
+            // (Custom CSV target column, etc.). Fall back to inferring
+            // from the *raw* split y so the inference doesn't get
+            // confused by mapY's regression-treated-as-reconstruction
+            // behavior (which substitutes x for y, giving a window-
+            // width number instead of the true target width).
+            var _prevTargetSize = Number(activeDs && activeDs.targetSize) || 0;
+            var _yTestMapped = isClassification ? testSplit.y.map(function (l) { return typeof l === "number" ? oh(l, nCls) : l; })
+              : isRecon3 ? testSplit.x : testSplit.y;
+            // Delegate to model_builder_core.inferTargetWidth so the
+            // zero-scalar-truthiness trap is handled in one place.
+            // The helper picks the first split with non-empty y/x via
+            // explicit array-length checks, NOT truthiness — so a
+            // valid `0` first label doesn't get skipped.
+            var _inferredTargetSize = modelBuilder.inferTargetWidth(
+              [{ x: testSplit.x, y: testSplit.y }], defaultHeadType, nCls
+            );
             activeDs = {
               xTest: testSplit.x,
-              yTest: isClassification ? testSplit.y.map(function (l) { return typeof l === "number" ? oh(l, nCls) : l; })
-                : isRecon3 ? testSplit.x : testSplit.y,
+              yTest: _yTestMapped,
               yTestRaw: testSplit.y,
               featureSize: resolvedFS || 1,
               numClasses: nCls,
+              targetSize: _prevTargetSize || _inferredTargetSize || undefined,
             };
           }
 
@@ -30693,6 +30806,10 @@
           var rebuiltModel = modelBuilder.buildModelFromGraph(tf, modelRec.graph, {
             mode: graphMode, featureSize: featureSize, windowSize: 1, seqFeatureSize: featureSize,
             allowedOutputKeys: allowedOutputKeys, defaultTarget: defaultTarget, numClasses: activeDs.numClasses || nCls,
+            // Same strict-targetSize contract as the eval-time build:
+            // model_builder_core throws on unresolved widths instead of
+            // silently defaulting to 1 (was the ais_trajectory.position bug).
+            targetSize: (activeDs && Number(activeDs.targetSize)) || undefined,
           });
 
           // load saved weights
@@ -31933,13 +32050,40 @@
         if (!resolvedFeatureSize && train.x.length) resolvedFeatureSize = train.x[0].length;
         // for multi-head models (VAE+Classifier): provide labels separately
         var hasClsHead = _heads && _heads.some(function (h) { return h.headType === "classification"; });
+        // Preserve targetSize across the rebuild — same reason as the
+        // Test path above (and the inference rebuild at ~line 893).
+        // Falls back to inferring from the RAW split y, not from the
+        // mapped y: mapY's isReconstruction2 branch substitutes x for
+        // y for any non-classification head (including true regression
+        // like ais_trajectory.position), so the mapped y[0].length
+        // would be the input window width, not the target width.
+        var _prevTargetSize2 = Number(activeDs && activeDs.targetSize) || 0;
+        var _yTrainMapped = mapY(train);
+        var _yValMapped = mapY(val);
+        var _yTestMapped2 = mapY(test);
+        // Delegate to the shared inferTargetWidth helper. It picks the
+        // first split with a non-empty array via explicit length check,
+        // so valid zero labels (y=[0]) don't get falsy-skipped by an
+        // `||` truthiness chain. It also handles the reconstruction/
+        // regression split correctly without relying on mapY's
+        // y-substituted-with-x behavior.
+        var _inferredTargetSize2 = modelBuilder.inferTargetWidth(
+          [
+            { x: train.x, y: train.y },
+            { x: val.x, y: val.y },
+            { x: test.x, y: test.y },
+          ],
+          defaultHeadType2,
+          nClasses
+        );
         activeDs = {
-          xTrain: train.x, yTrain: mapY(train),
-          xVal: val.x, yVal: mapY(val),
-          xTest: test.x, yTest: mapY(test),
+          xTrain: train.x, yTrain: _yTrainMapped,
+          xVal: val.x, yVal: _yValMapped,
+          xTest: test.x, yTest: _yTestMapped2,
           featureSize: resolvedFeatureSize || activeDs.featureSize || 1,
           numClasses: nClasses,
           targetMode: defaultTarget,
+          targetSize: _prevTargetSize2 || _inferredTargetSize2 || undefined,
         };
         // add raw labels for classification heads (before one-hot mapping)
         if (hasClsHead && !isClassification2) {
@@ -31962,6 +32106,8 @@
           windowSize: Number(activeDs.windowSize || 1),
           allowedOutputKeys: allowedOutputKeys, defaultTarget: defaultTarget,
           paramNames: activeDs.paramNames, paramSize: activeDs.paramSize, numClasses: activeDs.numClasses || activeDs.classCount || 10,
+          // Strict-targetSize contract (PR #91 follow-up to #90).
+          targetSize: (activeDs && Number(activeDs.targetSize)) || undefined,
         });
       } catch (err) { onStatus("Build error: " + err.message); return; }
 
@@ -33808,7 +33954,15 @@
             weightValues: trainerArtifacts && trainerArtifacts.weightValues,
             weightSpecs: trainerArtifacts && trainerArtifacts.weightSpecs,
             featureSize: sResolvedFs,
-            targetSize: sResolvedFs, numClasses: dsData2.numClasses || dsData2.classCount || 0,
+            // Prefer the active variant's declared target width over
+            // the input-width fallback. Reconstruction targets
+            // legitimately have targetSize === featureSize (the
+            // original intent), but dynamic regression targets
+            // (Custom CSV target column, ais_trajectory.position)
+            // have a smaller y than x and would silently mis-shape the
+            // server-side head if we sent sResolvedFs.
+            targetSize: (activeDs2 && Number(activeDs2.targetSize)) || sResolvedFs,
+            numClasses: (activeDs2 && (activeDs2.numClasses || activeDs2.classCount)) || dsData2.numClasses || dsData2.classCount || 0,
             method: method,
             numSamples: config.numSamples || 16,
             steps: config.steps || 100,
@@ -33896,9 +34050,21 @@
         var latentInfo = modelBuilder.extractLatentInfo ? modelBuilder.extractLatentInfo(modelRec.graph) : { latentDim: 16 };
         var latentDim = latentInfo.latentDim || 16;
 
+        // For dataset_bundle wrappers, the real numClasses/targetSize live
+        // on the active variant, not on the bundle wrapper. Same pattern
+        // used at lines 878 + 916 in this file. Without this resolution,
+        // PR #91's strict target-width contract throws on bundled dynamic
+        // regression generation (`targetSize` on the wrapper is
+        // undefined → builder can't resolve the head).
+        var _genActiveDs = dsData && dsData.kind === "dataset_bundle" && dsData.datasets
+          ? dsData.datasets[dsData.activeVariantId || Object.keys(dsData.datasets)[0]]
+          : dsData;
         var built = modelBuilder.buildModelFromGraph(tf, modelRec.graph, {
           mode: graphMode, featureSize: featureSize, windowSize: 1, seqFeatureSize: featureSize,
-          allowedOutputKeys: allowedOutputKeys, defaultTarget: defaultTarget, numClasses: dsData.numClasses || dsData.classCount || 10,
+          allowedOutputKeys: allowedOutputKeys, defaultTarget: defaultTarget,
+          numClasses: (_genActiveDs && (_genActiveDs.numClasses || _genActiveDs.classCount)) ||
+            dsData.numClasses || dsData.classCount || 10,
+          targetSize: (_genActiveDs && Number(_genActiveDs.targetSize)) || undefined,
         });
 
         // load weights — select based on config (last vs best)
@@ -35505,7 +35671,7 @@
       });
     }
 
-    function _runPredictiveEvaluation(tf, trainer, modelRec, artifacts, allowedOutputKeys, defaultTarget, nCls, featureSize, testX, useServer) {
+    function _runPredictiveEvaluation(tf, trainer, modelRec, artifacts, allowedOutputKeys, defaultTarget, nCls, featureSize, testX, useServer, targetSize) {
       var serverAdapter = _getServerAdapter();
       var inferredHeadConfigs = modelBuilder && typeof modelBuilder.inferOutputHeads === "function"
         ? modelBuilder.inferOutputHeads(modelRec.graph, allowedOutputKeys, defaultTarget)
@@ -35520,7 +35686,11 @@
             weightSpecs: artifacts && artifacts.weightSpecs,
             checkpoint: artifacts && artifacts.checkpoint,
             featureSize: featureSize,
-            targetSize: featureSize,
+            // Mirror the generative server-config rule: prefer the
+            // resolved targetSize (dynamic regression / Custom CSV)
+            // over the input-width fallback. featureSize is only the
+            // right answer for reconstruction targets where y === x.
+            targetSize: (targetSize && Number(targetSize)) || featureSize,
             numClasses: nCls,
             xInput: testX,
             headConfigs: inferredHeadConfigs,
@@ -35546,6 +35716,13 @@
           allowedOutputKeys: allowedOutputKeys,
           defaultTarget: defaultTarget,
           numClasses: nCls,
+          // Pull targetSize from the dataset record so dynamic-width
+          // targets (Custom CSV target column, etc.) resolve cleanly.
+          // model_builder_core.targetUnitsFromMode now throws instead
+          // of silently defaulting to 1 when no width hint exists,
+          // which would otherwise mis-build the head and produce
+          // garbage predictions (see PR #90: ais_trajectory.position).
+          targetSize: targetSize,
         });
         _loadWeights(tf, built.model, artifacts);
         var allPreds = [];
@@ -35580,7 +35757,7 @@
       });
     }
 
-    function _runGenerativeEvaluation(tf, trainer, modelRec, dataset, artifacts, ev, meta, featureSize, nCls) {
+    function _runGenerativeEvaluation(tf, trainer, modelRec, dataset, artifacts, ev, meta, featureSize, nCls, targetSize) {
       var engine = getGenerationEngine();
       var serverAdapter = _getServerAdapter();
       if (!engine) return Promise.reject(new Error("Generation engine not available"));
@@ -35610,7 +35787,14 @@
           weightSpecs: artifacts && artifacts.weightSpecs,
           checkpoint: artifacts && artifacts.checkpoint,
           featureSize: featureSize,
-          targetSize: featureSize,
+          // Prefer the dataset's declared target width over the input
+          // width fallback. Reconstruction targets legitimately have
+          // targetSize === featureSize (the original code's intent),
+          // but dynamic regression targets (Custom CSV target column,
+          // ais_trajectory.position) have a smaller y than x, and
+          // sending featureSize as targetSize would silently mis-shape
+          // the head on the server.
+          targetSize: (targetSize && Number(targetSize)) || featureSize,
           numClasses: nCls,
           method: method,
           numSamples: numSamples,
@@ -35712,6 +35896,12 @@
           allowedOutputKeys: allowedOutputKeys,
           defaultTarget: defaultTarget,
           numClasses: nCls,
+          // Strict targetSize contract — same as the predictive eval
+          // path. Generative flows usually target pixel_values
+          // (reconstruction → upstream-width fallback), but dynamic
+          // regression generation needs the explicit hint to avoid
+          // the strict throw.
+          targetSize: (targetSize && Number(targetSize)) || undefined,
         });
         _loadWeights(tf, built.model, artifacts);
 
@@ -35822,6 +36012,7 @@
       var testY = predictiveMode === "reconstruction" ? testX : (testSplit.y || []);
       var testLabels = _resolveSplitLabels(dsData, testSplit.name || "");
       var featureSize = _resolveFeatureSize(dsData, testX) || 1;
+      var targetSize = (activeDs && Number(activeDs.targetSize)) || undefined;
       var testN = testX.length;
 
       if (predictiveMode === "classification" && testY.length && typeof testY[0] === "number") {
@@ -35849,12 +36040,12 @@
       return Promise.resolve()
         .then(function () {
           if (!runNeeds.predictive) return null;
-          return _runPredictiveEvaluation(tf, trainer, modelRec, artifacts, allowedOutputKeys, defaultTarget, nCls, featureSize, testX, useServerPredict);
+          return _runPredictiveEvaluation(tf, trainer, modelRec, artifacts, allowedOutputKeys, defaultTarget, nCls, featureSize, testX, useServerPredict, targetSize);
         })
         .then(function (allPreds) {
           predictiveResult = allPreds;
           if (runNeeds.predictive && allPreds == null) {
-            return _runPredictiveEvaluation(tf, trainer, modelRec, artifacts, allowedOutputKeys, defaultTarget, nCls, featureSize, testX, false);
+            return _runPredictiveEvaluation(tf, trainer, modelRec, artifacts, allowedOutputKeys, defaultTarget, nCls, featureSize, testX, false, targetSize);
           }
           return allPreds;
         })
@@ -35864,7 +36055,7 @@
             _applyPredictionMetrics(pc, r, selectedIds, allPreds, testY, testLabels, testN, nCls, predictiveMode);
           }
           if (!runNeeds.generative) return null;
-          return _runGenerativeEvaluation(tf, trainer, modelRec, dataset, artifacts, ev, meta, featureSize, nCls);
+          return _runGenerativeEvaluation(tf, trainer, modelRec, dataset, artifacts, ev, meta, featureSize, nCls, targetSize);
         })
         .then(function (genResult) {
           generationResult = genResult;

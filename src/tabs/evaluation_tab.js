@@ -1234,7 +1234,7 @@
       });
     }
 
-    function _runPredictiveEvaluation(tf, trainer, modelRec, artifacts, allowedOutputKeys, defaultTarget, nCls, featureSize, testX, useServer) {
+    function _runPredictiveEvaluation(tf, trainer, modelRec, artifacts, allowedOutputKeys, defaultTarget, nCls, featureSize, testX, useServer, targetSize) {
       var serverAdapter = _getServerAdapter();
       var inferredHeadConfigs = modelBuilder && typeof modelBuilder.inferOutputHeads === "function"
         ? modelBuilder.inferOutputHeads(modelRec.graph, allowedOutputKeys, defaultTarget)
@@ -1249,7 +1249,11 @@
             weightSpecs: artifacts && artifacts.weightSpecs,
             checkpoint: artifacts && artifacts.checkpoint,
             featureSize: featureSize,
-            targetSize: featureSize,
+            // Mirror the generative server-config rule: prefer the
+            // resolved targetSize (dynamic regression / Custom CSV)
+            // over the input-width fallback. featureSize is only the
+            // right answer for reconstruction targets where y === x.
+            targetSize: (targetSize && Number(targetSize)) || featureSize,
             numClasses: nCls,
             xInput: testX,
             headConfigs: inferredHeadConfigs,
@@ -1275,6 +1279,13 @@
           allowedOutputKeys: allowedOutputKeys,
           defaultTarget: defaultTarget,
           numClasses: nCls,
+          // Pull targetSize from the dataset record so dynamic-width
+          // targets (Custom CSV target column, etc.) resolve cleanly.
+          // model_builder_core.targetUnitsFromMode now throws instead
+          // of silently defaulting to 1 when no width hint exists,
+          // which would otherwise mis-build the head and produce
+          // garbage predictions (see PR #90: ais_trajectory.position).
+          targetSize: targetSize,
         });
         _loadWeights(tf, built.model, artifacts);
         var allPreds = [];
@@ -1309,7 +1320,7 @@
       });
     }
 
-    function _runGenerativeEvaluation(tf, trainer, modelRec, dataset, artifacts, ev, meta, featureSize, nCls) {
+    function _runGenerativeEvaluation(tf, trainer, modelRec, dataset, artifacts, ev, meta, featureSize, nCls, targetSize) {
       var engine = getGenerationEngine();
       var serverAdapter = _getServerAdapter();
       if (!engine) return Promise.reject(new Error("Generation engine not available"));
@@ -1339,7 +1350,14 @@
           weightSpecs: artifacts && artifacts.weightSpecs,
           checkpoint: artifacts && artifacts.checkpoint,
           featureSize: featureSize,
-          targetSize: featureSize,
+          // Prefer the dataset's declared target width over the input
+          // width fallback. Reconstruction targets legitimately have
+          // targetSize === featureSize (the original code's intent),
+          // but dynamic regression targets (Custom CSV target column,
+          // ais_trajectory.position) have a smaller y than x, and
+          // sending featureSize as targetSize would silently mis-shape
+          // the head on the server.
+          targetSize: (targetSize && Number(targetSize)) || featureSize,
           numClasses: nCls,
           method: method,
           numSamples: numSamples,
@@ -1441,6 +1459,12 @@
           allowedOutputKeys: allowedOutputKeys,
           defaultTarget: defaultTarget,
           numClasses: nCls,
+          // Strict targetSize contract — same as the predictive eval
+          // path. Generative flows usually target pixel_values
+          // (reconstruction → upstream-width fallback), but dynamic
+          // regression generation needs the explicit hint to avoid
+          // the strict throw.
+          targetSize: (targetSize && Number(targetSize)) || undefined,
         });
         _loadWeights(tf, built.model, artifacts);
 
@@ -1551,6 +1575,7 @@
       var testY = predictiveMode === "reconstruction" ? testX : (testSplit.y || []);
       var testLabels = _resolveSplitLabels(dsData, testSplit.name || "");
       var featureSize = _resolveFeatureSize(dsData, testX) || 1;
+      var targetSize = (activeDs && Number(activeDs.targetSize)) || undefined;
       var testN = testX.length;
 
       if (predictiveMode === "classification" && testY.length && typeof testY[0] === "number") {
@@ -1578,12 +1603,12 @@
       return Promise.resolve()
         .then(function () {
           if (!runNeeds.predictive) return null;
-          return _runPredictiveEvaluation(tf, trainer, modelRec, artifacts, allowedOutputKeys, defaultTarget, nCls, featureSize, testX, useServerPredict);
+          return _runPredictiveEvaluation(tf, trainer, modelRec, artifacts, allowedOutputKeys, defaultTarget, nCls, featureSize, testX, useServerPredict, targetSize);
         })
         .then(function (allPreds) {
           predictiveResult = allPreds;
           if (runNeeds.predictive && allPreds == null) {
-            return _runPredictiveEvaluation(tf, trainer, modelRec, artifacts, allowedOutputKeys, defaultTarget, nCls, featureSize, testX, false);
+            return _runPredictiveEvaluation(tf, trainer, modelRec, artifacts, allowedOutputKeys, defaultTarget, nCls, featureSize, testX, false, targetSize);
           }
           return allPreds;
         })
@@ -1593,7 +1618,7 @@
             _applyPredictionMetrics(pc, r, selectedIds, allPreds, testY, testLabels, testN, nCls, predictiveMode);
           }
           if (!runNeeds.generative) return null;
-          return _runGenerativeEvaluation(tf, trainer, modelRec, dataset, artifacts, ev, meta, featureSize, nCls);
+          return _runGenerativeEvaluation(tf, trainer, modelRec, dataset, artifacts, ev, meta, featureSize, nCls, targetSize);
         })
         .then(function (genResult) {
           generationResult = genResult;

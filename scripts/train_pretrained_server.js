@@ -448,6 +448,11 @@ async function trainOneModel(modelDef, dataset, trainerDef) {
       mode: "direct", featureSize: featureSize, windowSize: 1, seqFeatureSize: featureSize,
       allowedOutputKeys: outputKeys, defaultTarget: defaultTarget,
       numClasses: dataset.numClasses || dataset.classCount || 10,
+      // Required for dynamic-width targets (Custom CSV target column,
+      // any schema whose output omits featureSize). model_builder_core
+      // throws here rather than silently defaulting to 1 — see PR #90's
+      // ais_trajectory.position bug for what the silent default cost us.
+      targetSize: dataset.targetSize,
     });
     graphHeadConfigs = buildInfo.headConfigs || [];
     if (buildInfo.model) try { buildInfo.model.dispose(); } catch (_) {}
