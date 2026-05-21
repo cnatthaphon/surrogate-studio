@@ -51,6 +51,10 @@ function makeHead(loss) {
     "categoricalCrossentropy", "categorical_crossentropy",
     "sparseCategoricalCrossentropy", "sparse_categorical_crossentropy",
     "cross_entropy",
+    // Legacy classification aliases — must stay accepted; reviewer
+    // caught that the first revision of #92 rejected these and broke
+    // older configs (training_worker.js:117 still maps them).
+    "ce", "crossentropy", "classification",
     "none", "use_global",
   ];
   KNOWN.forEach(function (l) {

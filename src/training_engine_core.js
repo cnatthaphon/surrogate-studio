@@ -93,6 +93,11 @@
       "categoricalcrossentropy", "categorical_crossentropy",
       "sparsecategoricalcrossentropy", "sparse_categorical_crossentropy",
       "cross_entropy",
+      // Legacy classification aliases tolerated by training_worker.js
+      // (see :117) and pre-#92 callers. Rejecting them here would
+      // break older preset configs and any third-party graph that
+      // uses the shorter form. All three behave like categorical CE.
+      "ce", "crossentropy", "classification",
       "none", "use_global",
     ].forEach(function (n) { s[n] = true; });
     return s;

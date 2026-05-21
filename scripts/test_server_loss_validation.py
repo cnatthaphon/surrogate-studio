@@ -26,6 +26,9 @@ required_aliases = [
     '"wasserstein"', '"wgan"',
     '"iou"', '"giou"', '"giou_mse"', '"mse_giou"',
     '"categoricalcrossentropy"', '"sparsecategoricalcrossentropy"', '"cross_entropy"',
+    # Legacy classification aliases tolerated by training_worker.js:117.
+    # Rejected by the first revision of PR #92 — restored after review.
+    '"ce"', '"crossentropy"', '"classification"',
     '"none"', '"use_global"',
 ]
 known_block_start = src.find("_KNOWN_LOSS_NAMES = {")
@@ -77,6 +80,24 @@ else:
 # caught by the guard above).
 # Sanity check: the existing demos use a mix of these aliases; the
 # guard must not regress them. (Covered by python_all suite.)
+
+# 6. Legacy classification aliases route through CrossEntropyLoss, not
+# the silent-MSE final fallback. (Reviewer flagged the first revision
+# of #92 for breaking these: just allowlisting them without a
+# dispatch branch would still silently fall through to MSELoss.)
+for alias in ['"ce"', '"crossentropy"', '"classification"']:
+    # Must appear inside a tuple alongside the existing CE aliases.
+    ce_block_start = src.find('"categoricalcrossentropy"')
+    if ce_block_start < 0:
+        print("  FAIL: categoricalcrossentropy CE branch not found")
+        ok = False
+        break
+    ce_block_end = src.find("nn.CrossEntropyLoss()", ce_block_start)
+    if ce_block_end < 0 or alias not in src[ce_block_start:ce_block_end]:
+        print(f"  FAIL: legacy alias {alias} not routed through CE dispatch branch")
+        ok = False
+        continue
+    print(f"  ✓ legacy alias {alias} routes through CrossEntropyLoss")
 
 if ok:
     print("\nPASS: server-side strict loss-name validation present.")

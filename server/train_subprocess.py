@@ -469,6 +469,11 @@ def main():
             "categoricalcrossentropy", "categorical_crossentropy",
             "sparsecategoricalcrossentropy", "sparse_categorical_crossentropy",
             "cross_entropy",
+            # Legacy classification aliases tolerated by
+            # src/training_worker.js:117 and pre-#92 callers. All three
+            # behave like categorical CE — rejected previously by this
+            # PR's first revision, which broke older configs.
+            "ce", "crossentropy", "classification",
             "none", "use_global",
         }
         if hl not in _KNOWN_LOSS_NAMES:
@@ -487,7 +492,13 @@ def main():
         elif hl in ("wasserstein", "wgan"):
             # Wasserstein loss: -mean(truth * pred)
             head_losses.append({"fn": lambda p, t: -torch.mean(t * p), "weight": hw, "phase": hp, "cls": False, "binary_target": True})
-        elif hl in ("categoricalcrossentropy", "categorical_crossentropy", "cross_entropy", "sparsecategoricalcrossentropy"):
+        elif hl in (
+            "categoricalcrossentropy", "categorical_crossentropy", "cross_entropy",
+            "sparsecategoricalcrossentropy", "sparse_categorical_crossentropy",
+            # Legacy classification aliases — same normalization as the
+            # JS-side mapLossAlias. All three route to CrossEntropyLoss.
+            "ce", "crossentropy", "classification",
+        ):
             head_losses.append({"fn": nn.CrossEntropyLoss(), "weight": hw, "phase": hp, "cls": True})
         elif hl == "mae":
             head_losses.append({"fn": nn.L1Loss(), "weight": hw, "phase": hp, "cls": False})
