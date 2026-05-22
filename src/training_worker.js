@@ -670,7 +670,14 @@
     });
 
     if (restoreBestWeights && Array.isArray(bestWeights) && bestWeights.length) {
-      try { model.setWeights(bestWeights); } catch (_) {}
+      try {
+        model.setWeights(bestWeights);
+      } catch (e) {
+        // Silent swallow used to mask shape-mismatch on best-weights
+        // restore — training metadata would say weightSelection:"best"
+        // but the model actually retained last-epoch weights. Surface it.
+        console.warn("[training_worker] best-weights restore failed — model retains last-epoch weights: " + (e && e.message || e));
+      }
     }
 
     // === Post-training: eval metrics + save weights ===

@@ -759,9 +759,16 @@
       validationData: [xValInputs, singleHead ? fitYVal[0] : fitYVal],
       callbacks: [progressCb],
     }).then(function () {
-      // restore best weights
+      // restore best weights. Silent swallow used to mask a real
+      // shape-mismatch case: training metadata could still claim
+      // `weightSelection: "best"` while the model actually carried
+      // last-epoch weights. Warn so the symptom surfaces.
       if (restoreBestWeights && Array.isArray(bestWeights) && bestWeights.length) {
-        try { opts.model.setWeights(bestWeights); } catch (e) {}
+        try {
+          opts.model.setWeights(bestWeights);
+        } catch (e) {
+          console.warn("[training_engine] best-weights restore failed — model retains last-epoch weights: " + (e && e.message || e));
+        }
       }
 
       // compute final metrics

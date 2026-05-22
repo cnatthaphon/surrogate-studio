@@ -959,7 +959,14 @@ async function runTrainer(rawCtx) {
   });
 
   if (restoreBestWeights && Array.isArray(bestWeights) && bestWeights.length) {
-    try { model.setWeights(bestWeights); } catch (_) {}
+    try {
+      model.setWeights(bestWeights);
+    } catch (e) {
+      // Same swallow pattern fixed in training_engine_core +
+      // training_worker. Surface shape-mismatch instead of silently
+      // shipping last-epoch weights under a "best" label.
+      console.warn("[tfjs_headless] best-weights restore failed — model retains last-epoch weights: " + (e && e.message || e));
+    }
   }
 
   const predValRaw = model.predict(xVal);

@@ -864,7 +864,28 @@
         if (Array.isArray(tgtShapeRaw) && tgtShapeRaw.length) {
           tgtShape = tgtShapeRaw.map(function (d) { return Math.max(1, Number(d) || 1); });
         } else {
-          var tgtSize = Math.max(1, Number((inode.data && inode.data.featureSize) || 4));
+          // Resolution order — explicit on node, then schema lookup,
+          // then datasetMeta.targetSize. The previous code defaulted to
+          // 4 silently (bbox-shaped), which would mis-shape any
+          // future preset wiring a non-bbox target through this node.
+          // Strict-throw is the same defensive treatment applied to
+          // targetUnitsFromMode in #91.
+          var _tsExplicit = Number((inode.data && inode.data.featureSize) || 0);
+          var _tsSchema = 0;
+          if (!_tsExplicit) {
+            var _spec = _lookupOutputSpec(tgtKey, datasetMeta.allowedOutputKeys);
+            _tsSchema = (_spec && Number(_spec.featureSize)) || 0;
+          }
+          var _tsDataset = Number(datasetMeta.targetSize || 0);
+          var tgtSize = _tsExplicit || _tsSchema || _tsDataset;
+          if (!tgtSize) {
+            throw new Error(
+              "target_source node '" + iid + "' (targetKey='" + tgtKey + "') has no resolvable width. " +
+              "Set `featureSize` or `targetShape` on the node, declare `featureSize` on the schema output " +
+              "for '" + tgtKey + "', or pass `datasetMeta.targetSize` from the caller. " +
+              "(The previous silent fallback to 4 used to mis-shape non-bbox target_source wirings.)"
+            );
+          }
           tgtShape = [tgtSize];
         }
         itensor = tf.input({ shape: tgtShape, name: "target_input_" + tgtKey + "_" + iid });
