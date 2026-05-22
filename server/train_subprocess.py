@@ -151,6 +151,30 @@ def _resolve_aug_probs(cfg):
         return 0.0, p
     return 0.0, 0.0
 
+# Single source of truth for "what loss strings count as classification".
+# Used by:
+#   - _KNOWN_LOSS_NAMES (allowlist of accepted loss strings)
+#   - the CE dispatch branch (`elif hl in _CLASSIFICATION_LOSS_ALIASES`)
+#   - _any_cls_head detection (decides whether labelsTrain must ship)
+# Reviewer of PR #92 caught that these three sets drifted: a config
+# could pass the allowlist + reach CrossEntropyLoss but fail to
+# include labelsTrain because _any_cls_head only checked the older
+# tuple. Keeping all three rooted on this constant makes drift
+# impossible.
+_CLASSIFICATION_LOSS_ALIASES = frozenset({
+    "categoricalcrossentropy",
+    "categorical_crossentropy",
+    "sparsecategoricalcrossentropy",
+    "sparse_categorical_crossentropy",
+    "cross_entropy",
+    # Legacy aliases tolerated by src/training_worker.js:117 and
+    # pre-#92 callers.
+    "ce",
+    "crossentropy",
+    "classification",
+})
+
+
 def _build_giou_head_loss(hc):
     """Build the {fn, weight, phase, cls} entry for a GIoU/giou_mse head.
 
@@ -425,10 +449,11 @@ def main():
             _class_num = int((n.get("data") or {}).get("numClasses", 10))
 
     # --- Check if any head needs classification labels (evaluated after labels_train is set below) ---
+    # Uses the module-level _CLASSIFICATION_LOSS_ALIASES set so the
+    # three sites that need to agree (allowlist + CE dispatch + this
+    # detection) can't drift independently.
     _any_cls_head = any(
-        str((hc.get("loss") or hc.get("headType") or "")).lower()
-        in ("categoricalcrossentropy", "categorical_crossentropy", "cross_entropy",
-            "sparsecategoricalcrossentropy", "classification")
+        str((hc.get("loss") or hc.get("headType") or "")).lower() in _CLASSIFICATION_LOSS_ALIASES
         for hc in (head_configs or [])
     )
 
@@ -457,6 +482,30 @@ def main():
         if htype == "latent_kl":
             head_losses.append({"fn": None, "weight": 0, "phase": hp, "cls": False, "skip": True})
             continue
+        # Strict loss-name validation. The pre-2026-05-20 behavior fell
+        # through to MSELoss for any unrecognized hl string, which masked
+        # typos (e.g. `loss: "uber"` silently trained with MSE). Mirror
+        # the JS-side KNOWN_LOSS_NAMES set in training_engine_core.
+        # Build the allowlist from the shared classification-alias set
+        # plus all other supported loss names. Routing every site
+        # through _CLASSIFICATION_LOSS_ALIASES means adding a new
+        # classification alias updates allowlist + dispatch + label-
+        # loader detection in one place.
+        _KNOWN_LOSS_NAMES = _CLASSIFICATION_LOSS_ALIASES | {
+            "", "mse", "mae", "huber",
+            "bce", "binarycrossentropy", "binary_crossentropy",
+            "wasserstein", "wgan",
+            "iou", "giou", "giou_mse", "mse_giou",
+            "none", "use_global",
+        }
+        if hl not in _KNOWN_LOSS_NAMES:
+            raise ValueError(
+                "Unknown loss name '" + str(hl) + "' on head '"
+                + str(hc.get("id") or hc.get("nodeId") or "?")
+                + "'. Known losses: mse, mae, huber, bce, wasserstein, giou, "
+                + "giou_mse, categoricalCrossentropy, sparseCategoricalCrossentropy, "
+                + "cross_entropy, none, use_global."
+            )
         # explicit loss field takes priority
         if hl == "none":
             head_losses.append({"fn": None, "weight": 0, "phase": hp, "cls": False, "skip": True})
@@ -465,7 +514,7 @@ def main():
         elif hl in ("wasserstein", "wgan"):
             # Wasserstein loss: -mean(truth * pred)
             head_losses.append({"fn": lambda p, t: -torch.mean(t * p), "weight": hw, "phase": hp, "cls": False, "binary_target": True})
-        elif hl in ("categoricalcrossentropy", "categorical_crossentropy", "cross_entropy", "sparsecategoricalcrossentropy"):
+        elif hl in _CLASSIFICATION_LOSS_ALIASES:
             head_losses.append({"fn": nn.CrossEntropyLoss(), "weight": hw, "phase": hp, "cls": True})
         elif hl == "mae":
             head_losses.append({"fn": nn.L1Loss(), "weight": hw, "phase": hp, "cls": False})
