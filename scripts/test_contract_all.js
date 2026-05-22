@@ -50,6 +50,7 @@ const baseSuite = [
   "test_giou_headconfigs_propagation.js",
   "test_target_units_strict.js",
   "test_strict_loss_validation.js",
+  "test_target_source_strict.js",
 ];
 
 function runOne(scriptName) {
