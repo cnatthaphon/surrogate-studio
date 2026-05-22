@@ -1,5 +1,5 @@
 // Surrogate Studio - concatenated bundle
-// Generated: 2026-05-22T09:38:34Z
+// Generated: 2026-05-22T17:56:27Z
 // Source files: 58
 
 
@@ -36170,21 +36170,21 @@
     function _loadWeights(tf, model, artifacts) {
       var converter = (typeof window !== "undefined" && window.OSCWeightConverter) ? window.OSCWeightConverter : null;
       if (!converter || typeof converter.loadArtifactsIntoModel !== "function") {
-        console.warn("[eval] Weight converter not available — eval will run against random weights");
-        return;
+        // Throw so the eval pipeline marks the result as r.status="error"
+        // instead of silently reporting metrics from random initial
+        // weights — that's the failure mode that masked
+        // ais_trajectory.position for 6 months (PR #90).
+        throw new Error("Weight converter not available — cannot load pretrained weights for eval");
       }
-      // Don't drop the result on the floor. A shape mismatch here
-      // means eval runs against initial weights and reports
-      // meaningless numbers — exactly the failure mode that masked
-      // the ais_trajectory.position bug fixed in #90. Match the
-      // already-correct pattern used by generation_tab + trainer_tab.
       var result = converter.loadArtifactsIntoModel(tf, model, artifacts);
       if (!result || !result.loaded) {
-        console.warn("[eval] Weight load failed:", result && result.reason ? result.reason : "unknown_error",
-          "— eval will run against random weights");
-        return;
+        throw new Error(
+          "Weight load failed: " + (result && result.reason ? result.reason : "unknown_error") +
+          ". Eval result would otherwise come from random initial weights — refusing to report metrics."
+        );
       }
       console.log("[eval] Weights loaded (" + result.mode + ", matched=" + result.matched + " of " + result.totalModelWeights + ")");
+      return result;
     }
 
     function mount() { _renderLeftPanel(); _renderMainPanel(); _renderRightPanel(); }
