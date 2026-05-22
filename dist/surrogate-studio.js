@@ -1,5 +1,5 @@
 // Surrogate Studio - concatenated bundle
-// Generated: 2026-05-22T08:08:32Z
+// Generated: 2026-05-22T09:38:34Z
 // Source files: 58
 
 
@@ -36169,8 +36169,22 @@
 
     function _loadWeights(tf, model, artifacts) {
       var converter = (typeof window !== "undefined" && window.OSCWeightConverter) ? window.OSCWeightConverter : null;
-      if (!converter || typeof converter.loadArtifactsIntoModel !== "function") return;
-      converter.loadArtifactsIntoModel(tf, model, artifacts);
+      if (!converter || typeof converter.loadArtifactsIntoModel !== "function") {
+        console.warn("[eval] Weight converter not available — eval will run against random weights");
+        return;
+      }
+      // Don't drop the result on the floor. A shape mismatch here
+      // means eval runs against initial weights and reports
+      // meaningless numbers — exactly the failure mode that masked
+      // the ais_trajectory.position bug fixed in #90. Match the
+      // already-correct pattern used by generation_tab + trainer_tab.
+      var result = converter.loadArtifactsIntoModel(tf, model, artifacts);
+      if (!result || !result.loaded) {
+        console.warn("[eval] Weight load failed:", result && result.reason ? result.reason : "unknown_error",
+          "— eval will run against random weights");
+        return;
+      }
+      console.log("[eval] Weights loaded (" + result.mode + ", matched=" + result.matched + " of " + result.totalModelWeights + ")");
     }
 
     function mount() { _renderLeftPanel(); _renderMainPanel(); _renderRightPanel(); }
