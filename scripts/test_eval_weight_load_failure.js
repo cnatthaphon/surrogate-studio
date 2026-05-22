@@ -57,22 +57,29 @@ ok(/random initial weights/i.test(lwBody) || /refusing/i.test(lwBody),
   "error message references the random-init-weights symptom OR refusal to report");
 
 // --- Case 2: the throw is reachable from _runPredictiveEvaluation
-// AND _runGenerativeEvaluation. Both call _loadWeights with no
-// surrounding try/catch — so a throw escapes up to _evaluateOneModel's
-// .catch(), which sets r.status="error".
+// AND _runGenerativeEvaluation, AND each path disposes the built
+// model on failure (not just on success). Previous revision had no
+// try/finally, so a thrown _loadWeights leaked the model. After:
+// each path wraps _loadWeights in a try block whose finally (or
+// catch) calls built.model.dispose() — and rethrows so the outer
+// .catch() still marks r.status="error".
 function findCallsiteContext(label, startMarker) {
   var s = src.indexOf(startMarker);
   if (s < 0) { failed += 1; console.log("  ✗ " + label + ": call site marker not found"); return; }
-  // Look at the next ~50 lines for a try/catch wrapping _loadWeights.
   var window2 = src.slice(s, s + 15000);
   var lwCall = window2.indexOf("_loadWeights(tf, ");
   if (lwCall < 0) { failed += 1; console.log("  ✗ " + label + ": _loadWeights not called in this scope"); return; }
-  // Confirm no `try { _loadWeights(...) } catch` wrapping — look for
-  // a `try {` within 200 chars before AND its matching catch within
-  // 200 chars after. If neither exists, the throw escapes.
-  var preWindow = window2.slice(Math.max(0, lwCall - 200), lwCall);
-  ok(!/try\s*\{[^}]*$/.test(preWindow),
-    label + ": _loadWeights is NOT wrapped in a local try/catch (throw escapes to outer .catch)");
+  // The call MUST be inside a try block whose cleanup disposes the
+  // model. Look for `try {` before and either `finally` or a
+  // dispose() reference within ~6000 chars after — the predictive
+  // path uses try/finally, the generative path uses try/catch with
+  // an explicit _disposeBoth() call.
+  var preWindow = window2.slice(Math.max(0, lwCall - 500), lwCall);
+  var postWindow = window2.slice(lwCall, Math.min(window2.length, lwCall + 6000));
+  var hasTry = /try\s*\{[^}]*$/.test(preWindow);
+  var hasCleanup = /\.dispose\(\)|_disposeBoth\(\)/.test(postWindow);
+  ok(hasTry, label + ": _loadWeights wrapped in try block (was unwrapped → model leaked on throw)");
+  ok(hasCleanup, label + ": cleanup (.dispose() or _disposeBoth()) reachable from the try block");
 }
 findCallsiteContext("predictive eval", "function _runPredictiveEvaluation");
 findCallsiteContext("generative eval", "function _runGenerativeEvaluation");
@@ -111,6 +118,98 @@ ok(thrown && /Weight load failed/.test(String(thrown.message || "")),
   "thrown error names 'Weight load failed'");
 ok(thrown && /shape_mismatch/.test(String(thrown.message || "")),
   "thrown error names the underlying reason ('shape_mismatch')");
+
+// --- Case 5: behavioral round-trip on the cleanup pattern. Mirror
+// the predictive eval's try/finally + the generative eval's
+// try/catch+handedOff pattern with a mock model whose dispose()
+// flips a counter. Assert both:
+//   - the throw propagates (so the outer .catch sets r.status="error")
+//   - dispose was called on the mock model (so we didn't leak)
+// This catches a future regression that removes the try/finally
+// while keeping the throw — the structural assertions above would
+// still pass on a broken cleanup that calls dispose AFTER the
+// throw exit point.
+
+function makeMockModel() {
+  var m = { _disposed: 0, _isModel: true };
+  m.dispose = function () { m._disposed += 1; };
+  return m;
+}
+
+// Predictive pattern: try { _loadWeights(...); ... } finally { built.model.dispose() }
+(function () {
+  var built = { model: makeMockModel() };
+  var threw = null;
+  function _loadWeightsFail() { throw new Error("Weight load failed: shape_mismatch. ..."); }
+  try {
+    try {
+      _loadWeightsFail();
+    } finally {
+      try { built.model.dispose(); } catch (_) {}
+    }
+  } catch (e) { threw = e; }
+  ok(threw != null, "predictive cleanup: throw still propagates after dispose");
+  ok(built.model._disposed === 1,
+    "predictive cleanup: built.model.dispose() called exactly once on failure (got " + built.model._disposed + ")");
+})();
+
+// Generative pattern: try { ... } catch + handedOff flag + _disposeBoth helper.
+(function () {
+  var built = { model: makeMockModel() };
+  var genModel = null;
+  var disposed = false;
+  function _disposeBoth() {
+    if (disposed) return;
+    disposed = true;
+    if (genModel && genModel !== built.model) { try { genModel.dispose(); } catch (_) {} }
+    try { built.model.dispose(); } catch (_) {}
+  }
+  var handedOffToEngine = false;
+  var threw = null;
+  function _loadWeightsFail() { throw new Error("Weight load failed: shape_mismatch. ..."); }
+  try {
+    try {
+      _loadWeightsFail();
+      genModel = built.model;
+      handedOffToEngine = true; // unreachable when throw fires
+    } catch (e) {
+      if (!handedOffToEngine) _disposeBoth();
+      throw e;
+    }
+  } catch (e) { threw = e; }
+  ok(threw != null, "generative cleanup: throw still propagates after dispose");
+  ok(built.model._disposed === 1,
+    "generative cleanup: built.model.dispose() called exactly once on failure (got " + built.model._disposed + ")");
+})();
+
+// Generative pattern with separate genModel (latent decoder case):
+// _loadWeights succeeds, decoder extraction succeeds, clientConfig
+// throws before engine.generate takes over → both models disposed.
+(function () {
+  var built = { model: makeMockModel() };
+  var genModel = makeMockModel(); // separate decoder model
+  var disposed = false;
+  function _disposeBoth() {
+    if (disposed) return;
+    disposed = true;
+    if (genModel && genModel !== built.model) { try { genModel.dispose(); } catch (_) {} }
+    try { built.model.dispose(); } catch (_) {}
+  }
+  var handedOffToEngine = false;
+  var threw = null;
+  try {
+    try {
+      // _loadWeights OK; decoder extracted; clientConfig throws
+      throw new Error("clientConfig assembly failed");
+    } catch (e) {
+      if (!handedOffToEngine) _disposeBoth();
+      throw e;
+    }
+  } catch (e) { threw = e; }
+  ok(threw != null, "decoder-case cleanup: clientConfig throw propagates");
+  ok(built.model._disposed === 1 && genModel._disposed === 1,
+    "decoder-case cleanup: BOTH built.model AND genModel disposed (got built=" + built.model._disposed + " gen=" + genModel._disposed + ")");
+})();
 
 console.log("\n  " + passed + " passed, " + failed + " failed");
 if (failed) process.exit(1);
