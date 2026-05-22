@@ -1287,36 +1287,43 @@
           // garbage predictions (see PR #90: ais_trajectory.position).
           targetSize: targetSize,
         });
-        _loadWeights(tf, built.model, artifacts);
-        var allPreds = [];
-        var headOutputs = null;
-        var batchSize = 256;
-        // #173: target_source graphs build models with >1 input (image +
-        // target). At eval time we only have image-side data; rely on
-        // prediction_core.buildPredictInputs to pad extra inputs with
-        // zero tensors so model.predict() accepts the call. The augment
-        // layers run in eval mode (no flip), so the dummy zero target
-        // doesn't perturb output[0] (the bbox head we actually evaluate).
-        var predCore = predictionCore || (typeof window !== "undefined" && window.OSCPredictionCore) || null;
-        for (var bi = 0; bi < testX.length; bi += batchSize) {
-          var bEnd = Math.min(bi + batchSize, testX.length);
-          var bt = tf.tensor2d(testX.slice(bi, bEnd));
-          var wrapped = predCore && typeof predCore.buildPredictInputs === "function"
-            ? predCore.buildPredictInputs(tf, built.model, bt)
-            : { input: bt, extras: [] };
-          var br = built.model.predict(wrapped.input);
-          var outputs = Array.isArray(br) ? br : [br];
-          if (!headOutputs) headOutputs = outputs.map(function () { return []; });
-          outputs.forEach(function (tensor, idx) {
-            headOutputs[idx] = headOutputs[idx].concat(tensor.arraySync());
-          });
-          allPreds = allPreds.concat(outputs[0].arraySync());
-          bt.dispose();
-          wrapped.extras.forEach(function (t) { t.dispose(); });
-          outputs.forEach(function (t) { t.dispose(); });
+        // Always dispose the built model — even when _loadWeights
+        // throws (failed shape match, missing converter). Without
+        // try/finally, repeated failed evals would leak TF.js model
+        // graphs + held tensors.
+        try {
+          _loadWeights(tf, built.model, artifacts);
+          var allPreds = [];
+          var headOutputs = null;
+          var batchSize = 256;
+          // #173: target_source graphs build models with >1 input (image +
+          // target). At eval time we only have image-side data; rely on
+          // prediction_core.buildPredictInputs to pad extra inputs with
+          // zero tensors so model.predict() accepts the call. The augment
+          // layers run in eval mode (no flip), so the dummy zero target
+          // doesn't perturb output[0] (the bbox head we actually evaluate).
+          var predCore = predictionCore || (typeof window !== "undefined" && window.OSCPredictionCore) || null;
+          for (var bi = 0; bi < testX.length; bi += batchSize) {
+            var bEnd = Math.min(bi + batchSize, testX.length);
+            var bt = tf.tensor2d(testX.slice(bi, bEnd));
+            var wrapped = predCore && typeof predCore.buildPredictInputs === "function"
+              ? predCore.buildPredictInputs(tf, built.model, bt)
+              : { input: bt, extras: [] };
+            var br = built.model.predict(wrapped.input);
+            var outputs = Array.isArray(br) ? br : [br];
+            if (!headOutputs) headOutputs = outputs.map(function () { return []; });
+            outputs.forEach(function (tensor, idx) {
+              headOutputs[idx] = headOutputs[idx].concat(tensor.arraySync());
+            });
+            allPreds = allPreds.concat(outputs[0].arraySync());
+            bt.dispose();
+            wrapped.extras.forEach(function (t) { t.dispose(); });
+            outputs.forEach(function (t) { t.dispose(); });
+          }
+          return _normalizePredictiveResult(built.headConfigs || inferredHeadConfigs, allPreds, headOutputs);
+        } finally {
+          try { built.model.dispose(); } catch (_e) { /* idempotent */ }
         }
-        built.model.dispose();
-        return _normalizePredictiveResult(built.headConfigs || inferredHeadConfigs, allPreds, headOutputs);
       });
     }
 
@@ -1466,77 +1473,108 @@
           // the strict throw.
           targetSize: (targetSize && Number(targetSize)) || undefined,
         });
-        _loadWeights(tf, built.model, artifacts);
+        // Synchronous setup phase: _loadWeights can throw (failed
+        // shape match, missing converter), extractDecoder can throw,
+        // and clientConfig assembly can throw. If any of those fire
+        // before engine.generate() takes over, we'd leak both built.model
+        // AND genModel (which may be a separate decoder). The
+        // engine.generate().then/catch chain disposes only when its
+        // promise actually starts. Wrap the synchronous setup so
+        // throws here clean up too.
+        // Single dispose helper used by all the sync-throw paths AND
+        // the existing engine.generate().then/catch chain. Idempotent
+        // so a double-call (sync throw → catch → also engine.catch)
+        // doesn't fault.
+        var genModel = null;
+        var disposed = false;
+        function _disposeBoth() {
+          if (disposed) return;
+          disposed = true;
+          if (genModel && genModel !== built.model) {
+            try { genModel.dispose(); } catch (_) { /* idempotent */ }
+          }
+          try { built.model.dispose(); } catch (_) { /* idempotent */ }
+        }
+        var handedOffToEngine = false;
+        try {
+          _loadWeights(tf, built.model, artifacts);
+          genModel = built.model;
+          var latentInfo = modelBuilder.extractLatentInfo ? modelBuilder.extractLatentInfo(modelRec.graph) : { latentDim: featureSize };
+          var latentDim = latentInfo.latentDim || featureSize;
+          var genNodes = { sampleNodes: meta.info.sampleNodes || [], outputNodes: meta.info.outputNodes || [] };
+          var sampleInputIndex = -1;
+          var outputIndex = 0;
 
-        var genModel = built.model;
-        var latentInfo = modelBuilder.extractLatentInfo ? modelBuilder.extractLatentInfo(modelRec.graph) : { latentDim: featureSize };
-        var latentDim = latentInfo.latentDim || featureSize;
-        var genNodes = { sampleNodes: meta.info.sampleNodes || [], outputNodes: meta.info.outputNodes || [] };
-        var sampleInputIndex = -1;
-        var outputIndex = 0;
-
-        if (trainerOverride.sampleNodeId && genNodes.sampleNodes.length) {
-          var selectedSample = genNodes.sampleNodes.find(function (s) { return s.id === trainerOverride.sampleNodeId; });
-          if (selectedSample) {
-            latentDim = selectedSample.dim || latentDim;
+          if (trainerOverride.sampleNodeId && genNodes.sampleNodes.length) {
+            var selectedSample = genNodes.sampleNodes.find(function (s) { return s.id === trainerOverride.sampleNodeId; });
+            if (selectedSample) {
+              latentDim = selectedSample.dim || latentDim;
+              if (built.inputNodes) {
+                for (var si0 = 0; si0 < built.inputNodes.length; si0++) {
+                  if (built.inputNodes[si0].id === trainerOverride.sampleNodeId) { sampleInputIndex = si0; break; }
+                }
+              }
+            }
+          } else if (genNodes.sampleNodes.length) {
+            latentDim = genNodes.sampleNodes[0].dim || latentDim;
             if (built.inputNodes) {
-              for (var si0 = 0; si0 < built.inputNodes.length; si0++) {
-                if (built.inputNodes[si0].id === trainerOverride.sampleNodeId) { sampleInputIndex = si0; break; }
+              for (var si = 0; si < built.inputNodes.length; si++) {
+                if (built.inputNodes[si].id === genNodes.sampleNodes[0].id) { sampleInputIndex = si; break; }
               }
             }
           }
-        } else if (genNodes.sampleNodes.length) {
-          latentDim = genNodes.sampleNodes[0].dim || latentDim;
-          if (built.inputNodes) {
-            for (var si = 0; si < built.inputNodes.length; si++) {
-              if (built.inputNodes[si].id === genNodes.sampleNodes[0].id) { sampleInputIndex = si; break; }
+
+          if (trainerOverride.outputNodeId && built.headConfigs && built.headConfigs.length > 1) {
+            for (var oi = 0; oi < built.headConfigs.length; oi++) {
+              if (built.headConfigs[oi].id && built.headConfigs[oi].id.indexOf(trainerOverride.outputNodeId + ":") === 0) {
+                outputIndex = oi;
+                break;
+              }
+            }
+          } else if (genNodes.outputNodes.length > 1 && built.headConfigs) {
+            var passthrough = genNodes.outputNodes.find(function (item) { return item.loss === "none"; }) || genNodes.outputNodes[0];
+            for (var oi1 = 0; oi1 < built.headConfigs.length; oi1++) {
+              if (built.headConfigs[oi1].id && built.headConfigs[oi1].id.indexOf(passthrough.id + ":") === 0) {
+                outputIndex = oi1;
+                break;
+              }
             }
           }
-        }
 
-        if (trainerOverride.outputNodeId && built.headConfigs && built.headConfigs.length > 1) {
-          for (var oi = 0; oi < built.headConfigs.length; oi++) {
-            if (built.headConfigs[oi].id && built.headConfigs[oi].id.indexOf(trainerOverride.outputNodeId + ":") === 0) {
-              outputIndex = oi;
-              break;
-            }
+          if (meta.info.hasLatentDecoder && method !== "inverse" && method !== "reconstruct") {
+            try {
+              var decoder = modelBuilder.extractDecoder(tf, built.model, latentDim);
+              if (decoder && decoder.model) {
+                genModel = decoder.model;
+                latentDim = decoder.latentDim || latentDim;
+                outputIndex = 0;
+              }
+            } catch (_) {}
           }
-        } else if (genNodes.outputNodes.length > 1 && built.headConfigs) {
-          var passthrough = genNodes.outputNodes.find(function (item) { return item.loss === "none"; }) || genNodes.outputNodes[0];
-          for (var oi1 = 0; oi1 < built.headConfigs.length; oi1++) {
-            if (built.headConfigs[oi1].id && built.headConfigs[oi1].id.indexOf(passthrough.id + ":") === 0) {
-              outputIndex = oi1;
-              break;
-            }
-          }
-        }
 
-        if (meta.info.hasLatentDecoder && method !== "inverse" && method !== "reconstruct") {
-          try {
-            var decoder = modelBuilder.extractDecoder(tf, built.model, latentDim);
-            if (decoder && decoder.model) {
-              genModel = decoder.model;
-              latentDim = decoder.latentDim || latentDim;
-              outputIndex = 0;
-            }
-          } catch (_) {}
+          var clientConfig = buildClientConfig(built, outputIndex, sampleInputIndex, latentDim, genModel);
+          var genPromise = engine.generate(tf, clientConfig);
+          handedOffToEngine = true;
+          return genPromise.then(function (result) {
+            result = result || {};
+            result.method = result.method || method;
+            result.runtime = "client";
+            result.checkpointRef = _getCheckpointRef(artifacts);
+            result.weightSelection = _resolveActualWeightSelection(trainer, artifacts, ev.weightSelection);
+            _disposeBoth();
+            return result;
+          }).catch(function (err) {
+            _disposeBoth();
+            throw err;
+          });
+        } catch (e) {
+          // Sync throw before engine.generate took ownership. Without
+          // this cleanup, repeated failed evals (e.g. weight-load
+          // shape mismatch on every retry) would leak the TF.js
+          // model + its weight tensors per attempt.
+          if (!handedOffToEngine) _disposeBoth();
+          throw e;
         }
-
-        var clientConfig = buildClientConfig(built, outputIndex, sampleInputIndex, latentDim, genModel);
-        return engine.generate(tf, clientConfig).then(function (result) {
-          result = result || {};
-          result.method = result.method || method;
-          result.runtime = "client";
-          result.checkpointRef = _getCheckpointRef(artifacts);
-          result.weightSelection = _resolveActualWeightSelection(trainer, artifacts, ev.weightSelection);
-          if (genModel !== built.model) try { genModel.dispose(); } catch (_) {}
-          built.model.dispose();
-          return result;
-        }).catch(function (err) {
-          if (genModel !== built.model) try { genModel.dispose(); } catch (_) {}
-          built.model.dispose();
-          throw err;
-        });
       });
     }
 
@@ -1666,8 +1704,22 @@
 
     function _loadWeights(tf, model, artifacts) {
       var converter = (typeof window !== "undefined" && window.OSCWeightConverter) ? window.OSCWeightConverter : null;
-      if (!converter || typeof converter.loadArtifactsIntoModel !== "function") return;
-      converter.loadArtifactsIntoModel(tf, model, artifacts);
+      if (!converter || typeof converter.loadArtifactsIntoModel !== "function") {
+        // Throw so the eval pipeline marks the result as r.status="error"
+        // instead of silently reporting metrics from random initial
+        // weights — that's the failure mode that masked
+        // ais_trajectory.position for 6 months (PR #90).
+        throw new Error("Weight converter not available — cannot load pretrained weights for eval");
+      }
+      var result = converter.loadArtifactsIntoModel(tf, model, artifacts);
+      if (!result || !result.loaded) {
+        throw new Error(
+          "Weight load failed: " + (result && result.reason ? result.reason : "unknown_error") +
+          ". Eval result would otherwise come from random initial weights — refusing to report metrics."
+        );
+      }
+      console.log("[eval] Weights loaded (" + result.mode + ", matched=" + result.matched + " of " + result.totalModelWeights + ")");
+      return result;
     }
 
     function mount() { _renderLeftPanel(); _renderMainPanel(); _renderRightPanel(); }
