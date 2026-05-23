@@ -1,5 +1,5 @@
 // Surrogate Studio - concatenated bundle
-// Generated: 2026-05-23T16:51:51Z
+// Generated: 2026-05-23T17:05:20Z
 // Source files: 58
 
 
@@ -30924,21 +30924,26 @@
             targetSize: (activeDs && Number(activeDs.targetSize)) || undefined,
           });
 
-          // load saved weights
+          // load saved weights — strict throw on any failure. The
+          // previous catch swallowed errors with only console.warn,
+          // then execution fell through to inference. The model still
+          // had its random-init weights, so test metrics looked
+          // plausible but were pure garbage (this was the exact
+          // failure class as PR #94 for evaluation_tab and PR #95 for
+          // generation_tab, in the trainer's Test phase). The outer
+          // catch at the bottom of this try renders "Inference error:
+          // ..." to the user and disposes rebuiltModel.
           var hasWeights = t.modelArtifacts && t.modelArtifacts.weightSpecs &&
             (t.modelArtifacts.weightData || t.modelArtifacts.weightValues);
           if (hasWeights) {
-            try {
-              var converter = (typeof window !== "undefined" && window.OSCWeightConverter) ? window.OSCWeightConverter : null;
-              if (!converter || typeof converter.loadArtifactsIntoModel !== "function") {
-                throw new Error("Weight converter not available");
-              }
-              var loadResult = converter.loadArtifactsIntoModel(tf, rebuiltModel.model, t.modelArtifacts);
-              if (!loadResult || !loadResult.loaded) {
-                throw new Error(loadResult && loadResult.reason ? loadResult.reason : "weight_load_failed");
-              }
-            } catch (e) {
-              console.warn("[test] Weight load failed:", e.message);
+            var converter = (typeof window !== "undefined" && window.OSCWeightConverter) ? window.OSCWeightConverter : null;
+            if (!converter || typeof converter.loadArtifactsIntoModel !== "function") {
+              throw new Error("Weight converter not available — refusing to test with random initial weights");
+            }
+            var loadResult = converter.loadArtifactsIntoModel(tf, rebuiltModel.model, t.modelArtifacts);
+            if (!loadResult || !loadResult.loaded) {
+              throw new Error("Weight load failed: " + (loadResult && loadResult.reason ? loadResult.reason : "unknown") +
+                " — refusing to compute test metrics on random initial weights");
             }
           }
 
@@ -30985,6 +30990,7 @@
           allPreds = allPredsArr;
 
           rebuiltModel.model.dispose();
+          rebuiltModel = null;
 
           // cache results
           _testCache[activeId] = {
@@ -31011,6 +31017,14 @@
           }
 
         } catch (e) {
+          // Dispose the rebuilt model if it was built before the throw.
+          // rebuiltModel is var-hoisted so it's visible here regardless
+          // of where the throw came from; nullified after success-side
+          // dispose so we never double-dispose.
+          if (rebuiltModel && rebuiltModel.model) {
+            try { rebuiltModel.model.dispose(); } catch (_) { /* idempotent */ }
+            rebuiltModel = null;
+          }
           if (_mountId !== capturedMountId) return;
           loaderWrap.innerHTML = "";
           loaderWrap.appendChild(el("span", { style: "font-size:12px;color:#f43f5e;" }, "Inference error: " + e.message));
@@ -32227,18 +32241,32 @@
 
       var resumeArtifacts = _getResumeArtifacts(tCard);
       if (resumeArtifacts) {
+        // Strict resume contract: if the user clicked Resume, they
+        // explicitly wanted to continue from the checkpoint. Silently
+        // falling back to training-from-scratch (the previous
+        // behavior) discards their prior work without their consent,
+        // and the onStatus message was easy to miss among other
+        // training updates. Same fallbacks-hide-real-issues class as
+        // PR #94 (eval) / #95 (gen) / Bug A above (Test phase) —
+        // refuse to proceed and surface the error visibly. Dispose
+        // buildResult.model so we don't leak a partially-loaded
+        // training model when the user retries.
+        var resumeFailReason = null;
         try {
           var resumeLoad = _loadArtifactsIntoTfModel(tf, buildResult.model, resumeArtifacts);
           if (!resumeLoad || !resumeLoad.loaded) {
-            onStatus("Resume checkpoint ignored: " + ((resumeLoad && resumeLoad.reason) || "weight_load_failed"));
-            resumeArtifacts = null;
+            resumeFailReason = (resumeLoad && resumeLoad.reason) || "weight_load_failed";
           } else {
             onStatus("Loaded saved checkpoint into training model.");
           }
         } catch (resumeErr) {
-          console.warn("[trainer] Resume checkpoint load failed:", resumeErr.message);
-          onStatus("Resume checkpoint ignored: " + resumeErr.message);
-          resumeArtifacts = null;
+          resumeFailReason = resumeErr.message || "weight_load_failed";
+        }
+        if (resumeFailReason) {
+          try { buildResult.model.dispose(); } catch (_) { /* idempotent */ }
+          onStatus("Resume failed: " + resumeFailReason +
+            ". Refusing to silently train from scratch — fix the checkpoint or click Reset to start fresh.");
+          return;
         }
       }
 
