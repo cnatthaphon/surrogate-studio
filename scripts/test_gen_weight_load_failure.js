@@ -141,5 +141,61 @@ function makeMockModel() {
     "behavioral: when engine took over, helper no-ops to avoid double-dispose (got " + built.model._disposed + ")");
 })();
 
+// --- Case 8: source-level — engine.generate's promise is captured
+// FIRST and the ownership flag is flipped AFTER. If the flag flipped
+// before engine.generate() returned, a synchronous throw from the
+// engine (bad config, validation error, missing tf op) would still
+// exit through the outer catch — but the helper would see
+// _engineTookOver === true and no-op, leaking the model.
+var srcOrder = src.match(/var genPromise = engine\.generate\(tf, genConfig\);\s*\n\s*_engineTookOver = true;/);
+ok(srcOrder != null,
+  "engine.generate's promise captured BEFORE the ownership flag flips (else sync-throw leaks model)");
+// Negative assertion — the broken order is NOT present.
+ok(!/_engineTookOver = true;\s*\n\s*engine\.generate\(tf, genConfig\)/.test(src),
+  "ownership flag is NOT flipped before engine.generate() returns (regression guard)");
+
+// --- Case 9: behavioral — engine.generate throws synchronously
+// (e.g. validation error before returning a promise). The outer
+// try/catch must call _disposeBuiltOnFailure() WITH the flag still
+// false, so the model is released.
+(function () {
+  var built = { model: makeMockModel() };
+  var genModel = makeMockModel(); // decoder swap case
+  var _engineTookOver = false;
+  var _disposeBuiltOnFailure = function () {
+    if (_engineTookOver) return;
+    if (genModel && (!built || genModel !== built.model)) {
+      try { genModel.dispose(); } catch (_) {}
+    }
+    if (built && built.model) {
+      try { built.model.dispose(); } catch (_) {}
+    }
+  };
+  // Mirror the production pattern: capture promise first, then flag.
+  // If engine.generate throws synchronously, the assignment line
+  // itself throws — we never reach `_engineTookOver = true`.
+  var fakeEngineGenerate = function () {
+    throw new Error("engine validation failed: bad latentDim");
+  };
+  var threw = null;
+  try {
+    var genPromise = fakeEngineGenerate();        // throws here
+    _engineTookOver = true;                        // unreachable
+    genPromise.then(function () {}).catch(function () {});
+  } catch (e) {
+    threw = e;
+    if (typeof _disposeBuiltOnFailure === "function") {
+      try { _disposeBuiltOnFailure(); } catch (_) {}
+    }
+  }
+  ok(threw != null, "sync engine.generate throw: error propagates to catch");
+  ok(_engineTookOver === false,
+    "sync engine.generate throw: ownership flag stays false (promise never captured)");
+  ok(built.model._disposed === 1,
+    "sync engine.generate throw: built.model.dispose() called once (got " + built.model._disposed + ")");
+  ok(genModel._disposed === 1,
+    "sync engine.generate throw: decoder genModel.dispose() called once (got " + genModel._disposed + ")");
+})();
+
 console.log("\n  " + passed + " passed, " + failed + " failed");
 if (failed) process.exit(1);

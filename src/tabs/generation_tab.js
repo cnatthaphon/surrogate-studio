@@ -1269,8 +1269,15 @@
           }
         }
 
-        _engineTookOver = true; // from here, engine.generate's then/catch chain owns model disposal
-        engine.generate(tf, genConfig).then(function (result) {
+        // Capture the promise FIRST. Only flip the ownership flag
+        // after engine.generate() has returned a promise — if it
+        // throws synchronously (bad genConfig, validation error,
+        // missing tf op), the outer catch must still run cleanup,
+        // and that means _engineTookOver must still be false when
+        // _disposeBuiltOnFailure() is called.
+        var genPromise = engine.generate(tf, genConfig);
+        _engineTookOver = true;
+        genPromise.then(function (result) {
           _isGenerating = false;
           if (currentMountId !== _mountId) return;
           result.runtime = "client";
