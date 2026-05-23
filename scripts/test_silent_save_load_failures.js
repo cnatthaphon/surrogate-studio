@@ -45,6 +45,15 @@ ok(/t\.modelArtifacts\s*=\s*null/.test(ploadSrc),
   "pretrained_loader catch nulls t.modelArtifacts so the card reflects the load failure");
 ok(/Pretrained load failed:/.test(ploadSrc),
   "pretrained_loader catch records a t.error message describing the failure");
+// Bug F (PR #98 reviewer follow-up): the missing-global short-circuit
+// is now split out of the "intentional skip" branch and treated as
+// an error. The early-return chain used to be a single condition
+// `!t._pretrainedVar || t.status !== "done" || !W[t._pretrainedVar]`
+// — the third clause silently masked a missing pretrained asset.
+ok(/Pretrained asset missing:/.test(ploadSrc),
+  "pretrained_loader names 'Pretrained asset missing:' when window[_pretrainedVar] is absent (was: silent skip)");
+ok(!/!t\._pretrainedVar \|\| t\.status !== "done" \|\| !W\[t\._pretrainedVar\]/.test(ploadSrc),
+  "pretrained_loader no longer collapses the missing-global case into the intentional-skip branch");
 
 // --- Behavioral: invoke loadAll() against a card whose pretrained
 // var triggers a decode crash (bad base64), assert the card is marked
@@ -84,6 +93,88 @@ ok(/Pretrained load failed:/.test(ploadSrc),
     "card.modelArtifacts NULLED so it doesn't appear ready for Test (was: stale artifacts kept)");
   ok(/Pretrained load failed/.test(String(card.error || "")),
     "card.error names 'Pretrained load failed' for the UI to display");
+})();
+
+// --- Bug F behavioral: card declares _pretrainedVar but the global
+// is absent (typical of a busted build or a missing pretrained
+// <script> include). Pre-fix this hit the `|| !W[t._pretrainedVar]`
+// clause in the single early-return and the card was upserted
+// unchanged at status="done" with no artifacts — the Test tab's
+// hasArtifacts guard hid the symptom but the card looked successful.
+// Post-fix: status="error", artifacts nulled, error message names
+// the missing global.
+(function () {
+  global.window = {
+    // No 'missingPretrainedVar' defined here — that's the bug case.
+    OSCCheckpointFormatCore: null,
+  };
+  delete require.cache[require.resolve("../src/pretrained_loader.js")];
+  var loader = require("../src/pretrained_loader.js");
+  var upserted = [];
+  var mockStore = {
+    upsertTrainerCard: function (c) { upserted.push(c); },
+    replaceTrainerEpochs: function () {},
+  };
+  var card = {
+    id: "tMissing",
+    name: "Missing Asset",
+    status: "done",
+    _pretrainedVar: "missingPretrainedVar",
+    config: {},
+    modelArtifacts: { weightSpecs: ["stale"] }, // simulate stale artifacts from a prior load
+  };
+  loader.loadAll(mockStore, [card]);
+  ok(upserted.length === 1, "Bug F: card upserted once when global is missing");
+  ok(card.status === "error",
+    "Bug F: card status='error' when window[_pretrainedVar] is missing (was: stayed 'done' silently — got " + card.status + ")");
+  ok(card.modelArtifacts === null,
+    "Bug F: card.modelArtifacts NULLED on missing-asset (was: stale artifacts kept)");
+  ok(/Pretrained asset missing/.test(String(card.error || "")),
+    "Bug F: card.error names the missing global (got: '" + (card.error || "") + "')");
+  ok(/missingPretrainedVar/.test(String(card.error || "")),
+    "Bug F: error message includes the missing variable name so the user knows what to fix");
+})();
+
+// --- Bug F negative: cards WITHOUT _pretrainedVar (regular trainer
+// cards that were never pretrained) must still be passed through
+// unchanged — the fix is meant to split the missing-GLOBAL case
+// out of the intentional-skip branch, not to flag every card.
+(function () {
+  global.window = {};
+  delete require.cache[require.resolve("../src/pretrained_loader.js")];
+  var loader = require("../src/pretrained_loader.js");
+  var upserted = [];
+  var mockStore = {
+    upsertTrainerCard: function (c) { upserted.push(c); },
+    replaceTrainerEpochs: function () {},
+  };
+  var card = { id: "tBare", name: "Not Pretrained", status: "done", config: {} };
+  loader.loadAll(mockStore, [card]);
+  ok(upserted.length === 1 && card.status === "done",
+    "Bug F negative: cards without _pretrainedVar pass through unchanged (got status=" + card.status + ")");
+  ok(card.error == null,
+    "Bug F negative: card.error stays absent for non-pretrained cards");
+})();
+
+// --- Bug F negative 2: cards with status != "done" pass through
+// unchanged regardless of pretrained var presence (the loader is
+// only meant to materialize already-completed pretrained cards).
+(function () {
+  global.window = { somePretrainedVar: "base64data" };
+  delete require.cache[require.resolve("../src/pretrained_loader.js")];
+  var loader = require("../src/pretrained_loader.js");
+  var upserted = [];
+  var mockStore = {
+    upsertTrainerCard: function (c) { upserted.push(c); },
+    replaceTrainerEpochs: function () {},
+  };
+  var card = {
+    id: "tNew", name: "Fresh", status: "new",
+    _pretrainedVar: "somePretrainedVar", config: {},
+  };
+  loader.loadAll(mockStore, [card]);
+  ok(upserted.length === 1 && card.status === "new",
+    "Bug F negative 2: non-'done' cards pass through (status stays '" + card.status + "')");
 })();
 
 // ===========================================================

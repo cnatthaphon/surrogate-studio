@@ -1,5 +1,5 @@
 // Surrogate Studio - concatenated bundle
-// Generated: 2026-05-23T19:36:02Z
+// Generated: 2026-05-23T19:59:44Z
 // Source files: 58
 
 
@@ -21214,7 +21214,27 @@
     var fmt = W.OSCCheckpointFormatCore || null;
 
     trainers.forEach(function (t) {
-      if (!t._pretrainedVar || t.status !== "done" || !W[t._pretrainedVar]) {
+      // Three short-circuit cases — only the FIRST TWO are
+      // intentional skips. The third (pretrained var named but
+      // global missing) is the silent-fallback bug reviewer caught
+      // on PR #98: a trainer with _pretrainedVar:"DOES_NOT_EXIST"
+      // used to be upserted unchanged at status="done" with no
+      // artifacts. The Test tab's `if (!t.modelArtifacts)` guard
+      // (PR #97) prevented the random-init inference symptom, but
+      // the card still LOOKED successful. Surface the missing
+      // asset explicitly so the user can fix the build / preset.
+      if (!t._pretrainedVar || t.status !== "done") {
+        store.upsertTrainerCard(t);
+        return;
+      }
+      if (!W[t._pretrainedVar]) {
+        console.error("[pretrained] Asset missing:", t.name, t._pretrainedVar);
+        t.status = "error";
+        t.error = "Pretrained asset missing: window." + t._pretrainedVar +
+          " was not loaded (check the preset's pretrained <script> tag or bundle).";
+        t.modelArtifacts = null;
+        t.modelArtifactsLast = null;
+        t.modelArtifactsBest = null;
         store.upsertTrainerCard(t);
         return;
       }
