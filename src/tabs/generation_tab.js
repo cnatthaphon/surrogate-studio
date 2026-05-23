@@ -1051,12 +1051,35 @@
           targetSize: (_genActiveDs && Number(_genActiveDs.targetSize)) || undefined,
         });
 
-        // load weights — select based on config (last vs best)
+        // load weights — select based on config (last vs best).
+        // _loadWeights now throws on failure (same contract as the
+        // Evaluation tab fix in #94). Generating from random initial
+        // weights would yield noise samples that look superficially
+        // valid; refusing is more honest. The throw exits to the
+        // outer catch (line ~1277), which calls _disposeBuiltOnFailure
+        // to release the TF.js model + held tensors.
         var _artifacts = trainerArtifacts;
+        // Declare with var so they're hoisted to _generateOnClient's
+        // function scope and visible in the outer catch (line ~1294).
+        // A `function _disposeBuiltOnFailure()` declaration here would
+        // be block-scoped under strict mode and invisible from catch.
+        var genModel = null;
+        var _engineTookOver = false;
+        var _disposeBuiltOnFailure = function () {
+          if (_engineTookOver) return; // engine.generate's then/catch chain disposes
+          // `built` is var-hoisted; can be undefined if buildModelFromGraph
+          // threw before assignment. Guard before deref.
+          if (genModel && (!built || genModel !== built.model)) {
+            try { genModel.dispose(); } catch (_) { /* idempotent */ }
+          }
+          if (built && built.model) {
+            try { built.model.dispose(); } catch (_) { /* idempotent */ }
+          }
+        };
         _loadWeights(tf, built.model, _artifacts);
 
         // determine latent dim and model for generation
-        var genModel = built.model;
+        genModel = built.model;
         var genMeta = _resolveGenerationMeta(modelRec);
         g.family = genMeta.info.family || g.family;
 
@@ -1246,7 +1269,15 @@
           }
         }
 
-        engine.generate(tf, genConfig).then(function (result) {
+        // Capture the promise FIRST. Only flip the ownership flag
+        // after engine.generate() has returned a promise — if it
+        // throws synchronously (bad genConfig, validation error,
+        // missing tf op), the outer catch must still run cleanup,
+        // and that means _engineTookOver must still be false when
+        // _disposeBuiltOnFailure() is called.
+        var genPromise = engine.generate(tf, genConfig);
+        _engineTookOver = true;
+        genPromise.then(function (result) {
           _isGenerating = false;
           if (currentMountId !== _mountId) return;
           result.runtime = "client";
@@ -1279,6 +1310,13 @@
         g.status = "draft"; _saveGen(g);
         onStatus("Generation setup error: " + e.message);
         _renderLeftPanel(); _renderRightPanel();
+        // Synchronous throw before engine.generate took ownership —
+        // dispose the built model + decoder to prevent TF.js graph +
+        // tensor leaks on repeated failed attempts. (e.g. weight-load
+        // shape mismatch on every retry.)
+        if (typeof _disposeBuiltOnFailure === "function") {
+          try { _disposeBuiltOnFailure(); } catch (_) { /* idempotent */ }
+        }
       }
       } // end _generateOnClient
     }
@@ -1291,15 +1329,23 @@
     function _loadWeights(tf, model, artifacts) {
       var converter = (typeof window !== "undefined" && window.OSCWeightConverter) ? window.OSCWeightConverter : null;
       if (!converter || typeof converter.loadArtifactsIntoModel !== "function") {
-        console.warn("[gen] Weight converter not available");
-        return;
+        // Throw so the outer try/catch in _generateOnClient marks
+        // the generation as failed instead of producing samples from
+        // random initial weights — same defensive contract as the
+        // Evaluation tab fix in #94. Generating from random weights
+        // gives the user noise samples that look superficially valid;
+        // refusing to generate is more honest.
+        throw new Error("Weight converter not available — cannot load pretrained weights for generation");
       }
       var result = converter.loadArtifactsIntoModel(tf, model, artifacts);
       if (!result || !result.loaded) {
-        console.warn("[gen] Weight load failed:", result && result.reason ? result.reason : "unknown_error");
-        return;
+        throw new Error(
+          "Weight load failed: " + (result && result.reason ? result.reason : "unknown_error") +
+          ". Generated samples would otherwise come from random initial weights — refusing to generate."
+        );
       }
       console.log("[gen] Weights loaded (" + result.mode + ", matched=" + result.matched + ")");
+      return result;
     }
 
     // ─── Render generated samples — delegates to dataset module or core ───
