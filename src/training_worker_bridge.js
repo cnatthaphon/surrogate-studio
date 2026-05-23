@@ -163,7 +163,19 @@
           return;
         }
         if (kind === "complete") {
-          done(msg.result || {});
+          // Defense-in-depth at the bridge boundary: the worker
+          // contract is "complete → result includes modelArtifacts".
+          // Even with the worker-side strict-throw fix (PR #99 for
+          // Bug G), a future regression that lets an empty/null
+          // result through must NOT silently resolve as success.
+          // Previous `done(msg.result || {})` accepted anything,
+          // including {kind:"complete"} with no result field at all.
+          var result = msg && msg.result;
+          if (!result || !result.modelArtifacts) {
+            fail(new Error("Worker reported complete but no modelArtifacts in result — likely a weight extraction failure that didn't propagate as kind:'error'"));
+            return;
+          }
+          done(result);
           return;
         }
       };

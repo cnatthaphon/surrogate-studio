@@ -732,7 +732,18 @@
         generatedBy: "training_worker",
       };
     } catch (saveErr) {
-      self.postMessage({ kind: "log", message: "Warning: weight extraction failed at [" + String(saveErr.message || saveErr) + "]" });
+      // Previous behavior posted a kind:"log" warning and left
+      // trainedArtifacts=null. Training then completed via
+      // postMessage({kind:"complete", result:{...modelArtifacts:null...}}),
+      // the bridge accepted it (msg.result || {}), and the trainer
+      // tab marked the card status="done" with no usable weights —
+      // user saw "✓ Done (Worker)" but tCard.modelArtifacts was
+      // undefined. Same silent fake-success class as Bugs C/D/E/F
+      // (PR #98). Re-throw so the outer try/catch posts kind:"error",
+      // which routes through the bridge's error branch and sets
+      // tCard.status="error" with the underlying reason.
+      throw new Error("Weight extraction failed in worker: " + String(saveErr.message || saveErr) +
+        " — refusing to report training complete without saving the trained weights");
     }
 
     try {
