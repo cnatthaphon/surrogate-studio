@@ -40,6 +40,7 @@ function makeModel(layerSpecs) {
 
   // --- Case 1: full match → loaded: true.
   (function () {
+    var baseline = tf.memory().numTensors;
     var model = makeModel([8, 4, 2]); // 2 Dense layers → 4 weights (2 kernels + 2 biases)
     var modelWeights = model.weights;
     var specs = modelWeights.map(function (w, i) {
@@ -52,6 +53,13 @@ function makeModel(layerSpecs) {
     ok(result.matched === modelWeights.length,
       "full-match: matched === modelWeights.length (" + result.matched + " === " + modelWeights.length + ")");
     model.dispose();
+    // Leak guard: every temp tensor created inside loadArtifactsIntoModel
+    // (the getWeights() clones AND the new tf.tensor() replacements) must
+    // be disposed in the try/finally — model.dispose() only releases the
+    // model's own variables, not the loader's temp inputs to setWeights.
+    var after = tf.memory().numTensors;
+    ok(after === baseline,
+      "full-match: no leaked tensors after model.dispose() (baseline=" + baseline + ", after=" + after + ")");
   })();
 
   // --- Case 2: partial match — saved checkpoint covers only the
@@ -59,6 +67,7 @@ function makeModel(layerSpecs) {
   // matching spec. Pre-fix: loaded:true with matched=2, totalModelWeights=4
   // (and the unmatched layer kept random weights). Post-fix: loaded:false.
   (function () {
+    var baseline = tf.memory().numTensors;
     var model = makeModel([8, 4, 2]); // 4 weights total
     var modelWeights = model.weights;
     // Only ship specs for the FIRST dense layer (2 of 4 weights).
@@ -85,6 +94,14 @@ function makeModel(layerSpecs) {
     ok(result.totalModelWeights === 4,
       "partial-match: totalModelWeights surfaced in result (" + result.totalModelWeights + ")");
     model.dispose();
+    // The reviewer-flagged leak: the partial-match early-return at
+    // weight_converter.js:249 created tf.tensor replacements at line
+    // 232 but exited without disposing them. Confirmed via tf.memory():
+    // 2 tensors remained alive after model.dispose(). The try/finally
+    // wrap now disposes every temp on every return path.
+    var after = tf.memory().numTensors;
+    ok(after === baseline,
+      "partial-match: no leaked tensors after failure-return + model.dispose() (baseline=" + baseline + ", after=" + after + ")");
   })();
 
   // --- Case 3: saved checkpoint has EXTRA specs the model doesn't
@@ -92,6 +109,7 @@ function makeModel(layerSpecs) {
   // loaded:true (an oversize checkpoint is not the bug class —
   // only undersize is, because that leaves model weights random).
   (function () {
+    var baseline = tf.memory().numTensors;
     var model = makeModel([8, 4, 2]); // 4 weights
     var modelWeights = model.weights;
     // Ship 6 specs: the 4 model weights + 2 phantom extras.
@@ -125,6 +143,42 @@ function makeModel(layerSpecs) {
       ok(true, "oversize-checkpoint: loader refused to guess (reason=" + result.reason + ")");
     }
     model.dispose();
+    // Leak guard for the positional-fallback branch (line 273+ in
+    // weight_converter.js): mwVals = model.getWeights() and the
+    // tf.tensor() slices inside the loop are all owned by the
+    // loader. The try/finally must dispose them whether the branch
+    // takes the success return or the weight_count_mismatch return.
+    var after = tf.memory().numTensors;
+    ok(after === baseline,
+      "oversize-checkpoint: no leaked tensors after positional-fallback + model.dispose() (baseline=" + baseline + ", after=" + after + ")");
+  })();
+
+  // --- Case 4: positional-fallback FAILURE branch (weight_count_mismatch).
+  // Specs have empty names so no named matches occur; values buffer is
+  // smaller than the model needs, so the positional loop breaks early
+  // and out.length !== mwVals.length → loaded:false. The positional
+  // branch creates getWeights() clones AND partial tf.tensor() slices
+  // before the early-return; without try/finally those would leak.
+  (function () {
+    var baseline = tf.memory().numTensors;
+    var model = makeModel([8, 4, 2]);
+    // Anonymous specs (no name) → all skipped by name path → fall through
+    // to positional. Provide only enough bytes for the first kernel.
+    var firstKernelSize = model.weights[0].shape.reduce(function (a, b) { return a * b; }, 1);
+    var anonSpecs = [{ name: "", shape: model.weights[0].shape.slice(), dtype: "float32" }];
+    var anonValues = new Float32Array(firstKernelSize).fill(0.05);
+    var result = WC.loadArtifactsIntoModel(tf, model, {
+      weightSpecs: anonSpecs,
+      weightValues: Array.from(anonValues),
+    });
+    ok(result.loaded === false,
+      "positional-fallback failure: loaded:false when values buffer is short (got " + JSON.stringify(result) + ")");
+    ok(/weight_count_mismatch/.test(String(result.reason || "")),
+      "positional-fallback failure: reason names 'weight_count_mismatch'");
+    model.dispose();
+    var after = tf.memory().numTensors;
+    ok(after === baseline,
+      "positional-fallback failure: no leaked tensors after weight_count_mismatch return + model.dispose() (baseline=" + baseline + ", after=" + after + ")");
   })();
 
   console.log("\n  " + passed + " passed, " + failed + " failed");
