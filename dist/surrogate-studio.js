@@ -1,5 +1,5 @@
 // Surrogate Studio - concatenated bundle
-// Generated: 2026-05-23T09:03:42Z
+// Generated: 2026-05-23T16:51:51Z
 // Source files: 58
 
 
@@ -27235,92 +27235,138 @@
     }
 
     var modelWeights = model.weights || [];
-    var current = model.getWeights();
-    var matched = 0;
-    var namedSpecs = 0;
-    var offset = 0;
-    var savedMap = {};
-    var matchedSpecKeys = {};
+    // tfjs-layers' model.getWeights() returns LayerVariable.read()
+    // references — NOT clones. The model still owns those, and
+    // model.dispose() will release them. What WE own are the
+    // tf.tensor() calls below that build replacement values for
+    // setWeights(); those tensors are what the reviewer caught
+    // leaking on the partial-match early-return. Track only those
+    // in _ownedTemps; the try/finally disposes them on every return
+    // path (success, partial-match failure, positional success,
+    // weight_count_mismatch).
+    var _ownedTemps = [];
+    try {
+      var current = model.getWeights();
+      var matched = 0;
+      var namedSpecs = 0;
+      var offset = 0;
+      var savedMap = {};
+      var matchedSpecKeys = {};
 
-    specs.forEach(function (sp, idx) {
-      var shape = Array.isArray(sp.shape) ? sp.shape.slice() : [];
-      var size = shape.reduce(function (a, b) { return a * b; }, 1);
-      // canonicalizeWeightName returns either a string or an array of candidate
-      // browser-side names. Register the spec under every alias so the lookup
-      // below can match whichever convention the browser model used.
-      var keys = _aliasesFor(sp.name || "").filter(Boolean);
-      if (keys.length) {
-        namedSpecs++;
-        var entry = { offset: offset, size: size, shape: shape, rawName: sp.name || "", index: idx, primaryKey: keys[0] };
-        keys.forEach(function (k) { if (k && !savedMap[k]) savedMap[k] = entry; });
-      }
-      offset += size;
-    });
-
-    if (namedSpecs > 0 && modelWeights.length) {
-      for (var i = 0; i < modelWeights.length; i++) {
-        var mw = modelWeights[i];
-        var mwAliases = _aliasesFor(mw.name).filter(Boolean);
-        var saved = null;
-        var matchedKey = null;
-        for (var ai = 0; ai < mwAliases.length; ai++) {
-          if (savedMap[mwAliases[ai]]) {
-            saved = savedMap[mwAliases[ai]];
-            matchedKey = mwAliases[ai];
-            break;
-          }
+      specs.forEach(function (sp, idx) {
+        var shape = Array.isArray(sp.shape) ? sp.shape.slice() : [];
+        var size = shape.reduce(function (a, b) { return a * b; }, 1);
+        // canonicalizeWeightName returns either a string or an array of candidate
+        // browser-side names. Register the spec under every alias so the lookup
+        // below can match whichever convention the browser model used.
+        var keys = _aliasesFor(sp.name || "").filter(Boolean);
+        if (keys.length) {
+          namedSpecs++;
+          var entry = { offset: offset, size: size, shape: shape, rawName: sp.name || "", index: idx, primaryKey: keys[0] };
+          keys.forEach(function (k) { if (k && !savedMap[k]) savedMap[k] = entry; });
         }
-        if (!saved) continue;
-        var expectedSize = mw.shape.reduce(function (a, b) { return a * b; }, 1);
-        if (saved.size !== expectedSize) continue;
-        if (saved.shape.length && !_sameShape(saved.shape, mw.shape)) continue;
-        current[i] = tf.tensor(values.subarray(saved.offset, saved.offset + saved.size), mw.shape);
-        matched++;
-        // Track the spec's PRIMARY key (the spec was registered under all its
-        // aliases, but for the "all named specs matched" check we want one
-        // entry per unique spec, not per alias).
-        matchedSpecKeys[saved.primaryKey || matchedKey] = true;
+        offset += size;
+      });
+
+      if (namedSpecs > 0 && modelWeights.length) {
+        for (var i = 0; i < modelWeights.length; i++) {
+          var mw = modelWeights[i];
+          var mwAliases = _aliasesFor(mw.name).filter(Boolean);
+          var saved = null;
+          var matchedKey = null;
+          for (var ai = 0; ai < mwAliases.length; ai++) {
+            if (savedMap[mwAliases[ai]]) {
+              saved = savedMap[mwAliases[ai]];
+              matchedKey = mwAliases[ai];
+              break;
+            }
+          }
+          if (!saved) continue;
+          var expectedSize = mw.shape.reduce(function (a, b) { return a * b; }, 1);
+          if (saved.size !== expectedSize) continue;
+          if (saved.shape.length && !_sameShape(saved.shape, mw.shape)) continue;
+          // Build a replacement tensor owned by us — overwriting
+          // current[i] does NOT drop the model's variable (current[i]
+          // was a read() reference to the LayerVariable; the model
+          // still owns it). The new tensor is tracked so the finally
+          // disposes it whether we exit via the strict partial-match
+          // failure or the setWeights success path.
+          var newT = tf.tensor(values.subarray(saved.offset, saved.offset + saved.size), mw.shape);
+          _ownedTemps.push(newT);
+          current[i] = newT;
+          matched++;
+          // Track the spec's PRIMARY key (the spec was registered under all its
+          // aliases, but for the "all named specs matched" check we want one
+          // entry per unique spec, not per alias).
+          matchedSpecKeys[saved.primaryKey || matchedKey] = true;
+        }
+        var matchedNamedSpecs = Object.keys(matchedSpecKeys).length;
+        if (matchedNamedSpecs === namedSpecs && matched > 0) {
+          // Strict: every model weight must have received a value from
+          // the saved checkpoint. The pre-2026-05-23 behavior tolerated
+          // matched < modelWeights.length and returned loaded:true —
+          // that's the exact symptom that masked the ais_trajectory
+          // bug in PR #90 (every saved spec matched, but the model had
+          // MORE weights than the saved file because the auto-built
+          // head was wider). Surfacing this as a load failure forces
+          // the caller to handle the architecture mismatch.
+          if (matched < modelWeights.length) {
+            return {
+              loaded: false,
+              reason: "partial_match_" + matched + "_of_" + modelWeights.length +
+                " (architecture mismatch: " + (modelWeights.length - matched) +
+                " model weights have no matching saved spec)",
+              mode: "name",
+              matched: matched,
+              namedSpecs: namedSpecs,
+              totalModelWeights: modelWeights.length,
+            };
+          }
+          model.setWeights(current);
+          return {
+            loaded: true,
+            mode: "name",
+            matched: matched,
+            namedSpecs: namedSpecs,
+            totalModelWeights: modelWeights.length,
+          };
+        }
       }
-      var matchedNamedSpecs = Object.keys(matchedSpecKeys).length;
-      if (matchedNamedSpecs === namedSpecs && matched > 0) {
-        model.setWeights(current);
+
+      // Fallback: positional slice copy for legacy artifacts without usable names.
+      var mwVals = model.getWeights();
+      var out = [];
+      var off2 = 0;
+      for (var wi = 0; wi < mwVals.length; wi++) {
+        var sz = mwVals[wi].shape.reduce(function (a, b) { return a * b; }, 1);
+        if (off2 + sz > values.length) break;
+        var posT = tf.tensor(values.subarray(off2, off2 + sz), mwVals[wi].shape);
+        _ownedTemps.push(posT);
+        out.push(posT);
+        off2 += sz;
+      }
+      if (out.length === mwVals.length) {
+        model.setWeights(out);
         return {
           loaded: true,
-          mode: "name",
-          matched: matched,
+          mode: "positional",
+          matched: out.length,
           namedSpecs: namedSpecs,
-          totalModelWeights: modelWeights.length,
+          totalModelWeights: mwVals.length,
         };
       }
-    }
-
-    // Fallback: positional slice copy for legacy artifacts without usable names.
-    var mwVals = model.getWeights();
-    var out = [];
-    var off2 = 0;
-    for (var wi = 0; wi < mwVals.length; wi++) {
-      var sz = mwVals[wi].shape.reduce(function (a, b) { return a * b; }, 1);
-      if (off2 + sz > values.length) break;
-      out.push(tf.tensor(values.subarray(off2, off2 + sz), mwVals[wi].shape));
-      off2 += sz;
-    }
-    if (out.length === mwVals.length) {
-      model.setWeights(out);
       return {
-        loaded: true,
-        mode: "positional",
-        matched: out.length,
+        loaded: false,
+        reason: "weight_count_mismatch",
+        matched: matched,
         namedSpecs: namedSpecs,
-        totalModelWeights: mwVals.length,
+        totalModelWeights: modelWeights.length || mwVals.length || 0,
       };
+    } finally {
+      for (var di = 0; di < _ownedTemps.length; di += 1) {
+        try { _ownedTemps[di].dispose(); } catch (_) { /* idempotent, may already be disposed */ }
+      }
     }
-    return {
-      loaded: false,
-      reason: "weight_count_mismatch",
-      matched: matched,
-      namedSpecs: namedSpecs,
-      totalModelWeights: modelWeights.length || mwVals.length || 0,
-    };
   }
 
   /**
