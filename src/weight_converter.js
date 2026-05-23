@@ -238,6 +238,26 @@
       }
       var matchedNamedSpecs = Object.keys(matchedSpecKeys).length;
       if (matchedNamedSpecs === namedSpecs && matched > 0) {
+        // Strict: every model weight must have received a value from
+        // the saved checkpoint. The pre-2026-05-23 behavior tolerated
+        // matched < modelWeights.length and returned loaded:true —
+        // that's the exact symptom that masked the ais_trajectory
+        // bug in PR #90 (every saved spec matched, but the model had
+        // MORE weights than the saved file because the auto-built
+        // head was wider). Surfacing this as a load failure forces
+        // the caller to handle the architecture mismatch.
+        if (matched < modelWeights.length) {
+          return {
+            loaded: false,
+            reason: "partial_match_" + matched + "_of_" + modelWeights.length +
+              " (architecture mismatch: " + (modelWeights.length - matched) +
+              " model weights have no matching saved spec)",
+            mode: "name",
+            matched: matched,
+            namedSpecs: namedSpecs,
+            totalModelWeights: modelWeights.length,
+          };
+        }
         model.setWeights(current);
         return {
           loaded: true,
