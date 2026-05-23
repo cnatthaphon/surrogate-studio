@@ -1,5 +1,5 @@
 // Surrogate Studio - concatenated bundle
-// Generated: 2026-05-23T17:05:20Z
+// Generated: 2026-05-23T19:36:02Z
 // Source files: 58
 
 
@@ -21245,7 +21245,25 @@
         if (meta.metrics) t.metrics = meta.metrics;
         if (meta.epochs && meta.epochs.length) store.replaceTrainerEpochs(t.id, meta.epochs);
       } catch (e) {
-        console.warn("[pretrained] Load failed:", t.name, e.message);
+        // The previous handler only console.warn'd and left the card
+        // at its inbound status="done" (the loader only runs on
+        // already-"done" trainers). After the trainer_tab Test phase
+        // strict-throw fix (PR #97), the Test path's weight-load
+        // guard checks for non-empty t.modelArtifacts BEFORE
+        // attempting load — so when this catch silently skipped the
+        // artifact assignment, the user's "click Test" went through
+        // a `hasWeights=false` branch and ran inference on random
+        // initial weights. Same class as the test-path silent
+        // fallback we just fixed; the failure point was upstream in
+        // the pretrained decode. Mark the card as error explicitly
+        // and null modelArtifacts so the trainer UI shows a real
+        // failure instead of fake-success.
+        console.error("[pretrained] Load failed:", t.name, e.message);
+        t.status = "error";
+        t.error = "Pretrained load failed: " + (e.message || "unknown");
+        t.modelArtifacts = null;
+        t.modelArtifactsLast = null;
+        t.modelArtifactsBest = null;
       }
 
       store.upsertTrainerCard(t);
@@ -31825,6 +31843,7 @@
           _activeTrainingCancel = null;
           try { if (_activeModel) _activeModel.stopTraining = true; } catch (_) {}
           var savedWeights = false;
+          var stopSaveError = null;
           if (tc) {
             tc.status = "stopped";
             _setRuntimeDiagnostics(tc, {
@@ -31841,14 +31860,31 @@
                 tc.modelArtifacts = lastW; // on stop, always use last
                 tc.trainedOnServer = false;
                 savedWeights = true;
-              } catch (e) {}
+              } catch (e) {
+                // The previous bare `catch (e) {}` swallowed weight-
+                // extraction errors entirely. User saw the generic
+                // "Training stop requested" status and assumed weights
+                // were saved (or that the stop was still in flight),
+                // but tc.modelArtifacts was never set — the trained
+                // model was effectively lost. Surface the failure
+                // explicitly so the user can decide to retry or
+                // accept the loss.
+                stopSaveError = e && e.message ? e.message : String(e || "unknown");
+                tc.status = "error";
+                tc.error = "Weight save failed on stop: " + stopSaveError;
+                console.error("[trainer] Weight save failed on stop:", e);
+              }
             }
             store.upsertTrainerCard(tc);
           }
           if (cancelFn) {
             try { Promise.resolve(cancelFn()).catch(function () {}); } catch (_) {}
           }
-          onStatus(savedWeights ? "Training stopped (weights saved)" : "Training stop requested");
+          onStatus(
+            savedWeights ? "Training stopped (weights saved)" :
+            stopSaveError ? "Training stopped but weight save FAILED: " + stopSaveError + " — trained model lost" :
+            "Training stop requested"
+          );
           _renderLeftPanel(); _renderMainPanel(); _renderRightPanel();
         });
         btnRow.appendChild(stopBtn);
@@ -32796,7 +32832,13 @@
             status: "done",
             note: "Main-thread training completed.",
           });
-          // Save both last and best weights
+          // Save both last and best weights. Previous code only
+          // console.warn'd on failure — tCard.status was already set
+          // to "done" above, so the user saw a "done" card while
+          // modelArtifacts was never set (the try block aborted).
+          // Trained model effectively lost. Promote the card to
+          // status="error" and surface the failure via onStatus.
+          var postTrainSaveError = null;
           try {
             var lastArtifacts = _normalizeCheckpointArtifacts(_extractWeightsFromModel(buildResult.model), "js_client");
             tCard.modelArtifactsLast = lastArtifacts;
@@ -32811,11 +32853,18 @@
             var sel = _resolveWeightSelection(config, buildResult.headConfigs);
             tCard.modelArtifacts = sel === "last" ? tCard.modelArtifactsLast : tCard.modelArtifactsBest;
           } catch (e) {
-            console.warn("[trainer] Weight save failed:", e.message);
+            postTrainSaveError = e && e.message ? e.message : String(e || "unknown");
+            tCard.status = "error";
+            tCard.error = "Weight save failed after training: " + postTrainSaveError;
+            console.error("[trainer] Weight save failed after training:", e);
           }
           tCard.trainedOnServer = false;
           if (store) store.upsertTrainerCard(tCard);
-          onStatus("\u2713 Done: MAE=" + (result.mae != null ? Number(result.mae).toExponential(3) : "—"));
+          if (postTrainSaveError) {
+            onStatus("Training succeeded but weight save FAILED: " + postTrainSaveError + " — trained model lost");
+          } else {
+            onStatus("\u2713 Done: MAE=" + (result.mae != null ? Number(result.mae).toExponential(3) : "—"));
+          }
           if (_isTrainerTrainViewVisible(activeId) || (stateApi && stateApi.getActiveTrainer() === activeId)) { _renderLeftPanel(); _renderMainPanel(); _renderRightPanel(); }
           _activeModel = null;
           buildResult.model.dispose();

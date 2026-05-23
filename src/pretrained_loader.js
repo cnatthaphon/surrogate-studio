@@ -57,7 +57,25 @@
         if (meta.metrics) t.metrics = meta.metrics;
         if (meta.epochs && meta.epochs.length) store.replaceTrainerEpochs(t.id, meta.epochs);
       } catch (e) {
-        console.warn("[pretrained] Load failed:", t.name, e.message);
+        // The previous handler only console.warn'd and left the card
+        // at its inbound status="done" (the loader only runs on
+        // already-"done" trainers). After the trainer_tab Test phase
+        // strict-throw fix (PR #97), the Test path's weight-load
+        // guard checks for non-empty t.modelArtifacts BEFORE
+        // attempting load — so when this catch silently skipped the
+        // artifact assignment, the user's "click Test" went through
+        // a `hasWeights=false` branch and ran inference on random
+        // initial weights. Same class as the test-path silent
+        // fallback we just fixed; the failure point was upstream in
+        // the pretrained decode. Mark the card as error explicitly
+        // and null modelArtifacts so the trainer UI shows a real
+        // failure instead of fake-success.
+        console.error("[pretrained] Load failed:", t.name, e.message);
+        t.status = "error";
+        t.error = "Pretrained load failed: " + (e.message || "unknown");
+        t.modelArtifacts = null;
+        t.modelArtifactsLast = null;
+        t.modelArtifactsBest = null;
       }
 
       store.upsertTrainerCard(t);
