@@ -55,6 +55,7 @@ const baseSuite = [
   "test_gen_weight_load_failure.js",
   "test_weight_load_partial_match.js",
   "test_trainer_weight_load_failure.js",
+  "test_silent_save_load_failures.js",
 ];
 
 function runOne(scriptName) {
