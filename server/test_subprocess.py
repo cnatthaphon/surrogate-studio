@@ -46,8 +46,23 @@ def main():
     model = build_model_from_graph(graph, feature_size, target_size, num_classes)
     model = model.to(device)
 
-    # Load weights
-    load_weights_into_model(model, config)
+    # Load weights. Test is meaningless without trained weights —
+    # pre-fix this discarded the load return value and silently
+    # produced test metrics on a randomly-initialized model (matches
+    # the trainer_tab Test-phase Bug A class from PR #97, but on the
+    # server-runtime side). Refuse to run on random init; raise so
+    # the outer try/except emits kind:"error".
+    if not load_weights_into_model(model, config):
+        print(json.dumps({
+            "kind": "error",
+            "message": (
+                "Server test requires checkpoint weights, but load_weights_into_model "
+                "returned False — request likely had no weightSpecs/weightValues, or the "
+                "saved checkpoint couldn't be matched against the rebuilt model. Refusing "
+                "to compute test metrics on a randomly-initialized model."
+            ),
+        }))
+        sys.exit(1)
 
     # Run inference
     model.eval()

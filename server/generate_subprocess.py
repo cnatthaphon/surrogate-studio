@@ -119,10 +119,24 @@ def main():
     seed = int(config.get("seed", 42))
     output_node_id = str(config.get("outputNodeId", "") or "").strip()
 
-    # Build + load weights
+    # Build + load weights. Generation is meaningless without trained
+    # weights — pre-fix this discarded the load return value and
+    # silently produced samples from a randomly-initialized model
+    # (noise that looks like generated data). Refuse to run on
+    # random init; raise so the outer try/except emits kind:"error".
     model = build_model_from_graph(graph, feature_size, target_size, num_classes)
     model = model.to(device)
-    load_weights_into_model(model, config)
+    if not load_weights_into_model(model, config):
+        print(json.dumps({
+            "kind": "error",
+            "message": (
+                "Server generate requires checkpoint weights, but load_weights_into_model "
+                "returned False — request likely had no weightSpecs/weightValues, or the "
+                "saved checkpoint couldn't be matched against the rebuilt model. Refusing "
+                "to generate samples from a randomly-initialized model."
+            ),
+        }))
+        sys.exit(1)
     model.eval()
     output_index = _resolve_output_index(model, graph, output_node_id)
     gen_nodes = _extract_generation_nodes(graph)

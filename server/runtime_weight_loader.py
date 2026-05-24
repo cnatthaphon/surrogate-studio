@@ -118,6 +118,14 @@ def _load_named_checkpoint(model: Any, saved_map: Dict[str, Dict[str, Any]], fla
     matched = 0
     matched_specs = set()
 
+    # Count of model weights the named-load is responsible for filling
+    # (everything except BN's num_batches_tracked, which is a plain
+    # Python int counter — not a learned weight). Drives the strict
+    # partial-match check below.
+    loadable_count = sum(
+        1 for n in state.keys() if "num_batches_tracked" not in n
+    )
+
     for name, param in state.items():
         if "num_batches_tracked" in name:
             continue
@@ -145,8 +153,30 @@ def _load_named_checkpoint(model: Any, saved_map: Dict[str, Dict[str, Any]], fla
             new_state[name] = torch.tensor(vals.reshape(param.shape), dtype=torch.float32)
         matched += 1
 
-    if not matched:
+    if matched == 0:
+        # No matches — let the caller fall through to the positional-
+        # load path (designed for legacy artifacts whose names don't
+        # follow the canonical convention).
         return False
+
+    # Strict partial-match guard (parity with TF.js PR #96's
+    # weight_converter.loadArtifactsIntoModel fix). Pre-fix, if some
+    # model weights matched and others didn't — architecture mismatch,
+    # undersized checkpoint, name-canonicalization drift — the
+    # function returned True with `merged_state = dict(state)`, which
+    # KEPT the random init for unmatched weights. Server-side
+    # train/predict/generate then ran on a partially-random model with
+    # no error surfaced. Surface this as a hard failure so the
+    # subprocess's outer try/except emits kind:"error" and the browser
+    # sees the load failure.
+    if matched < loadable_count:
+        raise ValueError(
+            f"Named checkpoint load matched only {matched} of {loadable_count} "
+            f"model weights — architecture mismatch (the saved checkpoint is "
+            f"missing entries for {loadable_count - matched} weight tensors). "
+            f"Refusing to load partial weights; would silently leave unmatched "
+            f"tensors at random initialization."
+        )
 
     merged_state = dict(state)
     merged_state.update(new_state)
