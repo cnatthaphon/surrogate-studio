@@ -2473,6 +2473,30 @@
           _stopRequestedTrainingId = "";
           _stopRequestedRunId = 0;
           _activeTrainingId = "";
+          // Defense-in-depth: PR #99's server_runtime_adapter fix
+          // (Bug J: hasArtifacts:false) covered the SSE layer, but
+          // a malformed /api/train/:id/result that returned without
+          // modelArtifacts still resolved successfully. The
+          // adapter's _fetchServerResult contract now rejects that
+          // case too, so this branch should be unreachable on the
+          // normal path; this guard is here so a future adapter
+          // regression doesn't relapse into silent fake-success.
+          if (!result || !result.modelArtifacts) {
+            tCard.status = "error";
+            tCard.error = "Server training completed but produced no weight artifacts — trained model lost";
+            _setRuntimeDiagnostics(tCard, {
+              executionMode: "server",
+              source: "server",
+              status: "error",
+              note: "Server training completed but /result returned no modelArtifacts.",
+            });
+            if (store) store.upsertTrainerCard(tCard);
+            onStatus("Server training FAILED: no weight artifacts returned \u2014 trained model lost");
+            if (_isTrainerTrainViewVisible(activeId) || (stateApi && stateApi.getActiveTrainer() === activeId)) { _renderLeftPanel(); _renderMainPanel(); _renderRightPanel(); }
+            _activeModel = null;
+            buildResult.model.dispose();
+            return;
+          }
           tCard.status = wasStopRequested ? "stopped" : "done";
           tCard.metrics = result;
           if (!tCard.metrics.paramCount) tCard.metrics.paramCount = buildResult.model.countParams();

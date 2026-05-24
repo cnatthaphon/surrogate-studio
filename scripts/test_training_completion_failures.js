@@ -166,5 +166,80 @@ ok(/contract|trained model not retrievable/i.test(saSrc.slice(saSrc.indexOf("Ser
   ok(resolves.length === 1, "Bug J negative: hasArtifacts:true still resolves");
 })();
 
+// ===========================================================
+// Bug K — src/server_runtime_adapter.js _fetchServerResult strict
+// ===========================================================
+// PR #99 Bug J reject covered SSE hasArtifacts:false. Reviewer
+// caught the next layer down: if SSE says hasArtifacts:true but
+// /api/train/:id/result returns a malformed payload (no
+// modelArtifacts, or empty weightSpecs/weightValues), the previous
+// `_fetchServerResult().then(resolve)` chain still resolved
+// successfully. Defense at the adapter level + defense at the
+// trainer_tab .then handler.
+
+ok(/_fetchServerResult\(\)[\s\S]{0,800}?\.then\(_normalizeServerResult\)\.then\(function \(out\) \{/.test(saSrc),
+  "_fetchServerResult chains a strict validation after _normalizeServerResult");
+ok(/Server \/result returned no modelArtifacts/.test(saSrc),
+  "_fetchServerResult throws when /result lacks modelArtifacts");
+ok(/Server \/result modelArtifacts is empty/.test(saSrc),
+  "_fetchServerResult throws when modelArtifacts is present but empty (no specs/values)");
+
+// --- Bug K behavioral: drive the strict-validation step with
+// malformed normalized results.
+(function () {
+  function validate(out) {
+    if (!out || !out.modelArtifacts) {
+      throw new Error("Server /result returned no modelArtifacts after SSE hasArtifacts:true — server response is malformed, trained model not retrievable");
+    }
+    var ma = out.modelArtifacts;
+    var hasValues = (Array.isArray(ma.weightValues) && ma.weightValues.length > 0) ||
+      (ma.weightData && (ma.weightData.byteLength > 0 || (Array.isArray(ma.weightData) && ma.weightData.length > 0)));
+    var hasSpecs = Array.isArray(ma.weightSpecs) && ma.weightSpecs.length > 0;
+    if (!hasValues || !hasSpecs) {
+      throw new Error("Server /result modelArtifacts is empty (weightSpecs.length=" +
+        (ma.weightSpecs ? ma.weightSpecs.length : 0) +
+        ", hasValues=" + hasValues +
+        ") — trained model not retrievable");
+    }
+    return out;
+  }
+  var rejects = 0;
+  var resolves = 0;
+  function run(out) {
+    try { validate(out); resolves += 1; } catch (e) { rejects += 1; }
+  }
+  // All four malformed shapes must reject.
+  run(null);
+  run({});
+  run({ modelArtifacts: null });
+  run({ modelArtifacts: {} });
+  run({ modelArtifacts: { weightSpecs: [], weightValues: [] } });
+  run({ modelArtifacts: { weightSpecs: [{ name: "w" }], weightValues: [] } });
+  run({ modelArtifacts: { weightSpecs: [], weightValues: [0.1] } });
+  ok(rejects === 7 && resolves === 0,
+    "Bug K behavioral: 7 malformed /result payloads all reject (got " + rejects + " rejects, " + resolves + " resolves)");
+  // Valid: must resolve.
+  run({ modelArtifacts: { weightSpecs: [{ name: "w", shape: [1] }], weightValues: [0.1] } });
+  ok(resolves === 1, "Bug K negative: valid /result (specs+values) resolves through");
+  // Valid via weightData (binary buffer path).
+  var buf = new ArrayBuffer(8);
+  run({ modelArtifacts: { weightSpecs: [{ name: "w" }], weightData: buf } });
+  ok(resolves === 2, "Bug K negative: valid /result with weightData (binary) resolves through");
+})();
+
+// ===========================================================
+// Bug K continued — trainer_tab.js server.then defense-in-depth
+// ===========================================================
+// Locate the server training .then handler. trSrc was loaded above.
+var srvThenStart = trSrc.indexOf("var wasStopRequested = _isStopRequestedRun(activeId, currentRunId)");
+ok(srvThenStart > 0, "located server-training .then handler in trainer_tab.js");
+var srvThenBlock = trSrc.slice(srvThenStart, srvThenStart + 3000);
+ok(/if \(!result \|\| !result\.modelArtifacts\) \{[\s\S]{0,800}?tCard\.status = "error"/.test(srvThenBlock),
+  "server.then handler validates result.modelArtifacts BEFORE setting status='done'/'stopped'");
+ok(/Server training (completed but produced no weight artifacts|FAILED: no weight artifacts)/.test(srvThenBlock),
+  "server.then handler surfaces 'no weight artifacts' message on the silent-failure case");
+ok(/trained model lost/i.test(srvThenBlock),
+  "server.then handler onStatus says 'trained model lost' for the consequence");
+
 console.log("\n  " + passed + " passed, " + failed + " failed");
 if (failed) process.exit(1);
