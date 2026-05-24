@@ -338,7 +338,30 @@ def main():
     num_classes = ds.get("numClasses", 0)
     model = build_model_from_graph(graph, feature_size, target_size, num_classes)
     model = model.to(device)
-    resumed_from_checkpoint = load_weights_into_model(model, config)
+    # Detect resume intent BEFORE attempting load: if the config
+    # carries non-empty weightSpecs or weightValues, the user (or
+    # browser) sent a checkpoint and expects us to use it. Pre-fix,
+    # load_weights_into_model returned False on any failure mode
+    # (empty values, no name matches that couldn't be salvaged by
+    # positional) and training silently proceeded from random init.
+    # User saw "Model: N params" then a normal training run, never
+    # knowing their checkpoint was ignored. Same silent-fallback
+    # class as the trainer_tab Resume path fixed in PR #97 (Bug B).
+    from checkpoint_format import extract_weight_specs as _xws, extract_weight_values as _xwv
+    _resume_intended = bool(_xws(config)) or bool(_xwv(config))
+    try:
+        resumed_from_checkpoint = load_weights_into_model(model, config)
+    except Exception as load_err:
+        error(f"Checkpoint load failed: {load_err}. Refusing to silently fall back to training-from-scratch — fix the checkpoint or remove modelArtifacts from the request to start fresh.")
+        sys.exit(1)
+    if _resume_intended and not resumed_from_checkpoint:
+        error(
+            "Checkpoint was provided (weightSpecs/weightValues present in request) "
+            "but load_weights_into_model returned False — likely an empty weightValues "
+            "buffer or an artifact shape the loader doesn't recognize. Refusing to "
+            "silently train from scratch on a request that expected resume."
+        )
+        sys.exit(1)
     param_count = sum(p.numel() for p in model.parameters())
     status(f"Model: {param_count} params")
     if resumed_from_checkpoint:

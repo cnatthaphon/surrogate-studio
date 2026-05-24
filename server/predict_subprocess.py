@@ -39,10 +39,28 @@ def main():
         print(json.dumps({"kind": "error", "message": "No input data"}))
         sys.exit(1)
 
-    # Build + load weights (reuse test_subprocess weight loading)
+    # Build + load weights (reuse test_subprocess weight loading).
+    # Predict is meaningless without trained weights — pre-fix this
+    # discarded the load return value and silently produced
+    # predictions on random initialization if the checkpoint was
+    # missing/malformed. Same silent-fallback class as PR #98 Bug E
+    # (post-train save) but on the inference side: the user clicks
+    # "Predict on server" and gets back numbers that look real but
+    # are noise. Raise if the load returned False so the subprocess's
+    # outer try/except emits kind:"error" and the browser surfaces it.
     model = build_model_from_graph(graph, feature_size, target_size, num_classes)
     model = model.to(device)
-    load_weights_into_model(model, config)
+    if not load_weights_into_model(model, config):
+        print(json.dumps({
+            "kind": "error",
+            "message": (
+                "Server predict requires checkpoint weights, but load_weights_into_model "
+                "returned False — request likely had no weightSpecs/weightValues, or the "
+                "saved checkpoint couldn't be matched against the rebuilt model. Refusing "
+                "to run inference on a randomly-initialized model."
+            ),
+        }))
+        sys.exit(1)
 
     # Inference
     model.eval()
