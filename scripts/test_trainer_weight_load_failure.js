@@ -29,20 +29,26 @@ function ok(cond, label) {
 // the outer catch renders an "Inference error:" message.
 //
 // Source-level guard: the inner try/catch around the load is GONE,
-// AND the throw mentions the random-init-weights refusal.
-var loadBlockMatch = src.match(/\/\/ load saved weights[\s\S]{0,2500}?\n          var hasWeights[\s\S]{0,2500}?\n          \}\n/);
-ok(loadBlockMatch != null, "located Test-phase weight-load block");
-if (loadBlockMatch) {
-  var loadBlock = loadBlockMatch[0];
-  ok(!/try \{[\s\S]*?console\.warn\("\[test\] Weight load failed/.test(loadBlock),
-    "Test phase NO LONGER catches weight-load failure with console.warn (was the silent-metrics bug)");
-  ok(/throw new Error\("Weight converter not available/.test(loadBlock),
-    "Test phase throws when converter is missing");
-  ok(/throw new Error\("Weight load failed:/.test(loadBlock),
-    "Test phase throws when loadResult.loaded === false");
-  ok(/random initial weights|refusing/i.test(loadBlock),
-    "Test phase throw message references random-init-weights refusal");
-}
+// AND the throw mentions the random-init-weights refusal. PR #101
+// added Bug P's `if (!hasWeights)` early-throw, so the load chain
+// is now: hasWeights computed → throw if missing → converter check
+// → throw if missing → loadResult check → throw if !loaded. The
+// "loadBlock" no longer cleanly terminates at a single brace; widen
+// the boundary to the next `var maxAvailable = ` line (the start of
+// the inference loop).
+var maxAvailIdx = src.indexOf("var maxAvailable = (activeDs.xTest");
+ok(maxAvailIdx > 0, "located inference-loop boundary (var maxAvailable)");
+var loadStartIdx = src.indexOf("// load saved weights");
+ok(loadStartIdx > 0 && loadStartIdx < maxAvailIdx, "located Test-phase weight-load block");
+var loadBlock = src.slice(loadStartIdx, maxAvailIdx);
+ok(!/try \{[\s\S]*?console\.warn\("\[test\] Weight load failed/.test(loadBlock),
+  "Test phase NO LONGER catches weight-load failure with console.warn (was the silent-metrics bug)");
+ok(/throw new Error\("Weight converter not available/.test(loadBlock),
+  "Test phase throws when converter is missing");
+ok(/throw new Error\("Weight load failed:/.test(loadBlock),
+  "Test phase throws when loadResult.loaded === false");
+ok(/random initial weights|refusing/i.test(loadBlock),
+  "Test phase throw message references random-init-weights refusal");
 
 // --- Case 2: Test-phase outer catch disposes rebuiltModel.model so
 // a thrown load failure doesn't leak the rebuilt model.

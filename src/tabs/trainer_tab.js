@@ -802,7 +802,21 @@
     function _renderTestSubTabClient(mainEl, t, activeId, Plotly, _darkLayout, pc, schemaId, allowedOutputKeys, defaultTarget, isClassification, defaultHeadType) {
       var tf = getTf();
       // --- load dataset + model for TF.js inference ---
-      if (!tf || !t.modelArtifacts || !t.datasetId || !modelBuilder) {
+      // PR #101 reviewer caught a bypass: the previous condition
+      // bundled `!t.modelArtifacts` into the generic fallback path
+      // alongside legitimate environment issues (TF.js not loaded,
+      // dataset not selected, modelBuilder not ready). That early-
+      // return prevented the strict "Cannot run Test" guard at the
+      // bottom of this function from ever firing for null/empty
+      // artifacts — the user saw training curves only and could
+      // misread it as "no test data" rather than "model has no
+      // usable weights" (the exact upstream silent-failure mode the
+      // audit has been hunting). Split the condition: the genuine
+      // environment issues still fall back gracefully; the
+      // no-artifacts case continues to the strict guard inside the
+      // setTimeout async body where it throws and renders an
+      // explicit "Inference error: Cannot run Test: ..." message.
+      if (!tf || !t.datasetId || !modelBuilder) {
         _renderFallbackCurves(mainEl, activeId, Plotly, _darkLayout);
         return;
       }
@@ -939,18 +953,38 @@
           // generation_tab, in the trainer's Test phase). The outer
           // catch at the bottom of this try renders "Inference error:
           // ..." to the user and disposes rebuiltModel.
-          var hasWeights = t.modelArtifacts && t.modelArtifacts.weightSpecs &&
-            (t.modelArtifacts.weightData || t.modelArtifacts.weightValues);
-          if (hasWeights) {
-            var converter = (typeof window !== "undefined" && window.OSCWeightConverter) ? window.OSCWeightConverter : null;
-            if (!converter || typeof converter.loadArtifactsIntoModel !== "function") {
-              throw new Error("Weight converter not available — refusing to test with random initial weights");
-            }
-            var loadResult = converter.loadArtifactsIntoModel(tf, rebuiltModel.model, t.modelArtifacts);
-            if (!loadResult || !loadResult.loaded) {
-              throw new Error("Weight load failed: " + (loadResult && loadResult.reason ? loadResult.reason : "unknown") +
-                " — refusing to compute test metrics on random initial weights");
-            }
+          // Test inference is meaningless without trained weights —
+          // pre-fix this `if (hasWeights)` block silently skipped the
+          // load when artifacts were missing/empty, and inference at
+          // line 956+ ran on the random-init model from buildModelFromGraph.
+          // The user saw legitimate-looking test metrics (accuracy,
+          // confusion matrix, ROC curves) computed from noise. Same
+          // exact garbage-metrics class the audit has been hunting,
+          // upstream of the strict-throw load logic (PR #97 Bug A
+          // covered the load FAILURE case but not the NO-ARTIFACTS
+          // case). The downstream defenses — pretrained loader (PR
+          // #98 Bug C), missing-global (PR #98 Bug F), import (this
+          // PR Bug O) — should prevent the no-artifacts state from
+          // ever reaching here; this guard catches any future
+          // upstream regression.
+          var hasWeights = t.modelArtifacts && Array.isArray(t.modelArtifacts.weightSpecs) &&
+            t.modelArtifacts.weightSpecs.length > 0 &&
+            ((Array.isArray(t.modelArtifacts.weightValues) && t.modelArtifacts.weightValues.length > 0) ||
+             (t.modelArtifacts.weightData && (t.modelArtifacts.weightData.byteLength > 0 ||
+              (Array.isArray(t.modelArtifacts.weightData) && t.modelArtifacts.weightData.length > 0))));
+          if (!hasWeights) {
+            throw new Error("Cannot run Test: trainer card has no usable weight artifacts (modelArtifacts " +
+              (t.modelArtifacts ? "missing weightSpecs or weight values" : "is null") +
+              "). The card may have been imported corrupted, restored from a stale store, or built from a pretrained asset that failed to load. Train the model first.");
+          }
+          var converter = (typeof window !== "undefined" && window.OSCWeightConverter) ? window.OSCWeightConverter : null;
+          if (!converter || typeof converter.loadArtifactsIntoModel !== "function") {
+            throw new Error("Weight converter not available — refusing to test with random initial weights");
+          }
+          var loadResult = converter.loadArtifactsIntoModel(tf, rebuiltModel.model, t.modelArtifacts);
+          if (!loadResult || !loadResult.loaded) {
+            throw new Error("Weight load failed: " + (loadResult && loadResult.reason ? loadResult.reason : "unknown") +
+              " — refusing to compute test metrics on random initial weights");
           }
 
           var maxAvailable = (activeDs.xTest || []).length;
@@ -2004,8 +2038,41 @@
             if (data.backend) t.backend = data.backend;
             if (data.runtimeDiagnostics) t.runtimeDiagnostics = data.runtimeDiagnostics;
             if (data.epochs && store) store.replaceTrainerEpochs(activeId, data.epochs);
+
+            // Validate: a trained-state status ("done"/"stopped") must
+            // be backed by usable modelArtifacts. Pre-fix, an import
+            // with status:"done" but missing/empty modelArtifacts was
+            // applied verbatim — the card appeared trained but the
+            // Test phase's `if (hasWeights)` gate silently skipped
+            // weight loading and ran inference on random init. Same
+            // class as PR #98 Bug C (pretrained_loader) and PR #98
+            // Bug F (missing pretrained global).
+            var _trainedStatuses = { done: 1, stopped: 1 };
+            if (_trainedStatuses[t.status]) {
+              var _ma = t.modelArtifacts;
+              var _hasUsableArtifacts = _ma &&
+                Array.isArray(_ma.weightSpecs) && _ma.weightSpecs.length > 0 &&
+                ((Array.isArray(_ma.weightValues) && _ma.weightValues.length > 0) ||
+                 (_ma.weightData && (_ma.weightData.byteLength > 0 ||
+                  (Array.isArray(_ma.weightData) && _ma.weightData.length > 0))));
+              if (!_hasUsableArtifacts) {
+                t.status = "error";
+                t.error = "Imported trainer claimed status='" + (data.status || "?") +
+                  "' but contains no usable weight artifacts (weightSpecs.length=" +
+                  ((_ma && Array.isArray(_ma.weightSpecs)) ? _ma.weightSpecs.length : 0) +
+                  "). Refusing to mark as trained — would silently run Test on random initial weights.";
+                t.modelArtifacts = null;
+                t.modelArtifactsLast = null;
+                t.modelArtifactsBest = null;
+              }
+            }
+
             if (store) store.upsertTrainerCard(t);
-            onStatus("Trainer imported: " + file.name);
+            if (t.status === "error") {
+              onStatus("Import incomplete: " + (t.error || "trainer marked error"));
+            } else {
+              onStatus("Trainer imported: " + file.name);
+            }
             _renderLeftPanel(); _renderMainPanel(); _renderRightPanel();
           }
 
