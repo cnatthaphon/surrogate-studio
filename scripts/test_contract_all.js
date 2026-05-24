@@ -58,6 +58,7 @@ const baseSuite = [
   "test_silent_save_load_failures.js",
   "test_training_completion_failures.js",
   "test_trainer_import_and_test_strict.js",
+  "test_dataset_silent_fallback.js",
 ];
 
 function runOne(scriptName) {

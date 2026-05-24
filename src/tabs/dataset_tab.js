@@ -204,7 +204,24 @@
       mainEl.appendChild(card);
 
       if (!ds.data) {
-        mainEl.appendChild(el("div", { style: "font-size:12px;color:#64748b;padding:8px;" }, "Configure and generate from right panel."));
+        // Distinguish corruption (status claims "ready" or "error",
+        // but ds.data is missing) from the legitimate untouched
+        // state (fresh card never generated). Pre-fix, every
+        // !ds.data case fell through to the generic "Configure and
+        // generate" prompt — a card with status="ready" but no
+        // data silently rendered as if untouched, hiding the
+        // state-vs-reality drift. Same UX-deception class the
+        // weight-side audit (PRs #98 Bugs C/F, #101 Bugs O/P) has
+        // been chasing on trainer cards.
+        if (ds.status === "ready") {
+          mainEl.appendChild(el("div", { style: "font-size:12px;color:#f43f5e;padding:8px;" },
+            "Dataset claims status=\"ready\" but has no data. Likely a stale state from a failed auto-build or a corrupted import. Re-generate from the right panel, or check the source descriptor."));
+        } else if (ds.status === "error") {
+          mainEl.appendChild(el("div", { style: "font-size:12px;color:#f43f5e;padding:8px;" },
+            "Dataset build failed: " + escapeHtml(String(ds.error || "no details"))));
+        } else {
+          mainEl.appendChild(el("div", { style: "font-size:12px;color:#64748b;padding:8px;" }, "Configure and generate from right panel."));
+        }
         return;
       }
 

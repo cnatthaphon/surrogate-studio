@@ -1,5 +1,5 @@
 // Surrogate Studio - concatenated bundle
-// Generated: 2026-05-24T16:54:07Z
+// Generated: 2026-05-24T18:42:12Z
 // Source files: 58
 
 
@@ -21366,16 +21366,49 @@
       }, d.config || ds.config || {}, d.splitConfig ? { splitConfig: d.splitConfig } : {});
       if (d.totalCount || d.sourceTotalExamples) cfg.totalCount = d.totalCount || d.sourceTotalExamples;
 
+      // Three silent-fallback failure modes existed pre-fix:
+      //   1. mod.build(cfg) threw synchronously → console.warn + return,
+      //      dataset card stayed at its prior status (often "new") with
+      //      no error visible to the user
+      //   2. async build resolved with falsy result → `if (!result) return;`
+      //      silently skipped without marking the card
+      //   3. async build rejected → console.warn-only catch, dataset
+      //      stayed at prior status
+      // In all three cases, the user saw the dataset card in its
+      // pre-build state and could not tell why generation didn't run.
+      // Same silent-fallback class as PR #98 Bug C (pretrained weight
+      // decode) on the dataset side. Mark status="error" with a
+      // descriptive ds.error message so the dataset_tab renderer
+      // (PR-this Bug R) can surface it.
+      function _markDatasetBuildFailure(reason) {
+        if (typeof console !== "undefined" && console.error) {
+          console.error("[pretrained] Dataset build failed:", ds.id, reason);
+        }
+        var failed = Object.assign({}, ds, {
+          status: "error",
+          error: "Dataset build failed: " + String(reason || "unknown"),
+        });
+        try { store.upsertDataset(failed); } catch (_e) { /* store unavailable */ }
+      }
+
       var p;
-      try { p = mod.build(cfg); } catch (e) { console.warn("[pretrained] Dataset build failed:", ds.id, e.message); return; }
+      try {
+        p = mod.build(cfg);
+      } catch (e) {
+        _markDatasetBuildFailure(e && e.message ? e.message : e);
+        return;
+      }
       if (!p || typeof p.then !== "function") p = Promise.resolve(p);
 
       pending.push(p.then(function (result) {
-        if (!result) return;
+        if (!result) {
+          _markDatasetBuildFailure("module returned no result (null/undefined)");
+          return;
+        }
         var updated = Object.assign({}, ds, { data: result, status: "ready", generatedAt: Date.now() });
         store.upsertDataset(updated);
       }).catch(function (e) {
-        console.warn("[pretrained] Dataset build failed:", ds.id, e.message);
+        _markDatasetBuildFailure(e && e.message ? e.message : e);
       }));
     });
 
@@ -28988,7 +29021,24 @@
       mainEl.appendChild(card);
 
       if (!ds.data) {
-        mainEl.appendChild(el("div", { style: "font-size:12px;color:#64748b;padding:8px;" }, "Configure and generate from right panel."));
+        // Distinguish corruption (status claims "ready" or "error",
+        // but ds.data is missing) from the legitimate untouched
+        // state (fresh card never generated). Pre-fix, every
+        // !ds.data case fell through to the generic "Configure and
+        // generate" prompt — a card with status="ready" but no
+        // data silently rendered as if untouched, hiding the
+        // state-vs-reality drift. Same UX-deception class the
+        // weight-side audit (PRs #98 Bugs C/F, #101 Bugs O/P) has
+        // been chasing on trainer cards.
+        if (ds.status === "ready") {
+          mainEl.appendChild(el("div", { style: "font-size:12px;color:#f43f5e;padding:8px;" },
+            "Dataset claims status=\"ready\" but has no data. Likely a stale state from a failed auto-build or a corrupted import. Re-generate from the right panel, or check the source descriptor."));
+        } else if (ds.status === "error") {
+          mainEl.appendChild(el("div", { style: "font-size:12px;color:#f43f5e;padding:8px;" },
+            "Dataset build failed: " + escapeHtml(String(ds.error || "no details"))));
+        } else {
+          mainEl.appendChild(el("div", { style: "font-size:12px;color:#64748b;padding:8px;" }, "Configure and generate from right panel."));
+        }
         return;
       }
 
