@@ -145,25 +145,34 @@ ok(
 )
 
 # ----------------------------------------------------------------
-# Case 3: no match — saved checkpoint has specs with names that
-# don't canonicalize to anything in the model. Should return False
-# (NOT raise) so the caller can fall through to positional load.
-# ----------------------------------------------------------------
-torch.manual_seed(0)
-ref3 = TwoLayerDense().eval()
-specs_nomatch, values_nomatch = extract_pytorch_state(ref3.state_dict())
-# Rewrite all spec names to garbage so canonicalize returns
-# something that doesn't match any model weight.
+# Case 3: no name match — saved checkpoint carries the TRAINED
+# weights but with spec names that don't canonicalize to anything
+# in the model. _load_named_checkpoint should return False (matched
+# == 0, NOT raise) so load_weights_into_model falls through to the
+# positional path, which loads by offset rather than name.
+#
+# The first revision of this test built the artifact from a FRESH
+# ref3 (untrained, only seeded), then compared predictions against
+# y_ref from the trained Case 1 model — that's a logic bug: the
+# positional load was correctly copying ref3's random weights into
+# fresh_nomatch, but those weights didn't match the trained ref. CI
+# reproduced this with max diff ~3.185e-01. Reuse the Case 1
+# trained values + rewrite their names to garbage so the round-trip
+# compares the trained model to the loaded-from-positional model.
+import copy
+specs_nomatch = copy.deepcopy(specs)
 for sp in specs_nomatch:
     sp["name"] = "totally_unrelated_" + sp["name"]
 artifacts_nomatch = normalize_artifacts(
-    specs_nomatch, values_nomatch, producer_runtime="test-nomatch", include_weight_data=True
+    specs_nomatch, values, producer_runtime="test-nomatch", include_weight_data=True
 )
 
 torch.manual_seed(99)
 fresh_nomatch = TwoLayerDense().eval()
 # Positional path WILL succeed (it doesn't use names — just slices
-# by offset). So this round-trip should match.
+# by offset). With the trained values + garbage names, named-match
+# returns 0 specs hit, positional fills all weights from the same
+# byte buffer Case 1 used. Round-trip should match y_ref bit-exactly.
 ok_nomatch = load_weights_into_model(fresh_nomatch, artifacts_nomatch)
 ok(
     ok_nomatch is True,
