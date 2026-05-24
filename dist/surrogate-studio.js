@@ -1,5 +1,5 @@
 // Surrogate Studio - concatenated bundle
-// Generated: 2026-05-24T11:24:41Z
+// Generated: 2026-05-24T16:54:07Z
 // Source files: 58
 
 
@@ -30883,7 +30883,21 @@
     function _renderTestSubTabClient(mainEl, t, activeId, Plotly, _darkLayout, pc, schemaId, allowedOutputKeys, defaultTarget, isClassification, defaultHeadType) {
       var tf = getTf();
       // --- load dataset + model for TF.js inference ---
-      if (!tf || !t.modelArtifacts || !t.datasetId || !modelBuilder) {
+      // PR #101 reviewer caught a bypass: the previous condition
+      // bundled `!t.modelArtifacts` into the generic fallback path
+      // alongside legitimate environment issues (TF.js not loaded,
+      // dataset not selected, modelBuilder not ready). That early-
+      // return prevented the strict "Cannot run Test" guard at the
+      // bottom of this function from ever firing for null/empty
+      // artifacts — the user saw training curves only and could
+      // misread it as "no test data" rather than "model has no
+      // usable weights" (the exact upstream silent-failure mode the
+      // audit has been hunting). Split the condition: the genuine
+      // environment issues still fall back gracefully; the
+      // no-artifacts case continues to the strict guard inside the
+      // setTimeout async body where it throws and renders an
+      // explicit "Inference error: Cannot run Test: ..." message.
+      if (!tf || !t.datasetId || !modelBuilder) {
         _renderFallbackCurves(mainEl, activeId, Plotly, _darkLayout);
         return;
       }

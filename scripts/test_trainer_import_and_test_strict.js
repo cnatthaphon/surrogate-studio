@@ -152,6 +152,117 @@ function applyImport(data, t) {
 // ===========================================================
 // Bug P — Test phase hasWeights gate
 // ===========================================================
+// PR #101 reviewer follow-up: the original Bug P fix added a strict
+// guard INSIDE the setTimeout body, but missed the earlier
+// _renderTestSubTabClient short-circuit at line ~805 that bundled
+// `!t.modelArtifacts` with legitimate environment fallbacks (no
+// TF.js, no dataset, no modelBuilder). The strict guard was
+// unreachable for the null-artifacts case — silent fallback to
+// training curves instead of a "Cannot run Test" error. Fix:
+// removed `!t.modelArtifacts` from the early-return condition.
+
+// Source-level: the early-return condition in
+// _renderTestSubTabClient must NOT include `!t.modelArtifacts`.
+var clientFnIdx = src.indexOf("function _renderTestSubTabClient(mainEl, t, activeId");
+ok(clientFnIdx > 0, "located _renderTestSubTabClient");
+var clientFnBody = src.slice(clientFnIdx, clientFnIdx + 2500);
+// The bypass pattern that PR #101 introduced and the reviewer
+// caught: the four-clause early-return that included !t.modelArtifacts.
+ok(!/if \(!tf \|\| !t\.modelArtifacts \|\| !t\.datasetId \|\| !modelBuilder\)/.test(clientFnBody),
+  "Bug P regression guard: early-return condition does NOT include `!t.modelArtifacts` (was: silent fallback bypassed strict guard)");
+// The fixed condition: three clauses — tf, datasetId, modelBuilder —
+// all genuine environment issues. modelArtifacts handled downstream.
+ok(/if \(!tf \|\| !t\.datasetId \|\| !modelBuilder\) \{[\s\S]{0,200}?_renderFallbackCurves/.test(clientFnBody),
+  "Bug P fix: early-return only on genuine environment issues (tf/datasetId/modelBuilder)");
+
+// Behavioral: assert the real caller-path ordering. Simulate
+// _renderTestSubTabClient's body decision tree with mocks that
+// reproduce the four bypass conditions individually. Null
+// artifacts must reach the strict guard; everything else must
+// fall back.
+function simulateRenderTestSubTabClient(deps) {
+  // Inline the new control flow.
+  var tf = deps.tf;
+  var t = deps.t;
+  var modelBuilder = deps.modelBuilder;
+  if (!tf || !t.datasetId || !modelBuilder) {
+    return "fallback"; // _renderFallbackCurves
+  }
+  // Past the early-return — execution reaches the setTimeout body
+  // where the strict hasWeights guard runs.
+  var hasWeights = t.modelArtifacts && Array.isArray(t.modelArtifacts.weightSpecs) &&
+    t.modelArtifacts.weightSpecs.length > 0 &&
+    ((Array.isArray(t.modelArtifacts.weightValues) && t.modelArtifacts.weightValues.length > 0) ||
+     (t.modelArtifacts.weightData && (t.modelArtifacts.weightData.byteLength > 0 ||
+      (Array.isArray(t.modelArtifacts.weightData) && t.modelArtifacts.weightData.length > 0))));
+  if (!hasWeights) {
+    throw new Error("Cannot run Test: trainer card has no usable weight artifacts");
+  }
+  return "ran-test";
+}
+
+// Null artifacts → strict guard throws, NOT silent fallback.
+(function () {
+  var threw = null;
+  try {
+    simulateRenderTestSubTabClient({
+      tf: {}, modelBuilder: {},
+      t: { datasetId: "d1", modelArtifacts: null },
+    });
+  } catch (e) { threw = e; }
+  ok(threw != null,
+    "Bug P real-path: null modelArtifacts THROWS in the strict guard (was: silent fallback to training curves)");
+  ok(threw && /Cannot run Test/.test(String(threw.message || "")),
+    "Bug P real-path: thrown error names 'Cannot run Test'");
+})();
+
+// Empty artifacts → strict guard throws.
+(function () {
+  var threw = null;
+  try {
+    simulateRenderTestSubTabClient({
+      tf: {}, modelBuilder: {},
+      t: { datasetId: "d1", modelArtifacts: { weightSpecs: [], weightValues: [] } },
+    });
+  } catch (e) { threw = e; }
+  ok(threw != null,
+    "Bug P real-path: empty modelArtifacts THROWS (does not bypass guard via early-return)");
+})();
+
+// Negative: missing TF.js → legitimate fallback, no throw.
+(function () {
+  var threw = null;
+  var result = null;
+  try {
+    result = simulateRenderTestSubTabClient({
+      tf: null, modelBuilder: {},
+      t: { datasetId: "d1", modelArtifacts: { weightSpecs: [{ name: "w" }], weightValues: [0.1] } },
+    });
+  } catch (e) { threw = e; }
+  ok(threw == null && result === "fallback",
+    "Bug P real-path negative: !tf falls back gracefully (genuine environment issue, NOT model error)");
+})();
+
+// Negative: missing datasetId → legitimate fallback.
+(function () {
+  var result = simulateRenderTestSubTabClient({
+    tf: {}, modelBuilder: {},
+    t: { datasetId: "", modelArtifacts: { weightSpecs: [{ name: "w" }], weightValues: [0.1] } },
+  });
+  ok(result === "fallback",
+    "Bug P real-path negative: missing datasetId falls back gracefully");
+})();
+
+// Negative: valid setup → reaches inference path.
+(function () {
+  var result = simulateRenderTestSubTabClient({
+    tf: {}, modelBuilder: {},
+    t: { datasetId: "d1", modelArtifacts: { weightSpecs: [{ name: "w" }], weightValues: [0.1] } },
+  });
+  ok(result === "ran-test",
+    "Bug P real-path negative: valid setup reaches inference (no false-positive throws)");
+})();
+
 var hwIdx = src.indexOf("Cannot run Test: trainer card has no usable weight artifacts");
 ok(hwIdx > 0, "Test phase throws 'Cannot run Test' on missing artifacts (was: silent skip + random-init inference)");
 
