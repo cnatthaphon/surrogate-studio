@@ -2473,6 +2473,30 @@
           _stopRequestedTrainingId = "";
           _stopRequestedRunId = 0;
           _activeTrainingId = "";
+          // Defense-in-depth: PR #99's server_runtime_adapter fix
+          // (Bug J: hasArtifacts:false) covered the SSE layer, but
+          // a malformed /api/train/:id/result that returned without
+          // modelArtifacts still resolved successfully. The
+          // adapter's _fetchServerResult contract now rejects that
+          // case too, so this branch should be unreachable on the
+          // normal path; this guard is here so a future adapter
+          // regression doesn't relapse into silent fake-success.
+          if (!result || !result.modelArtifacts) {
+            tCard.status = "error";
+            tCard.error = "Server training completed but produced no weight artifacts — trained model lost";
+            _setRuntimeDiagnostics(tCard, {
+              executionMode: "server",
+              source: "server",
+              status: "error",
+              note: "Server training completed but /result returned no modelArtifacts.",
+            });
+            if (store) store.upsertTrainerCard(tCard);
+            onStatus("Server training FAILED: no weight artifacts returned \u2014 trained model lost");
+            if (_isTrainerTrainViewVisible(activeId) || (stateApi && stateApi.getActiveTrainer() === activeId)) { _renderLeftPanel(); _renderMainPanel(); _renderRightPanel(); }
+            _activeModel = null;
+            buildResult.model.dispose();
+            return;
+          }
           tCard.status = wasStopRequested ? "stopped" : "done";
           tCard.metrics = result;
           if (!tCard.metrics.paramCount) tCard.metrics.paramCount = buildResult.model.countParams();
@@ -2691,6 +2715,32 @@
             _isTraining = false;
             _activeTrainingCancel = null;
             _activeTrainingId = "";
+            // Defense-in-depth: even with the bridge-level validation
+            // (PR #99 Bug H), treat a result with no modelArtifacts
+            // as a training failure rather than silently marking the
+            // card "done" with empty artifacts. Pre-fix this branch
+            // set tCard.status="done" unconditionally and the
+            // artifact assignment was guarded by `if (result.modelArtifacts)`
+            // — a null result produced a green check toast on a card
+            // with no usable weights. With the worker strict-throw
+            // and bridge guard upstream, this should be unreachable
+            // on the normal path; this is here so a future regression
+            // in either upstream layer doesn't relapse silently.
+            if (!result || !result.modelArtifacts) {
+              tCard.status = "error";
+              tCard.error = "Worker training completed but produced no weight artifacts — trained model lost";
+              _setRuntimeDiagnostics(tCard, {
+                executionMode: "worker",
+                source: "browser",
+                status: "error",
+                note: "Worker training completed but no modelArtifacts in result.",
+              });
+              if (store) store.upsertTrainerCard(tCard);
+              onStatus("Worker training FAILED: no weight artifacts returned — trained model lost");
+              if (_isTrainerTrainViewVisible(activeId) || (stateApi && stateApi.getActiveTrainer() === activeId)) { _renderLeftPanel(); _renderMainPanel(); _renderRightPanel(); }
+              buildResult.model.dispose();
+              return;
+            }
             tCard.status = "done";
             tCard.metrics = result;
             tCard.backend = result.resolvedBackend || String(config.runtimeBackend || "auto");
@@ -2702,16 +2752,14 @@
               note: "Worker training completed.",
             });
             // convert worker's ArrayBuffer to JSON-safe array before store.upsert
-            if (result.modelArtifacts) {
-              var wa = _normalizeCheckpointArtifacts(result.modelArtifacts, "js_client");
-              if (wa.weightData && wa.weightData.byteLength) {
-                wa.weightValues = Array.from(new Float32Array(wa.weightData));
-                delete wa.weightData;
-              }
-              tCard.modelArtifacts = wa;
-              tCard.modelArtifactsLast = wa;
-              tCard.modelArtifactsBest = wa;
+            var wa = _normalizeCheckpointArtifacts(result.modelArtifacts, "js_client");
+            if (wa.weightData && wa.weightData.byteLength) {
+              wa.weightValues = Array.from(new Float32Array(wa.weightData));
+              delete wa.weightData;
             }
+            tCard.modelArtifacts = wa;
+            tCard.modelArtifactsLast = wa;
+            tCard.modelArtifactsBest = wa;
             tCard.trainedOnServer = false;
             if (store) store.upsertTrainerCard(tCard);
             onStatus("\u2713 Done (Worker): MAE=" + (result.mae != null ? Number(result.mae).toExponential(3) : "—"));

@@ -1,5 +1,5 @@
 // Surrogate Studio - concatenated bundle
-// Generated: 2026-05-23T19:59:44Z
+// Generated: 2026-05-24T09:30:25Z
 // Source files: 58
 
 
@@ -17380,7 +17380,19 @@
           return;
         }
         if (kind === "complete") {
-          done(msg.result || {});
+          // Defense-in-depth at the bridge boundary: the worker
+          // contract is "complete → result includes modelArtifacts".
+          // Even with the worker-side strict-throw fix (PR #99 for
+          // Bug G), a future regression that lets an empty/null
+          // result through must NOT silently resolve as success.
+          // Previous `done(msg.result || {})` accepted anything,
+          // including {kind:"complete"} with no result field at all.
+          var result = msg && msg.result;
+          if (!result || !result.modelArtifacts) {
+            fail(new Error("Worker reported complete but no modelArtifacts in result — likely a weight extraction failure that didn't propagate as kind:'error'"));
+            return;
+          }
+          done(result);
           return;
         }
       };
@@ -27886,7 +27898,32 @@
       return fetch(serverUrl + "/api/train/" + jobId + "/result").then(function (r) {
         if (!r.ok) throw new Error("Failed to fetch weights: " + r.status);
         return r.json();
-      }).then(_normalizeServerResult);
+      }).then(_normalizeServerResult).then(function (out) {
+        // Strict contract on the /result endpoint: when the SSE
+        // signaled hasArtifacts:true, the followup fetch MUST
+        // deliver usable modelArtifacts. Pre-fix this returned
+        // successfully on any 200, including malformed payloads
+        // with no modelArtifacts or empty weight buffers — the
+        // trainer's .then handler then marked the card "done"
+        // with no usable weights (reviewer reproduced this with
+        // mocked fetch). Same silent fake-success class as PR
+        // #99's other layers; PR #99's hasArtifacts:false reject
+        // only covered the FIRST layer of this chain.
+        if (!out || !out.modelArtifacts) {
+          throw new Error("Server /result returned no modelArtifacts after SSE hasArtifacts:true — server response is malformed, trained model not retrievable");
+        }
+        var ma = out.modelArtifacts;
+        var hasValues = (Array.isArray(ma.weightValues) && ma.weightValues.length > 0) ||
+          (ma.weightData && (ma.weightData.byteLength > 0 || (Array.isArray(ma.weightData) && ma.weightData.length > 0)));
+        var hasSpecs = Array.isArray(ma.weightSpecs) && ma.weightSpecs.length > 0;
+        if (!hasValues || !hasSpecs) {
+          throw new Error("Server /result modelArtifacts is empty (weightSpecs.length=" +
+            (ma.weightSpecs ? ma.weightSpecs.length : 0) +
+            ", hasValues=" + hasValues +
+            ") — trained model not retrievable");
+        }
+        return out;
+      });
     }
     function _recoverStoppedResult(reject, resolve) {
       var tries = 0;
@@ -27951,7 +27988,19 @@
               if (typeof spec.onStatus === "function") spec.onStatus("Training done — downloading weights...");
               _fetchServerResult().then(resolve).catch(function (e) { reject(new Error("Weight download failed: " + e.message)); });
             } else {
-              resolve(_normalizeServerResult(lightResult));
+              // Defense-in-depth: the server contract is "complete →
+              // hasArtifacts:true" (train_subprocess.py always
+              // includes modelArtifacts in its complete payload via
+              // normalize_artifacts). hasArtifacts:false on the wire
+              // means the subprocess emitted complete without
+              // saving weights — a contract violation, not a
+              // legitimate state. Previously this silently resolved
+              // with a light result (no weights) and the trainer
+              // marked the card status="done" with no artifacts to
+              // load. Reject so the trainer's .catch routes it
+              // through the error branch and the user sees the
+              // failure.
+              reject(new Error("Server reported complete but hasArtifacts=false — subprocess violated the complete-with-modelArtifacts contract, trained model not retrievable"));
             }
           } catch (e) {
             reject(new Error("Failed to parse server result: " + e.message));
@@ -32505,6 +32554,30 @@
           _stopRequestedTrainingId = "";
           _stopRequestedRunId = 0;
           _activeTrainingId = "";
+          // Defense-in-depth: PR #99's server_runtime_adapter fix
+          // (Bug J: hasArtifacts:false) covered the SSE layer, but
+          // a malformed /api/train/:id/result that returned without
+          // modelArtifacts still resolved successfully. The
+          // adapter's _fetchServerResult contract now rejects that
+          // case too, so this branch should be unreachable on the
+          // normal path; this guard is here so a future adapter
+          // regression doesn't relapse into silent fake-success.
+          if (!result || !result.modelArtifacts) {
+            tCard.status = "error";
+            tCard.error = "Server training completed but produced no weight artifacts — trained model lost";
+            _setRuntimeDiagnostics(tCard, {
+              executionMode: "server",
+              source: "server",
+              status: "error",
+              note: "Server training completed but /result returned no modelArtifacts.",
+            });
+            if (store) store.upsertTrainerCard(tCard);
+            onStatus("Server training FAILED: no weight artifacts returned \u2014 trained model lost");
+            if (_isTrainerTrainViewVisible(activeId) || (stateApi && stateApi.getActiveTrainer() === activeId)) { _renderLeftPanel(); _renderMainPanel(); _renderRightPanel(); }
+            _activeModel = null;
+            buildResult.model.dispose();
+            return;
+          }
           tCard.status = wasStopRequested ? "stopped" : "done";
           tCard.metrics = result;
           if (!tCard.metrics.paramCount) tCard.metrics.paramCount = buildResult.model.countParams();
@@ -32723,6 +32796,32 @@
             _isTraining = false;
             _activeTrainingCancel = null;
             _activeTrainingId = "";
+            // Defense-in-depth: even with the bridge-level validation
+            // (PR #99 Bug H), treat a result with no modelArtifacts
+            // as a training failure rather than silently marking the
+            // card "done" with empty artifacts. Pre-fix this branch
+            // set tCard.status="done" unconditionally and the
+            // artifact assignment was guarded by `if (result.modelArtifacts)`
+            // — a null result produced a green check toast on a card
+            // with no usable weights. With the worker strict-throw
+            // and bridge guard upstream, this should be unreachable
+            // on the normal path; this is here so a future regression
+            // in either upstream layer doesn't relapse silently.
+            if (!result || !result.modelArtifacts) {
+              tCard.status = "error";
+              tCard.error = "Worker training completed but produced no weight artifacts — trained model lost";
+              _setRuntimeDiagnostics(tCard, {
+                executionMode: "worker",
+                source: "browser",
+                status: "error",
+                note: "Worker training completed but no modelArtifacts in result.",
+              });
+              if (store) store.upsertTrainerCard(tCard);
+              onStatus("Worker training FAILED: no weight artifacts returned — trained model lost");
+              if (_isTrainerTrainViewVisible(activeId) || (stateApi && stateApi.getActiveTrainer() === activeId)) { _renderLeftPanel(); _renderMainPanel(); _renderRightPanel(); }
+              buildResult.model.dispose();
+              return;
+            }
             tCard.status = "done";
             tCard.metrics = result;
             tCard.backend = result.resolvedBackend || String(config.runtimeBackend || "auto");
@@ -32734,16 +32833,14 @@
               note: "Worker training completed.",
             });
             // convert worker's ArrayBuffer to JSON-safe array before store.upsert
-            if (result.modelArtifacts) {
-              var wa = _normalizeCheckpointArtifacts(result.modelArtifacts, "js_client");
-              if (wa.weightData && wa.weightData.byteLength) {
-                wa.weightValues = Array.from(new Float32Array(wa.weightData));
-                delete wa.weightData;
-              }
-              tCard.modelArtifacts = wa;
-              tCard.modelArtifactsLast = wa;
-              tCard.modelArtifactsBest = wa;
+            var wa = _normalizeCheckpointArtifacts(result.modelArtifacts, "js_client");
+            if (wa.weightData && wa.weightData.byteLength) {
+              wa.weightValues = Array.from(new Float32Array(wa.weightData));
+              delete wa.weightData;
             }
+            tCard.modelArtifacts = wa;
+            tCard.modelArtifactsLast = wa;
+            tCard.modelArtifactsBest = wa;
             tCard.trainedOnServer = false;
             if (store) store.upsertTrainerCard(tCard);
             onStatus("\u2713 Done (Worker): MAE=" + (result.mae != null ? Number(result.mae).toExponential(3) : "—"));

@@ -259,7 +259,32 @@
       return fetch(serverUrl + "/api/train/" + jobId + "/result").then(function (r) {
         if (!r.ok) throw new Error("Failed to fetch weights: " + r.status);
         return r.json();
-      }).then(_normalizeServerResult);
+      }).then(_normalizeServerResult).then(function (out) {
+        // Strict contract on the /result endpoint: when the SSE
+        // signaled hasArtifacts:true, the followup fetch MUST
+        // deliver usable modelArtifacts. Pre-fix this returned
+        // successfully on any 200, including malformed payloads
+        // with no modelArtifacts or empty weight buffers — the
+        // trainer's .then handler then marked the card "done"
+        // with no usable weights (reviewer reproduced this with
+        // mocked fetch). Same silent fake-success class as PR
+        // #99's other layers; PR #99's hasArtifacts:false reject
+        // only covered the FIRST layer of this chain.
+        if (!out || !out.modelArtifacts) {
+          throw new Error("Server /result returned no modelArtifacts after SSE hasArtifacts:true — server response is malformed, trained model not retrievable");
+        }
+        var ma = out.modelArtifacts;
+        var hasValues = (Array.isArray(ma.weightValues) && ma.weightValues.length > 0) ||
+          (ma.weightData && (ma.weightData.byteLength > 0 || (Array.isArray(ma.weightData) && ma.weightData.length > 0)));
+        var hasSpecs = Array.isArray(ma.weightSpecs) && ma.weightSpecs.length > 0;
+        if (!hasValues || !hasSpecs) {
+          throw new Error("Server /result modelArtifacts is empty (weightSpecs.length=" +
+            (ma.weightSpecs ? ma.weightSpecs.length : 0) +
+            ", hasValues=" + hasValues +
+            ") — trained model not retrievable");
+        }
+        return out;
+      });
     }
     function _recoverStoppedResult(reject, resolve) {
       var tries = 0;
@@ -324,7 +349,19 @@
               if (typeof spec.onStatus === "function") spec.onStatus("Training done — downloading weights...");
               _fetchServerResult().then(resolve).catch(function (e) { reject(new Error("Weight download failed: " + e.message)); });
             } else {
-              resolve(_normalizeServerResult(lightResult));
+              // Defense-in-depth: the server contract is "complete →
+              // hasArtifacts:true" (train_subprocess.py always
+              // includes modelArtifacts in its complete payload via
+              // normalize_artifacts). hasArtifacts:false on the wire
+              // means the subprocess emitted complete without
+              // saving weights — a contract violation, not a
+              // legitimate state. Previously this silently resolved
+              // with a light result (no weights) and the trainer
+              // marked the card status="done" with no artifacts to
+              // load. Reject so the trainer's .catch routes it
+              // through the error branch and the user sees the
+              // failure.
+              reject(new Error("Server reported complete but hasArtifacts=false — subprocess violated the complete-with-modelArtifacts contract, trained model not retrievable"));
             }
           } catch (e) {
             reject(new Error("Failed to parse server result: " + e.message));
