@@ -1,5 +1,5 @@
 // Surrogate Studio - concatenated bundle
-// Generated: 2026-05-25T09:53:21Z
+// Generated: 2026-05-25T10:28:41Z
 // Source files: 58
 
 
@@ -7839,8 +7839,20 @@
     var testFrac = Math.max(0.01, 1 - trainFrac - valFrac);
     var forceEqualClass = !!config.forceEqualClass;
 
+    // Forward the explicit synthetic-fallback opt-in from the caller
+    // through to the source loader. Reviewer caught this missing on
+    // the second PR #103 revision: even when a caller passed
+    // `mod.build({allowSyntheticFallback:true})` for legitimate Node/
+    // offline use, the module still called loadSource() WITHOUT the
+    // flag and the loader threw in offline mode. The flag must
+    // propagate so the strict default ("real CIFAR only, else throw")
+    // can be explicitly overridden where intended.
     var sourcePromise = loader
-      ? loader.loadSource({ totalExamples: Math.max(totalCount, 10000), seed: seed })
+      ? loader.loadSource({
+          totalExamples: Math.max(totalCount, 10000),
+          seed: seed,
+          allowSyntheticFallback: !!config.allowSyntheticFallback,
+        })
       : Promise.resolve(_fallbackSource(totalCount, seed));
 
     return sourcePromise.then(function (source) {

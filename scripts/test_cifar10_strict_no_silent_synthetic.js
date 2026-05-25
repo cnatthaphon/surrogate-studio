@@ -173,11 +173,85 @@ if (fallbackBranchMatch) {
         });
     })
     .then(function () {
+      // ===========================================================
+      // Case 6: module-level — cifar10_module.buildCifar10Dataset
+      // must FORWARD config.allowSyntheticFallback to the underlying
+      // loadSource. Reviewer caught this missing on the second PR
+      // #103 revision: even when a caller passed
+      // `mod.build({allowSyntheticFallback:true})`, the module
+      // called loadSource() WITHOUT the flag and the loader threw in
+      // offline mode.
+      // ===========================================================
+      var moduleSrc = fs.readFileSync(
+        path.join(__dirname, "..", "src/dataset_modules/cifar10_module.js"), "utf8"
+      );
+      ok(/allowSyntheticFallback: !!config\.allowSyntheticFallback/.test(moduleSrc),
+        "Case 6 source: cifar10_module forwards config.allowSyntheticFallback to loadSource");
+      ok(/loader\.loadSource\(\{[\s\S]{0,400}?allowSyntheticFallback:/.test(moduleSrc),
+        "Case 6 source: the forwarded flag appears INSIDE the loader.loadSource(...) call (not as a separate option)");
+
+      // Behavioral: register the loader globally so cifar10_module
+      // picks it up via getLoader(), then drive mod.build with both
+      // opt-in and plain config.
+      // The previous Case 5 require already left the loader on
+      // global.OSCCifar10SourceLoader (UMD branch).
+      delete require.cache[require.resolve("../src/dataset_modules/cifar10_module.js")];
+      // Ensure the loader is on global (the UMD wrapper sets it,
+      // but require returns the factory result directly via
+      // module.exports — manually attach as the module does).
+      if (!global.OSCCifar10SourceLoader) {
+        global.OSCCifar10SourceLoader = require("../src/dataset_modules/cifar10_source_loader.js");
+      }
+      // cifar10_module needs createRng / clampInt etc. — set up
+      // minimal shims if missing. The module reads from root.
+      var cifarMod = require("../src/dataset_modules/cifar10_module.js");
+      ok(cifarMod && typeof cifarMod.build === "function",
+        "Case 6 setup: loaded cifar10_module.build");
+
+      // Case 6a: mod.build({allowSyntheticFallback:true}) MUST
+      // succeed in Node/offline (forward works) and return synthetic.
+      return cifarMod.build({
+        allowSyntheticFallback: true,
+        totalCount: 100,
+        seed: 42,
+        trainFrac: 0.7,
+        valFrac: 0.15,
+      }).then(function (result) {
+        ok(result != null,
+          "Case 6a: mod.build({allowSyntheticFallback:true}) resolves in offline (forward works)");
+        // The result is the built dataset; the source field on the
+        // INNER source may have been mapped. Check that build
+        // completed without throwing.
+      }).catch(function (e) {
+        ok(false,
+          "Case 6a [REGRESSION]: mod.build({allowSyntheticFallback:true}) threw in offline (forward broken): " + e.message);
+      });
+    })
+    .then(function () {
+      // Case 6b: mod.build() WITHOUT the flag MUST throw in offline.
+      // The flag default is `!!config.allowSyntheticFallback` → false
+      // when omitted, so the loader's strict path fires.
+      var cifarMod = require("../src/dataset_modules/cifar10_module.js");
+      return cifarMod.build({
+        totalCount: 100,
+        seed: 42,
+        trainFrac: 0.7,
+        valFrac: 0.15,
+      }).then(function (result) {
+        ok(false,
+          "Case 6b [REGRESSION]: mod.build() without opt-in resolved in offline (got result.kind='" +
+          (result && result.kind) + "'). Should have thrown.");
+      }).catch(function (err) {
+        ok(/CIFAR-10 source unreachable/.test(String(err.message || "")),
+          "Case 6b: mod.build() WITHOUT opt-in throws in offline (strict default preserved)");
+      });
+    })
+    .then(function () {
       console.log("\n  " + passed + " passed, " + failed + " failed");
       if (failed) process.exit(1);
     })
     .catch(function (e) {
-      console.log("  ✗ Case 5 setup error: " + e.message);
+      console.log("  ✗ Case 5/6 setup error: " + e.message);
       process.exit(1);
     });
 })();
