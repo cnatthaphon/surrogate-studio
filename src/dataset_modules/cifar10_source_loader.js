@@ -200,7 +200,18 @@
       };
     }
 
-    // Try GCS (full 60k, reliable CORS) → GitHub batch (10k) → synthetic
+    // Try GCS (full 60k, reliable CORS) → GitHub batch (10k) →
+    // synthetic IF EXPLICITLY OPTED IN. The previous behavior
+    // silently substituted synthetic geometric patterns when both
+    // real sources failed (e.g., offline, CORS issues, both
+    // services down). The user clicked "Generate CIFAR-10 dataset"
+    // and got 32x32 random-color-bar patterns labeled like CIFAR-10
+    // classes — training proceeded, validation accuracy looked
+    // reasonable, but the model never saw a real CIFAR-10 image.
+    // Same wrong-data-as-real silent-fallback class the audit has
+    // been hunting on the weight side. Tests that genuinely want
+    // synthetic data must pass opts.allowSyntheticFallback = true
+    // (or call buildSyntheticSource directly — exported below).
     return loadFromGCS().then(function (batch) {
       console.log("[CIFAR-10] Loaded " + batch.count + " images from GCS");
       var source = makeSource(batch);
@@ -216,10 +227,21 @@
         return source;
       });
     }).catch(function (err) {
-      console.warn("[CIFAR-10] All sources failed (" + (err && err.message || "") + "). Using synthetic patterns.");
-      var source = buildSyntheticSource(opts);
-      CACHE = source;
-      return source;
+      if (opts.allowSyntheticFallback) {
+        console.warn("[CIFAR-10] All real sources failed (" + (err && err.message || "") +
+          "), falling back to synthetic patterns per opts.allowSyntheticFallback.");
+        var source = buildSyntheticSource(opts);
+        CACHE = source;
+        return source;
+      }
+      throw new Error(
+        "CIFAR-10 source unreachable: both GCS and GitHub failed (" +
+        (err && err.message || "unknown") +
+        "). Refusing to silently substitute synthetic geometric patterns — " +
+        "training on synthetic would produce metrics that look real but reflect " +
+        "no actual CIFAR-10 learning. Check your network connection or pass " +
+        "opts.allowSyntheticFallback=true for explicit synthetic use (Node tests, offline development)."
+      );
     });
   }
 
