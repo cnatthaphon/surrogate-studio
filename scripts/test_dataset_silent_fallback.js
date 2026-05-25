@@ -1,0 +1,255 @@
+"use strict";
+// Regression test for two dataset-side silent-fallback bugs in the
+// same audit class as PRs #94-#101 — both let a dataset card reach a
+// state-vs-reality mismatch where the UI hides a real build failure.
+//
+// Bug R — src/tabs/dataset_tab.js (~line 206): the `if (!ds.data)`
+//   branch rendered "Configure and generate from right panel"
+//   unconditionally. A dataset with status="ready" or status="error"
+//   but missing ds.data fell through to this prompt and rendered as
+//   if untouched — same UX-deception class as PR #101 Bug O
+//   (imported trainer with status="done" but no artifacts).
+//
+// Bug T — src/pretrained_loader.js (~line 170): three silent-
+//   fallback paths around mod.build(cfg):
+//     1. sync throw → console.warn + return, dataset unchanged
+//     2. async resolve(null) → silent return, dataset unchanged
+//     3. async reject → console.warn catch, dataset unchanged
+//   In all three cases, the user saw the card in its pre-build state
+//   with no indication that the auto-build had failed.
+
+var path = require("path");
+var fs = require("fs");
+
+var passed = 0, failed = 0;
+function ok(cond, label) {
+  if (cond) { passed += 1; console.log("  ✓ " + label); }
+  else { failed += 1; console.log("  ✗ " + label); }
+}
+
+// ===========================================================
+// Bug R — src/tabs/dataset_tab.js (state-vs-reality branch)
+// ===========================================================
+var dtSrc = fs.readFileSync(
+  path.join(__dirname, "..", "src/tabs/dataset_tab.js"), "utf8"
+);
+
+// Locate the readiness branch (PR #102 revision uses
+// _hasUsableData; first revision used `if (!ds.data)` directly).
+var noDataStart = dtSrc.indexOf("if (!_hasUsableData(ds))");
+ok(noDataStart > 0, "located the `if (!_hasUsableData(ds))` branch in dataset_tab.js (contract-driven readiness)");
+var noDataEnd = dtSrc.indexOf("return;\n      }", noDataStart);
+ok(noDataEnd > 0, "located the end of the readiness branch");
+var noDataBlock = dtSrc.slice(noDataStart, noDataEnd + 30);
+
+ok(/ds\.status === "ready"/.test(noDataBlock),
+  "Bug R: the readiness branch distinguishes status='ready' (corruption) from untouched");
+ok(/ds\.status === "error"/.test(noDataBlock),
+  "Bug R: the readiness branch also distinguishes status='error' (build failed)");
+// Source uses escaped quotes `status=\"ready\"` for the JS literal,
+// so the file content has a literal backslash before each quote.
+ok(/Dataset claims status=\\"ready\\" but no recognized data shape/.test(noDataBlock),
+  "Bug R: 'ready but no data' renders an explicit corruption message naming the recognized data shapes");
+ok(/Dataset build failed:/.test(noDataBlock),
+  "Bug R: 'error' status surfaces the ds.error message");
+ok(/Configure and generate from right panel/.test(noDataBlock),
+  "Bug R negative: the legitimate untouched case still shows 'Configure and generate' (no false-positives)");
+
+// PR #102 second revision: the readiness check must accept root-
+// level data shapes AND must NOT gate splitIndices+sourceId on
+// registration (the renderer needs to reach the source-loading
+// path at line ~309 to register the source on fresh page reload).
+ok(/var d = ds\.data \|\| ds;/.test(dtSrc),
+  "Bug R fix-up: render path uses `ds.data || ds` so root-level payloads work");
+// Defensive: there shouldn't be a bare `if (!ds.data)` early-return
+// remaining (regression guard against the too-narrow check).
+ok(!/if \(!ds\.data\) \{[\s\S]{0,400}?ds\.status === "ready"/.test(dtSrc),
+  "Bug R fix-up: the too-narrow `if (!ds.data)` check is gone");
+// Defensive: the readiness check must NOT delegate to
+// OSCDatasetSourceRegistry.hasDatasetData (which gates
+// splitIndices+sourceId on `has(d.sourceId)`). The renderer's
+// readiness needs the looser "declared shape" semantic.
+ok(!/_srcReg\.hasDatasetData\(/.test(dtSrc),
+  "Bug R fix-up: readiness check does NOT delegate to hasDatasetData (would gate on registration → bypass source-loading path)");
+
+// --- Behavioral: drive the dataset_tab._hasUsableData logic with
+// every recognized data shape. The second revision's critical
+// difference vs the registry's hasDatasetData: splitIndices +
+// sourceId is accepted even when the source is NOT registered yet
+// (so the source-loading path can fire on fresh page reload). All
+// recognized shapes must return true; only fully-empty returns false.
+function inlineHasUsableData(dsCard) {
+  var src = dsCard || {};
+  var d = src.data || src;
+  if (!d || typeof d !== "object") return false;
+  if (d.records && (
+    (d.records.train && (Array.isArray(d.records.train.x) ? d.records.train.x.length > 0 : !!d.records.train)) ||
+    (d.records.val && (Array.isArray(d.records.val.x) ? d.records.val.x.length > 0 : !!d.records.val)) ||
+    (d.records.test && (Array.isArray(d.records.test.x) ? d.records.test.x.length > 0 : !!d.records.test))
+  )) return true;
+  if (Array.isArray(d.xTrain) && d.xTrain.length > 0) return true;
+  if (d.sourceDescriptor) return true;
+  if (d.trajectories && d.trajectories.length) return true;
+  // No `has(sourceId)` gate — accept declared shape, let the
+  // renderer's source-loading path register the source.
+  if (d.splitIndices && d.sourceId) {
+    var si = d.splitIndices;
+    if ((Array.isArray(si.train) && si.train.length > 0) ||
+        (Array.isArray(si.val) && si.val.length > 0) ||
+        (Array.isArray(si.test) && si.test.length > 0)) return true;
+  }
+  return false;
+}
+
+// The reviewer's specific case: source-backed dataset with payload
+// at the ROOT (no ds.data wrapper). Must NOT be flagged as corrupt.
+ok(inlineHasUsableData({ status: "ready", sourceDescriptor: { type: "csv", url: "x.csv" } }) === true,
+  "Bug R fix-up [reviewer case]: root-level sourceDescriptor is ready (was: flagged as corruption)");
+ok(inlineHasUsableData({ status: "ready", data: { sourceDescriptor: { type: "csv" } } }) === true,
+  "Bug R fix-up: nested sourceDescriptor under ds.data still works (back-compat)");
+ok(inlineHasUsableData({ status: "ready", xTrain: [[1, 2], [3, 4]] }) === true,
+  "Bug R fix-up: root-level xTrain array is ready");
+ok(inlineHasUsableData({ status: "ready", records: { train: { x: [[1]] } } }) === true,
+  "Bug R fix-up: root-level records.train.x is ready");
+ok(inlineHasUsableData({ status: "ready", trajectories: [{ id: 1 }] }) === true,
+  "Bug R fix-up: root-level trajectories is ready");
+ok(inlineHasUsableData({ status: "ready", splitIndices: { train: [0, 1] }, sourceId: "src1" }) === true,
+  "Bug R fix-up: root-level splitIndices+sourceId is ready");
+
+// PR #102 third revision (reviewer follow-up): splitIndices +
+// sourceId must be accepted even when the source is NOT yet
+// registered. The registry's hasDatasetData would return false here
+// (because `has(d.sourceId)` fails), but the renderer needs to
+// accept this so the source-loading path at dataset_tab.js:~309
+// can fire and register the source. Verify by simulating:
+// inlineHasUsableData does NOT receive the registry, so by
+// construction it cannot check registration — but the EXPECTED
+// outcome is that even with `has(sourceId) === false` (which the
+// real registry call would have produced), the dataset_tab
+// readiness gate still passes.
+ok(inlineHasUsableData({ status: "ready", splitIndices: { train: [0] }, sourceId: "unregistered_source_xyz" }) === true,
+  "Bug R fix-up [reviewer case 2]: splitIndices+sourceId with UNREGISTERED source still passes readiness (lets the source-loading path register it on fresh reload)");
+ok(inlineHasUsableData({ status: "ready", data: { splitIndices: { val: [3, 4] }, sourceId: "unregistered_source_abc" } }) === true,
+  "Bug R fix-up: nested splitIndices+sourceId (unregistered) also passes readiness");
+
+// Negative: only flag as corrupt when truly no recognized shape.
+ok(inlineHasUsableData({ status: "ready" }) === false,
+  "Bug R fix-up negative: status='ready' with no payload at all is correctly flagged");
+ok(inlineHasUsableData({ status: "ready", data: {} }) === false,
+  "Bug R fix-up negative: empty ds.data with no fields is correctly flagged");
+ok(inlineHasUsableData({ status: "ready", xTrain: [] }) === false,
+  "Bug R fix-up negative: empty xTrain array is correctly flagged (length check)");
+ok(inlineHasUsableData({ status: "ready", splitIndices: { train: [] }, sourceId: "src1" }) === false,
+  "Bug R fix-up negative: splitIndices with empty arrays is correctly flagged");
+ok(inlineHasUsableData({ status: "ready", splitIndices: { train: [0] } }) === false,
+  "Bug R fix-up negative: splitIndices without sourceId is correctly flagged");
+
+// ===========================================================
+// Bug T — src/pretrained_loader.js (build-failure path)
+// ===========================================================
+var ploadSrc = fs.readFileSync(
+  path.join(__dirname, "..", "src/pretrained_loader.js"), "utf8"
+);
+
+ok(/_markDatasetBuildFailure/.test(ploadSrc),
+  "Bug T: helper _markDatasetBuildFailure exists to centralize the error-promotion");
+ok(/status: "error"[\s\S]{0,200}?error: "Dataset build failed:/.test(ploadSrc),
+  "Bug T: _markDatasetBuildFailure sets status='error' AND a descriptive ds.error");
+
+// Source-level: the three pre-fix patterns should be gone.
+ok(!/} catch \(e\) \{ console\.warn\("\[pretrained\] Dataset build failed:", ds\.id, e\.message\); return; \}/.test(ploadSrc),
+  "Bug T: sync-throw catch NO LONGER just console.warn + return");
+ok(!/if \(!result\) return;[\s\S]{0,200}?status: "ready"/.test(ploadSrc),
+  "Bug T: async null-result NO LONGER silently returns before status assignment");
+// Defensive: there shouldn't be a bare console.warn-only catch on the build promise.
+var promiseCatchPattern = /\.catch\(function \(e\) \{\s*\n\s*console\.warn\("\[pretrained\] Dataset build failed:", ds\.id, e\.message\);\s*\n\s*\}\)/;
+ok(!promiseCatchPattern.test(ploadSrc),
+  "Bug T: async-reject catch NO LONGER just console.warn (now calls _markDatasetBuildFailure)");
+
+// --- Behavioral: drive ensureDatasetsReady-style logic with three
+// failure modes; assert each leaves the dataset at status="error"
+// with a descriptive ds.error.
+
+function makeMockStore() {
+  var upserts = [];
+  return {
+    listDatasets: function () { return []; },
+    upsertDataset: function (d) { upserts.push(d); },
+    _upserts: upserts,
+  };
+}
+
+// Inline a minimal version of the markDatasetBuildFailure + build
+// flow so we can drive it without loading the whole module's
+// requireRegistry chain.
+function runWithBuilder(buildFn) {
+  var ds = { id: "demo_ds", schemaId: "x", status: "new" };
+  var store = makeMockStore();
+  function _markDatasetBuildFailure(reason) {
+    var failed = Object.assign({}, ds, {
+      status: "error",
+      error: "Dataset build failed: " + String(reason || "unknown"),
+    });
+    store.upsertDataset(failed);
+  }
+  var p;
+  try {
+    p = buildFn();
+  } catch (e) {
+    _markDatasetBuildFailure(e && e.message ? e.message : e);
+    return Promise.resolve(store);
+  }
+  if (!p || typeof p.then !== "function") p = Promise.resolve(p);
+  return p.then(function (result) {
+    if (!result) {
+      _markDatasetBuildFailure("module returned no result (null/undefined)");
+      return store;
+    }
+    var updated = Object.assign({}, ds, { data: result, status: "ready", generatedAt: 1 });
+    store.upsertDataset(updated);
+    return store;
+  }).catch(function (e) {
+    _markDatasetBuildFailure(e && e.message ? e.message : e);
+    return store;
+  });
+}
+
+// Failure mode 1: sync throw.
+runWithBuilder(function () { throw new Error("syntax error in dataset spec"); })
+  .then(function (s) {
+    ok(s._upserts.length === 1 && s._upserts[0].status === "error",
+      "Bug T behavioral [sync throw]: dataset upserted with status='error' (was: silent return, status unchanged)");
+    ok(/syntax error/.test(s._upserts[0].error || ""),
+      "Bug T behavioral [sync throw]: ds.error names the underlying message");
+  });
+
+// Failure mode 2: async resolve(null).
+runWithBuilder(function () { return Promise.resolve(null); })
+  .then(function (s) {
+    ok(s._upserts.length === 1 && s._upserts[0].status === "error",
+      "Bug T behavioral [null result]: dataset upserted with status='error' (was: silent return)");
+    ok(/module returned no result/i.test(s._upserts[0].error || ""),
+      "Bug T behavioral [null result]: ds.error names 'module returned no result'");
+  });
+
+// Failure mode 3: async reject.
+runWithBuilder(function () { return Promise.reject(new Error("HTTP 500 from source")); })
+  .then(function (s) {
+    ok(s._upserts.length === 1 && s._upserts[0].status === "error",
+      "Bug T behavioral [async reject]: dataset upserted with status='error' (was: console.warn only)");
+    ok(/HTTP 500/.test(s._upserts[0].error || ""),
+      "Bug T behavioral [async reject]: ds.error names the underlying rejection reason");
+  });
+
+// Negative: successful build still sets status="ready".
+runWithBuilder(function () { return Promise.resolve({ records: [{}], featureSize: 4 }); })
+  .then(function (s) {
+    ok(s._upserts.length === 1 && s._upserts[0].status === "ready",
+      "Bug T behavioral negative: successful build still produces status='ready'");
+    ok(s._upserts[0].data != null,
+      "Bug T behavioral negative: successful build attaches data");
+  })
+  .then(function () {
+    console.log("\n  " + passed + " passed, " + failed + " failed");
+    if (failed) process.exit(1);
+  });

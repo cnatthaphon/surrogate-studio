@@ -166,16 +166,49 @@
       }, d.config || ds.config || {}, d.splitConfig ? { splitConfig: d.splitConfig } : {});
       if (d.totalCount || d.sourceTotalExamples) cfg.totalCount = d.totalCount || d.sourceTotalExamples;
 
+      // Three silent-fallback failure modes existed pre-fix:
+      //   1. mod.build(cfg) threw synchronously → console.warn + return,
+      //      dataset card stayed at its prior status (often "new") with
+      //      no error visible to the user
+      //   2. async build resolved with falsy result → `if (!result) return;`
+      //      silently skipped without marking the card
+      //   3. async build rejected → console.warn-only catch, dataset
+      //      stayed at prior status
+      // In all three cases, the user saw the dataset card in its
+      // pre-build state and could not tell why generation didn't run.
+      // Same silent-fallback class as PR #98 Bug C (pretrained weight
+      // decode) on the dataset side. Mark status="error" with a
+      // descriptive ds.error message so the dataset_tab renderer
+      // (PR-this Bug R) can surface it.
+      function _markDatasetBuildFailure(reason) {
+        if (typeof console !== "undefined" && console.error) {
+          console.error("[pretrained] Dataset build failed:", ds.id, reason);
+        }
+        var failed = Object.assign({}, ds, {
+          status: "error",
+          error: "Dataset build failed: " + String(reason || "unknown"),
+        });
+        try { store.upsertDataset(failed); } catch (_e) { /* store unavailable */ }
+      }
+
       var p;
-      try { p = mod.build(cfg); } catch (e) { console.warn("[pretrained] Dataset build failed:", ds.id, e.message); return; }
+      try {
+        p = mod.build(cfg);
+      } catch (e) {
+        _markDatasetBuildFailure(e && e.message ? e.message : e);
+        return;
+      }
       if (!p || typeof p.then !== "function") p = Promise.resolve(p);
 
       pending.push(p.then(function (result) {
-        if (!result) return;
+        if (!result) {
+          _markDatasetBuildFailure("module returned no result (null/undefined)");
+          return;
+        }
         var updated = Object.assign({}, ds, { data: result, status: "ready", generatedAt: Date.now() });
         store.upsertDataset(updated);
       }).catch(function (e) {
-        console.warn("[pretrained] Dataset build failed:", ds.id, e.message);
+        _markDatasetBuildFailure(e && e.message ? e.message : e);
       }));
     });
 

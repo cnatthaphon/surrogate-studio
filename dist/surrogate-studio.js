@@ -1,5 +1,5 @@
 // Surrogate Studio - concatenated bundle
-// Generated: 2026-05-24T16:54:07Z
+// Generated: 2026-05-25T08:37:25Z
 // Source files: 58
 
 
@@ -21366,16 +21366,49 @@
       }, d.config || ds.config || {}, d.splitConfig ? { splitConfig: d.splitConfig } : {});
       if (d.totalCount || d.sourceTotalExamples) cfg.totalCount = d.totalCount || d.sourceTotalExamples;
 
+      // Three silent-fallback failure modes existed pre-fix:
+      //   1. mod.build(cfg) threw synchronously → console.warn + return,
+      //      dataset card stayed at its prior status (often "new") with
+      //      no error visible to the user
+      //   2. async build resolved with falsy result → `if (!result) return;`
+      //      silently skipped without marking the card
+      //   3. async build rejected → console.warn-only catch, dataset
+      //      stayed at prior status
+      // In all three cases, the user saw the dataset card in its
+      // pre-build state and could not tell why generation didn't run.
+      // Same silent-fallback class as PR #98 Bug C (pretrained weight
+      // decode) on the dataset side. Mark status="error" with a
+      // descriptive ds.error message so the dataset_tab renderer
+      // (PR-this Bug R) can surface it.
+      function _markDatasetBuildFailure(reason) {
+        if (typeof console !== "undefined" && console.error) {
+          console.error("[pretrained] Dataset build failed:", ds.id, reason);
+        }
+        var failed = Object.assign({}, ds, {
+          status: "error",
+          error: "Dataset build failed: " + String(reason || "unknown"),
+        });
+        try { store.upsertDataset(failed); } catch (_e) { /* store unavailable */ }
+      }
+
       var p;
-      try { p = mod.build(cfg); } catch (e) { console.warn("[pretrained] Dataset build failed:", ds.id, e.message); return; }
+      try {
+        p = mod.build(cfg);
+      } catch (e) {
+        _markDatasetBuildFailure(e && e.message ? e.message : e);
+        return;
+      }
       if (!p || typeof p.then !== "function") p = Promise.resolve(p);
 
       pending.push(p.then(function (result) {
-        if (!result) return;
+        if (!result) {
+          _markDatasetBuildFailure("module returned no result (null/undefined)");
+          return;
+        }
         var updated = Object.assign({}, ds, { data: result, status: "ready", generatedAt: Date.now() });
         store.upsertDataset(updated);
       }).catch(function (e) {
-        console.warn("[pretrained] Dataset build failed:", ds.id, e.message);
+        _markDatasetBuildFailure(e && e.message ? e.message : e);
       }));
     });
 
@@ -28987,13 +29020,79 @@
         "Schema: " + escapeHtml(ds.schemaId || "") + " | Status: " + (ds.status === "ready" ? "\u2713 ready" : (ds.status || "empty"))));
       mainEl.appendChild(card);
 
-      if (!ds.data) {
-        mainEl.appendChild(el("div", { style: "font-size:12px;color:#64748b;padding:8px;" }, "Configure and generate from right panel."));
+      // Readiness check: does this card have ANY declared data
+      // shape that the rest of the pipeline knows how to consume?
+      // The repo contract recognizes five shapes (records, xTrain,
+      // sourceDescriptor, trajectories, splitIndices+sourceId) and
+      // the wrapper may carry these on ds.data OR on ds itself.
+      //
+      // First PR #102 revision used `!ds.data` (too narrow — missed
+      // root-level sourceDescriptor). Second revision delegated to
+      // OSCDatasetSourceRegistry.hasDatasetData (too strict —
+      // hasDatasetData gates splitIndices+sourceId on
+      // `has(d.sourceId)`, so on a fresh page reload before the
+      // source has been registered, a valid splitIndices dataset
+      // would be flagged as corrupt and the source-loading path at
+      // line ~309 would NEVER run to register the source).
+      //
+      // The renderer needs a LOOSER "declared shape" check than the
+      // registry's "currently usable" check: accept splitIndices +
+      // sourceId regardless of registration so the source-loading
+      // path can fire and re-render after registration.
+      function _hasUsableData(dsCard) {
+        var src = dsCard || {};
+        var d = src.data || src;
+        if (!d || typeof d !== "object") return false;
+        if (d.records && (
+          (d.records.train && (Array.isArray(d.records.train.x) ? d.records.train.x.length > 0 : !!d.records.train)) ||
+          (d.records.val && (Array.isArray(d.records.val.x) ? d.records.val.x.length > 0 : !!d.records.val)) ||
+          (d.records.test && (Array.isArray(d.records.test.x) ? d.records.test.x.length > 0 : !!d.records.test))
+        )) return true;
+        if (Array.isArray(d.xTrain) && d.xTrain.length > 0) return true;
+        if (d.sourceDescriptor) return true;
+        if (d.trajectories && d.trajectories.length) return true;
+        // splitIndices + sourceId: accept even when sourceId is not
+        // YET registered. The render path at line ~309 detects
+        // unregistered sources and calls mod.build() to register +
+        // re-render. Pre-fix, gating on `has(d.sourceId)` here
+        // short-circuited that path and showed a corruption warning
+        // on a perfectly valid (just-not-loaded-yet) dataset.
+        if (d.splitIndices && d.sourceId) {
+          var si = d.splitIndices;
+          if ((Array.isArray(si.train) && si.train.length > 0) ||
+              (Array.isArray(si.val) && si.val.length > 0) ||
+              (Array.isArray(si.test) && si.test.length > 0)) return true;
+        }
+        return false;
+      }
+
+      if (!_hasUsableData(ds)) {
+        // Distinguish corruption (status claims "ready", but the
+        // contract-driven readiness check finds no usable data shape)
+        // from the legitimate untouched state (fresh card never
+        // generated) and the explicit error state. Pre-fix, every
+        // !ds.data case fell through to the generic "Configure and
+        // generate" prompt — a card with status="ready" but no
+        // data silently rendered as if untouched, hiding the
+        // state-vs-reality drift. Same UX-deception class the
+        // weight-side audit (PRs #98 Bugs C/F, #101 Bugs O/P) has
+        // been chasing on trainer cards.
+        if (ds.status === "ready") {
+          mainEl.appendChild(el("div", { style: "font-size:12px;color:#f43f5e;padding:8px;" },
+            "Dataset claims status=\"ready\" but no recognized data shape was found (no records, xTrain, sourceDescriptor, trajectories, or splitIndices+sourceId). Likely a stale state from a failed auto-build or a corrupted import. Re-generate from the right panel, or check the source descriptor."));
+        } else if (ds.status === "error") {
+          mainEl.appendChild(el("div", { style: "font-size:12px;color:#f43f5e;padding:8px;" },
+            "Dataset build failed: " + escapeHtml(String(ds.error || "no details"))));
+        } else {
+          mainEl.appendChild(el("div", { style: "font-size:12px;color:#64748b;padding:8px;" }, "Configure and generate from right panel."));
+        }
         return;
       }
 
-      // data summary
-      var d = ds.data;
+      // data summary — wrapper-or-data: the contract allows the
+      // payload to live on ds.data OR on ds itself (source-backed
+      // datasets often carry sourceDescriptor at the root).
+      var d = ds.data || ds;
       var isBundle = d.kind === "dataset_bundle" && d.datasets;
       var activeDs = isBundle ? d.datasets[d.activeVariantId || Object.keys(d.datasets)[0]] : d;
 
