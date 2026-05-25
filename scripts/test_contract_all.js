@@ -59,6 +59,7 @@ const baseSuite = [
   "test_training_completion_failures.js",
   "test_trainer_import_and_test_strict.js",
   "test_dataset_silent_fallback.js",
+  "test_cifar10_strict_no_silent_synthetic.js",
 ];
 
 function runOne(scriptName) {

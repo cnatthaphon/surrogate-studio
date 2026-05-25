@@ -1,5 +1,5 @@
 // Surrogate Studio - concatenated bundle
-// Generated: 2026-05-25T08:37:25Z
+// Generated: 2026-05-25T10:28:41Z
 // Source files: 58
 
 
@@ -7610,7 +7610,18 @@
       };
     }
 
-    // Try GCS (full 60k, reliable CORS) → GitHub batch (10k) → synthetic
+    // Try GCS (full 60k, reliable CORS) → GitHub batch (10k) →
+    // synthetic IF EXPLICITLY OPTED IN. The previous behavior
+    // silently substituted synthetic geometric patterns when both
+    // real sources failed (e.g., offline, CORS issues, both
+    // services down). The user clicked "Generate CIFAR-10 dataset"
+    // and got 32x32 random-color-bar patterns labeled like CIFAR-10
+    // classes — training proceeded, validation accuracy looked
+    // reasonable, but the model never saw a real CIFAR-10 image.
+    // Same wrong-data-as-real silent-fallback class the audit has
+    // been hunting on the weight side. Tests that genuinely want
+    // synthetic data must pass opts.allowSyntheticFallback = true
+    // (or call buildSyntheticSource directly — exported below).
     return loadFromGCS().then(function (batch) {
       console.log("[CIFAR-10] Loaded " + batch.count + " images from GCS");
       var source = makeSource(batch);
@@ -7626,10 +7637,29 @@
         return source;
       });
     }).catch(function (err) {
-      console.warn("[CIFAR-10] All sources failed (" + (err && err.message || "") + "). Using synthetic patterns.");
-      var source = buildSyntheticSource(opts);
-      CACHE = source;
-      return source;
+      if (opts.allowSyntheticFallback) {
+        console.warn("[CIFAR-10] All real sources failed (" + (err && err.message || "") +
+          "), falling back to synthetic patterns per opts.allowSyntheticFallback.");
+        // Reviewer caught a cache-poisoning bug on the first PR
+        // #103 revision: writing synthetic into the global CACHE
+        // made a later plain `loadSource()` (no opt-in) return the
+        // cached synthetic source instead of throwing — exactly
+        // the silent fake-success the original fix was meant to
+        // prevent. Only REAL sources go into the global CACHE; the
+        // opt-in synthetic source is returned uncached. Repeat
+        // synthetic calls cost a rebuild, but that's a cheap deterministic
+        // op (buildSyntheticSource is seeded) and the per-call
+        // contract stays honest: every call without opt-in throws.
+        return buildSyntheticSource(opts);
+      }
+      throw new Error(
+        "CIFAR-10 source unreachable: both GCS and GitHub failed (" +
+        (err && err.message || "unknown") +
+        "). Refusing to silently substitute synthetic geometric patterns — " +
+        "training on synthetic would produce metrics that look real but reflect " +
+        "no actual CIFAR-10 learning. Check your network connection or pass " +
+        "opts.allowSyntheticFallback=true for explicit synthetic use (Node tests, offline development)."
+      );
     });
   }
 
@@ -7809,8 +7839,20 @@
     var testFrac = Math.max(0.01, 1 - trainFrac - valFrac);
     var forceEqualClass = !!config.forceEqualClass;
 
+    // Forward the explicit synthetic-fallback opt-in from the caller
+    // through to the source loader. Reviewer caught this missing on
+    // the second PR #103 revision: even when a caller passed
+    // `mod.build({allowSyntheticFallback:true})` for legitimate Node/
+    // offline use, the module still called loadSource() WITHOUT the
+    // flag and the loader threw in offline mode. The flag must
+    // propagate so the strict default ("real CIFAR only, else throw")
+    // can be explicitly overridden where intended.
     var sourcePromise = loader
-      ? loader.loadSource({ totalExamples: Math.max(totalCount, 10000), seed: seed })
+      ? loader.loadSource({
+          totalExamples: Math.max(totalCount, 10000),
+          seed: seed,
+          allowSyntheticFallback: !!config.allowSyntheticFallback,
+        })
       : Promise.resolve(_fallbackSource(totalCount, seed));
 
     return sourcePromise.then(function (source) {
