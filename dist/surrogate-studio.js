@@ -1,5 +1,5 @@
 // Surrogate Studio - concatenated bundle
-// Generated: 2026-05-25T08:07:10Z
+// Generated: 2026-05-25T08:37:25Z
 // Source files: 58
 
 
@@ -29020,29 +29020,26 @@
         "Schema: " + escapeHtml(ds.schemaId || "") + " | Status: " + (ds.status === "ready" ? "\u2713 ready" : (ds.status || "empty"))));
       mainEl.appendChild(card);
 
-      // Readiness check uses the same contract-driven helper as the
-      // trainer / notebook / pretrained readiness paths
-      // (OSCDatasetSourceRegistry.hasDatasetData). The repo contract
-      // accepts FIVE distinct data shapes — records.{train,val,test},
-      // xTrain arrays, sourceDescriptor, trajectories, or
-      // splitIndices+sourceId — and the wrapper may carry these on
-      // ds.data OR on ds itself (the helper uses `ds.data || ds`).
+      // Readiness check: does this card have ANY declared data
+      // shape that the rest of the pipeline knows how to consume?
+      // The repo contract recognizes five shapes (records, xTrain,
+      // sourceDescriptor, trajectories, splitIndices+sourceId) and
+      // the wrapper may carry these on ds.data OR on ds itself.
       //
-      // Reviewer caught the first revision of Bug R rejecting valid
-      // source-backed datasets like `{status:"ready",
-      // sourceDescriptor:{...}, data:undefined}` as corrupt because
-      // it only checked !ds.data. Mirror the registry's logic so
-      // corruption is flagged ONLY when ALL recognized data forms
-      // are absent.
-      var _W = typeof window !== "undefined" ? window : {};
-      var _srcReg = _W.OSCDatasetSourceRegistry || null;
+      // First PR #102 revision used `!ds.data` (too narrow — missed
+      // root-level sourceDescriptor). Second revision delegated to
+      // OSCDatasetSourceRegistry.hasDatasetData (too strict —
+      // hasDatasetData gates splitIndices+sourceId on
+      // `has(d.sourceId)`, so on a fresh page reload before the
+      // source has been registered, a valid splitIndices dataset
+      // would be flagged as corrupt and the source-loading path at
+      // line ~309 would NEVER run to register the source).
+      //
+      // The renderer needs a LOOSER "declared shape" check than the
+      // registry's "currently usable" check: accept splitIndices +
+      // sourceId regardless of registration so the source-loading
+      // path can fire and re-render after registration.
       function _hasUsableData(dsCard) {
-        if (_srcReg && typeof _srcReg.hasDatasetData === "function") {
-          return !!_srcReg.hasDatasetData(dsCard);
-        }
-        // Fallback: replicate registry/hasDatasetData(ds) when the
-        // module isn't loaded yet. Keep in sync with
-        // src/dataset_source_registry.js:172.
         var src = dsCard || {};
         var d = src.data || src;
         if (!d || typeof d !== "object") return false;
@@ -29054,6 +29051,12 @@
         if (Array.isArray(d.xTrain) && d.xTrain.length > 0) return true;
         if (d.sourceDescriptor) return true;
         if (d.trajectories && d.trajectories.length) return true;
+        // splitIndices + sourceId: accept even when sourceId is not
+        // YET registered. The render path at line ~309 detects
+        // unregistered sources and calls mod.build() to register +
+        // re-render. Pre-fix, gating on `has(d.sourceId)` here
+        // short-circuited that path and showed a corruption warning
+        // on a perfectly valid (just-not-loaded-yet) dataset.
         if (d.splitIndices && d.sourceId) {
           var si = d.splitIndices;
           if ((Array.isArray(si.train) && si.train.length > 0) ||

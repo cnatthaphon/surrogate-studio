@@ -55,22 +55,29 @@ ok(/Dataset build failed:/.test(noDataBlock),
 ok(/Configure and generate from right panel/.test(noDataBlock),
   "Bug R negative: the legitimate untouched case still shows 'Configure and generate' (no false-positives)");
 
-// PR #102 reviewer follow-up: the readiness check must delegate to
-// OSCDatasetSourceRegistry.hasDatasetData (or replicate its logic)
-// so source-backed payloads on the wrapper itself are accepted.
-ok(/_srcReg\.hasDatasetData/.test(dtSrc),
-  "Bug R fix-up: dataset_tab uses OSCDatasetSourceRegistry.hasDatasetData when available");
+// PR #102 second revision: the readiness check must accept root-
+// level data shapes AND must NOT gate splitIndices+sourceId on
+// registration (the renderer needs to reach the source-loading
+// path at line ~309 to register the source on fresh page reload).
 ok(/var d = ds\.data \|\| ds;/.test(dtSrc),
   "Bug R fix-up: render path uses `ds.data || ds` so root-level payloads work");
 // Defensive: there shouldn't be a bare `if (!ds.data)` early-return
 // remaining (regression guard against the too-narrow check).
 ok(!/if \(!ds\.data\) \{[\s\S]{0,400}?ds\.status === "ready"/.test(dtSrc),
   "Bug R fix-up: the too-narrow `if (!ds.data)` check is gone");
+// Defensive: the readiness check must NOT delegate to
+// OSCDatasetSourceRegistry.hasDatasetData (which gates
+// splitIndices+sourceId on `has(d.sourceId)`). The renderer's
+// readiness needs the looser "declared shape" semantic.
+ok(!/_srcReg\.hasDatasetData\(/.test(dtSrc),
+  "Bug R fix-up: readiness check does NOT delegate to hasDatasetData (would gate on registration → bypass source-loading path)");
 
-// --- Behavioral: drive the fallback _hasUsableData logic with
-// every recognized data shape (including the source-backed wrapper
-// the reviewer flagged). All must return true; only fully-empty
-// returns false.
+// --- Behavioral: drive the dataset_tab._hasUsableData logic with
+// every recognized data shape. The second revision's critical
+// difference vs the registry's hasDatasetData: splitIndices +
+// sourceId is accepted even when the source is NOT registered yet
+// (so the source-loading path can fire on fresh page reload). All
+// recognized shapes must return true; only fully-empty returns false.
 function inlineHasUsableData(dsCard) {
   var src = dsCard || {};
   var d = src.data || src;
@@ -83,6 +90,8 @@ function inlineHasUsableData(dsCard) {
   if (Array.isArray(d.xTrain) && d.xTrain.length > 0) return true;
   if (d.sourceDescriptor) return true;
   if (d.trajectories && d.trajectories.length) return true;
+  // No `has(sourceId)` gate — accept declared shape, let the
+  // renderer's source-loading path register the source.
   if (d.splitIndices && d.sourceId) {
     var si = d.splitIndices;
     if ((Array.isArray(si.train) && si.train.length > 0) ||
@@ -106,6 +115,22 @@ ok(inlineHasUsableData({ status: "ready", trajectories: [{ id: 1 }] }) === true,
   "Bug R fix-up: root-level trajectories is ready");
 ok(inlineHasUsableData({ status: "ready", splitIndices: { train: [0, 1] }, sourceId: "src1" }) === true,
   "Bug R fix-up: root-level splitIndices+sourceId is ready");
+
+// PR #102 third revision (reviewer follow-up): splitIndices +
+// sourceId must be accepted even when the source is NOT yet
+// registered. The registry's hasDatasetData would return false here
+// (because `has(d.sourceId)` fails), but the renderer needs to
+// accept this so the source-loading path at dataset_tab.js:~309
+// can fire and register the source. Verify by simulating:
+// inlineHasUsableData does NOT receive the registry, so by
+// construction it cannot check registration — but the EXPECTED
+// outcome is that even with `has(sourceId) === false` (which the
+// real registry call would have produced), the dataset_tab
+// readiness gate still passes.
+ok(inlineHasUsableData({ status: "ready", splitIndices: { train: [0] }, sourceId: "unregistered_source_xyz" }) === true,
+  "Bug R fix-up [reviewer case 2]: splitIndices+sourceId with UNREGISTERED source still passes readiness (lets the source-loading path register it on fresh reload)");
+ok(inlineHasUsableData({ status: "ready", data: { splitIndices: { val: [3, 4] }, sourceId: "unregistered_source_abc" } }) === true,
+  "Bug R fix-up: nested splitIndices+sourceId (unregistered) also passes readiness");
 
 // Negative: only flag as corrupt when truly no recognized shape.
 ok(inlineHasUsableData({ status: "ready" }) === false,
