@@ -230,9 +230,17 @@
       if (opts.allowSyntheticFallback) {
         console.warn("[CIFAR-10] All real sources failed (" + (err && err.message || "") +
           "), falling back to synthetic patterns per opts.allowSyntheticFallback.");
-        var source = buildSyntheticSource(opts);
-        CACHE = source;
-        return source;
+        // Reviewer caught a cache-poisoning bug on the first PR
+        // #103 revision: writing synthetic into the global CACHE
+        // made a later plain `loadSource()` (no opt-in) return the
+        // cached synthetic source instead of throwing — exactly
+        // the silent fake-success the original fix was meant to
+        // prevent. Only REAL sources go into the global CACHE; the
+        // opt-in synthetic source is returned uncached. Repeat
+        // synthetic calls cost a rebuild, but that's a cheap deterministic
+        // op (buildSyntheticSource is seeded) and the per-call
+        // contract stays honest: every call without opt-in throws.
+        return buildSyntheticSource(opts);
       }
       throw new Error(
         "CIFAR-10 source unreachable: both GCS and GitHub failed (" +
