@@ -203,10 +203,54 @@
         "Schema: " + escapeHtml(ds.schemaId || "") + " | Status: " + (ds.status === "ready" ? "\u2713 ready" : (ds.status || "empty"))));
       mainEl.appendChild(card);
 
-      if (!ds.data) {
-        // Distinguish corruption (status claims "ready" or "error",
-        // but ds.data is missing) from the legitimate untouched
-        // state (fresh card never generated). Pre-fix, every
+      // Readiness check uses the same contract-driven helper as the
+      // trainer / notebook / pretrained readiness paths
+      // (OSCDatasetSourceRegistry.hasDatasetData). The repo contract
+      // accepts FIVE distinct data shapes — records.{train,val,test},
+      // xTrain arrays, sourceDescriptor, trajectories, or
+      // splitIndices+sourceId — and the wrapper may carry these on
+      // ds.data OR on ds itself (the helper uses `ds.data || ds`).
+      //
+      // Reviewer caught the first revision of Bug R rejecting valid
+      // source-backed datasets like `{status:"ready",
+      // sourceDescriptor:{...}, data:undefined}` as corrupt because
+      // it only checked !ds.data. Mirror the registry's logic so
+      // corruption is flagged ONLY when ALL recognized data forms
+      // are absent.
+      var _W = typeof window !== "undefined" ? window : {};
+      var _srcReg = _W.OSCDatasetSourceRegistry || null;
+      function _hasUsableData(dsCard) {
+        if (_srcReg && typeof _srcReg.hasDatasetData === "function") {
+          return !!_srcReg.hasDatasetData(dsCard);
+        }
+        // Fallback: replicate registry/hasDatasetData(ds) when the
+        // module isn't loaded yet. Keep in sync with
+        // src/dataset_source_registry.js:172.
+        var src = dsCard || {};
+        var d = src.data || src;
+        if (!d || typeof d !== "object") return false;
+        if (d.records && (
+          (d.records.train && (Array.isArray(d.records.train.x) ? d.records.train.x.length > 0 : !!d.records.train)) ||
+          (d.records.val && (Array.isArray(d.records.val.x) ? d.records.val.x.length > 0 : !!d.records.val)) ||
+          (d.records.test && (Array.isArray(d.records.test.x) ? d.records.test.x.length > 0 : !!d.records.test))
+        )) return true;
+        if (Array.isArray(d.xTrain) && d.xTrain.length > 0) return true;
+        if (d.sourceDescriptor) return true;
+        if (d.trajectories && d.trajectories.length) return true;
+        if (d.splitIndices && d.sourceId) {
+          var si = d.splitIndices;
+          if ((Array.isArray(si.train) && si.train.length > 0) ||
+              (Array.isArray(si.val) && si.val.length > 0) ||
+              (Array.isArray(si.test) && si.test.length > 0)) return true;
+        }
+        return false;
+      }
+
+      if (!_hasUsableData(ds)) {
+        // Distinguish corruption (status claims "ready", but the
+        // contract-driven readiness check finds no usable data shape)
+        // from the legitimate untouched state (fresh card never
+        // generated) and the explicit error state. Pre-fix, every
         // !ds.data case fell through to the generic "Configure and
         // generate" prompt — a card with status="ready" but no
         // data silently rendered as if untouched, hiding the
@@ -215,7 +259,7 @@
         // been chasing on trainer cards.
         if (ds.status === "ready") {
           mainEl.appendChild(el("div", { style: "font-size:12px;color:#f43f5e;padding:8px;" },
-            "Dataset claims status=\"ready\" but has no data. Likely a stale state from a failed auto-build or a corrupted import. Re-generate from the right panel, or check the source descriptor."));
+            "Dataset claims status=\"ready\" but no recognized data shape was found (no records, xTrain, sourceDescriptor, trajectories, or splitIndices+sourceId). Likely a stale state from a failed auto-build or a corrupted import. Re-generate from the right panel, or check the source descriptor."));
         } else if (ds.status === "error") {
           mainEl.appendChild(el("div", { style: "font-size:12px;color:#f43f5e;padding:8px;" },
             "Dataset build failed: " + escapeHtml(String(ds.error || "no details"))));
@@ -225,8 +269,10 @@
         return;
       }
 
-      // data summary
-      var d = ds.data;
+      // data summary — wrapper-or-data: the contract allows the
+      // payload to live on ds.data OR on ds itself (source-backed
+      // datasets often carry sourceDescriptor at the root).
+      var d = ds.data || ds;
       var isBundle = d.kind === "dataset_bundle" && d.datasets;
       var activeDs = isBundle ? d.datasets[d.activeVariantId || Object.keys(d.datasets)[0]] : d;
 

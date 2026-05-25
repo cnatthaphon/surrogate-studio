@@ -34,25 +34,90 @@ var dtSrc = fs.readFileSync(
   path.join(__dirname, "..", "src/tabs/dataset_tab.js"), "utf8"
 );
 
-// Locate the !ds.data branch.
-var noDataStart = dtSrc.indexOf("if (!ds.data) {");
-ok(noDataStart > 0, "located the `if (!ds.data)` branch in dataset_tab.js");
+// Locate the readiness branch (PR #102 revision uses
+// _hasUsableData; first revision used `if (!ds.data)` directly).
+var noDataStart = dtSrc.indexOf("if (!_hasUsableData(ds))");
+ok(noDataStart > 0, "located the `if (!_hasUsableData(ds))` branch in dataset_tab.js (contract-driven readiness)");
 var noDataEnd = dtSrc.indexOf("return;\n      }", noDataStart);
-ok(noDataEnd > 0, "located the end of the !ds.data branch");
+ok(noDataEnd > 0, "located the end of the readiness branch");
 var noDataBlock = dtSrc.slice(noDataStart, noDataEnd + 30);
 
 ok(/ds\.status === "ready"/.test(noDataBlock),
-  "Bug R: the no-data branch distinguishes status='ready' (corruption) from untouched");
+  "Bug R: the readiness branch distinguishes status='ready' (corruption) from untouched");
 ok(/ds\.status === "error"/.test(noDataBlock),
-  "Bug R: the no-data branch also distinguishes status='error' (build failed)");
+  "Bug R: the readiness branch also distinguishes status='error' (build failed)");
 // Source uses escaped quotes `status=\"ready\"` for the JS literal,
 // so the file content has a literal backslash before each quote.
-ok(/Dataset claims status=\\"ready\\" but has no data/.test(noDataBlock),
-  "Bug R: 'ready but no data' renders an explicit corruption message (not the generic configure prompt)");
+ok(/Dataset claims status=\\"ready\\" but no recognized data shape/.test(noDataBlock),
+  "Bug R: 'ready but no data' renders an explicit corruption message naming the recognized data shapes");
 ok(/Dataset build failed:/.test(noDataBlock),
   "Bug R: 'error' status surfaces the ds.error message");
 ok(/Configure and generate from right panel/.test(noDataBlock),
   "Bug R negative: the legitimate untouched case still shows 'Configure and generate' (no false-positives)");
+
+// PR #102 reviewer follow-up: the readiness check must delegate to
+// OSCDatasetSourceRegistry.hasDatasetData (or replicate its logic)
+// so source-backed payloads on the wrapper itself are accepted.
+ok(/_srcReg\.hasDatasetData/.test(dtSrc),
+  "Bug R fix-up: dataset_tab uses OSCDatasetSourceRegistry.hasDatasetData when available");
+ok(/var d = ds\.data \|\| ds;/.test(dtSrc),
+  "Bug R fix-up: render path uses `ds.data || ds` so root-level payloads work");
+// Defensive: there shouldn't be a bare `if (!ds.data)` early-return
+// remaining (regression guard against the too-narrow check).
+ok(!/if \(!ds\.data\) \{[\s\S]{0,400}?ds\.status === "ready"/.test(dtSrc),
+  "Bug R fix-up: the too-narrow `if (!ds.data)` check is gone");
+
+// --- Behavioral: drive the fallback _hasUsableData logic with
+// every recognized data shape (including the source-backed wrapper
+// the reviewer flagged). All must return true; only fully-empty
+// returns false.
+function inlineHasUsableData(dsCard) {
+  var src = dsCard || {};
+  var d = src.data || src;
+  if (!d || typeof d !== "object") return false;
+  if (d.records && (
+    (d.records.train && (Array.isArray(d.records.train.x) ? d.records.train.x.length > 0 : !!d.records.train)) ||
+    (d.records.val && (Array.isArray(d.records.val.x) ? d.records.val.x.length > 0 : !!d.records.val)) ||
+    (d.records.test && (Array.isArray(d.records.test.x) ? d.records.test.x.length > 0 : !!d.records.test))
+  )) return true;
+  if (Array.isArray(d.xTrain) && d.xTrain.length > 0) return true;
+  if (d.sourceDescriptor) return true;
+  if (d.trajectories && d.trajectories.length) return true;
+  if (d.splitIndices && d.sourceId) {
+    var si = d.splitIndices;
+    if ((Array.isArray(si.train) && si.train.length > 0) ||
+        (Array.isArray(si.val) && si.val.length > 0) ||
+        (Array.isArray(si.test) && si.test.length > 0)) return true;
+  }
+  return false;
+}
+
+// The reviewer's specific case: source-backed dataset with payload
+// at the ROOT (no ds.data wrapper). Must NOT be flagged as corrupt.
+ok(inlineHasUsableData({ status: "ready", sourceDescriptor: { type: "csv", url: "x.csv" } }) === true,
+  "Bug R fix-up [reviewer case]: root-level sourceDescriptor is ready (was: flagged as corruption)");
+ok(inlineHasUsableData({ status: "ready", data: { sourceDescriptor: { type: "csv" } } }) === true,
+  "Bug R fix-up: nested sourceDescriptor under ds.data still works (back-compat)");
+ok(inlineHasUsableData({ status: "ready", xTrain: [[1, 2], [3, 4]] }) === true,
+  "Bug R fix-up: root-level xTrain array is ready");
+ok(inlineHasUsableData({ status: "ready", records: { train: { x: [[1]] } } }) === true,
+  "Bug R fix-up: root-level records.train.x is ready");
+ok(inlineHasUsableData({ status: "ready", trajectories: [{ id: 1 }] }) === true,
+  "Bug R fix-up: root-level trajectories is ready");
+ok(inlineHasUsableData({ status: "ready", splitIndices: { train: [0, 1] }, sourceId: "src1" }) === true,
+  "Bug R fix-up: root-level splitIndices+sourceId is ready");
+
+// Negative: only flag as corrupt when truly no recognized shape.
+ok(inlineHasUsableData({ status: "ready" }) === false,
+  "Bug R fix-up negative: status='ready' with no payload at all is correctly flagged");
+ok(inlineHasUsableData({ status: "ready", data: {} }) === false,
+  "Bug R fix-up negative: empty ds.data with no fields is correctly flagged");
+ok(inlineHasUsableData({ status: "ready", xTrain: [] }) === false,
+  "Bug R fix-up negative: empty xTrain array is correctly flagged (length check)");
+ok(inlineHasUsableData({ status: "ready", splitIndices: { train: [] }, sourceId: "src1" }) === false,
+  "Bug R fix-up negative: splitIndices with empty arrays is correctly flagged");
+ok(inlineHasUsableData({ status: "ready", splitIndices: { train: [0] } }) === false,
+  "Bug R fix-up negative: splitIndices without sourceId is correctly flagged");
 
 // ===========================================================
 // Bug T — src/pretrained_loader.js (build-failure path)
