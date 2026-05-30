@@ -1,6 +1,6 @@
 # Surrogate Studio
 
-[![CI](https://github.com/cnatthaphon/surrogate-studio/actions/workflows/ci.yml/badge.svg)](https://github.com/cnatthaphon/surrogate-studio/actions/workflows/ci.yml) ![Demos](https://img.shields.io/badge/demos-16-orange) ![Models](https://img.shields.io/badge/models-51-blue) ![Tests](https://img.shields.io/badge/E2E%20checks-297%20pass-brightgreen) ![Papers](https://img.shields.io/badge/papers%20cited-18-blueviolet) [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+[![CI](https://github.com/cnatthaphon/surrogate-studio/actions/workflows/ci.yml/badge.svg)](https://github.com/cnatthaphon/surrogate-studio/actions/workflows/ci.yml) ![Demos](https://img.shields.io/badge/demos-16-orange) ![Models](https://img.shields.io/badge/models-51-blue) ![Tests](https://img.shields.io/badge/E2E%20checks-323%20pass-brightgreen) ![Papers](https://img.shields.io/badge/papers%20cited-18-blueviolet) [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
 **A visual ML platform with 16 demos across published papers and custom data — trainable in the browser with no install.**
 
@@ -148,10 +148,10 @@ docker build -t surrogate-studio . && docker run -p 3777:3777 surrogate-studio
 
 | Suite | Coverage |
 |-------|----------|
-| Contract tests | 31 scripts |
+| Contract tests | 54 scripts |
 | Multi-schema pipeline | 11 schemas (5 full train+eval, 6 module-verified) |
-| Python parity tests | 18 server-side scripts — LSTM/GRU/Embedding cross-runtime round-trip, ConvTranspose parity, augment server contract |
-| GitHub Pages E2E | 297 checks across all 16 demos |
+| Python parity tests | 21 server-side scripts — LSTM/GRU/Embedding cross-runtime round-trip, ConvTranspose parity, augment server contract |
+| GitHub Pages E2E | 323 checks across all 16 demos |
 | Browser polish checks | Puppeteer spot-checks for mobile layout and Run Notebook preflight |
 | CI | Every push/PR via GitHub Actions — both Node + Python jobs |
 
